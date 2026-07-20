@@ -73,6 +73,25 @@ class AppDatabase extends _$AppDatabase {
   @override
   int get schemaVersion => 1;
 
+  // --- Reading items -------------------------------------------------------
+
+  Stream<List<ReadingItem>> watchItemsByKind(String kind) {
+    final query = select(readingItems)
+      ..where((t) => t.kind.equals(kind))
+      ..orderBy([(t) => OrderingTerm.desc(t.addedAt)]);
+    return query.watch();
+  }
+
+  Future<ReadingItem?> readingItemByHash(String contentHash) {
+    final query = select(readingItems)
+      ..where((t) => t.contentHash.equals(contentHash));
+    return query.getSingleOrNull();
+  }
+
+  Future<void> upsertReadingItem(ReadingItemsCompanion item) {
+    return into(readingItems).insertOnConflictUpdate(item);
+  }
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (migrator) => migrator.createAll(),

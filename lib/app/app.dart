@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
+import '../library/import/comic_import_service.dart';
 import '../library/persistence/app_database.dart';
 import '../presentation/app_shell.dart';
 import 'theme_preferences.dart';
@@ -10,13 +11,12 @@ class App extends StatelessWidget {
     super.key,
     required this.themePreferences,
     required this.database,
+    required this.importService,
   });
 
   final ThemePreferences themePreferences;
-
-  /// Opened at bootstrap; injected into repositories as import/reader
-  /// features land.
   final AppDatabase database;
+  final ComicImportService importService;
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +29,11 @@ class App extends StatelessWidget {
           theme: AppTheme.light(themePreferences.accent),
           darkTheme: AppTheme.dark(themePreferences.accent),
           themeMode: themePreferences.themeMode,
-          home: AppShell(themePreferences: themePreferences),
+          home: AppShell(
+            themePreferences: themePreferences,
+            database: database,
+            importService: importService,
+          ),
         );
       },
     );

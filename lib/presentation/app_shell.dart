@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../app/theme_preferences.dart';
+import '../library/import/comic_import_service.dart';
+import '../library/persistence/app_database.dart';
 import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shelf_screen.dart';
@@ -8,9 +10,16 @@ import 'screens/shelf_screen.dart';
 /// Root navigation: shelf / library / settings. Bottom navigation on narrow
 /// layouts, a side rail on wide (desktop-first) layouts.
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, required this.themePreferences});
+  const AppShell({
+    super.key,
+    required this.themePreferences,
+    required this.database,
+    required this.importService,
+  });
 
   final ThemePreferences themePreferences;
+  final AppDatabase database;
+  final ComicImportService importService;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -26,10 +35,13 @@ class _AppShellState extends State<AppShell> {
   ];
 
   List<Widget> get _screens => [
-    const ShelfScreen(),
-    const LibraryScreen(),
-    SettingsScreen(themePreferences: widget.themePreferences),
-  ];
+        const ShelfScreen(),
+        LibraryScreen(
+          database: widget.database,
+          importService: widget.importService,
+        ),
+        SettingsScreen(themePreferences: widget.themePreferences),
+      ];
 
   @override
   Widget build(BuildContext context) {
