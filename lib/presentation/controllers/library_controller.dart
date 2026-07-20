@@ -18,6 +18,10 @@ class LibraryController extends ChangeNotifier {
   final AppDatabase _database;
   final ComicImportService _importService;
 
+  /// Exposed for reader entry (progress / item load). Screens still go through
+  /// controllers for business actions; the reader opens with its own controller.
+  AppDatabase get database => _database;
+
   bool _importing = false;
   bool get isImporting => _importing;
 

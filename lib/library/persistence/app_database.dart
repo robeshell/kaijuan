@@ -104,10 +104,40 @@ class AppDatabase extends _$AppDatabase {
     return into(readingItems).insertOnConflictUpdate(item);
   }
 
+  Future<void> touchLastOpened(String id, DateTime at) {
+    return (update(readingItems)..where((t) => t.id.equals(id))).write(
+      ReadingItemsCompanion(lastOpenedAt: Value(at), updatedAt: Value(at)),
+    );
+  }
+
   /// Deletes the row; cascade removes progress/bookmarks. File cleanup is the
   /// caller's job (content-addressed files may be shared later).
   Future<void> deleteReadingItem(String id) {
     return (delete(readingItems)..where((t) => t.id.equals(id))).go();
+  }
+
+  // --- Progress ------------------------------------------------------------
+
+  Future<ReadingProgressData?> progressFor(String itemId) {
+    final query = select(readingProgress)
+      ..where((t) => t.itemId.equals(itemId));
+    return query.getSingleOrNull();
+  }
+
+  Future<void> upsertProgress({
+    required String itemId,
+    required String locatorJson,
+    required double progressFraction,
+    required DateTime updatedAt,
+  }) {
+    return into(readingProgress).insertOnConflictUpdate(
+      ReadingProgressCompanion(
+        itemId: Value(itemId),
+        locatorJson: Value(locatorJson),
+        progressFraction: Value(progressFraction.clamp(0.0, 1.0)),
+        updatedAt: Value(updatedAt),
+      ),
+    );
   }
 
   @override

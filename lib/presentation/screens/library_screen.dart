@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../library/import/comic_import_service.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
+import 'comic_reader_screen.dart';
 
 /// Library grid for imported comics. Book segment arrives with Phase 3.
 class LibraryScreen extends StatefulWidget {
@@ -33,6 +34,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(content: Text(summary.toString())));
+  }
+
+  void _openComic(ReadingItem item) {
+    ComicReaderScreen.open(
+      context,
+      database: widget.controller.database,
+      item: item,
+    );
   }
 
   @override
@@ -78,7 +87,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   childAspectRatio: 0.62,
                 ),
                 itemCount: items.length,
-                itemBuilder: (context, i) => _ComicCard(item: items[i]),
+                itemBuilder: (context, i) => _ComicCard(
+                  item: items[i],
+                  onTap: () => _openComic(items[i]),
+                ),
               );
             },
           ),
@@ -131,40 +143,45 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _ComicCard extends StatelessWidget {
-  const _ComicCard({required this.item});
+  const _ComicCard({required this.item, required this.onTap});
 
   final ReadingItem item;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.medium),
-            child: Container(
-              width: double.infinity,
-              color: semantics.surface,
-              child: item.coverPath != null
-                  ? Image.file(
-                      File(item.coverPath!),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const _CoverFallback(),
-                    )
-                  : const _CoverFallback(),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.medium),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.medium),
+              child: Container(
+                width: double.infinity,
+                color: semantics.surface,
+                child: item.coverPath != null
+                    ? Image.file(
+                        File(item.coverPath!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const _CoverFallback(),
+                      )
+                    : const _CoverFallback(),
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.x2),
-        Text(
-          item.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
+          const SizedBox(height: AppSpacing.x2),
+          Text(
+            item.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
     );
   }
 }
