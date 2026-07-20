@@ -63,6 +63,9 @@ class ReaderLocator {
 /// sort rules change, bump [version] so restored progress can be invalidated
 /// instead of silently pointing at the wrong page.
 abstract final class ComicPageOrder {
-  /// Natural sort of image entry names (see [ComicArchive.naturalCompare]).
+  /// Listing algorithm version:
+  /// - CBZ/ZIP: natural sort of image entry names
+  /// - EPUB: OPF spine → images (fallback: natural-sorted images)
+  /// See [ComicArchive.listPagesDetailed].
   static const int version = 1;
 }

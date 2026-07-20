@@ -1,14 +1,14 @@
 import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
-import 'package:path/path.dart' as p;
 
 import '../../library/import/comic_archive.dart';
 
 /// One open comic archive for a reading session.
 ///
 /// Holds the decoded zip directory so page reads do not re-open the file.
-/// Dispose with [close] when leaving the reader.
+/// Page order matches [ComicArchive.listFromArchive] (CBZ natural sort or
+/// EPUB OPF spine). Dispose with [close] when leaving the reader.
 class ComicSession {
   ComicSession._(
     this.path,
@@ -29,19 +29,14 @@ class ComicSession {
     final input = InputFileStream(path);
     try {
       final archive = ZipDecoder().decodeStream(input);
-      final pages = archive.files
-          .where((f) => f.isFile)
-          .map((f) => f.name)
-          .where(_isImageEntry)
-          .toList()
-        ..sort(ComicArchive.naturalCompare);
-      if (pages.isEmpty) {
+      final listing = ComicArchive.listFromArchive(archive);
+      if (listing.pageNames.isEmpty) {
         await input.close();
-        throw ComicSessionException('压缩包里找不到图片页');
+        throw const ComicSessionException('压缩包里找不到图片页');
       }
       return ComicSession._(
         path,
-        List.unmodifiable(pages),
+        List.unmodifiable(listing.pageNames),
         input,
         archive,
       );
@@ -78,9 +73,6 @@ class ComicSession {
       throw StateError('ComicSession is closed');
     }
   }
-
-  static bool _isImageEntry(String name) =>
-      ComicArchive.imageExtensions.contains(p.extension(name).toLowerCase());
 }
 
 class ComicSessionException implements Exception {
