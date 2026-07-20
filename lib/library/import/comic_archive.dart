@@ -5,8 +5,11 @@ import 'package:path/path.dart' as p;
 
 /// Read-only access to zip-based comic archives (CBZ/ZIP).
 ///
-/// Listing reads only the central directory; entry bytes are decompressed on
-/// demand, so hundred-megabyte archives never load fully into memory.
+/// Listing uses the zip central directory and sorts with [naturalCompare]
+/// (page-order version lives in domain `ComicPageOrder`). Entry bytes are
+/// decompressed on demand. Callers that read many pages (the reader) should
+/// keep one open archive rather than calling [listPages]/[readEntry] in a
+/// tight loop.
 abstract final class ComicArchive {
   static const imageExtensions = {
     '.jpg',

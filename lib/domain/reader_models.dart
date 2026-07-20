@@ -22,9 +22,31 @@ enum ReaderFormat {
       _ => null,
     };
   }
+
+  /// Wire format for drift / JSON. Never write [name] ad-hoc at call sites.
+  String get storageValue => name;
+
+  static ReaderFormat? fromStorage(String value) {
+    for (final format in ReaderFormat.values) {
+      if (format.name == value) return format;
+    }
+    return null;
+  }
 }
 
-enum ReaderKind { book, comic }
+enum ReaderKind {
+  book,
+  comic;
+
+  String get storageValue => name;
+
+  static ReaderKind? fromStorage(String value) {
+    for (final kind in ReaderKind.values) {
+      if (kind.name == value) return kind;
+    }
+    return null;
+  }
+}
 
 /// A reading position. The JSON payload is format-owned: comic readers store
 /// a page index, reflow readers store sectionID/anchor/range. Keeping it
@@ -35,4 +57,12 @@ class ReaderLocator {
 
   final ReaderFormat format;
   final String payloadJson;
+}
+
+/// Comic page-order contract. Progress locators store a page index; if the
+/// sort rules change, bump [version] so restored progress can be invalidated
+/// instead of silently pointing at the wrong page.
+abstract final class ComicPageOrder {
+  /// Natural sort of image entry names (see [ComicArchive.naturalCompare]).
+  static const int version = 1;
 }

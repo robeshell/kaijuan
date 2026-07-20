@@ -25,6 +25,8 @@ class ImportResult {
   final int added;
   final int updated;
   final List<ImportFailure> failures;
+
+  bool get isEmpty => added == 0 && updated == 0 && failures.isEmpty;
 }
 
 /// Imports comic files into content-addressed storage:
@@ -54,6 +56,17 @@ class ComicImportService {
       }
     }
     return ImportResult(added: added, updated: updated, failures: failures);
+  }
+
+  /// Removes the library row and best-effort deletes stored archive + cover.
+  Future<void> deleteItem(String id) async {
+    final item = await database.readingItemById(id);
+    if (item == null) return;
+    await database.deleteReadingItem(id);
+    await _deleteIfExists(item.filePath);
+    if (item.coverPath != null) {
+      await _deleteIfExists(item.coverPath!);
+    }
   }
 
   Future<_Outcome> _importOne(String path) async {
@@ -88,12 +101,14 @@ class ComicImportService {
     await database.upsertReadingItem(
       ReadingItemsCompanion(
         id: Value(existing?.id ?? hash),
-        kind: const Value('comic'),
-        format: Value(format.name),
+        kind: Value(ReaderKind.comic.storageValue),
+        format: Value(format.storageValue),
         title: Value(existing?.title ?? title),
         filePath: Value(storedPath),
         contentHash: Value(hash),
         coverPath: Value(coverPath),
+        pageCount: Value(pages.length),
+        pageOrderVersion: const Value(ComicPageOrder.version),
         addedAt: Value(existing?.addedAt ?? now),
         updatedAt: Value(now),
       ),
@@ -114,6 +129,13 @@ class ComicImportService {
     await _coversDir.create(recursive: true);
     await File(coverPath).writeAsBytes(bytes, flush: true);
     return coverPath;
+  }
+
+  Future<void> _deleteIfExists(String path) async {
+    final file = File(path);
+    if (await file.exists()) {
+      await file.delete();
+    }
   }
 
   Directory get _libraryDir =>

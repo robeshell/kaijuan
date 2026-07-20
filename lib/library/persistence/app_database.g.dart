@@ -89,6 +89,30 @@ class $ReadingItemsTable extends ReadingItems
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _pageCountMeta = const VerificationMeta(
+    'pageCount',
+  );
+  @override
+  late final GeneratedColumn<int> pageCount = GeneratedColumn<int>(
+    'page_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _pageOrderVersionMeta = const VerificationMeta(
+    'pageOrderVersion',
+  );
+  @override
+  late final GeneratedColumn<int> pageOrderVersion = GeneratedColumn<int>(
+    'page_order_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _onShelfMeta = const VerificationMeta(
     'onShelf',
   );
@@ -147,6 +171,8 @@ class $ReadingItemsTable extends ReadingItems
     contentHash,
     coverPath,
     seriesName,
+    pageCount,
+    pageOrderVersion,
     onShelf,
     addedAt,
     updatedAt,
@@ -222,6 +248,21 @@ class $ReadingItemsTable extends ReadingItems
       context.handle(
         _seriesNameMeta,
         seriesName.isAcceptableOrUnknown(data['series_name']!, _seriesNameMeta),
+      );
+    }
+    if (data.containsKey('page_count')) {
+      context.handle(
+        _pageCountMeta,
+        pageCount.isAcceptableOrUnknown(data['page_count']!, _pageCountMeta),
+      );
+    }
+    if (data.containsKey('page_order_version')) {
+      context.handle(
+        _pageOrderVersionMeta,
+        pageOrderVersion.isAcceptableOrUnknown(
+          data['page_order_version']!,
+          _pageOrderVersionMeta,
+        ),
       );
     }
     if (data.containsKey('on_shelf')) {
@@ -300,6 +341,14 @@ class $ReadingItemsTable extends ReadingItems
         DriftSqlType.string,
         data['${effectivePrefix}series_name'],
       ),
+      pageCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}page_count'],
+      )!,
+      pageOrderVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}page_order_version'],
+      )!,
       onShelf: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}on_shelf'],
@@ -334,6 +383,12 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
   final String contentHash;
   final String? coverPath;
   final String? seriesName;
+
+  /// Image page count for comics; 0 for books until reflow metrics land.
+  final int pageCount;
+
+  /// [ComicPageOrder.version] frozen at import time. 0 = unknown/legacy.
+  final int pageOrderVersion;
   final bool onShelf;
   final DateTime addedAt;
   final DateTime updatedAt;
@@ -347,6 +402,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
     required this.contentHash,
     this.coverPath,
     this.seriesName,
+    required this.pageCount,
+    required this.pageOrderVersion,
     required this.onShelf,
     required this.addedAt,
     required this.updatedAt,
@@ -367,6 +424,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
     if (!nullToAbsent || seriesName != null) {
       map['series_name'] = Variable<String>(seriesName);
     }
+    map['page_count'] = Variable<int>(pageCount);
+    map['page_order_version'] = Variable<int>(pageOrderVersion);
     map['on_shelf'] = Variable<bool>(onShelf);
     map['added_at'] = Variable<DateTime>(addedAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -390,6 +449,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
       seriesName: seriesName == null && nullToAbsent
           ? const Value.absent()
           : Value(seriesName),
+      pageCount: Value(pageCount),
+      pageOrderVersion: Value(pageOrderVersion),
       onShelf: Value(onShelf),
       addedAt: Value(addedAt),
       updatedAt: Value(updatedAt),
@@ -413,6 +474,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
       contentHash: serializer.fromJson<String>(json['contentHash']),
       coverPath: serializer.fromJson<String?>(json['coverPath']),
       seriesName: serializer.fromJson<String?>(json['seriesName']),
+      pageCount: serializer.fromJson<int>(json['pageCount']),
+      pageOrderVersion: serializer.fromJson<int>(json['pageOrderVersion']),
       onShelf: serializer.fromJson<bool>(json['onShelf']),
       addedAt: serializer.fromJson<DateTime>(json['addedAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -431,6 +494,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
       'contentHash': serializer.toJson<String>(contentHash),
       'coverPath': serializer.toJson<String?>(coverPath),
       'seriesName': serializer.toJson<String?>(seriesName),
+      'pageCount': serializer.toJson<int>(pageCount),
+      'pageOrderVersion': serializer.toJson<int>(pageOrderVersion),
       'onShelf': serializer.toJson<bool>(onShelf),
       'addedAt': serializer.toJson<DateTime>(addedAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -447,6 +512,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
     String? contentHash,
     Value<String?> coverPath = const Value.absent(),
     Value<String?> seriesName = const Value.absent(),
+    int? pageCount,
+    int? pageOrderVersion,
     bool? onShelf,
     DateTime? addedAt,
     DateTime? updatedAt,
@@ -460,6 +527,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
     contentHash: contentHash ?? this.contentHash,
     coverPath: coverPath.present ? coverPath.value : this.coverPath,
     seriesName: seriesName.present ? seriesName.value : this.seriesName,
+    pageCount: pageCount ?? this.pageCount,
+    pageOrderVersion: pageOrderVersion ?? this.pageOrderVersion,
     onShelf: onShelf ?? this.onShelf,
     addedAt: addedAt ?? this.addedAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -479,6 +548,10 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
       seriesName: data.seriesName.present
           ? data.seriesName.value
           : this.seriesName,
+      pageCount: data.pageCount.present ? data.pageCount.value : this.pageCount,
+      pageOrderVersion: data.pageOrderVersion.present
+          ? data.pageOrderVersion.value
+          : this.pageOrderVersion,
       onShelf: data.onShelf.present ? data.onShelf.value : this.onShelf,
       addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -499,6 +572,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
           ..write('contentHash: $contentHash, ')
           ..write('coverPath: $coverPath, ')
           ..write('seriesName: $seriesName, ')
+          ..write('pageCount: $pageCount, ')
+          ..write('pageOrderVersion: $pageOrderVersion, ')
           ..write('onShelf: $onShelf, ')
           ..write('addedAt: $addedAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -517,6 +592,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
     contentHash,
     coverPath,
     seriesName,
+    pageCount,
+    pageOrderVersion,
     onShelf,
     addedAt,
     updatedAt,
@@ -534,6 +611,8 @@ class ReadingItem extends DataClass implements Insertable<ReadingItem> {
           other.contentHash == this.contentHash &&
           other.coverPath == this.coverPath &&
           other.seriesName == this.seriesName &&
+          other.pageCount == this.pageCount &&
+          other.pageOrderVersion == this.pageOrderVersion &&
           other.onShelf == this.onShelf &&
           other.addedAt == this.addedAt &&
           other.updatedAt == this.updatedAt &&
@@ -549,6 +628,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
   final Value<String> contentHash;
   final Value<String?> coverPath;
   final Value<String?> seriesName;
+  final Value<int> pageCount;
+  final Value<int> pageOrderVersion;
   final Value<bool> onShelf;
   final Value<DateTime> addedAt;
   final Value<DateTime> updatedAt;
@@ -563,6 +644,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
     this.contentHash = const Value.absent(),
     this.coverPath = const Value.absent(),
     this.seriesName = const Value.absent(),
+    this.pageCount = const Value.absent(),
+    this.pageOrderVersion = const Value.absent(),
     this.onShelf = const Value.absent(),
     this.addedAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -578,6 +661,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
     required String contentHash,
     this.coverPath = const Value.absent(),
     this.seriesName = const Value.absent(),
+    this.pageCount = const Value.absent(),
+    this.pageOrderVersion = const Value.absent(),
     this.onShelf = const Value.absent(),
     required DateTime addedAt,
     required DateTime updatedAt,
@@ -600,6 +685,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
     Expression<String>? contentHash,
     Expression<String>? coverPath,
     Expression<String>? seriesName,
+    Expression<int>? pageCount,
+    Expression<int>? pageOrderVersion,
     Expression<bool>? onShelf,
     Expression<DateTime>? addedAt,
     Expression<DateTime>? updatedAt,
@@ -615,6 +702,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
       if (contentHash != null) 'content_hash': contentHash,
       if (coverPath != null) 'cover_path': coverPath,
       if (seriesName != null) 'series_name': seriesName,
+      if (pageCount != null) 'page_count': pageCount,
+      if (pageOrderVersion != null) 'page_order_version': pageOrderVersion,
       if (onShelf != null) 'on_shelf': onShelf,
       if (addedAt != null) 'added_at': addedAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -632,6 +721,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
     Value<String>? contentHash,
     Value<String?>? coverPath,
     Value<String?>? seriesName,
+    Value<int>? pageCount,
+    Value<int>? pageOrderVersion,
     Value<bool>? onShelf,
     Value<DateTime>? addedAt,
     Value<DateTime>? updatedAt,
@@ -647,6 +738,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
       contentHash: contentHash ?? this.contentHash,
       coverPath: coverPath ?? this.coverPath,
       seriesName: seriesName ?? this.seriesName,
+      pageCount: pageCount ?? this.pageCount,
+      pageOrderVersion: pageOrderVersion ?? this.pageOrderVersion,
       onShelf: onShelf ?? this.onShelf,
       addedAt: addedAt ?? this.addedAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -682,6 +775,12 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
     if (seriesName.present) {
       map['series_name'] = Variable<String>(seriesName.value);
     }
+    if (pageCount.present) {
+      map['page_count'] = Variable<int>(pageCount.value);
+    }
+    if (pageOrderVersion.present) {
+      map['page_order_version'] = Variable<int>(pageOrderVersion.value);
+    }
     if (onShelf.present) {
       map['on_shelf'] = Variable<bool>(onShelf.value);
     }
@@ -711,6 +810,8 @@ class ReadingItemsCompanion extends UpdateCompanion<ReadingItem> {
           ..write('contentHash: $contentHash, ')
           ..write('coverPath: $coverPath, ')
           ..write('seriesName: $seriesName, ')
+          ..write('pageCount: $pageCount, ')
+          ..write('pageOrderVersion: $pageOrderVersion, ')
           ..write('onShelf: $onShelf, ')
           ..write('addedAt: $addedAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -1455,6 +1556,8 @@ typedef $$ReadingItemsTableCreateCompanionBuilder =
       required String contentHash,
       Value<String?> coverPath,
       Value<String?> seriesName,
+      Value<int> pageCount,
+      Value<int> pageOrderVersion,
       Value<bool> onShelf,
       required DateTime addedAt,
       required DateTime updatedAt,
@@ -1471,6 +1574,8 @@ typedef $$ReadingItemsTableUpdateCompanionBuilder =
       Value<String> contentHash,
       Value<String?> coverPath,
       Value<String?> seriesName,
+      Value<int> pageCount,
+      Value<int> pageOrderVersion,
       Value<bool> onShelf,
       Value<DateTime> addedAt,
       Value<DateTime> updatedAt,
@@ -1567,6 +1672,16 @@ class $$ReadingItemsTableFilterComposer
 
   ColumnFilters<String> get seriesName => $composableBuilder(
     column: $table.seriesName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pageCount => $composableBuilder(
+    column: $table.pageCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pageOrderVersion => $composableBuilder(
+    column: $table.pageOrderVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1690,6 +1805,16 @@ class $$ReadingItemsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get pageCount => $composableBuilder(
+    column: $table.pageCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pageOrderVersion => $composableBuilder(
+    column: $table.pageOrderVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get onShelf => $composableBuilder(
     column: $table.onShelf,
     builder: (column) => ColumnOrderings(column),
@@ -1745,6 +1870,14 @@ class $$ReadingItemsTableAnnotationComposer
 
   GeneratedColumn<String> get seriesName => $composableBuilder(
     column: $table.seriesName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get pageCount =>
+      $composableBuilder(column: $table.pageCount, builder: (column) => column);
+
+  GeneratedColumn<int> get pageOrderVersion => $composableBuilder(
+    column: $table.pageOrderVersion,
     builder: (column) => column,
   );
 
@@ -1849,6 +1982,8 @@ class $$ReadingItemsTableTableManager
                 Value<String> contentHash = const Value.absent(),
                 Value<String?> coverPath = const Value.absent(),
                 Value<String?> seriesName = const Value.absent(),
+                Value<int> pageCount = const Value.absent(),
+                Value<int> pageOrderVersion = const Value.absent(),
                 Value<bool> onShelf = const Value.absent(),
                 Value<DateTime> addedAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -1863,6 +1998,8 @@ class $$ReadingItemsTableTableManager
                 contentHash: contentHash,
                 coverPath: coverPath,
                 seriesName: seriesName,
+                pageCount: pageCount,
+                pageOrderVersion: pageOrderVersion,
                 onShelf: onShelf,
                 addedAt: addedAt,
                 updatedAt: updatedAt,
@@ -1879,6 +2016,8 @@ class $$ReadingItemsTableTableManager
                 required String contentHash,
                 Value<String?> coverPath = const Value.absent(),
                 Value<String?> seriesName = const Value.absent(),
+                Value<int> pageCount = const Value.absent(),
+                Value<int> pageOrderVersion = const Value.absent(),
                 Value<bool> onShelf = const Value.absent(),
                 required DateTime addedAt,
                 required DateTime updatedAt,
@@ -1893,6 +2032,8 @@ class $$ReadingItemsTableTableManager
                 contentHash: contentHash,
                 coverPath: coverPath,
                 seriesName: seriesName,
+                pageCount: pageCount,
+                pageOrderVersion: pageOrderVersion,
                 onShelf: onShelf,
                 addedAt: addedAt,
                 updatedAt: updatedAt,

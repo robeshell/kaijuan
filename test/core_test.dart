@@ -29,6 +29,24 @@ void main() {
     });
   });
 
+  group('storage wire format', () {
+    test('ReaderKind round-trips', () {
+      expect(ReaderKind.comic.storageValue, 'comic');
+      expect(ReaderKind.fromStorage('book'), ReaderKind.book);
+      expect(ReaderKind.fromStorage('nope'), isNull);
+    });
+
+    test('ReaderFormat round-trips', () {
+      expect(ReaderFormat.cbz.storageValue, 'cbz');
+      expect(ReaderFormat.fromStorage('zip'), ReaderFormat.zip);
+      expect(ReaderFormat.fromStorage('nope'), isNull);
+    });
+
+    test('ComicPageOrder version is pinned for progress safety', () {
+      expect(ComicPageOrder.version, 1);
+    });
+  });
+
   group('ComicArchive.naturalCompare', () {
     test('sorts numeric chunks numerically', () {
       final names = ['page10.jpg', 'page2.jpg', 'page1.jpg'];

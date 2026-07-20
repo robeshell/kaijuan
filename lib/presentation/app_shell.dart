@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/theme_preferences.dart';
-import '../library/import/comic_import_service.dart';
-import '../library/persistence/app_database.dart';
+import 'controllers/library_controller.dart';
 import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shelf_screen.dart';
@@ -13,13 +12,11 @@ class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     required this.themePreferences,
-    required this.database,
-    required this.importService,
+    required this.libraryController,
   });
 
   final ThemePreferences themePreferences;
-  final AppDatabase database;
-  final ComicImportService importService;
+  final LibraryController libraryController;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -27,6 +24,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
+  late final List<Widget> _screens;
 
   static const _destinations = [
     (icon: Icons.auto_stories_outlined, selectedIcon: Icons.auto_stories, label: '书架'),
@@ -34,14 +32,16 @@ class _AppShellState extends State<AppShell> {
     (icon: Icons.settings_outlined, selectedIcon: Icons.settings, label: '设置'),
   ];
 
-  List<Widget> get _screens => [
-        const ShelfScreen(),
-        LibraryScreen(
-          database: widget.database,
-          importService: widget.importService,
-        ),
-        SettingsScreen(themePreferences: widget.themePreferences),
-      ];
+  @override
+  void initState() {
+    super.initState();
+    // Stable children so IndexedStack keeps tab state (import progress, scroll).
+    _screens = [
+      const ShelfScreen(),
+      LibraryScreen(controller: widget.libraryController),
+      SettingsScreen(themePreferences: widget.themePreferences),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,13 +64,15 @@ class _AppShellState extends State<AppShell> {
               ],
             ),
             const VerticalDivider(width: 1),
-            Expanded(child: _screens[_index]),
+            Expanded(
+              child: IndexedStack(index: _index, children: _screens),
+            ),
           ],
         ),
       );
     }
     return Scaffold(
-      body: _screens[_index],
+      body: IndexedStack(index: _index, children: _screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),

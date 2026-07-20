@@ -5,6 +5,7 @@ import 'app/app.dart';
 import 'app/theme_preferences.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/persistence/app_database.dart';
+import 'presentation/controllers/library_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,11 +15,14 @@ Future<void> main() async {
     database: database,
     supportDirectory: await getApplicationSupportDirectory(),
   );
+  final libraryController = LibraryController(
+    database: database,
+    importService: importService,
+  );
   runApp(
     App(
       themePreferences: themePreferences,
-      database: database,
-      importService: importService,
+      libraryController: libraryController,
     ),
   );
 }
