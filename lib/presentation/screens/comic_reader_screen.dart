@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/comic_reading_preferences.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/comic/comic_models.dart';
 import '../controllers/comic_reader_controller.dart';
@@ -13,19 +15,27 @@ class ComicReaderScreen extends StatefulWidget {
     super.key,
     required this.database,
     required this.item,
+    this.readingPreferences,
   });
 
   final AppDatabase database;
   final ReadingItem item;
+  final ComicReadingPreferences? readingPreferences;
 
   static Future<void> open(
     BuildContext context, {
     required AppDatabase database,
     required ReadingItem item,
+    ComicReadingPreferences? readingPreferences,
   }) {
-    return Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ComicReaderScreen(database: database, item: item),
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: false,
+        builder: (_) => ComicReaderScreen(
+          database: database,
+          item: item,
+          readingPreferences: readingPreferences,
+        ),
       ),
     );
   }
@@ -44,6 +54,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
     _controller = ComicReaderController(
       database: widget.database,
       item: widget.item,
+      readingPreferences: widget.readingPreferences,
     )..open();
   }
 
@@ -54,12 +65,22 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
     super.dispose();
   }
 
-  void _handleBack() {
+  /// Toolbar back / error-page back: always leave the reader.
+  void _exitReader() {
+    final nav = Navigator.of(context, rootNavigator: true);
+    if (nav.canPop()) {
+      // Imperative [pop] — not [maybePop] — so PopScope.canPop cannot block.
+      nav.pop();
+    }
+  }
+
+  /// Escape: dismiss chrome first when visible, then leave.
+  void _handleDismiss() {
     if (_controller.chromeVisible) {
       _controller.hideChrome();
       return;
     }
-    Navigator.of(context).maybePop();
+    _exitReader();
   }
 
   /// Semantic next/prev mapped through reading direction.
@@ -77,7 +98,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
     final rtl = _controller.direction == ComicReadDirection.rtl;
 
     if (key == LogicalKeyboardKey.escape) {
-      _handleBack();
+      _handleDismiss();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.space ||
@@ -97,6 +118,16 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
       _turn(forward: rtl);
       return KeyEventResult.handled;
     }
+    if (_controller.mode == ComicReaderMode.vertical) {
+      if (key == LogicalKeyboardKey.arrowDown) {
+        _turn(forward: true);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowUp) {
+        _turn(forward: false);
+        return KeyEventResult.handled;
+      }
+    }
     return KeyEventResult.ignored;
   }
 
@@ -110,17 +141,12 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
         listenable: _controller,
         builder: (context, _) {
           final bg = Color(_controller.readingTheme.backgroundArgb);
-          return PopScope(
-            canPop: !_controller.chromeVisible,
-            onPopInvokedWithResult: (didPop, _) {
-              if (!didPop && _controller.chromeVisible) {
-                _controller.hideChrome();
-              }
-            },
-            child: Scaffold(
-              backgroundColor: bg,
-              body: _buildBody(bg),
-            ),
+          // Do not set canPop:false while chrome is open — that made toolbar
+          // [maybePop] / some back paths only hide chrome. Esc still dismisses
+          // chrome first via [_handleDismiss].
+          return Scaffold(
+            backgroundColor: bg,
+            body: _buildBody(bg),
           );
         },
       ),
@@ -131,7 +157,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
     if (_controller.openError != null) {
       return _ErrorBody(
         message: _controller.openError.toString(),
-        onBack: () => Navigator.of(context).maybePop(),
+        onBack: _exitReader,
       );
     }
     if (!_controller.isReady) {
@@ -151,7 +177,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
             curve: Curves.easeOut,
             child: ComicReaderChrome(
               controller: _controller,
-              onBack: _handleBack,
+              onBack: _exitReader,
             ),
           ),
         ),
@@ -168,7 +194,11 @@ class _ErrorBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final macLead =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS ? 78.0 : 0.0;
+    // Top inset from app MediaQuery; left clears traffic lights on macOS.
     return SafeArea(
+      minimum: EdgeInsets.only(left: macLead),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

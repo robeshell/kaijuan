@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../app/comic_reading_preferences.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/comic/comic_models.dart';
@@ -13,12 +14,22 @@ class ComicReaderController extends ChangeNotifier {
   ComicReaderController({
     required AppDatabase database,
     required ReadingItem item,
-  }) : this._(database, item);
+    ComicReadingPreferences? readingPreferences,
+  }) : this._(database, item, readingPreferences);
 
-  ComicReaderController._(this._database, this.item);
+  ComicReaderController._(
+    this._database,
+    this.item,
+    ComicReadingPreferences? readingPreferences,
+  )   : _readingPreferences = readingPreferences,
+        _mode = readingPreferences?.mode ?? ComicReaderMode.slide,
+        _direction = readingPreferences?.direction ?? ComicReadDirection.ltr,
+        _readingTheme =
+            readingPreferences?.readingTheme ?? ComicReadingTheme.comicDefault;
 
   final AppDatabase _database;
   final ReadingItem item;
+  final ComicReadingPreferences? _readingPreferences;
 
   ComicSession? _session;
   ComicPageCache? _cache;
@@ -26,9 +37,9 @@ class ComicReaderController extends ChangeNotifier {
 
   int _pageIndex = 0;
   bool _chromeVisible = false;
-  ComicReaderMode _mode = ComicReaderMode.slide;
-  ComicReadDirection _direction = ComicReadDirection.ltr;
-  ComicReadingTheme _readingTheme = ComicReadingTheme.comicDefault;
+  ComicReaderMode _mode;
+  ComicReadDirection _direction;
+  ComicReadingTheme _readingTheme;
   bool _ready = false;
   bool _disposed = false;
 
@@ -115,29 +126,47 @@ class ComicReaderController extends ChangeNotifier {
     if (_mode == mode) return;
     _mode = mode;
     notifyListeners();
+    unawaited(_readingPreferences?.setMode(mode));
   }
 
   void setDirection(ComicReadDirection direction) {
     if (_direction == direction) return;
     _direction = direction;
     notifyListeners();
+    unawaited(_readingPreferences?.setDirection(direction));
   }
 
   void setReadingTheme(ComicReadingTheme theme) {
     if (_readingTheme == theme) return;
     _readingTheme = theme;
     notifyListeners();
+    unawaited(_readingPreferences?.setReadingTheme(theme));
   }
 
   /// Semantic "next" — toward the end of the book.
-  void goForward() => jumpTo(_pageIndex + 1);
+  /// In spread mode, advances by one spread (two pages).
+  void goForward() {
+    if (_mode == ComicReaderMode.spread) {
+      jumpTo(comicSpreadStep(_pageIndex, delta: 1, pageCount: pageCount));
+    } else {
+      jumpTo(_pageIndex + 1);
+    }
+  }
 
   /// Semantic "previous" — toward the start of the book.
-  void goBackward() => jumpTo(_pageIndex - 1);
+  /// In spread mode, retreats by one spread (two pages).
+  void goBackward() {
+    if (_mode == ComicReaderMode.spread) {
+      jumpTo(comicSpreadStep(_pageIndex, delta: -1, pageCount: pageCount));
+    } else {
+      jumpTo(_pageIndex - 1);
+    }
+  }
 
   void jumpTo(int index) {
-    if (_session == null) return;
-    final clamped = index.clamp(0, pageCount - 1);
+    final total = pageCount;
+    if (total <= 0) return;
+    final clamped = index.clamp(0, total - 1);
     if (clamped == _pageIndex) return;
     _pageIndex = clamped;
     _sliderPreview = null;
@@ -145,6 +174,10 @@ class ComicReaderController extends ChangeNotifier {
     notifyListeners();
     unawaited(_persistProgress());
   }
+
+  /// Vertical list reports the page at the viewport; same path as [jumpTo].
+  /// Scroll bodies must gate re-entrant animate/jump with local flags.
+  void reportVisiblePage(int index) => jumpTo(index);
 
   void onSliderChanged(double value) {
     final total = pageCount;
@@ -164,15 +197,10 @@ class ComicReaderController extends ChangeNotifier {
   /// Spread layout for [anchor] (primary page index).
   PageSpread spreadFor(int anchor) {
     if (_mode != ComicReaderMode.spread || pageCount <= 0) {
-      return PageSpread.single(anchor.clamp(0, pageCount - 1));
+      final safe = pageCount <= 0 ? 0 : anchor.clamp(0, pageCount - 1);
+      return PageSpread.single(safe);
     }
-    // Pair 0-1, 2-3, … ; odd last page stands alone.
-    final primary = (anchor ~/ 2) * 2;
-    final secondary = primary + 1;
-    if (secondary < pageCount) {
-      return PageSpread.double(primaryPage: primary, secondaryPage: secondary);
-    }
-    return PageSpread.single(primary);
+    return comicSpreadFor(anchor, pageCount: pageCount);
   }
 
   Future<void> _persistProgress() async {

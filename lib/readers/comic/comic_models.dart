@@ -157,3 +157,54 @@ class PageSpread {
   final int? secondaryPage;
   final bool usesSpreadLayout;
 }
+
+/// Even primary of the spread that contains [pageIndex] (0-1, 2-3, …).
+int comicSpreadPrimary(int pageIndex) {
+  if (pageIndex < 0) return 0;
+  return (pageIndex ~/ 2) * 2;
+}
+
+/// Next/previous spread anchor. [delta] is +1 (forward) or -1 (backward).
+int comicSpreadStep(
+  int pageIndex, {
+  required int delta,
+  required int pageCount,
+}) {
+  if (pageCount <= 0) return 0;
+  final primary = comicSpreadPrimary(pageIndex);
+  return (primary + delta * 2).clamp(0, pageCount - 1);
+}
+
+/// Build the spread shown for [anchor] under comic spread pairing rules.
+PageSpread comicSpreadFor(int anchor, {required int pageCount}) {
+  if (pageCount <= 0) return const PageSpread.single(0);
+  final primary = comicSpreadPrimary(anchor.clamp(0, pageCount - 1));
+  final secondary = primary + 1;
+  if (secondary < pageCount) {
+    return PageSpread.double(primaryPage: primary, secondaryPage: secondary);
+  }
+  return PageSpread.single(primary);
+}
+
+/// Which page index is "current" for a vertical list of equal [itemExtent].
+/// Uses the page whose midpoint is closest to the viewport top (offset).
+int comicVerticalPageIndex({
+  required double scrollOffset,
+  required double itemExtent,
+  required int pageCount,
+}) {
+  if (pageCount <= 0 || itemExtent <= 0) return 0;
+  final index = (scrollOffset / itemExtent).round();
+  return index.clamp(0, pageCount - 1);
+}
+
+/// Scroll offset that puts [pageIndex] at the top of a fixed-extent list.
+double comicVerticalOffsetForPage({
+  required int pageIndex,
+  required double itemExtent,
+  required int pageCount,
+}) {
+  if (pageCount <= 0 || itemExtent <= 0) return 0;
+  final index = pageIndex.clamp(0, pageCount - 1);
+  return index * itemExtent;
+}

@@ -184,35 +184,128 @@ class _VerticalBody extends StatefulWidget {
   State<_VerticalBody> createState() => _VerticalBodyState();
 }
 
+/// Fixed page aspect for vertical list: width / height = 0.7 → height = w / 0.7.
+const _kVerticalAspect = 0.7;
+
 class _VerticalBodyState extends State<_VerticalBody> {
   final _scrollController = ScrollController();
+  bool _syncingFromController = false;
+  bool _syncingFromScroll = false;
+  double _itemExtent = 0;
+  bool _didInitialJump = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onController);
+    _scrollController.addListener(_onScroll);
+  }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onController);
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_syncingFromController || _itemExtent <= 0) return;
+    if (!_scrollController.hasClients) return;
+    final c = widget.controller;
+    final index = comicVerticalPageIndex(
+      scrollOffset: _scrollController.offset,
+      itemExtent: _itemExtent,
+      pageCount: c.pageCount,
+    );
+    if (index == c.pageIndex) return;
+    _syncingFromScroll = true;
+    c.reportVisiblePage(index);
+    _syncingFromScroll = false;
+  }
+
+  void _onController() {
+    if (_syncingFromScroll || _itemExtent <= 0) return;
+    if (!_scrollController.hasClients) return;
+    final c = widget.controller;
+    final target = comicVerticalOffsetForPage(
+      pageIndex: c.pageIndex,
+      itemExtent: _itemExtent,
+      pageCount: c.pageCount,
+    );
+    final current = _scrollController.offset;
+    // Ignore tiny differences while the user is still flinging mid-page.
+    if ((current - target).abs() < _itemExtent * 0.35) return;
+    _syncingFromController = true;
+    _scrollController
+        .animateTo(
+          target.clamp(0.0, _scrollController.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        )
+        .whenComplete(() {
+      _syncingFromController = false;
+    });
+  }
+
+  void _ensureInitialOffset() {
+    if (_didInitialJump || _itemExtent <= 0) return;
+    if (!_scrollController.hasClients) return;
+    final c = widget.controller;
+    if (c.pageIndex <= 0) {
+      _didInitialJump = true;
+      return;
+    }
+    final target = comicVerticalOffsetForPage(
+      pageIndex: c.pageIndex,
+      itemExtent: _itemExtent,
+      pageCount: c.pageCount,
+    );
+    _syncingFromController = true;
+    _scrollController.jumpTo(
+      target.clamp(0.0, _scrollController.position.maxScrollExtent),
+    );
+    _syncingFromController = false;
+    _didInitialJump = true;
   }
 
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onTap: c.toggleChrome,
-      child: ListView.builder(
-        controller: _scrollController,
-        itemCount: c.pageCount,
-        itemBuilder: (context, index) {
-          return AspectRatio(
-            aspectRatio: 0.7,
-            child: ComicPageImage(
-              controller: c,
-              pageIndex: index,
-              fit: BoxFit.fitWidth,
-            ),
-          );
-        },
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final extent = width > 0 ? width / _kVerticalAspect : 0.0;
+        if (extent != _itemExtent) {
+          _itemExtent = extent;
+          // After first layout (or width change), restore scroll to pageIndex.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (!_didInitialJump) {
+              _ensureInitialOffset();
+            } else {
+              _onController();
+            }
+          });
+        }
+
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: c.toggleChrome,
+          child: ListView.builder(
+            controller: _scrollController,
+            itemExtent: extent > 0 ? extent : null,
+            itemCount: c.pageCount,
+            itemBuilder: (context, index) {
+              return ComicPageImage(
+                controller: c,
+                pageIndex: index,
+                fit: BoxFit.fitWidth,
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

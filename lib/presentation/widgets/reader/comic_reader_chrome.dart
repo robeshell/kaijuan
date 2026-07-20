@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
@@ -7,6 +8,10 @@ import '../../../readers/comic/comic_models.dart';
 import '../../controllers/comic_reader_controller.dart';
 
 /// Top + bottom glass chrome for the comic reader.
+///
+/// On desktop the host uses a transparent / custom title bar
+/// (`fullSizeContentView` on macOS). The reader is pushed full-window, so
+/// chrome must clear traffic lights (mac) and the title-bar band (mac/win).
 class ComicReaderChrome extends StatelessWidget {
   const ComicReaderChrome({
     super.key,
@@ -16,6 +21,9 @@ class ComicReaderChrome extends StatelessWidget {
 
   final ComicReaderController controller;
   final VoidCallback onBack;
+
+  /// Clear of macOS traffic lights (same band as [DesktopTitleBar]).
+  static const double _macTrafficLightClearance = 78;
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +36,13 @@ class ComicReaderChrome extends StatelessWidget {
         ? const Color(0x99F2F2F4)
         : const Color(0x991C1C1E);
 
+    final leadingClearance =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+            ? _macTrafficLightClearance
+            : 0.0;
+
     return Stack(
+      fit: StackFit.expand,
       children: [
         Positioned(
           top: 0,
@@ -36,58 +50,76 @@ class ComicReaderChrome extends StatelessWidget {
           right: 0,
           child: _GlassBar(
             glass: glass,
+            // Top padding from app-level desktop MediaQuery via SafeArea.
             child: SafeArea(
               bottom: false,
-              child: SizedBox(
-                height: 56,
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: '返回',
-                      onPressed: onBack,
-                      icon: Icon(Icons.arrow_back, color: fg),
-                    ),
-                    Expanded(
-                      child: Text(
-                        controller.item.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
+              child: Padding(
+                padding: EdgeInsets.only(left: leadingClearance),
+                child: SizedBox(
+                  height: 56,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: Row(
+                    children: [
+                      IconButton(
+                        tooltip: '返回',
+                        onPressed: onBack,
+                        icon: Icon(
+                          Icons.arrow_back_outlined,
                           color: fg,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                          weight: 300,
                         ),
                       ),
+                      Expanded(
+                        child: Text(
+                          controller.item.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: fg,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      PopupMenuButton<String>(
+                        tooltip: '阅读选项',
+                        icon: Icon(
+                          Icons.more_horiz_outlined,
+                          color: fg,
+                          weight: 300,
+                        ),
+                        onSelected: (value) => _onMenu(value),
+                        itemBuilder: (context) => [
+                          for (final mode in ComicReaderMode.values)
+                            CheckedPopupMenuItem(
+                              value: 'mode:${mode.storageValue}',
+                              checked: controller.mode == mode,
+                              child: Text(mode.label),
+                            ),
+                          const PopupMenuDivider(),
+                          for (final d in ComicReadDirection.values)
+                            CheckedPopupMenuItem(
+                              value: 'dir:${d.storageValue}',
+                              checked: controller.direction == d,
+                              child: Text(d.label),
+                            ),
+                          const PopupMenuDivider(),
+                          for (final t in ComicReadingTheme.values)
+                            CheckedPopupMenuItem(
+                              value: 'theme:${t.storageValue}',
+                              checked: controller.readingTheme == t,
+                              child: Text(t.label),
+                            ),
+                        ],
+                      ),
+                      // Balance leading traffic-light clearance so title stays centered.
+                      if (leadingClearance > 0)
+                        SizedBox(width: leadingClearance - 8),
+                    ],
                     ),
-                    PopupMenuButton<String>(
-                      tooltip: '阅读选项',
-                      icon: Icon(Icons.more_horiz, color: fg),
-                      onSelected: (value) => _onMenu(value),
-                      itemBuilder: (context) => [
-                        for (final mode in ComicReaderMode.values)
-                          CheckedPopupMenuItem(
-                            value: 'mode:${mode.storageValue}',
-                            checked: controller.mode == mode,
-                            child: Text(mode.label),
-                          ),
-                        const PopupMenuDivider(),
-                        for (final d in ComicReadDirection.values)
-                          CheckedPopupMenuItem(
-                            value: 'dir:${d.storageValue}',
-                            checked: controller.direction == d,
-                            child: Text(d.label),
-                          ),
-                        const PopupMenuDivider(),
-                        for (final t in ComicReadingTheme.values)
-                          CheckedPopupMenuItem(
-                            value: 'theme:${t.storageValue}',
-                            checked: controller.readingTheme == t,
-                            child: Text(t.label),
-                          ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -101,53 +133,56 @@ class ComicReaderChrome extends StatelessWidget {
             glass: glass,
             child: SafeArea(
               top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.x4,
-                  AppSpacing.x2,
-                  AppSpacing.x4,
-                  AppSpacing.x3,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          controller.pageLabel,
-                          style: TextStyle(color: fgMuted, fontSize: 13),
-                        ),
-                        const Spacer(),
-                        if (controller.mode != ComicReaderMode.vertical)
+              child: Material(
+                type: MaterialType.transparency,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.x4,
+                    AppSpacing.x2,
+                    AppSpacing.x4,
+                    AppSpacing.x3,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
                           Text(
-                            controller.direction.label,
-                            style: TextStyle(color: fgMuted, fontSize: 12),
+                            controller.pageLabel,
+                            style: TextStyle(color: fgMuted, fontSize: 13),
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.x2),
-                    if (controller.pageCount > 1)
-                      SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 3,
-                          thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 7,
-                          ),
-                          overlayShape: const RoundSliderOverlayShape(
-                            overlayRadius: 14,
-                          ),
-                        ),
-                        child: Slider(
-                          min: 0,
-                          max: (controller.pageCount - 1).toDouble(),
-                          value: controller.displayPage
-                              .toDouble()
-                              .clamp(0, controller.pageCount - 1),
-                          onChanged: controller.onSliderChanged,
-                          onChangeEnd: controller.onSliderChangeEnd,
-                        ),
+                          const Spacer(),
+                          if (controller.mode != ComicReaderMode.vertical)
+                            Text(
+                              controller.direction.label,
+                              style: TextStyle(color: fgMuted, fontSize: 12),
+                            ),
+                        ],
                       ),
-                  ],
+                      const SizedBox(height: AppSpacing.x2),
+                      if (controller.pageCount > 1)
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 7,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 14,
+                            ),
+                          ),
+                          child: Slider(
+                            min: 0,
+                            max: (controller.pageCount - 1).toDouble(),
+                            value: controller.displayPage
+                                .toDouble()
+                                .clamp(0, controller.pageCount - 1),
+                            onChanged: controller.onSliderChanged,
+                            onChangeEnd: controller.onSliderChangeEnd,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
