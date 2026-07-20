@@ -19,9 +19,13 @@ class ThemePreferences extends ChangeNotifier {
   ThemeMode get themeMode => _themeMode;
   AccentPreset get accent => _accent;
 
-  static Future<ThemePreferences> load({Directory? supportDirectory}) async {
+  static Future<ThemePreferences> load({
+    Directory? supportDirectory,
+    AccentPreset? defaultAccent,
+  }) async {
     final dir = supportDirectory ?? await getApplicationSupportDirectory();
     final file = File(p.join(dir.path, 'theme.json'));
+    final fallbackAccent = defaultAccent ?? AppColors.defaultAccent;
     try {
       if (await file.exists()) {
         final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
@@ -34,7 +38,7 @@ class ThemePreferences extends ChangeNotifier {
     } catch (_) {
       // Corrupted file — fall back to defaults.
     }
-    return ThemePreferences._(file, ThemeMode.system, AppColors.defaultAccent);
+    return ThemePreferences._(file, ThemeMode.system, fallbackAccent);
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {

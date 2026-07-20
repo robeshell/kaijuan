@@ -15,14 +15,26 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.kaika.kaika"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // Overridden per productFlavor (comic / book). See docs/ENGINEERING.md.
+        applicationId = "com.kaika.comic"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    flavorDimensions += "brand"
+    productFlavors {
+        create("comic") {
+            dimension = "brand"
+            applicationId = "com.kaika.comic"
+            resValue("string", "app_name", "Kaika Comic")
+        }
+        create("book") {
+            dimension = "brand"
+            applicationId = "com.kaika.book"
+            resValue("string", "app_name", "Kaika Book")
+        }
     }
 
     buildTypes {

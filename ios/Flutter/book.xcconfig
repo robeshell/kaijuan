@@ -1,0 +1,4 @@
+// Brand: book — included by Debug-book / Release-book / Profile-book
+PRODUCT_BUNDLE_IDENTIFIER=com.kaika.book
+PRODUCT_DISPLAY_NAME=Kaika Book
+FLUTTER_TARGET=lib/main_book.dart

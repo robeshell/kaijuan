@@ -1,0 +1,5 @@
+// Book brand
+PRODUCT_NAME = Kaika Book
+PRODUCT_BUNDLE_IDENTIFIER = com.kaika.book
+PRODUCT_COPYRIGHT = Copyright © 2026 Kaika. All rights reserved.
+FLUTTER_TARGET = lib/main_book.dart
