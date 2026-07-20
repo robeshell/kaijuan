@@ -5,9 +5,12 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'app/app.dart';
+import 'app/book_reading_preferences.dart';
 import 'app/comic_reading_preferences.dart';
 import 'app/theme_preferences.dart';
 import 'brand/brand_config.dart';
+import 'domain/reader_models.dart';
+import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/persistence/app_database.dart';
 import 'presentation/controllers/library_controller.dart';
@@ -30,26 +33,44 @@ Future<void> bootstrap(BrandConfig brand) async {
     supportDirectory: supportDir,
     defaultAccent: brand.defaultAccent,
   );
-  final readingPreferences = await ComicReadingPreferences.load(
+  final comicReadingPreferences = await ComicReadingPreferences.load(
     supportDirectory: supportDir,
     defaultReadingTheme: brand.defaultReadingTheme,
   );
+  final bookReadingPreferences = brand.isBook
+      ? await BookReadingPreferences.load(
+          supportDirectory: supportDir,
+          defaultReadingTheme: brand.defaultReadingTheme,
+        )
+      : null;
+
   final database = AppDatabase.named(brand.databaseName);
-  final importService = ComicImportService(
-    database: database,
-    supportDirectory: supportDir,
-  );
-  final libraryController = LibraryController(
-    database: database,
-    importService: importService,
-    importExtensions: brand.importExtensions,
-  );
+  final libraryController = brand.isBook
+      ? LibraryController(
+          database: database,
+          bookImportService: BookImportService(
+            database: database,
+            supportDirectory: supportDir,
+          ),
+          libraryKind: ReaderKind.book,
+          importExtensions: brand.importExtensions,
+        )
+      : LibraryController(
+          database: database,
+          comicImportService: ComicImportService(
+            database: database,
+            supportDirectory: supportDir,
+          ),
+          libraryKind: ReaderKind.comic,
+          importExtensions: brand.importExtensions,
+        );
 
   runApp(
     App(
       brand: brand,
       themePreferences: themePreferences,
-      readingPreferences: readingPreferences,
+      readingPreferences: comicReadingPreferences,
+      bookReadingPreferences: bookReadingPreferences,
       libraryController: libraryController,
     ),
   );

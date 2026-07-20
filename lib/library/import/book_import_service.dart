@@ -5,28 +5,16 @@ import 'package:drift/drift.dart' show Value;
 import 'package:path/path.dart' as p;
 
 import '../../domain/reader_models.dart';
+import '../../readers/book/book_epub.dart';
 import '../persistence/app_database.dart';
-import 'comic_archive.dart';
 import 'import_models.dart';
 
-/// Imports comic files into content-addressed storage:
-///
-///   `<appSupport>/library/<contentHash>.<ext>` — the source file
-///   `<appSupport>/covers/<contentHash>.<ext>`  — extracted first page
-///
-/// Supports CBZ/ZIP and **image-based EPUB** (OPF spine → images).
-/// Content addressing makes re-imports idempotent and dedup free.
-class ComicImportService {
-  ComicImportService({required this.database, required this.supportDirectory});
+/// Imports reflow EPUB into content-addressed storage for the book app.
+class BookImportService {
+  BookImportService({required this.database, required this.supportDirectory});
 
   final AppDatabase database;
   final Directory supportDirectory;
-
-  static const supportedFormats = {
-    ReaderFormat.cbz,
-    ReaderFormat.zip,
-    ReaderFormat.epub,
-  };
 
   Future<ImportResult> importPaths(List<String> paths) async {
     var added = 0;
@@ -38,6 +26,8 @@ class ComicImportService {
         outcome == _Outcome.added ? added++ : updated++;
       } on ImportException catch (e) {
         failures.add(ImportFailure(path: path, reason: e.message));
+      } on BookEpubException catch (e) {
+        failures.add(ImportFailure(path: path, reason: e.message));
       } catch (e) {
         failures.add(ImportFailure(path: path, reason: e.toString()));
       }
@@ -45,7 +35,6 @@ class ComicImportService {
     return ImportResult(added: added, updated: updated, failures: failures);
   }
 
-  /// Removes the library row and best-effort deletes stored archive + cover.
   Future<void> deleteItem(String id) async {
     final item = await database.readingItemById(id);
     if (item == null) return;
@@ -58,8 +47,8 @@ class ComicImportService {
 
   Future<_Outcome> _importOne(String path) async {
     final format = ReaderFormat.fromExtension(p.extension(path));
-    if (format == null || !supportedFormats.contains(format)) {
-      throw ImportException('不支持的漫画格式：${p.extension(path)}');
+    if (format != ReaderFormat.epub) {
+      throw ImportException('图书目前仅支持 EPUB：${p.extension(path)}');
     }
     final file = File(path);
     if (!await file.exists()) {
@@ -73,41 +62,25 @@ class ComicImportService {
       await file.copy(storedPath);
     }
 
-    final listing = await ComicArchive.listPagesDetailed(storedPath);
-    if (listing.pageNames.isEmpty) {
-      await File(storedPath).delete().catchError((_) => File(storedPath));
-      throw ImportException(
-        format == ReaderFormat.epub
-            ? 'EPUB 里找不到可用的图片页（仅支持页图式 / 固定版式漫画 EPUB）'
-            : '压缩包里找不到图片页',
-      );
-    }
-
-    final coverEntry = listing.pageNames.firstWhere(
-      (e) => ComicArchive.imageExtensions.contains(
-        p.extension(e).toLowerCase(),
-      ),
-      orElse: () => listing.pageNames.first,
-    );
-    final coverPath = await _ensureCover(hash, storedPath, coverEntry);
+    final doc = await BookEpub.open(storedPath);
+    final coverPath = await _ensureCover(hash, storedPath, doc);
     final fallbackTitle = p.basenameWithoutExtension(path);
-    final title = (listing.title?.trim().isNotEmpty ?? false)
-        ? listing.title!.trim()
-        : fallbackTitle;
+    final title =
+        doc.title.trim().isNotEmpty ? doc.title.trim() : fallbackTitle;
 
     final existing = await database.readingItemByHash(hash);
     final now = DateTime.now();
     await database.upsertReadingItem(
       ReadingItemsCompanion(
         id: Value(existing?.id ?? hash),
-        kind: Value(ReaderKind.comic.storageValue),
-        format: Value(format.storageValue),
+        kind: Value(ReaderKind.book.storageValue),
+        format: Value(ReaderFormat.epub.storageValue),
         title: Value(existing?.title ?? title),
         filePath: Value(storedPath),
         contentHash: Value(hash),
         coverPath: Value(coverPath),
-        pageCount: Value(listing.pageNames.length),
-        pageOrderVersion: const Value(ComicPageOrder.version),
+        pageCount: Value(doc.sectionCount),
+        pageOrderVersion: const Value(0),
         addedAt: Value(existing?.addedAt ?? now),
         updatedAt: Value(now),
       ),
@@ -115,19 +88,18 @@ class ComicImportService {
     return existing == null ? _Outcome.added : _Outcome.updated;
   }
 
-  Future<String> _ensureCover(
+  Future<String?> _ensureCover(
     String hash,
-    String archivePath,
-    String firstPage,
+    String epubPath,
+    BookEpubDocument doc,
   ) async {
-    final ext = p.extension(firstPage).toLowerCase();
-    final coverPath = p.join(
-      _coversDir.path,
-      '$hash${ext.isEmpty ? '.img' : ext}',
-    );
+    if (doc.coverEntry == null) return null;
+    final bytes = await BookEpub.readEntry(epubPath, doc.coverEntry!);
+    if (bytes == null || bytes.isEmpty) return null;
+    final ext = p.extension(doc.coverEntry!).toLowerCase();
+    final safe = (ext.isEmpty || ext == '.xml') ? '.jpg' : ext;
+    final coverPath = p.join(_coversDir.path, '$hash$safe');
     if (await File(coverPath).exists()) return coverPath;
-    final bytes = await ComicArchive.readEntry(archivePath, firstPage);
-    if (bytes == null) throw ImportException('封面提取失败');
     await _coversDir.create(recursive: true);
     await File(coverPath).writeAsBytes(bytes, flush: true);
     return coverPath;

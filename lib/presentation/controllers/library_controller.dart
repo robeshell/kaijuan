@@ -2,7 +2,9 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../domain/reader_models.dart';
+import '../../library/import/book_import_service.dart';
 import '../../library/import/comic_import_service.dart';
+import '../../library/import/import_models.dart';
 import '../../library/persistence/app_database.dart';
 
 /// How the library grid orders items (client-side after stream).
@@ -32,14 +34,24 @@ enum LibraryShelfFilter {
 class LibraryController extends ChangeNotifier {
   LibraryController({
     required AppDatabase database,
-    required ComicImportService importService,
+    ComicImportService? comicImportService,
+    BookImportService? bookImportService,
+    required this.libraryKind,
     this.importExtensions = const ['cbz', 'zip', 'epub'],
-  })  // Public names stay database/importService for call sites.
-      : _database = database, // ignore: prefer_initializing_formals
-        _importService = importService; // ignore: prefer_initializing_formals
+  })  : _database = database,
+        _comicImport = comicImportService,
+        _bookImport = bookImportService,
+        assert(
+          comicImportService != null || bookImportService != null,
+          'Need comic or book import service',
+        );
 
   final AppDatabase _database;
-  final ComicImportService _importService;
+  final ComicImportService? _comicImport;
+  final BookImportService? _bookImport;
+
+  /// Which product library this controller serves.
+  final ReaderKind libraryKind;
 
   /// File picker extensions (no dots), from [BrandConfig].
   final List<String> importExtensions;
@@ -112,7 +124,7 @@ class LibraryController extends ChangeNotifier {
 
   /// Live library entries with progress (for filters / badges).
   Stream<List<LibraryEntry>> watchLibraryEntries() =>
-      _database.watchLibraryEntries(ReaderKind.comic);
+      _database.watchLibraryEntries(libraryKind);
 
   /// Apply filters + sort + title [query].
   List<LibraryEntry> filterAndSort(
@@ -198,11 +210,10 @@ class LibraryController extends ChangeNotifier {
   Future<ReadingProgressData?> progressFor(String itemId) =>
       _database.progressFor(itemId);
 
-  /// Opens the system file picker and imports comics (CBZ/ZIP/EPUB).
-  /// Returns null when the user cancels.
-  Future<ImportResult?> pickAndImportComics() async {
+  /// Opens the system file picker. Returns null when the user cancels.
+  Future<ImportResult?> pickAndImport() async {
     final typeGroup = XTypeGroup(
-      label: '漫画',
+      label: libraryKind == ReaderKind.book ? '图书' : '漫画',
       extensions: importExtensions,
     );
     final files = await openFiles(acceptedTypeGroups: [typeGroup]);
@@ -210,7 +221,10 @@ class LibraryController extends ChangeNotifier {
     return importPaths([for (final f in files) f.path]);
   }
 
-  /// Import entry point used by tests and by [pickAndImportComics].
+  /// Back-compat alias for comic call sites / tests.
+  Future<ImportResult?> pickAndImportComics() => pickAndImport();
+
+  /// Import entry point used by tests and by [pickAndImport].
   Future<ImportResult> importPaths(List<String> paths) async {
     if (_importing) {
       return const ImportResult(
@@ -222,20 +236,29 @@ class LibraryController extends ChangeNotifier {
     _importing = true;
     notifyListeners();
     try {
-      return await _importService.importPaths(paths);
+      if (_bookImport != null) {
+        return await _bookImport.importPaths(paths);
+      }
+      return await _comicImport!.importPaths(paths);
     } finally {
       _importing = false;
       notifyListeners();
     }
   }
 
-  Future<void> deleteItem(String id) => _importService.deleteItem(id);
+  Future<void> deleteItem(String id) async {
+    if (_bookImport != null) {
+      await _bookImport.deleteItem(id);
+    } else {
+      await _comicImport!.deleteItem(id);
+    }
+  }
 
   /// Batch delete (content files + rows).
   Future<int> deleteItems(Iterable<String> ids) async {
     var n = 0;
     for (final id in ids) {
-      await _importService.deleteItem(id);
+      await deleteItem(id);
       n++;
     }
     return n;

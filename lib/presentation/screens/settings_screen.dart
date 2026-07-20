@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../app/theme_preferences.dart';
 import '../../brand/brand_config.dart';
@@ -16,11 +17,13 @@ class SettingsScreen extends StatelessWidget {
     required this.brand,
     required this.themePreferences,
     this.readingPreferences,
+    this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final ThemePreferences themePreferences;
   final ComicReadingPreferences? readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +31,9 @@ class SettingsScreen extends StatelessWidget {
     final listenables = <Listenable>[themePreferences];
     if (readingPreferences != null) {
       listenables.add(readingPreferences!);
+    }
+    if (bookReadingPreferences != null) {
+      listenables.add(bookReadingPreferences!);
     }
 
     return Scaffold(
@@ -182,19 +188,75 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               ],
-              if (brand.isBook) ...[
+              if (brand.isBook && bookReadingPreferences != null) ...[
                 const SizedBox(height: 32),
                 const Text(
                   '阅读默认',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
-                  '图书 reflow 引擎接入后可在此设置字号、行距等。',
+                  '新打开图书时使用；在阅读器内修改会同步保存到这里。',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: semantics.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '字号 ${bookReadingPreferences!.fontSize.toStringAsFixed(0)}',
                   style: TextStyle(
                     fontSize: 13,
                     color: semantics.textSecondary,
                   ),
+                ),
+                Slider(
+                  value: bookReadingPreferences!.fontSize,
+                  min: 14,
+                  max: 28,
+                  divisions: 14,
+                  label: bookReadingPreferences!.fontSize.toStringAsFixed(0),
+                  onChanged: (v) => bookReadingPreferences!.setFontSize(v),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '行距 ${bookReadingPreferences!.lineHeight.toStringAsFixed(1)}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: semantics.textSecondary,
+                  ),
+                ),
+                Slider(
+                  value: bookReadingPreferences!.lineHeight,
+                  min: 1.2,
+                  max: 2.2,
+                  divisions: 10,
+                  label: bookReadingPreferences!.lineHeight.toStringAsFixed(1),
+                  onChanged: (v) => bookReadingPreferences!.setLineHeight(v),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '阅读背景',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: semantics.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final t in ComicReadingTheme.values)
+                      _ReadingThemeChip(
+                        theme: t,
+                        selected:
+                            bookReadingPreferences!.readingTheme == t,
+                        onTap: () =>
+                            bookReadingPreferences!.setReadingTheme(t),
+                      ),
+                  ],
                 ),
               ],
               const SizedBox(height: 32),
@@ -288,11 +350,11 @@ class _AboutCardState extends State<_AboutCard> {
 
   String get _tagline => widget.brand.isComic
       ? '本地漫画阅读 · CBZ / ZIP / 页图 EPUB'
-      : '本地图书阅读 · 引擎即将接入';
+      : '本地图书阅读 · 正文 EPUB reflow';
 
   String get _blurb => widget.brand.isComic
       ? '文件与进度保存在本机，不上传、不刮削云端。支持页图式与固定版式漫画 EPUB。'
-      : '与漫画产品数据隔离。图书 reflow 引擎接入后可导入正文 EPUB。';
+      : '与漫画产品数据隔离。支持正文 EPUB 流式阅读；页图漫画请用漫画 App。';
 
   String get _formatsLabel =>
       widget.brand.importExtensions.map((e) => e.toUpperCase()).join(' · ');

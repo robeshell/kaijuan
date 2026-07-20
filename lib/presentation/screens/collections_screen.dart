@@ -2,13 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
+import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
+import 'book_reader_screen.dart';
 import 'comic_reader_screen.dart';
 
 /// 合集 directory (book-cover-sized collage cards).
@@ -18,17 +21,20 @@ class CollectionsScreen extends StatelessWidget {
     required this.brand,
     required this.controller,
     this.readingPreferences,
+    this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final LibraryController controller;
   final ComicReadingPreferences? readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
 
   static Future<void> open(
     BuildContext context, {
     required BrandConfig brand,
     required LibraryController controller,
     ComicReadingPreferences? readingPreferences,
+    BookReadingPreferences? bookReadingPreferences,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
@@ -36,6 +42,7 @@ class CollectionsScreen extends StatelessWidget {
           brand: brand,
           controller: controller,
           readingPreferences: readingPreferences,
+          bookReadingPreferences: bookReadingPreferences,
         ),
       ),
     );
@@ -163,6 +170,7 @@ class CollectionsScreen extends StatelessWidget {
                         controller: controller,
                         collection: s.collection,
                         readingPreferences: readingPreferences,
+                        bookReadingPreferences: bookReadingPreferences,
                       ),
                       onMenu: () => _menu(context, s),
                     );
@@ -220,7 +228,9 @@ class CollectionsScreen extends StatelessWidget {
                   final ok = await showAppConfirmDialog(
                     context,
                     title: '删除合集？',
-                    message: '删除「${s.collection.name}」不会删除书库里的漫画。',
+                    message: brand.isBook
+                        ? '删除「${s.collection.name}」不会删除书库里的图书。'
+                        : '删除「${s.collection.name}」不会删除书库里的漫画。',
                     confirmLabel: '删除',
                     destructive: true,
                   );
@@ -333,12 +343,14 @@ class CollectionDetailScreen extends StatefulWidget {
     required this.controller,
     required this.collection,
     this.readingPreferences,
+    this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final LibraryController controller;
   final Collection collection;
   final ComicReadingPreferences? readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
 
   static Future<void> open(
     BuildContext context, {
@@ -346,6 +358,7 @@ class CollectionDetailScreen extends StatefulWidget {
     required LibraryController controller,
     required Collection collection,
     ComicReadingPreferences? readingPreferences,
+    BookReadingPreferences? bookReadingPreferences,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
@@ -354,6 +367,7 @@ class CollectionDetailScreen extends StatefulWidget {
           controller: controller,
           collection: collection,
           readingPreferences: readingPreferences,
+          bookReadingPreferences: bookReadingPreferences,
         ),
       ),
     );
@@ -401,8 +415,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   }
 
   void _openItem(ReadingItem item) {
-    if (widget.brand.isBook) {
-      showAppSnackBar(context, '图书阅读引擎即将接入');
+    if (item.kind == ReaderKind.book.storageValue || widget.brand.isBook) {
+      BookReaderScreen.open(
+        context,
+        database: widget.controller.database,
+        item: item,
+        readingPreferences: widget.bookReadingPreferences,
+      );
       return;
     }
     ComicReaderScreen.open(

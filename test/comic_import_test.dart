@@ -47,7 +47,8 @@ void main() {
     );
     controller = LibraryController(
       database: database,
-      importService: importService,
+      comicImportService: importService,
+      libraryKind: ReaderKind.comic,
     );
   });
 

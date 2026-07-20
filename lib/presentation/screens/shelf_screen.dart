@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
@@ -9,6 +10,7 @@ import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../widgets/app_overlays.dart';
+import 'book_reader_screen.dart';
 import 'comic_reader_screen.dart';
 
 /// Shelf: 继续阅读 + 最近 + 我的书架（仅单本钉选；合集在书库展示）.
@@ -18,15 +20,22 @@ class ShelfScreen extends StatelessWidget {
     required this.brand,
     required this.libraryController,
     this.readingPreferences,
+    this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final LibraryController libraryController;
   final ComicReadingPreferences? readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
 
   void _openReal(BuildContext context, ReadingItem item) {
-    if (brand.isBook) {
-      showAppSnackBar(context, '图书阅读引擎即将接入');
+    if (item.kind == ReaderKind.book.storageValue || brand.isBook) {
+      BookReaderScreen.open(
+        context,
+        database: libraryController.database,
+        item: item,
+        readingPreferences: bookReadingPreferences,
+      );
       return;
     }
     if (item.kind != ReaderKind.comic.storageValue) return;

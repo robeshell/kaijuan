@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../app/book_reading_preferences.dart';
 import '../app/comic_reading_preferences.dart';
 import '../app/theme_preferences.dart';
 import '../brand/brand_config.dart';
@@ -21,12 +22,14 @@ class AppShell extends StatefulWidget {
     required this.themePreferences,
     required this.libraryController,
     required this.readingPreferences,
+    this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final ThemePreferences themePreferences;
   final LibraryController libraryController;
   final ComicReadingPreferences readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -51,16 +54,19 @@ class _AppShellState extends State<AppShell> {
         brand: widget.brand,
         libraryController: widget.libraryController,
         readingPreferences: widget.readingPreferences,
+        bookReadingPreferences: widget.bookReadingPreferences,
       ),
       LibraryScreen(
         brand: widget.brand,
         controller: widget.libraryController,
         readingPreferences: widget.readingPreferences,
+        bookReadingPreferences: widget.bookReadingPreferences,
       ),
       SettingsScreen(
         brand: widget.brand,
         themePreferences: widget.themePreferences,
         readingPreferences: widget.readingPreferences,
+        bookReadingPreferences: widget.bookReadingPreferences,
       ),
     ];
   }

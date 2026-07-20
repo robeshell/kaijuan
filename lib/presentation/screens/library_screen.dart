@@ -2,15 +2,18 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
-import '../../library/import/comic_import_service.dart';
+import '../../domain/reader_models.dart';
+import '../../library/import/import_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
-import 'comic_reader_screen.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
+import 'book_reader_screen.dart';
+import 'comic_reader_screen.dart';
 import 'collections_screen.dart';
 import 'item_detail_sheet.dart';
 import 'lists_screen.dart';
@@ -23,11 +26,13 @@ class LibraryScreen extends StatefulWidget {
     required this.brand,
     required this.controller,
     this.readingPreferences,
+    this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final LibraryController controller;
   final ComicReadingPreferences? readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -80,12 +85,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _import() async {
-    if (widget.brand.isBook) {
-      if (!mounted) return;
-      showAppSnackBar(context, '图书导入与阅读引擎即将接入');
-      return;
-    }
-    final result = await widget.controller.pickAndImportComics();
+    final result = await widget.controller.pickAndImport();
     if (!mounted || result == null) return;
     await _showImportSummary(result);
   }
@@ -159,8 +159,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _openItem(ReadingItem item) {
-    if (widget.brand.isBook) {
-      showAppSnackBar(context, '图书阅读引擎即将接入');
+    if (item.kind == ReaderKind.book.storageValue || widget.brand.isBook) {
+      BookReaderScreen.open(
+        context,
+        database: widget.controller.database,
+        item: item,
+        readingPreferences: widget.bookReadingPreferences,
+      );
       return;
     }
     ComicReaderScreen.open(
@@ -426,6 +431,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             brand: widget.brand,
                             controller: c,
                             readingPreferences: widget.readingPreferences,
+                            bookReadingPreferences:
+                                widget.bookReadingPreferences,
                           ),
                           icon: Icon(
                             Icons.playlist_play_outlined,
@@ -452,6 +459,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             brand: widget.brand,
                             controller: c,
                             readingPreferences: widget.readingPreferences,
+                            bookReadingPreferences:
+                                widget.bookReadingPreferences,
                           ),
                           icon: Icon(
                             Icons.collections_bookmark_outlined,
@@ -594,7 +603,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                         const SizedBox(width: 8),
                         IconButton(
-                          tooltip: '导入（CBZ / ZIP / EPUB）',
+                          tooltip: widget.brand.isBook
+                              ? '导入 EPUB'
+                              : '导入（CBZ / ZIP / EPUB）',
                           onPressed: importing ? null : _import,
                           icon: importing
                               ? const SizedBox(
@@ -701,7 +712,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  '导入 CBZ、ZIP 或 EPUB 漫画',
+                                  widget.brand.isBook
+                                      ? '导入 EPUB 图书'
+                                      : '导入 CBZ、ZIP 或 EPUB 漫画',
                                   style: TextStyle(
                                     color: semantics.textSecondary,
                                   ),
@@ -736,6 +749,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 brand: widget.brand,
                                 controller: c,
                                 readingPreferences: widget.readingPreferences,
+                                bookReadingPreferences:
+                                    widget.bookReadingPreferences,
                                 onTap: _onItemTap,
                                 onLongPress: _onItemLongPress,
                                 onMenu: _showDetail,
@@ -748,6 +763,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 brand: widget.brand,
                                 controller: c,
                                 readingPreferences: widget.readingPreferences,
+                                bookReadingPreferences:
+                                    widget.bookReadingPreferences,
                                 onTap: _onItemTap,
                                 onLongPress: _onItemLongPress,
                                 onMenu: _showDetail,
@@ -882,6 +899,7 @@ class _GridBody extends StatelessWidget {
     required this.brand,
     required this.controller,
     required this.readingPreferences,
+    required this.bookReadingPreferences,
     required this.onTap,
     required this.onLongPress,
     required this.onMenu,
@@ -894,6 +912,7 @@ class _GridBody extends StatelessWidget {
   final BrandConfig brand;
   final LibraryController controller;
   final ComicReadingPreferences? readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
   final ValueChanged<LibraryEntry> onTap;
   final ValueChanged<LibraryEntry> onLongPress;
   final ValueChanged<LibraryEntry> onMenu;
@@ -921,6 +940,7 @@ class _GridBody extends StatelessWidget {
               controller: controller,
               collection: s.collection,
               readingPreferences: readingPreferences,
+              bookReadingPreferences: bookReadingPreferences,
             ),
           );
         }
@@ -947,6 +967,7 @@ class _ListBody extends StatelessWidget {
     required this.brand,
     required this.controller,
     required this.readingPreferences,
+    required this.bookReadingPreferences,
     required this.onTap,
     required this.onLongPress,
     required this.onMenu,
@@ -959,6 +980,7 @@ class _ListBody extends StatelessWidget {
   final BrandConfig brand;
   final LibraryController controller;
   final ComicReadingPreferences? readingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
   final ValueChanged<LibraryEntry> onTap;
   final ValueChanged<LibraryEntry> onLongPress;
   final ValueChanged<LibraryEntry> onMenu;
@@ -1001,6 +1023,7 @@ class _ListBody extends StatelessWidget {
               controller: controller,
               collection: s.collection,
               readingPreferences: readingPreferences,
+              bookReadingPreferences: bookReadingPreferences,
             ),
           );
         }
