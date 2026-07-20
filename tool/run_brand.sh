@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
-# Run a brand shell. Usage:
-#   tool/run_brand.sh comic [device]
-#   tool/run_brand.sh book macos
+# Run the unified Kaika App.
+#
+# The old dual-brand (comic/book) split has been collapsed into a single App
+# with two reader engines. This script is kept for muscle memory but now
+# ignores the brand argument.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-BRAND="${1:-}"
 DEVICE="${2:-}"
-if [[ "$BRAND" != "comic" && "$BRAND" != "book" ]]; then
-  echo "Usage: $0 comic|book [device]"
-  exit 1
-fi
-
-ENTRY="lib/main_${BRAND}.dart"
-ARGS=(run --flavor "$BRAND" -t "$ENTRY")
+ARGS=(run -t lib/main.dart)
 if [[ -n "$DEVICE" ]]; then
   ARGS+=(-d "$DEVICE")
 fi

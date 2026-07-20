@@ -1,4 +1,4 @@
-# 图书阅读器设计规范（book App）
+# 图书阅读器设计规范
 
 | | |
 |--|--|
@@ -8,8 +8,7 @@
 
 ## 目标
 
-**book** 产品的正文阅读：EPUB **reflow**（文字流式），非页图。  
-与 **comic** 的页图 EPUB（spine→图）**严格分流**。
+**正文 EPUB** 的 reflow（文字流式）阅读。与漫画页图引擎在同一 App 内，按 `item.kind` 路由。
 
 ## 范围
 
@@ -23,7 +22,6 @@
 
 ### 不做（本阶段）
 
-- 漫画页图 EPUB 走 book。  
 - 划线笔记、TTS、在线书城。  
 - 复杂 CSS / 固定版式双栏还原（远）。
 
@@ -54,10 +52,10 @@
 
 ## 导入
 
-- 扩展名：`epub`（`BrandConfig.book.importExtensions`）。  
-- 拒绝路径：若 OPF spine **无可用文字节**且仅有图片页 → 提示「页图 EPUB 请用漫画 App」（可选文案）。  
-- 存储：与 comic 相同 content-addressed 布局，目录在 `book` namespace。  
-- `pageCount`：0（或 sectionCount 写入扩展字段前暂 0）。
+- 扩展名：`epub`（`BrandConfig.app.importExtensions`）。  
+- 路由：`EpubImportRouter` 自动探测 — 正文 EPUB → book import；页图 EPUB → comic import。  
+- 存储：与 comic 相同 content-addressed 布局，同一 `library` / `covers` 目录。  
+- `pageCount`：`sectionCount`。
 
 ## UI
 
@@ -69,15 +67,15 @@
 ## 打开路由
 
 ```text
-book 书库点条目 → BookReaderScreen
-comic 书库点条目 → ComicReaderScreen
+条目 kind=book → BookReaderScreen
+条目 kind=comic → ComicReaderScreen
 ```
 
-书库壳可共享；**禁止** book 条目进入 comic 页图 session。
+书库壳共享；**禁止** book 条目进入 comic 页图 session。
 
 ## 验收（spike）
 
-1. book flavor 导入 reflow EPUB 出现在书库。  
+1. 导入 reflow EPUB → 书库出现，kind=book。  
 2. 打开可滚动正文，切换章节。  
 3. 退出再进恢复章节与大致滚动位置。  
-4. 漫画页图 EPUB 仍只在 comic 可用。
+4. 页图 EPUB 自动进入漫画引擎。

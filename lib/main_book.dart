@@ -1,8 +1,7 @@
 import 'bootstrap.dart';
-import 'brand/brand_config.dart';
 
-/// Book app entry (placeholder product shell; reflow engine not wired yet).
+/// Back-compatible redirect to the unified [bootstrap].
 ///
-/// Uses isolated DB/support namespace. Import whitelist is epub-only at brand
-/// level; import service still comic-oriented until book pipeline lands.
-Future<void> main() => bootstrap(BrandConfig.book);
+/// Old `--flavor book -t lib/main_book.dart` invocations still compile and run
+/// the same single App.
+Future<void> main() => bootstrap();

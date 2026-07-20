@@ -48,7 +48,7 @@ class ListsScreen extends StatelessWidget {
   }
 
   void _openItem(BuildContext context, ReadingItem item) {
-    if (item.kind == ReaderKind.book.storageValue || brand.isBook) {
+    if (item.kind == ReaderKind.book.storageValue) {
       BookReaderScreen.open(
         context,
         database: controller.database,
@@ -160,9 +160,7 @@ class ListsScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          brand.isBook
-                              ? '创建后可在条目详情或书库多选里加入图书'
-                              : '创建后可在条目详情或书库多选里加入漫画',
+                          '创建后可在条目详情或书库多选里加入',
                           style: TextStyle(
                             fontSize: 13,
                             color: semantics.textSecondary,
@@ -219,9 +217,8 @@ class ListsScreen extends StatelessWidget {
                               final ok = await showAppConfirmDialog(
                                 context,
                                 title: '删除书单？',
-                                message: brand.isBook
-                                    ? '删除「${s.list.name}」不会删除书库里的图书。'
-                                    : '删除「${s.list.name}」不会删除书库里的漫画。',
+                                message:
+                                    '删除「${s.list.name}」不会删除书库里的条目。',
                                 confirmLabel: '删除',
                                 destructive: true,
                               );

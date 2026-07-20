@@ -29,7 +29,7 @@ class ShelfScreen extends StatelessWidget {
   final BookReadingPreferences? bookReadingPreferences;
 
   void _openReal(BuildContext context, ReadingItem item) {
-    if (item.kind == ReaderKind.book.storageValue || brand.isBook) {
+    if (item.kind == ReaderKind.book.storageValue) {
       BookReaderScreen.open(
         context,
         database: libraryController.database,
@@ -38,7 +38,6 @@ class ShelfScreen extends StatelessWidget {
       );
       return;
     }
-    if (item.kind != ReaderKind.comic.storageValue) return;
     ComicReaderScreen.open(
       context,
       database: libraryController.database,

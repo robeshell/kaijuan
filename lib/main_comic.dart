@@ -1,5 +1,7 @@
 import 'bootstrap.dart';
-import 'brand/brand_config.dart';
 
-/// Explicit comic app entry (future `--flavor comic -t lib/main_comic.dart`).
-Future<void> main() => bootstrap(BrandConfig.comic);
+/// Back-compatible redirect to the unified [bootstrap].
+///
+/// Old `--flavor comic -t lib/main_comic.dart` invocations still compile and
+/// run the same single App.
+Future<void> main() => bootstrap();

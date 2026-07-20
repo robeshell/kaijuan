@@ -7,6 +7,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaika/domain/reader_models.dart';
 import 'package:kaika/library/import/book_import_service.dart';
+import 'package:kaika/library/import/comic_import_service.dart';
 import 'package:kaika/library/persistence/app_database.dart';
 import 'package:kaika/presentation/controllers/library_controller.dart';
 import 'package:kaika/readers/book/book_epub.dart';
@@ -129,8 +130,11 @@ void main() {
     );
     controller = LibraryController(
       database: database,
+      comicImportService: ComicImportService(
+        database: database,
+        supportDirectory: tempRoot,
+      ),
       bookImportService: importService,
-      libraryKind: ReaderKind.book,
       importExtensions: const ['epub'],
     );
   });
@@ -174,7 +178,7 @@ void main() {
 
   test('image-only EPUB fails book import with friendly reason', () async {
     final file = await _writeImageOnlyEpub(tempRoot, 'manga.epub');
-    final result = await controller.importPaths([file.path]);
+    final result = await importService.importPaths([file.path]);
     expect(result.added, 0);
     expect(result.failures, hasLength(1));
     expect(result.failures.first.reason, contains('页图'));

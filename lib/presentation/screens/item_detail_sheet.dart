@@ -241,7 +241,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                   '加入合集',
                   style: TextStyle(fontWeight: FontWeight.w600),
                 ),
-                subtitle: Text('一本漫画同一时间只在一个合集里'),
+                subtitle: Text('一本条目同一时间只在一个合集里'),
               ),
               for (final c in cols)
                 ListTile(

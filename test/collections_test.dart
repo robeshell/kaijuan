@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/domain/reader_models.dart';
+import 'package:kaika/library/import/book_import_service.dart';
 import 'package:kaika/library/import/comic_import_service.dart';
 import 'package:kaika/library/persistence/app_database.dart';
 import 'package:kaika/presentation/controllers/library_controller.dart';
@@ -41,7 +41,10 @@ void main() {
         database: database,
         supportDirectory: temp,
       ),
-      libraryKind: ReaderKind.comic,
+      bookImportService: BookImportService(
+        database: database,
+        supportDirectory: temp,
+      ),
     );
   });
 

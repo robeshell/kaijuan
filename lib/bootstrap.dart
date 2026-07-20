@@ -9,18 +9,21 @@ import 'app/book_reading_preferences.dart';
 import 'app/comic_reading_preferences.dart';
 import 'app/theme_preferences.dart';
 import 'brand/brand_config.dart';
-import 'domain/reader_models.dart';
 import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/persistence/app_database.dart';
 import 'presentation/controllers/library_controller.dart';
+import 'readers/comic/comic_models.dart';
 
-/// Shared process entry for comic / book shells.
+/// Single App bootstrap for Kaika.
 ///
-/// Isolates support files and DB by [BrandConfig]; see docs/ENGINEERING.md.
-Future<void> bootstrap(BrandConfig brand) async {
+/// Both comic and book reader engines are always available; file import routes
+/// by extension, with EPUB auto-detected between page-image comic and reflow
+/// book.
+Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  const brand = BrandConfig.app;
   final root = await getApplicationSupportDirectory();
   final supportDir = brand.storageNamespace.isEmpty
       ? root
@@ -37,33 +40,24 @@ Future<void> bootstrap(BrandConfig brand) async {
     supportDirectory: supportDir,
     defaultReadingTheme: brand.defaultReadingTheme,
   );
-  final bookReadingPreferences = brand.isBook
-      ? await BookReadingPreferences.load(
-          supportDirectory: supportDir,
-          defaultReadingTheme: brand.defaultReadingTheme,
-        )
-      : null;
+  final bookReadingPreferences = await BookReadingPreferences.load(
+    supportDirectory: supportDir,
+    defaultReadingTheme: ComicReadingTheme.paper,
+  );
 
   final database = AppDatabase.named(brand.databaseName);
-  final libraryController = brand.isBook
-      ? LibraryController(
-          database: database,
-          bookImportService: BookImportService(
-            database: database,
-            supportDirectory: supportDir,
-          ),
-          libraryKind: ReaderKind.book,
-          importExtensions: brand.importExtensions,
-        )
-      : LibraryController(
-          database: database,
-          comicImportService: ComicImportService(
-            database: database,
-            supportDirectory: supportDir,
-          ),
-          libraryKind: ReaderKind.comic,
-          importExtensions: brand.importExtensions,
-        );
+  final libraryController = LibraryController(
+    database: database,
+    comicImportService: ComicImportService(
+      database: database,
+      supportDirectory: supportDir,
+    ),
+    bookImportService: BookImportService(
+      database: database,
+      supportDirectory: supportDir,
+    ),
+    importExtensions: brand.importExtensions,
+  );
 
   runApp(
     App(

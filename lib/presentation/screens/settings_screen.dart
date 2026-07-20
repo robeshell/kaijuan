@@ -104,10 +104,10 @@ class SettingsScreen extends StatelessWidget {
                     ),
                 ],
               ),
-              if (brand.isComic && readingPreferences != null) ...[
+              if (readingPreferences != null) ...[
                 const SizedBox(height: 32),
                 const Text(
-                  '阅读默认',
+                  '漫画阅读默认',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 6),
@@ -188,10 +188,10 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               ],
-              if (brand.isBook && bookReadingPreferences != null) ...[
+              if (bookReadingPreferences != null) ...[
                 const SizedBox(height: 32),
                 const Text(
-                  '阅读默认',
+                  '图书阅读默认',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 6),
@@ -348,13 +348,10 @@ class _AboutCard extends StatefulWidget {
 class _AboutCardState extends State<_AboutCard> {
   late final Future<PackageInfo> _infoFuture = PackageInfo.fromPlatform();
 
-  String get _tagline => widget.brand.isComic
-      ? '本地漫画阅读 · CBZ / ZIP / 页图 EPUB'
-      : '本地图书阅读 · 正文 EPUB reflow';
+  String get _tagline => '本地漫画与图书阅读 · CBZ / ZIP / EPUB';
 
-  String get _blurb => widget.brand.isComic
-      ? '文件与进度保存在本机，不上传、不刮削云端。支持页图式与固定版式漫画 EPUB。'
-      : '与漫画产品数据隔离。支持正文 EPUB 流式阅读；页图漫画请用漫画 App。';
+  String get _blurb =>
+      '文件与进度保存在本机，不上传、不刮削云端。EPUB 按内容自动进入页图或正文阅读器。';
 
   String get _formatsLabel =>
       widget.brand.importExtensions.map((e) => e.toUpperCase()).join(' · ');
@@ -393,9 +390,7 @@ class _AboutCardState extends State<_AboutCard> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      widget.brand.isComic
-                          ? Icons.menu_book_outlined
-                          : Icons.auto_stories_outlined,
+                      Icons.auto_stories_outlined,
                       color: accent,
                       size: 26,
                     ),

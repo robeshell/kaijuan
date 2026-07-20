@@ -220,16 +220,20 @@ class AppDatabase extends _$AppDatabase {
     return query.watch();
   }
 
-  /// Comics (or books) with optional progress for library filters.
-  Stream<List<LibraryEntry>> watchLibraryEntries(ReaderKind kind) {
+  /// Library items with optional progress for library filters.
+  ///
+  /// Pass [kind] to filter by reader kind; `null` returns comic and book
+  /// entries mixed together.
+  Stream<List<LibraryEntry>> watchLibraryEntries([ReaderKind? kind]) {
     final query = select(readingItems).join([
       leftOuterJoin(
         readingProgress,
         readingProgress.itemId.equalsExp(readingItems.id),
       ),
-    ])
-      ..where(readingItems.kind.equals(kind.storageValue))
-      ..orderBy([OrderingTerm.desc(readingItems.addedAt)]);
+    ])..orderBy([OrderingTerm.desc(readingItems.addedAt)]);
+    if (kind != null) {
+      query.where(readingItems.kind.equals(kind.storageValue));
+    }
     return query.watch().map(
       (rows) => [
         for (final row in rows)

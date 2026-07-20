@@ -11,17 +11,16 @@ import '../../readers/comic/comic_models.dart';
 /// Owns reflow book session: open EPUB, section index, scroll progress, chrome.
 class BookReaderController extends ChangeNotifier {
   BookReaderController({
-    required AppDatabase database,
+    required this.database,
     required this.item,
     BookReadingPreferences? readingPreferences,
-  })  : _database = database,
-        _prefs = readingPreferences,
+  })  : _prefs = readingPreferences,
         _fontSize = readingPreferences?.fontSize ?? 18,
         _lineHeight = readingPreferences?.lineHeight ?? 1.6,
         _readingTheme =
             readingPreferences?.readingTheme ?? ComicReadingTheme.paper;
 
-  final AppDatabase _database;
+  final AppDatabase database;
   final ReadingItem item;
   final BookReadingPreferences? _prefs;
 
@@ -74,7 +73,7 @@ class BookReaderController extends ChangeNotifier {
       if (_disposed) return;
       _doc = doc;
       await _restoreProgress();
-      await _database.touchLastOpened(item.id, DateTime.now());
+      await database.touchLastOpened(item.id, DateTime.now());
       _ready = true;
       _openError = null;
       notifyListeners();
@@ -86,7 +85,7 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<void> _restoreProgress() async {
-    final row = await _database.progressFor(item.id);
+    final row = await database.progressFor(item.id);
     if (row == null || _doc == null) return;
     final locator = BookLocator.tryDecode(row.locatorJson);
     final valid = locator?.validated(sectionCount: _doc!.sectionCount);
@@ -159,7 +158,7 @@ class BookReaderController extends ChangeNotifier {
       sectionIndex: _sectionIndex,
       progressInSection: _progressInSection,
     );
-    await _database.upsertProgress(
+    await database.upsertProgress(
       itemId: item.id,
       locatorJson: locator.encode(),
       progressFraction: progressFraction,

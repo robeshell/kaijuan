@@ -1,9 +1,11 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import '../../domain/reader_models.dart';
 import '../../library/import/book_import_service.dart';
 import '../../library/import/comic_import_service.dart';
+import '../../library/import/epub_import_router.dart';
 import '../../library/import/import_models.dart';
 import '../../library/persistence/app_database.dart';
 
@@ -29,36 +31,41 @@ enum LibraryShelfFilter {
   notOnShelf,
 }
 
+/// Kind filter for the library grid.
+enum LibraryKindFilter {
+  all,
+  comic,
+  book;
+
+  ReaderKind? get readerKind => switch (this) {
+        all => null,
+        comic => ReaderKind.comic,
+        book => ReaderKind.book,
+      };
+}
+
 /// Presentation-facing library state. Screens subscribe to this; they do not
 /// touch drift or the import service directly.
 class LibraryController extends ChangeNotifier {
   LibraryController({
-    required AppDatabase database,
-    ComicImportService? comicImportService,
-    BookImportService? bookImportService,
-    required this.libraryKind,
+    required this.database,
+    required ComicImportService comicImportService,
+    required BookImportService bookImportService,
     this.importExtensions = const ['cbz', 'zip', 'epub'],
-  })  : _database = database,
-        _comicImport = comicImportService,
+  })  : _comicImport = comicImportService,
         _bookImport = bookImportService,
-        assert(
-          comicImportService != null || bookImportService != null,
-          'Need comic or book import service',
+        _epubRouter = EpubImportRouter(
+          comicImport: comicImportService,
+          bookImport: bookImportService,
         );
 
-  final AppDatabase _database;
-  final ComicImportService? _comicImport;
-  final BookImportService? _bookImport;
-
-  /// Which product library this controller serves.
-  final ReaderKind libraryKind;
+  final AppDatabase database;
+  final ComicImportService _comicImport;
+  final BookImportService _bookImport;
+  final EpubImportRouter _epubRouter;
 
   /// File picker extensions (no dots), from [BrandConfig].
   final List<String> importExtensions;
-
-  /// Exposed for reader entry (progress / item load). Screens still go through
-  /// controllers for business actions; the reader opens with its own controller.
-  AppDatabase get database => _database;
 
   bool _importing = false;
   bool get isImporting => _importing;
@@ -71,6 +78,9 @@ class LibraryController extends ChangeNotifier {
 
   LibraryShelfFilter _shelfFilter = LibraryShelfFilter.all;
   LibraryShelfFilter get shelfFilter => _shelfFilter;
+
+  LibraryKindFilter _kindFilter = LibraryKindFilter.all;
+  LibraryKindFilter get kindFilter => _kindFilter;
 
   /// null = all formats; otherwise ReaderFormat.storageValue.
   String? _formatFilter;
@@ -94,6 +104,12 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setKindFilter(LibraryKindFilter filter) {
+    if (_kindFilter == filter) return;
+    _kindFilter = filter;
+    notifyListeners();
+  }
+
   void setFormatFilter(String? format) {
     if (_formatFilter == format) return;
     _formatFilter = format;
@@ -110,6 +126,10 @@ class LibraryController extends ChangeNotifier {
       _shelfFilter = LibraryShelfFilter.all;
       changed = true;
     }
+    if (_kindFilter != LibraryKindFilter.all) {
+      _kindFilter = LibraryKindFilter.all;
+      changed = true;
+    }
     if (_formatFilter != null) {
       _formatFilter = null;
       changed = true;
@@ -120,11 +140,12 @@ class LibraryController extends ChangeNotifier {
   bool get hasActiveFilters =>
       _readFilter != LibraryReadFilter.all ||
       _shelfFilter != LibraryShelfFilter.all ||
+      _kindFilter != LibraryKindFilter.all ||
       _formatFilter != null;
 
   /// Live library entries with progress (for filters / badges).
   Stream<List<LibraryEntry>> watchLibraryEntries() =>
-      _database.watchLibraryEntries(libraryKind);
+      database.watchLibraryEntries(_kindFilter.readerKind);
 
   /// Apply filters + sort + title [query].
   List<LibraryEntry> filterAndSort(
@@ -193,27 +214,27 @@ class LibraryController extends ChangeNotifier {
 
   /// Shelf "continue reading": opened items + progress fraction for chrome.
   Stream<List<ContinueReadingEntry>> watchContinueReading({int limit = 24}) =>
-      _database.watchContinueReading(limit: limit);
+      database.watchContinueReading(limit: limit);
 
   /// Shelf "我的书架" pins.
   Stream<List<ReadingItem>> watchOnShelf({int limit = 48}) =>
-      _database.watchOnShelf(limit: limit);
+      database.watchOnShelf(limit: limit);
 
   Future<void> setOnShelf(String id, {required bool onShelf}) =>
-      _database.setOnShelf(id, onShelf: onShelf);
+      database.setOnShelf(id, onShelf: onShelf);
 
   Future<void> renameItem(String id, String title) =>
-      _database.renameReadingItem(id, title);
+      database.renameReadingItem(id, title);
 
-  Future<ReadingItem?> itemById(String id) => _database.readingItemById(id);
+  Future<ReadingItem?> itemById(String id) => database.readingItemById(id);
 
   Future<ReadingProgressData?> progressFor(String itemId) =>
-      _database.progressFor(itemId);
+      database.progressFor(itemId);
 
   /// Opens the system file picker. Returns null when the user cancels.
   Future<ImportResult?> pickAndImport() async {
     final typeGroup = XTypeGroup(
-      label: libraryKind == ReaderKind.book ? '图书' : '漫画',
+      label: '图书与漫画',
       extensions: importExtensions,
     );
     final files = await openFiles(acceptedTypeGroups: [typeGroup]);
@@ -225,6 +246,9 @@ class LibraryController extends ChangeNotifier {
   Future<ImportResult?> pickAndImportComics() => pickAndImport();
 
   /// Import entry point used by tests and by [pickAndImport].
+  ///
+  /// Routes by extension: cbz/zip → comic service, epub → auto-detect, others
+  /// fail.
   Future<ImportResult> importPaths(List<String> paths) async {
     if (_importing) {
       return const ImportResult(
@@ -236,10 +260,49 @@ class LibraryController extends ChangeNotifier {
     _importing = true;
     notifyListeners();
     try {
-      if (_bookImport != null) {
-        return await _bookImport.importPaths(paths);
+      final comicPaths = <String>[];
+      final bookPaths = <String>[];
+      final epubPaths = <String>[];
+      final failures = <ImportFailure>[];
+
+      for (final path in paths) {
+        final format = ReaderFormat.fromExtension(p.extension(path));
+        if (format == ReaderFormat.cbz || format == ReaderFormat.zip) {
+          comicPaths.add(path);
+        } else if (format == ReaderFormat.epub) {
+          epubPaths.add(path);
+        } else {
+          failures.add(
+            ImportFailure(path: path, reason: '不支持的格式：$path'),
+          );
+        }
       }
-      return await _comicImport!.importPaths(paths);
+
+      var added = 0;
+      var updated = 0;
+
+      if (comicPaths.isNotEmpty) {
+        final comicResult = await _comicImport.importPaths(comicPaths);
+        added += comicResult.added;
+        updated += comicResult.updated;
+        failures.addAll(comicResult.failures);
+      }
+
+      if (bookPaths.isNotEmpty) {
+        final bookResult = await _bookImport.importPaths(bookPaths);
+        added += bookResult.added;
+        updated += bookResult.updated;
+        failures.addAll(bookResult.failures);
+      }
+
+      if (epubPaths.isNotEmpty) {
+        final epubResult = await _epubRouter.importPaths(epubPaths);
+        added += epubResult.added;
+        updated += epubResult.updated;
+        failures.addAll(epubResult.failures);
+      }
+
+      return ImportResult(added: added, updated: updated, failures: failures);
     } finally {
       _importing = false;
       notifyListeners();
@@ -247,10 +310,13 @@ class LibraryController extends ChangeNotifier {
   }
 
   Future<void> deleteItem(String id) async {
-    if (_bookImport != null) {
+    final item = await database.readingItemById(id);
+    if (item == null) return;
+    final kind = ReaderKind.fromStorage(item.kind);
+    if (kind == ReaderKind.book) {
       await _bookImport.deleteItem(id);
     } else {
-      await _comicImport!.deleteItem(id);
+      await _comicImport.deleteItem(id);
     }
   }
 
@@ -269,7 +335,7 @@ class LibraryController extends ChangeNotifier {
     required bool onShelf,
   }) async {
     for (final id in ids) {
-      await _database.setOnShelf(id, onShelf: onShelf);
+      await database.setOnShelf(id, onShelf: onShelf);
     }
   }
 
@@ -278,38 +344,38 @@ class LibraryController extends ChangeNotifier {
     required Iterable<String> itemIds,
   }) async {
     for (final id in itemIds) {
-      await _database.addItemToList(listId: listId, itemId: id);
+      await database.addItemToList(listId: listId, itemId: id);
     }
   }
 
   // --- Reading lists -------------------------------------------------------
 
   Stream<List<ReadingListSummary>> watchReadingLists() =>
-      _database.watchReadingLists();
+      database.watchReadingLists();
 
   Stream<List<ReadingItem>> watchListMembers(String listId) =>
-      _database.watchListMembers(listId);
+      database.watchListMembers(listId);
 
   Future<String> createReadingList(String name) =>
-      _database.createReadingList(name);
+      database.createReadingList(name);
 
   Future<void> renameReadingList(String id, String name) =>
-      _database.renameReadingList(id, name);
+      database.renameReadingList(id, name);
 
   Future<void> deleteReadingList(String id) =>
-      _database.deleteReadingList(id);
+      database.deleteReadingList(id);
 
   Future<void> addItemToList({
     required String listId,
     required String itemId,
   }) =>
-      _database.addItemToList(listId: listId, itemId: itemId);
+      database.addItemToList(listId: listId, itemId: itemId);
 
   Future<void> removeItemFromList({
     required String listId,
     required String itemId,
   }) =>
-      _database.removeItemFromList(listId: listId, itemId: itemId);
+      database.removeItemFromList(listId: listId, itemId: itemId);
 
   Future<List<ReadingListSummary>> readingListsSnapshot() async {
     return watchReadingLists().first;
@@ -318,32 +384,32 @@ class LibraryController extends ChangeNotifier {
   // --- Collections (合集) ---------------------------------------------------
 
   Stream<List<CollectionSummary>> watchCollections() =>
-      _database.watchCollections();
+      database.watchCollections();
 
   /// Shelf strip: collections pinned to shelf (default true).
   Stream<List<CollectionSummary>> watchShelfCollections() =>
-      _database.watchShelfCollections();
+      database.watchShelfCollections();
 
   Stream<List<ReadingItem>> watchCollectionMembers(String collectionId) =>
-      _database.watchCollectionMembers(collectionId);
+      database.watchCollectionMembers(collectionId);
 
   Future<String> createCollection(String name, {bool onShelf = false}) =>
-      _database.createCollection(name, onShelf: onShelf);
+      database.createCollection(name, onShelf: onShelf);
 
   Future<void> renameCollection(String id, String name) =>
-      _database.renameCollection(id, name);
+      database.renameCollection(id, name);
 
   Future<void> deleteCollection(String id) =>
-      _database.deleteCollection(id);
+      database.deleteCollection(id);
 
   Future<void> setCollectionOnShelf(String id, {required bool onShelf}) =>
-      _database.setCollectionOnShelf(id, onShelf: onShelf);
+      database.setCollectionOnShelf(id, onShelf: onShelf);
 
   Future<void> addItemToCollection({
     required String collectionId,
     required String itemId,
   }) =>
-      _database.addItemToCollection(
+      database.addItemToCollection(
         collectionId: collectionId,
         itemId: itemId,
       );
@@ -353,7 +419,7 @@ class LibraryController extends ChangeNotifier {
     required Iterable<String> itemIds,
   }) async {
     for (final id in itemIds) {
-      await _database.addItemToCollection(
+      await database.addItemToCollection(
         collectionId: collectionId,
         itemId: id,
       );
@@ -364,14 +430,14 @@ class LibraryController extends ChangeNotifier {
     required String collectionId,
     required String itemId,
   }) =>
-      _database.removeItemFromCollection(
+      database.removeItemFromCollection(
         collectionId: collectionId,
         itemId: itemId,
       );
 
   Future<List<Collection>> collectionsSnapshot() =>
-      _database.collectionsSnapshot();
+      database.collectionsSnapshot();
 
   Future<String?> collectionIdForItem(String itemId) =>
-      _database.collectionIdForItem(itemId);
+      database.collectionIdForItem(itemId);
 }

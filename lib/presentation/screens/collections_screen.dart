@@ -228,9 +228,8 @@ class CollectionsScreen extends StatelessWidget {
                   final ok = await showAppConfirmDialog(
                     context,
                     title: '删除合集？',
-                    message: brand.isBook
-                        ? '删除「${s.collection.name}」不会删除书库里的图书。'
-                        : '删除「${s.collection.name}」不会删除书库里的漫画。',
+                    message:
+                        '删除「${s.collection.name}」不会删除书库里的条目。',
                     confirmLabel: '删除',
                     destructive: true,
                   );
@@ -415,7 +414,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   }
 
   void _openItem(ReadingItem item) {
-    if (item.kind == ReaderKind.book.storageValue || widget.brand.isBook) {
+    if (item.kind == ReaderKind.book.storageValue) {
       BookReaderScreen.open(
         context,
         database: widget.controller.database,

@@ -159,7 +159,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _openItem(ReadingItem item) {
-    if (item.kind == ReaderKind.book.storageValue || widget.brand.isBook) {
+    if (item.kind == ReaderKind.book.storageValue) {
       BookReaderScreen.open(
         context,
         database: widget.controller.database,
@@ -377,6 +377,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
         LibraryShelfFilter.all => '全部',
         LibraryShelfFilter.onShelfOnly => '已上架',
         LibraryShelfFilter.notOnShelf => '未上架',
+      };
+
+  String _kindFilterLabel(LibraryKindFilter f) => switch (f) {
+        LibraryKindFilter.all => '类型',
+        LibraryKindFilter.comic => '漫画',
+        LibraryKindFilter.book => '图书',
       };
 
   @override
@@ -603,9 +609,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                         const SizedBox(width: 8),
                         IconButton(
-                          tooltip: widget.brand.isBook
-                              ? '导入 EPUB'
-                              : '导入（CBZ / ZIP / EPUB）',
+                          tooltip: '导入（CBZ / ZIP / EPUB）',
                           onPressed: importing ? null : _import,
                           icon: importing
                               ? const SizedBox(
@@ -630,6 +634,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
+                      _FilterMenu<LibraryKindFilter>(
+                        label: _kindFilterLabel(c.kindFilter),
+                        icon: Icons.category_outlined,
+                        active: c.kindFilter != LibraryKindFilter.all,
+                        items: LibraryKindFilter.values,
+                        itemLabel: _kindFilterLabel,
+                        onSelected: c.setKindFilter,
+                      ),
                       _FilterMenu<LibraryReadFilter>(
                         label: _readFilterLabel(c.readFilter),
                         icon: Icons.auto_stories_outlined,
@@ -712,9 +724,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  widget.brand.isBook
-                                      ? '导入 EPUB 图书'
-                                      : '导入 CBZ、ZIP 或 EPUB 漫画',
+                                  '导入 CBZ、ZIP 或 EPUB',
                                   style: TextStyle(
                                     color: semantics.textSecondary,
                                   ),
