@@ -34,6 +34,9 @@ class BookEpubDocument {
 
 /// Open and parse reflow EPUB packages.
 abstract final class BookEpub {
+  static const _imageExtensions = {
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
+  };
   static Future<BookEpubDocument> open(String path) async {
     final input = InputFileStream(path);
     try {
@@ -93,18 +96,56 @@ abstract final class BookEpub {
     }
 
     String? coverEntry;
-    for (final item in manifest.values) {
-      if (item.properties.contains('cover-image') ||
-          item.idLooksLikeCover) {
-        coverEntry = _findEntry(names, item.href);
-        if (coverEntry != null) break;
+
+    // 1. EPUB 2 <meta name="cover" content="…"/> → lookup manifest id.
+    String? coverId;
+    for (final m in RegExp(
+      r'<meta\b([^>]+)/?>',
+      caseSensitive: false,
+    ).allMatches(opfXml)) {
+      final attrs = m.group(1)!;
+      if (_attr(attrs, 'name')?.toLowerCase() == 'cover') {
+        coverId = _attr(attrs, 'content');
+        break;
       }
     }
+    if (coverId != null) {
+      final coverItem = manifest[coverId];
+      if (coverItem != null) {
+        coverEntry = _findEntry(names, coverItem.href);
+      }
+    }
+
+    // 2. EPUB 3 properties="cover-image", or id/href looks like cover.
+    if (coverEntry == null) {
+      for (final item in manifest.values) {
+        if (item.properties.contains('cover-image') ||
+            item.idLooksLikeCover) {
+          coverEntry = _findEntry(names, item.href);
+          if (coverEntry != null) break;
+        }
+      }
+    }
+
+    // 3. Fallback: any image in the manifest.
     if (coverEntry == null) {
       for (final item in manifest.values) {
         if (item.mediaType.startsWith('image/')) {
           coverEntry = _findEntry(names, item.href);
           if (coverEntry != null) break;
+        }
+      }
+    }
+
+    // 4. Last resort: any image file in the archive whose name suggests cover.
+    if (coverEntry == null) {
+      for (final name in names) {
+        final lower = name.toLowerCase();
+        final ext = p.extension(name).toLowerCase();
+        if ((lower.contains('cover') || lower.contains('title')) &&
+            _imageExtensions.contains(ext)) {
+          coverEntry = name;
+          break;
         }
       }
     }
