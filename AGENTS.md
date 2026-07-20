@@ -1,81 +1,77 @@
 # KaikaNext 开发约定
 
-Flutter 重写版多格式阅读器（原 Swift 项目在同级目录 `../kaika`，**不迁移旧数据**）。
+Flutter 仓库：**两个品牌阅读 App**（comic / book）共享底座。  
+原 Swift 工程在 `../kaika`，**不迁移旧数据**。
 
 ## 项目身份
 
 - 路径：`/Users/wangwenyu/Documents/Code/KaikaNext`
-- 包名：`kaika`（pubspec；对用户不可见）
+- 当前可运行：以 **comic** 闭环为主（`lib/main.dart`）
+- 目标：一套仓库打出两个商店 App（见 `docs/ENGINEERING.md`）
 - 平台：iOS / iPadOS / macOS / Windows / Android
-- 参照工程：`../MusicPlayerNext`（Reverie）分层与工程范式
-- 设计方向：轻玻璃中性风、浅色验收基线；阅读主题与 App chrome 分离
+- 参照：`../MusicPlayerNext` 分层范式
+
+## 文档
+
+**[docs/README.md](docs/README.md)** 索引。
+
+| 权威 | 文件 |
+|------|------|
+| 双产品功能 | `docs/PRODUCT.md` |
+| 视觉 | `docs/DESIGN_FOUNDATION.md` |
+| 工程骨架 / 迁移 | `docs/ENGINEERING.md` |
+| 交互 | `docs/specs/*` |
 
 ## 优先级
 
-1. 用户当前明确要求
-2. 不破坏已能工作的导入 / 阅读链路
-3. 表现层不直连 drift；业务经 controller
-4. 先写 `docs/specs/` 再写对应 UI
+1. 用户当前明确要求  
+2. 不破坏 comic 已可用的导入 / 阅读链路  
+3. 表现层不直连 drift；经 controller  
+4. **先更新 PRODUCT / ENGINEERING / specs，再写 UI 与拆包**
 
-## 分层
+## 分层（现状 → 目标）
+
+**现状（单 app 模块，漫画可用）：**
 
 ```text
 lib/
-  app/                 — App、ThemePreferences
-  core/                — 设计 token（AppSpacing / AppRadii / AppSemantics / AppTheme）
-  domain/              — ReaderFormat / ReaderKind / ReaderLocator / ComicPageOrder
-  library/
-    import/            — ComicArchive、ComicImportService
-    persistence/       — AppDatabase (drift)
-  readers/comic/       — ComicSession、ComicPageCache、comic_models
-  presentation/
-    controllers/       — LibraryController、ComicReaderController
-    screens/
-    widgets/reader/
+  app/ brand/          — BrandConfig（骨架）
+  main.dart            — 默认 comic
+  main_comic.dart / main_book.dart
+  core/ domain/ library/ readers/comic/ presentation/
 ```
 
-## 已定架构决策（勿轻易推翻）
+**目标：** `apps/comic`、`apps/book` + `packages/kaika_core` 等，见 ENGINEERING。
 
-- **v1 先漫画后图书**；EPUB reflow 先 spike 再定引擎
-- **ReaderLocator 不透明 JSON**：DB 永不解析 payload；稳定 identity 在格式内部
-- **漫画页序契约**：`ComicPageOrder.version`（当前 1）+ 导入时写入 `pageCount` / `pageOrderVersion`
-- **内容寻址导入**：`contentHash` 去重；文件在 app support `library/` + `covers/`
-- **表现层只认 controller**：Screen 不直接调 drift / import service
-- **阅读 session 开一次 archive**：`ComicSession` 复用，不要每页 reopen zip
-- 文件名/类型名**不要带应用名**（已从 `Kaika*` 收口到 `App*`）；包名 `kaika` 可暂留
+## 已定架构决策
 
-## 当前进度（2026-07-20）
+- **双 App 双品牌**，数据默认隔离；非单 App 混库主路径。  
+- **ReaderLocator 不透明 JSON**。  
+- **漫画页序** `ComicPageOrder.version` + 导入 pageCount。  
+- **内容寻址导入**（每 App 自己的 library 目录）。  
+- **表现层只认 controller**；ComicSession 复用。  
+- 类型名不带应用名（`App*`）；包名可按 flavor 分。
 
-HEAD 参考：`e06df69`（漫画阅读器 session + 四模式）
+## 进度摘要
 
-已完成：
+- **已有（comic）**：导入 CBZ/ZIP/页图 EPUB；书库搜索/排序/筛选/删除/上架/详情重命名/书单；四模式阅读；进度与书架；偏好；桌面壳。  
+- **文档**：双 App 产品 + ENGINEERING；EPUB 页图归 comic、reflow 归 book。  
+- **骨架**：`BrandConfig` + flavor + 双 main。  
+- **整理三概念**：**我的书架**钉选 · **书单**长列表 · **合集**拼贴盒（**书库**最前混排，见 `docs/specs/collections.md`）。  
+- **下一刀**：book reflow spike；书签 UI；合集/书单体验打磨。
 
-- Phase 0 骨架：主题 token、三 Tab 壳、drift 三表
-- 设计总纲 `docs/DESIGN_FOUNDATION.md` + `docs/specs/reader-chrome.md`
-- CBZ/ZIP 导入 + 书库网格
-- macOS `user-selected.read-only` entitlement
-- LibraryController + IndexedStack
-- 漫画阅读器：slide / static / vertical / spread；进度恢复；玻璃 chrome
-
-已知轻债 / 下一步：
-
-1. 书架「继续阅读」接线（`lastOpenedAt` + progress）
-2. 阅读偏好持久化（mode / direction / reading theme）
-3. 纵向模式滚动位置 ↔ pageIndex 同步
-4. 双页模式按 spread 步进
-5. 删除 UI / 失败详情；import 集成测试已有
+全表以 **PRODUCT.md** 为准。
 
 ## 验证
 
 ```sh
 flutter analyze
 flutter test
-flutter build macos --debug
-# 或
-flutter run -d macos
+tool/run_brand.sh comic          # 或 book
+# flutter build macos --flavor comic -t lib/main_comic.dart
+# 详见 docs/ENGINEERING.md §5
 ```
 
 ## 与旧 kaika
 
-- 旧项目 Swift/SwiftUI 阅读器架构文档仍可参考 identity / 渲染决策
-- **不要**在 KaikaNext 照搬旧模块目录或迁移 SwiftData
+可参考 identity / 渲染文档；不照搬 Swift 目录、不迁 SwiftData。

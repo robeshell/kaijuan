@@ -1,17 +1,59 @@
-# kaika
+# KaikaNext
 
-A new Flutter project.
+本地双品牌阅读器工程：**漫画 App** + **图书 App**，一套代码、两套打包。
 
-## Getting Started
+| | comic | book |
+|--|-------|------|
+| 显示名（暂定） | Kaika Comic | Kaika Book |
+| Bundle / applicationId | `com.kaika.comic` | `com.kaika.book` |
+| 入口 | `lib/main_comic.dart` | `lib/main_book.dart` |
+| 状态 | 导入 CBZ + 阅读闭环 | 壳已通，引擎待做 |
 
-This project is a starting point for a Flutter application.
+## 文档
 
-A few resources to get you started if this is your first Flutter project:
+- [docs/README.md](docs/README.md) — 文档索引  
+- [docs/PRODUCT.md](docs/PRODUCT.md) — 产品功能  
+- [docs/ENGINEERING.md](docs/ENGINEERING.md) — flavor / 工程结构  
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## 运行
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```sh
+flutter pub get
+flutter analyze && flutter test
+
+# 漫画（默认产品）
+tool/run_brand.sh comic
+# 或
+flutter run --flavor comic -t lib/main_comic.dart
+
+# 图书壳
+tool/run_brand.sh book macos
+```
+
+macOS 冒烟打包：
+
+```sh
+flutter build macos --debug --flavor comic -t lib/main_comic.dart
+flutter build macos --debug --flavor book -t lib/main_book.dart
+```
+
+Android 需本机 JDK；`productFlavors` 已配置 comic / book。
+
+## 分品牌图标
+
+把 **1024×1024 PNG** 放到：
+
+- `brands/icons/comic/master_1024.png`
+- `brands/icons/book/master_1024.png`
+
+然后：
+
+```sh
+python3 tool/generate_brand_icons.py
+```
+
+细节见 [brands/icons/README.md](brands/icons/README.md)。当前为可区分的占位图（橙 C / 灰 B）。
+
+## 约定
+
+见根目录 [AGENTS.md](AGENTS.md)。
