@@ -56,10 +56,16 @@ abstract final class AppColors {
     return defaultAccent;
   }
 
-  // Neutral ramp — the chrome canvas stays neutral so covers supply color.
-  static const _lightCanvas = Color(0xFFF7F7F8);
+  // Light neutrals — keep chrome clean/white so covers supply color.
+  // Avoid mid-gray canvases (#F0–F5 range) which read "dirty" next to white cards.
+  static const _lightCanvas = Color(0xFFFFFFFF);
   static const _lightSurface = Color(0xFFFFFFFF);
-  static const _lightText = Color(0xFF1C1C1E);
+  /// Subtle wash only for inputs / inset wells (not full-page background).
+  static const lightWash = Color(0xFFF5F5F7);
+  static const _lightText = Color(0xFF111113);
+  /// Cool neutral secondary — not black@60% on gray (that goes muddy).
+  static const _lightTextSecondary = Color(0xFF6B6B73);
+  static const _lightHairline = Color(0x0F000000); // 6% black, crisp not sooty
   static const _darkCanvas = Color(0xFF141416);
   static const _darkSurface = Color(0xFF1E1E21);
   static const _darkText = Color(0xFFF2F2F4);
@@ -100,10 +106,10 @@ class AppSemantics extends ThemeExtension<AppSemantics> {
   factory AppSemantics.light() => const AppSemantics(
     canvas: AppColors._lightCanvas,
     surface: AppColors._lightSurface,
-    glassFill: Color(0xB3FFFFFF), // white 70%
-    hairline: Color(0x141C1C1E), // text 8%
+    glassFill: Color(0xE6FFFFFF), // white ~90% — less gray stack
+    hairline: AppColors._lightHairline,
     textPrimary: AppColors._lightText,
-    textSecondary: Color(0x991C1C1E), // text 60%
+    textSecondary: AppColors._lightTextSecondary,
   );
 
   factory AppSemantics.dark() => const AppSemantics(
@@ -171,6 +177,7 @@ abstract final class AppTheme {
         ThemeData.estimateBrightnessForColor(accent) == Brightness.dark
         ? Colors.white
         : Colors.black;
+    // fromSeed adds gray surfaceContainer* + surfaceTint that make M3 chrome muddy.
     final scheme = ColorScheme.fromSeed(
       brightness: brightness,
       seedColor: accent,
@@ -179,6 +186,15 @@ abstract final class AppTheme {
       onPrimary: onAccent,
       surface: semantics.surface,
       onSurface: semantics.textPrimary,
+      onSurfaceVariant: semantics.textSecondary,
+      surfaceTint: Colors.transparent,
+      outline: semantics.hairline,
+      outlineVariant: semantics.hairline,
+      surfaceContainerLowest: semantics.surface,
+      surfaceContainerLow: light ? AppColors.lightWash : semantics.surface,
+      surfaceContainer: semantics.surface,
+      surfaceContainerHigh: light ? AppColors.lightWash : semantics.surface,
+      surfaceContainerHighest: light ? AppColors.lightWash : semantics.surface,
     );
     return ThemeData(
       useMaterial3: true,
@@ -187,6 +203,185 @@ abstract final class AppTheme {
       dividerColor: semantics.hairline,
       visualDensity: VisualDensity.adaptivePlatformDensity,
       extensions: [semantics],
+      // Kill M3 primary-tinted overlays that turn white → dirty gray/orange.
+      applyElevationOverlayColor: false,
+      appBarTheme: AppBarTheme(
+        backgroundColor: semantics.canvas,
+        foregroundColor: semantics.textPrimary,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: semantics.surface,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: accent.withValues(alpha: 0.12),
+        elevation: 0,
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: selected ? accent : semantics.textSecondary,
+          );
+        }),
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: semantics.surface,
+        indicatorColor: accent.withValues(alpha: 0.10),
+        selectedIconTheme: IconThemeData(color: accent),
+        selectedLabelTextStyle: TextStyle(
+          color: accent,
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+        ),
+        unselectedIconTheme: IconThemeData(color: semantics.textSecondary),
+        unselectedLabelTextStyle: TextStyle(
+          color: semantics.textSecondary,
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        color: semantics.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.large),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        fillColor: AppColors.lightWash,
+        filled: true,
+      ),
+      // Quiet chrome for dialogs / menus / tips (both brands).
+      iconTheme: IconThemeData(
+        color: semantics.textSecondary,
+        size: 20,
+        weight: 300,
+        fill: 0,
+      ),
+      primaryIconTheme: IconThemeData(
+        color: accent,
+        size: 20,
+        weight: 300,
+        fill: 0,
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: semantics.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.panel),
+          side: BorderSide(color: semantics.hairline),
+        ),
+        titleTextStyle: TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.2,
+          color: semantics.textPrimary,
+        ),
+        contentTextStyle: TextStyle(
+          fontSize: 14,
+          height: 1.45,
+          fontWeight: FontWeight.w400,
+          color: semantics.textSecondary,
+        ),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: semantics.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 2,
+        dragHandleColor: semantics.hairline,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadii.panel),
+          ),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: semantics.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 6,
+        shadowColor: Colors.black.withValues(alpha: 0.10),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.medium),
+          side: BorderSide(color: semantics.hairline),
+        ),
+        textStyle: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          color: semantics.textPrimary,
+        ),
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: semantics.textPrimary,
+          ),
+        ),
+      ),
+      menuTheme: MenuThemeData(
+        style: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(semantics.surface),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+          elevation: const WidgetStatePropertyAll(6),
+          shadowColor: WidgetStatePropertyAll(
+            Colors.black.withValues(alpha: 0.10),
+          ),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.medium),
+              side: BorderSide(color: semantics.hairline),
+            ),
+          ),
+        ),
+      ),
+      tooltipTheme: TooltipThemeData(
+        waitDuration: const Duration(milliseconds: 450),
+        showDuration: const Duration(seconds: 3),
+        decoration: BoxDecoration(
+          color: light ? const Color(0xE6111113) : const Color(0xE6F2F2F4),
+          borderRadius: BorderRadius.circular(AppRadii.small),
+        ),
+        textStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: light ? Colors.white : const Color(0xFF111113),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: semantics.surface,
+        contentTextStyle: TextStyle(
+          color: semantics.textPrimary,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
+        behavior: SnackBarBehavior.floating,
+        elevation: 6,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.medium),
+          side: BorderSide(color: semantics.hairline),
+        ),
+        insetPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      ),
+      listTileTheme: ListTileThemeData(
+        iconColor: semantics.textSecondary,
+        textColor: semantics.textPrimary,
+        titleTextStyle: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: semantics.textPrimary,
+        ),
+        subtitleTextStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w400,
+          color: semantics.textSecondary,
+        ),
+      ),
     );
   }
 }
