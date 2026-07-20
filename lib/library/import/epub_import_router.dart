@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../domain/reader_models.dart';
 import '../../readers/book/book_epub.dart';
@@ -13,11 +14,13 @@ import 'import_models.dart';
 /// comic, then imports it through the right service.
 ///
 /// Detection rule:
-/// 1. Book wins if the OPF spine contains at least one section with readable
-///    plain text.
-/// 2. Otherwise, if the package has page-image spine entries (or fallback
+/// 1. Open the zip once; try both the book parser and the page-image listing.
+/// 2. Book wins only when the total plain-text length across all spine sections
+///    exceeds a threshold (currently 500 chars). Short text — chapter titles,
+///    page-number wrappers — does not turn a page-image EPUB into a book.
+/// 3. Otherwise, if the package has page-image spine entries (or fallback
 ///    images), it is imported as a comic.
-/// 3. Otherwise the import fails with a Chinese reason.
+/// 4. Otherwise the import fails with a Chinese reason.
 class EpubImportRouter {
   EpubImportRouter({
     required this.comicImport,
@@ -59,6 +62,12 @@ class EpubImportRouter {
     return ImportResult(added: added, updated: updated, failures: failures);
   }
 
+  /// If the average plain-text per section is under this threshold, the EPUB
+  /// is treated as page-image (comic) even when the book parser finds some
+  /// text. Manga EPUBs often have XHTML wrappers carrying only chapter titles
+  /// or page numbers — a few dozen chars per section.
+  static const _maxTextPerSectionForComic = 80;
+
   /// Opens the EPUB once and inspects its contents.
   static Future<ReaderKind> detectKind(String path) async {
     final file = File(path);
@@ -70,20 +79,55 @@ class EpubImportRouter {
     try {
       final archive = ZipDecoder().decodeStream(input);
 
-      // 1. Prefer reflow book if there is readable text in the spine.
+      // --- Book parser ---------------------------------------------------
+      int totalBookText = 0;
+      int sectionCount = 0;
       try {
         final doc = BookEpub.parseArchive(archive);
-        final hasText = doc.sections.any(
-          (s) => s.plainText.trim().isNotEmpty,
-        );
-        if (hasText) return ReaderKind.book;
+        sectionCount = doc.sections.length;
+        for (final s in doc.sections) {
+          totalBookText += s.plainText.length;
+        }
       } on BookEpubException catch (_) {
         // Not a readable reflow EPUB; continue to page-image detection.
       }
 
-      // 2. Fall back to page-image comic if the spine yields images.
+      // --- Image listing -------------------------------------------------
       final listing = ComicArchive.listFromArchive(archive);
-      if (listing.pageNames.isNotEmpty) return ReaderKind.comic;
+      final imageCount = listing.pageNames.length;
+
+      // --- Decision ------------------------------------------------------
+      // Average text per section lets us tell reflow books (hundreds of
+      // chars per section) from page-image wrappers (a few chars of title /
+      // page number per section).
+      final avgTextPerSection =
+          sectionCount > 0 ? totalBookText / sectionCount : 0.0;
+
+      debugPrint(
+        '[EpubImportRouter] $path\n'
+        '  book sections=$sectionCount totalText=$totalBookText'
+        ' avgText=${avgTextPerSection.toStringAsFixed(0)}\n'
+        '  images=$imageCount',
+      );
+
+      if (sectionCount > 0 && imageCount > 0) {
+        // Both engines found content. Use text-per-section average.
+        if (avgTextPerSection <= _maxTextPerSectionForComic) {
+          debugPrint('[EpubImportRouter] → comic (low text per section)');
+          return ReaderKind.comic;
+        }
+        debugPrint('[EpubImportRouter] → book (substantial text)');
+        return ReaderKind.book;
+      }
+
+      if (imageCount > 0) {
+        debugPrint('[EpubImportRouter] → comic (images, no text sections)');
+        return ReaderKind.comic;
+      }
+      if (sectionCount > 0) {
+        debugPrint('[EpubImportRouter] → book (text, no images)');
+        return ReaderKind.book;
+      }
 
       throw const ImportException(
         '无法识别：页图请用 CBZ/ZIP 等图包格式，正文 EPUB 需含可读章节',
