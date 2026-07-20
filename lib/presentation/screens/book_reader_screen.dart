@@ -123,6 +123,9 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     return KeyEventResult.ignored;
   }
 
+  /// Clear of macOS traffic lights (same band as comic chrome / DesktopTitleBar).
+  static const double _macTrafficLightClearance = 78;
+
   Future<void> _openToc() async {
     final doc = _controller.document;
     if (doc == null) return;
@@ -154,11 +157,43 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
       },
     );
     if (selected != null) {
-      _restoredScroll = true;
-      _controller.goToSection(selected);
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(0);
-      }
+      _goToSection(selected);
+    }
+  }
+
+  void _goToSection(int index) {
+    _restoredScroll = true;
+    _controller.goToSection(index);
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+  }
+
+  void _goAdjacent({required bool next}) {
+    _restoredScroll = true;
+    if (next) {
+      _controller.goNextSection();
+    } else {
+      _controller.goPreviousSection();
+    }
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+  }
+
+  void _onChromeMenu(String value) {
+    if (value == 'font-') {
+      _controller.setFontSize(_controller.fontSize - 1);
+      return;
+    }
+    if (value == 'font+') {
+      _controller.setFontSize(_controller.fontSize + 1);
+      return;
+    }
+    if (value.startsWith('theme:')) {
+      final id = value.substring('theme:'.length);
+      final theme = ComicReadingTheme.fromStorage(id);
+      _controller.setReadingTheme(theme);
     }
   }
 
@@ -184,6 +219,11 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
             return Scaffold(
               backgroundColor: bg,
               body: SafeArea(
+                minimum: EdgeInsets.only(
+                  left: !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+                      ? _macTrafficLightClearance
+                      : 0,
+                ),
                 child: Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -216,14 +256,15 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
           }
 
           final section = _controller.currentSection!;
-          final macLead = !kIsWeb &&
-                  defaultTargetPlatform == TargetPlatform.macOS
-              ? 78.0
-              : 0.0;
+          final macLead =
+              !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+                  ? _macTrafficLightClearance
+                  : 0.0;
 
           return Scaffold(
             backgroundColor: bg,
             body: Stack(
+              fit: StackFit.expand,
               children: [
                 GestureDetector(
                   behavior: HitTestBehavior.translucent,
@@ -233,7 +274,7 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                       controller: _scrollController,
                       child: SingleChildScrollView(
                         controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(28, 24, 28, 48),
+                        padding: const EdgeInsets.fromLTRB(28, 72, 28, 72),
                         child: SelectableText(
                           section.plainText,
                           style: TextStyle(
@@ -256,65 +297,90 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                       color: bg.withValues(alpha: 0.92),
                       child: SafeArea(
                         bottom: false,
-                        child: Padding(
-                          padding: EdgeInsets.only(left: macLead),
-                          child: SizedBox(
-                            height: 52,
-                            child: Row(
-                              children: [
-                                IconButton(
-                                  tooltip: '返回',
-                                  onPressed: _exit,
-                                  icon: Icon(
-                                    Icons.arrow_back_outlined,
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          // Stack keeps title centered without a trailing spacer
+                          // that can overflow when the window is narrow.
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  left: macLead + 40,
+                                  right: 88,
+                                ),
+                                child: Text(
+                                  widget.item.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
                                     color: fg,
-                                    weight: 300,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                Expanded(
-                                  child: Text(
-                                    widget.item.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
+                              ),
+                              Row(
+                                children: [
+                                  SizedBox(width: macLead),
+                                  IconButton(
+                                    tooltip: '返回',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: _exit,
+                                    icon: Icon(
+                                      Icons.arrow_back_outlined,
                                       color: fg,
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
+                                      weight: 300,
                                     ),
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: '目录',
-                                  onPressed: _openToc,
-                                  icon: Icon(
-                                    Icons.list_outlined,
-                                    color: fg,
-                                    weight: 300,
+                                  const Spacer(),
+                                  IconButton(
+                                    tooltip: '目录',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: _openToc,
+                                    icon: Icon(
+                                      Icons.list_outlined,
+                                      color: fg,
+                                      weight: 300,
+                                    ),
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: '缩小字号',
-                                  onPressed: () => _controller
-                                      .setFontSize(_controller.fontSize - 1),
-                                  icon: Icon(
-                                    Icons.text_decrease_outlined,
-                                    color: fg,
-                                    weight: 300,
+                                  PopupMenuButton<String>(
+                                    tooltip: '阅读选项',
+                                    padding: EdgeInsets.zero,
+                                    icon: Icon(
+                                      Icons.more_horiz_outlined,
+                                      color: fg,
+                                      weight: 300,
+                                    ),
+                                    onSelected: _onChromeMenu,
+                                    itemBuilder: (_) => [
+                                      PopupMenuItem(
+                                        value: 'font-',
+                                        child: Text(
+                                          '缩小字号（${_controller.fontSize.toStringAsFixed(0)}）',
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'font+',
+                                        child: Text('放大字号'),
+                                      ),
+                                      const PopupMenuDivider(),
+                                      for (final t
+                                          in ComicReadingTheme.values)
+                                        CheckedPopupMenuItem(
+                                          value: 'theme:${t.storageValue}',
+                                          checked:
+                                              _controller.readingTheme == t,
+                                          child: Text(t.label),
+                                        ),
+                                    ],
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: '放大字号',
-                                  onPressed: () => _controller
-                                      .setFontSize(_controller.fontSize + 1),
-                                  icon: Icon(
-                                    Icons.text_increase_outlined,
-                                    color: fg,
-                                    weight: 300,
-                                  ),
-                                ),
-                              ],
-                            ),
+                                  const SizedBox(width: 4),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -330,73 +396,51 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                       child: SafeArea(
                         top: false,
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-                          child: Row(
-                            children: [
-                              IconButton(
-                                tooltip: '上一节',
-                                onPressed: _controller.sectionIndex > 0
-                                    ? () {
-                                        _restoredScroll = true;
-                                        _controller.goPreviousSection();
-                                        if (_scrollController.hasClients) {
-                                          _scrollController.jumpTo(0);
-                                        }
-                                      }
-                                    : null,
-                                icon: Icon(
-                                  Icons.chevron_left,
-                                  color: muted,
-                                  weight: 300,
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  '${section.title} · ${_controller.sectionLabel}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
+                          padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+                          child: SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  tooltip: '上一节',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: _controller.sectionIndex > 0
+                                      ? () => _goAdjacent(next: false)
+                                      : null,
+                                  icon: Icon(
+                                    Icons.chevron_left,
                                     color: muted,
-                                    fontSize: 12,
+                                    weight: 300,
                                   ),
                                 ),
-                              ),
-                              IconButton(
-                                tooltip: '下一节',
-                                onPressed: _controller.sectionIndex <
-                                        _controller.sectionCount - 1
-                                    ? () {
-                                        _restoredScroll = true;
-                                        _controller.goNextSection();
-                                        if (_scrollController.hasClients) {
-                                          _scrollController.jumpTo(0);
-                                        }
-                                      }
-                                    : null,
-                                icon: Icon(
-                                  Icons.chevron_right,
-                                  color: muted,
-                                  weight: 300,
-                                ),
-                              ),
-                              PopupMenuButton<ComicReadingTheme>(
-                                tooltip: '阅读背景',
-                                icon: Icon(
-                                  Icons.palette_outlined,
-                                  color: muted,
-                                  weight: 300,
-                                ),
-                                onSelected: _controller.setReadingTheme,
-                                itemBuilder: (_) => [
-                                  for (final t in ComicReadingTheme.values)
-                                    PopupMenuItem(
-                                      value: t,
-                                      child: Text(t.label),
+                                Expanded(
+                                  child: Text(
+                                    '${section.title} · ${_controller.sectionLabel}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: muted,
+                                      fontSize: 12,
                                     ),
-                                ],
-                              ),
-                            ],
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: '下一节',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: _controller.sectionIndex <
+                                          _controller.sectionCount - 1
+                                      ? () => _goAdjacent(next: true)
+                                      : null,
+                                  icon: Icon(
+                                    Icons.chevron_right,
+                                    color: muted,
+                                    weight: 300,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
