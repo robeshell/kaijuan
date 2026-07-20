@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <windowsx.h>
 
 #include "resource.h"
 
@@ -51,6 +52,24 @@ void EnableFullDpiSupportIfAvailable(HWND hwnd) {
     enable_non_client_dpi_scaling(hwnd);
   }
   FreeLibrary(user32_module);
+}
+
+/// Custom Flutter title bar height (logical px). Matches platform_window_io.dart.
+constexpr int kCustomTitleBarHeight = 44;
+
+/// Right strip reserved for Flutter min/max/close (logical px).
+constexpr int kCustomTitleBarControlStripWidth = 140;
+
+UINT WindowDpi(HWND hwnd) {
+  const HMONITOR monitor =
+      MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+  return FlutterDesktopGetDpiForMonitor(monitor);
+}
+
+int ResizeBorderThickness(HWND hwnd) {
+  const UINT dpi = WindowDpi(hwnd);
+  return GetSystemMetricsForDpi(SM_CXFRAME, dpi) +
+         GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
 }
 
 }  // namespace
@@ -146,6 +165,13 @@ bool Win32Window::Create(const std::wstring& title,
 
   UpdateTheme(window);
 
+  // Extend DWM frame so Flutter paints where the system caption would be.
+  MARGINS margins = {0, 0, 0, 1};
+  DwmExtendFrameIntoClientArea(window, &margins);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE |
+                   SWP_FRAMECHANGED);
+
   return OnCreate();
 }
 
@@ -216,6 +242,61 @@ Win32Window::MessageHandler(HWND hwnd,
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
       return 0;
+
+    case WM_GETMINMAXINFO: {
+      // Logical 1024×700 — keep desktop side-rail layout (matches macOS / AppShell).
+      auto min_info = reinterpret_cast<MINMAXINFO*>(lparam);
+      const UINT dpi = WindowDpi(hwnd);
+      min_info->ptMinTrackSize.x =
+          MulDiv(1024, dpi, USER_DEFAULT_SCREEN_DPI);
+      min_info->ptMinTrackSize.y =
+          MulDiv(700, dpi, USER_DEFAULT_SCREEN_DPI);
+      return 0;
+    }
+
+    case WM_NCCALCSIZE: {
+      if (wparam == TRUE) {
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        if (IsZoomed(hwnd)) {
+          HMONITOR monitor =
+              MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+          MONITORINFO monitor_info = {};
+          monitor_info.cbSize = sizeof(MONITORINFO);
+          if (GetMonitorInfo(monitor, &monitor_info)) {
+            params->rgrc[0] = monitor_info.rcWork;
+          }
+          return 0;
+        }
+        const int border = ResizeBorderThickness(hwnd);
+        params->rgrc[0].left += border;
+        params->rgrc[0].right -= border;
+        params->rgrc[0].bottom -= border;
+        // top stays — custom title bar is client-area.
+        return 0;
+      }
+      return DefWindowProc(hwnd, message, wparam, lparam);
+    }
+
+    case WM_NCHITTEST: {
+      LRESULT hit = DefWindowProc(hwnd, message, wparam, lparam);
+      if (hit == HTCLIENT) {
+        POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        ScreenToClient(hwnd, &pt);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        const UINT dpi = WindowDpi(hwnd);
+        const int title_bar_height =
+            MulDiv(kCustomTitleBarHeight, dpi, USER_DEFAULT_SCREEN_DPI);
+        const int control_strip_width =
+            MulDiv(kCustomTitleBarControlStripWidth, dpi,
+                   USER_DEFAULT_SCREEN_DPI);
+        if (pt.y < title_bar_height &&
+            pt.x < rc.right - control_strip_width) {
+          return HTCAPTION;
+        }
+      }
+      return hit;
+    }
   }
 
   return DefWindowProc(window_handle_, message, wparam, lparam);
