@@ -44,7 +44,7 @@ docs/
 
 ## 已定原则（摘要）
 
-- **一个 App、一套数据**（沿用 comic 的 `app_library`）。  
+- **一个 App、一套数据**（沿用已有 `app_library`）。  
 - **一个仓库**，共享 core；两个引擎按 `item.kind` 路由。  
 - 书库内提供「全部 / 漫画 / 图书」类型筛选，不再用品牌分段。  
 - 导入 **CBZ / ZIP / EPUB**；EPUB 自动探测正文 vs 页图。
@@ -53,7 +53,7 @@ docs/
 
 ### 加功能
 
-1. 改 PRODUCT §4 表（标明 engine：comic / book / 共享）。  
+1. 改 PRODUCT §4 表（标明 engine：image / book / 共享）。  
 2. 开或改 specs。  
 3. 实现挂对应 engine 或共享层（见 ENGINEERING）。  
 

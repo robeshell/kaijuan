@@ -5,7 +5,7 @@
 | | |
 |--|--|
 | 显示名 | Kaika |
-| Bundle / applicationId | `com.kaika.comic`（暂留兼容） |
+| Bundle / applicationId | `com.kaika.reader` |
 | 入口 | `lib/main.dart` |
 | 格式 | CBZ / ZIP / EPUB（按内容自动路由） |
 | 状态 | 漫画页图闭环 + 图书 reflow spike |

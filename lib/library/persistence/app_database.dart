@@ -46,7 +46,7 @@ class ReadingListSummary {
   final int memberCount;
 }
 
-/// One imported reading item (book or comic). Dedupes on [contentHash] so
+/// One imported reading item. Dedupes on [contentHash] so
 /// re-importing the same file updates metadata instead of duplicating.
 class ReadingItems extends Table {
   TextColumn get id => text()();
@@ -222,8 +222,8 @@ class AppDatabase extends _$AppDatabase {
 
   /// Library items with optional progress for library filters.
   ///
-  /// Pass [kind] to filter by reader kind; `null` returns comic and book
-  /// entries mixed together.
+  /// Pass [kind] to filter by reader kind; `null` returns all entries mixed
+  /// together.
   Stream<List<LibraryEntry>> watchLibraryEntries([ReaderKind? kind]) {
     final query = select(readingItems).join([
       leftOuterJoin(

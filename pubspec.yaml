@@ -1,5 +1,5 @@
 name: kaika
-description: "Kaika — a multi-format book and comic reader."
+description: "Kaika — a local reader for page-image and reflow content."
 publish_to: 'none'
 version: 0.1.0+1
 

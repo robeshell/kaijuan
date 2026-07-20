@@ -4,7 +4,7 @@
 
 **目标**：一个 git 仓库，打出一个 **Kaika** 本地阅读 App；内部同时包含漫画页图引擎与图书 reflow 引擎。
 
-当前仓库已切换到 **单 App 入口**；原 comic/book 双 flavor 正在最小化收口。
+当前仓库已切换到 **单 App 入口**；原双 flavor 正在最小化收口。
 
 ---
 
@@ -30,11 +30,11 @@ KaikaNext/                          # 仓库名
 ```text
 BrandConfig
   displayName: Kaika
-  applicationId: com.kaika.comic   # 暂留兼容
+  applicationId: com.kaika.reader
   accent presets + default accent
   default reading theme
   import extension whitelist: cbz, zip, epub
-  databaseName: app_library        # 沿用 comic 数据
+  databaseName: app_library        # 沿用已有数据
   storageNamespace: ''             # support root
 ```
 
@@ -66,7 +66,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 | 书架/书库通用 widgets | | |
 | EpubImportRouter | | |
 
-禁止：core 依赖某个品牌文案；comic 包 import book 引擎（仅 import service / router 可桥接）。
+禁止：core 依赖某个品牌文案；image 引擎包 import book 引擎（仅 import service / router 可桥接）。
 
 ---
 
@@ -74,7 +74,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 
 | 项 | 策略 |
 |----|------|
-| DB 文件名 | `app_library`（沿用 comic） |
+| DB 文件名 | `app_library`（沿用已有） |
 | 内容文件目录 | `…/library` + `…/covers`（support root） |
 | 偏好 JSON | `comic_reading.json` / `book_reading.json` / `theme.json` |
 | 旧 `book_library` | 不自动合并；需要可重导 EPUB |
@@ -101,7 +101,7 @@ macOS 日常开发不再强制 `--flavor comic`。若 Xcode scheme 仍绑定 fla
 
 ### 5.2 原生 flavor 最小收口（P2）
 
-- Android：保留 `comic` productFlavor；`book` flavor 标 deprecated 或后续移除；applicationId 统一 `com.kaika.comic`；应用名 Kaika。
+- Android：保留 `comic` productFlavor；`book` flavor 标 deprecated 或后续移除；applicationId 统一 `com.kaika.reader`；应用名 Kaika。
 - iOS/macOS：保留 `comic` scheme；`book` scheme 标 deprecated；App 显示名 Kaika。
 - 图标：`brands/icons/comic/master_1024.png` 继续作为 Kaika 图标源；`book` 目录可归档。
 
@@ -121,7 +121,7 @@ python3 tool/generate_brand_icons.py
 
 1. **文档** — PRODUCT / ENGINEERING 改为单 App ✅
 2. **BrandConfig + 单 main** ✅
-3. **偏好 / DB 沿用 comic 布局** ✅
+3. **偏好 / DB 沿用已有布局** ✅
 4. **双 import service + EpubImportRouter** ✅
 5. **LibraryController 类型筛选 + 混排** ✅
 6. **UI 打开路径 / 设置 / 文案** ✅

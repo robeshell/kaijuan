@@ -242,13 +242,10 @@ class LibraryController extends ChangeNotifier {
     return importPaths([for (final f in files) f.path]);
   }
 
-  /// Back-compat alias for comic call sites / tests.
-  Future<ImportResult?> pickAndImportComics() => pickAndImport();
-
   /// Import entry point used by tests and by [pickAndImport].
   ///
-  /// Routes by extension: cbz/zip → comic service, epub → auto-detect, others
-  /// fail.
+  /// Routes by extension: cbz/zip → image archive service, epub → auto-detect,
+  /// others fail.
   Future<ImportResult> importPaths(List<String> paths) async {
     if (_importing) {
       return const ImportResult(

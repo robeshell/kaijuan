@@ -15,8 +15,8 @@ android {
     }
 
     defaultConfig {
-        // Overridden per productFlavor (comic / book). See docs/ENGINEERING.md.
-        applicationId = "com.kaika.comic"
+        // Overridden per productFlavor. See docs/ENGINEERING.md.
+        applicationId = "com.kaika.reader"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -27,8 +27,8 @@ android {
     productFlavors {
         create("comic") {
             dimension = "brand"
-            applicationId = "com.kaika.comic"
-            resValue("string", "app_name", "Kaika Comic")
+            applicationId = "com.kaika.reader"
+            resValue("string", "app_name", "Kaika")
         }
         create("book") {
             dimension = "brand"

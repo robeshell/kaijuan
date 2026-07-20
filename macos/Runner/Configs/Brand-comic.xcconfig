@@ -1,5 +1,5 @@
 // Comic brand — PRODUCT_NAME becomes window / .app name
-PRODUCT_NAME = Kaika Comic
-PRODUCT_BUNDLE_IDENTIFIER = com.kaika.comic
+PRODUCT_NAME = Kaika
+PRODUCT_BUNDLE_IDENTIFIER = com.kaika.reader
 PRODUCT_COPYRIGHT = Copyright © 2026 Kaika. All rights reserved.
 FLUTTER_TARGET = lib/main_comic.dart

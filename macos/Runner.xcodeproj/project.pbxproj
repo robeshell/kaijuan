@@ -864,8 +864,8 @@
 				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.kaika.comic;
-				PRODUCT_NAME = "Kaika Comic";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kaika.reader;
+				PRODUCT_NAME = "Kaika";
 			};
 			name = Profile-comic;
 		};
@@ -1133,8 +1133,8 @@
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.kaika.comic;
-				PRODUCT_NAME = "Kaika Comic";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kaika.reader;
+				PRODUCT_NAME = "Kaika";
 			};
 			name = Debug-comic;
 		};
@@ -1176,8 +1176,8 @@
 				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.kaika.comic;
-				PRODUCT_NAME = "Kaika Comic";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kaika.reader;
+				PRODUCT_NAME = "Kaika";
 			};
 			name = Release-comic;
 		};

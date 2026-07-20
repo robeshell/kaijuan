@@ -123,7 +123,7 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     return KeyEventResult.ignored;
   }
 
-  /// Clear of macOS traffic lights (same band as comic chrome / DesktopTitleBar).
+  /// Clear of macOS traffic lights (same band as reader chrome / DesktopTitleBar).
   static const double _macTrafficLightClearance = 78;
 
   Future<void> _openToc() async {

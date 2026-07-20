@@ -17,9 +17,9 @@ import 'readers/comic/comic_models.dart';
 
 /// Single App bootstrap for Kaika.
 ///
-/// Both comic and book reader engines are always available; file import routes
-/// by extension, with EPUB auto-detected between page-image comic and reflow
-/// book.
+/// Both page-image and reflow reader engines are always available; file import
+/// routes by extension, with EPUB auto-detected between page-image and reflow
+/// content.
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
 

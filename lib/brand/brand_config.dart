@@ -5,10 +5,10 @@ import '../readers/comic/comic_models.dart';
 
 /// Single-app product configuration for Kaika.
 ///
-/// The previous dual-brand (comic / book) split has been collapsed into one
-/// local reader App with two reader engines. Existing comic installs keep their
+/// The previous dual-brand (page-image / reflow) split has been collapsed into
+/// one local reader App with two reader engines. Existing installs keep their
 /// data because [databaseName] and [storageNamespace] still point at the legacy
-/// comic layout (`app_library` in the support root).
+/// layout (`app_library` in the support root).
 class BrandConfig {
   const BrandConfig({
     required this.displayName,
@@ -25,8 +25,8 @@ class BrandConfig {
   /// Android applicationId / Apple PRODUCT_BUNDLE_IDENTIFIER.
   final String applicationId;
 
-  /// Drift database file key. Kept as `app_library` so existing comic installs
-  /// do not lose data.
+  /// Drift database file key. Kept as `app_library` so existing installs do
+  /// not lose data.
   final String databaseName;
 
   /// Subdirectory under application support. Empty = support root.
@@ -34,7 +34,7 @@ class BrandConfig {
 
   final AccentPreset defaultAccent;
 
-  /// Comic engine default. Book defaults are loaded from
+  /// Page-image engine default. Reflow defaults are loaded from
   /// [BookReadingPreferences].
   final ComicReadingTheme defaultReadingTheme;
 
@@ -44,7 +44,7 @@ class BrandConfig {
   /// The only supported app configuration.
   static const app = BrandConfig(
     displayName: 'Kaika',
-    applicationId: 'com.kaika.comic',
+    applicationId: 'com.kaika.reader',
     databaseName: 'app_library',
     storageNamespace: '',
     defaultAccent: AccentPreset(
