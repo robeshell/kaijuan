@@ -35,10 +35,14 @@ Flutter 仓库：**两个品牌阅读 App**（comic / book）共享底座。
 
 ```text
 lib/
-  app/ brand/          — BrandConfig（骨架）
+  app/ brand/          — BrandConfig、阅读偏好
   main.dart            — 默认 comic
   main_comic.dart / main_book.dart
-  core/ domain/ library/ readers/comic/ presentation/
+  core/ domain/
+  library/import/      — ComicImportService / BookImportService
+  readers/comic/       — 页图 session
+  readers/book/        — reflow EPUB（纯文本 spike）
+  presentation/
 ```
 
 **目标：** `apps/comic`、`apps/book` + `packages/kaika_core` 等，见 ENGINEERING。
@@ -46,19 +50,19 @@ lib/
 ## 已定架构决策
 
 - **双 App 双品牌**，数据默认隔离；非单 App 混库主路径。  
-- **ReaderLocator 不透明 JSON**。  
+- **ReaderLocator 不透明 JSON**（comic 页 / book 节+节内进度）。  
 - **漫画页序** `ComicPageOrder.version` + 导入 pageCount。  
 - **内容寻址导入**（每 App 自己的 library 目录）。  
-- **表现层只认 controller**；ComicSession 复用。  
+- **表现层只认 controller**；ComicSession / BookEpub 按品牌分流。  
 - 类型名不带应用名（`App*`）；包名可按 flavor 分。
 
 ## 进度摘要
 
-- **已有（comic）**：导入 CBZ/ZIP/页图 EPUB；书库搜索/排序/筛选/删除/上架/详情重命名/书单；四模式阅读；进度与书架；偏好；桌面壳。  
-- **文档**：双 App 产品 + ENGINEERING；EPUB 页图归 comic、reflow 归 book。  
-- **骨架**：`BrandConfig` + flavor + 双 main。  
-- **整理三概念**：**我的书架**钉选 · **书单**长列表 · **合集**拼贴盒（**书库**最前混排，见 `docs/specs/collections.md`）。  
-- **下一刀**：book reflow spike；书签 UI；合集/书单体验打磨。
+- **已有（comic）**：导入 CBZ/ZIP/页图 EPUB；书库管理；合集/书单；四模式阅读；进度与书架；偏好；桌面壳。  
+- **已有（book spike）**：reflow EPUB 导入（`kind=book`）；`BookReaderScreen` 分节滚动/目录/字号/主题；`BookLocator` 进度恢复；设置阅读默认。  
+- **文档**：双 App 产品 + ENGINEERING；`specs/book-reader.md`。  
+- **整理三概念**：**我的书架** · **书单** · **合集**（书库最前）。  
+- **下一刀**：book reflow 版式加深（HTML/CSS）；书签 UI；合集/书单体验打磨。
 
 全表以 **PRODUCT.md** 为准。
 

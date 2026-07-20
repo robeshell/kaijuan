@@ -26,7 +26,8 @@ docs/
   dev-handoff.md
   specs/
     _TEMPLATE.md
-    library.md / shelf.md / search.md / lists.md / collections.md / reader-chrome.md
+    library.md / shelf.md / search.md / lists.md / collections.md
+    reader-chrome.md / book-reader.md
   opendesign/
     HANDOFF.md / CONTEXT.md / DESIGN.md / BRIEFS.md
 ```
@@ -75,7 +76,7 @@ docs/
 | lists | **书单**（长清单） |
 | collections | **合集**（拼贴盒；实现中） |
 | reader-chrome | 共享 chrome 语言 |
-| book-reader | **待写**（book 引擎） |
+| book-reader | book reflow（spike 已落地） |
 | settings / mobile / overlay | **待写** |
 
 整理三概念权威表见 [PRODUCT.md §4.4a](./PRODUCT.md)。
