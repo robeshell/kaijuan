@@ -2,6 +2,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaika/readers/book/book_html_preprocessor.dart';
 
 void main() {
+  test('wrapWithStylesheets prepends package and section CSS once', () {
+    final wrapped = BookHtmlPreprocessor.wrapWithStylesheets(
+      html: '<p>Body.</p>',
+      packageStylesheets: ['.pkg { color: red; }'],
+      sectionStylesheets: ['.sec { margin: 1em; }'],
+    );
+    expect(wrapped, startsWith('<style>'));
+    expect(wrapped, contains('.pkg { color: red; }'));
+    expect(wrapped, contains('.sec { margin: 1em; }'));
+    expect(wrapped, endsWith('<p>Body.</p>'));
+  });
+
+  test('wrapWithStylesheets returns html unchanged when no css', () {
+    expect(
+      BookHtmlPreprocessor.wrapWithStylesheets(html: '<p>x</p>'),
+      '<p>x</p>',
+    );
+  });
+
   test('linkedStylesheetHrefs extracts head link tags', () {
     final hrefs = BookHtmlPreprocessor.linkedStylesheetHrefs('''<?xml version="1.0"?>
 <html xmlns="http://www.w3.org/1999/xhtml">

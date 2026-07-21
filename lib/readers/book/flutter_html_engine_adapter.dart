@@ -169,6 +169,7 @@ class FlutterHtmlBookEngineAdapter {
             : ScrollModeView(
                 sections: _sections,
                 readBytes: _readBytes,
+                packageStylesheets: _packageStylesheets,
                 ensureSection: ensureSectionPrepared,
                 initialSection: sectionIndex,
                 initialProgress: progressInSection,

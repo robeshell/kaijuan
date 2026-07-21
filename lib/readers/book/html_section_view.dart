@@ -5,6 +5,7 @@ import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_html_svg/flutter_html_svg.dart';
 import 'package:flutter_html_table/flutter_html_table.dart';
 
+import '../../readers/book/book_html_preprocessor.dart';
 import '../../readers/book/book_theme.dart';
 import 'epub_image_extension.dart';
 
@@ -16,27 +17,38 @@ class HtmlSectionView extends StatelessWidget {
     required this.html,
     required this.baseHref,
     required this.readBytes,
+    this.packageStylesheets = const [],
+    this.sectionStylesheets = const [],
     required this.fontSize,
     required this.lineHeight,
     required this.margin,
     required this.theme,
+    this.onLinkTap,
   });
 
   final String html;
   final String baseHref;
   final Future<Uint8List?> Function(String entry) readBytes;
+  final List<String> packageStylesheets;
+  final List<String> sectionStylesheets;
   final double fontSize;
   final double lineHeight;
   final double margin;
   final BookReadingTheme theme;
+  final void Function(String url, {String baseHref})? onLinkTap;
 
   @override
   Widget build(BuildContext context) {
     final fg = Color(theme.foregroundArgb);
     final bg = Color(theme.backgroundArgb);
+    final data = BookHtmlPreprocessor.wrapWithStylesheets(
+      html: html,
+      packageStylesheets: packageStylesheets,
+      sectionStylesheets: sectionStylesheets,
+    );
 
     return Html(
-      data: html,
+      data: data,
       extensions: [
         EpubImageExtension(baseHref: baseHref, readBytes: readBytes),
         const TableHtmlExtension(),
@@ -77,10 +89,27 @@ class HtmlSectionView extends StatelessWidget {
           color: fg.withValues(alpha: 0.85),
           textDecoration: TextDecoration.underline,
         ),
+        'a.kaika-noteref-link': Style(
+          textDecoration: TextDecoration.none,
+          display: Display.inline,
+        ),
+        'sup': Style(
+          fontSize: FontSize(fontSize * 0.75),
+          display: Display.inline,
+        ),
+        '.kaika-noteref': Style(
+          color: fg.withValues(alpha: 0.75),
+          textDecoration: TextDecoration.none,
+          display: Display.inline,
+        ),
+        '.epub-footnote': Style(
+          width: Width(10),
+          height: Height.auto(),
+        ),
       },
       onLinkTap: (url, attributes, element) {
-        // v1.0: ignore external links; internal anchors handled later.
-        debugPrint('[HtmlSectionView] link tapped: $url');
+        if (url == null || url.isEmpty) return;
+        onLinkTap?.call(url, baseHref: baseHref);
       },
       onCssParseError: (css, messages) {
         // Real-world EPUB CSS frequently contains unsupported declarations.

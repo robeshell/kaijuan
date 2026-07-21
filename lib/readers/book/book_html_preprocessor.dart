@@ -71,6 +71,27 @@ abstract final class BookHtmlPreprocessor {
     );
   }
 
+  /// Prepends shared + section CSS as a single `<style>` block (scroll mode).
+  static String wrapWithStylesheets({
+    required String html,
+    List<String> packageStylesheets = const [],
+    List<String> sectionStylesheets = const [],
+  }) {
+    if (packageStylesheets.isEmpty && sectionStylesheets.isEmpty) return html;
+    final buffer = StringBuffer('<style>\n');
+    for (final css in packageStylesheets) {
+      buffer.write(css);
+      buffer.write('\n');
+    }
+    for (final css in sectionStylesheets) {
+      buffer.write(css);
+      buffer.write('\n');
+    }
+    buffer.write('</style>\n');
+    buffer.write(html);
+    return buffer.toString();
+  }
+
   static final _tagsToRemove = {
     'script',
     'iframe',
