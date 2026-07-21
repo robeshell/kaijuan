@@ -4,9 +4,11 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../epub_image_extension.dart';
+import '../book_css_rules.dart';
+import '../prepared_section.dart';
 import 'html_block_parser.dart';
 import 'page_block.dart';
-import '../prepared_section.dart';
 
 /// One page worth of blocks.
 class PageSpec {
@@ -51,20 +53,19 @@ class Paginator {
 
   final _imageSizeCache = <String, Size>{};
 
+  /// Leave a small band so TextPainter vs RichText drift cannot pack one
+  /// extra line past the visible page.
+  double get _maxContentHeight => math.max(0.0, pageSize.height - 24);
+
   Future<PaginatorResult> paginate(List<PreparedSection> sections) async {
     final allPages = <PageSpec>[];
     final startIndices = <int>[];
 
     for (final section in sections) {
       startIndices.add(allPages.length);
-      final parser = HtmlBlockParser(
-        fontSize: fontSize,
-        lineHeight: lineHeight,
-        textColor: textColor,
-      );
-      final blocks = parser.parse(section.html);
-      final pages = await _paginateBlocks(blocks);
+      final pages = await paginateSection(section);
       allPages.addAll(pages);
+      await Future<void>.delayed(Duration.zero);
     }
 
     return PaginatorResult(
@@ -73,7 +74,30 @@ class Paginator {
     );
   }
 
-  Future<List<PageSpec>> _paginateBlocks(List<PageBlock> blocks) async {
+  /// Paginate a single spine section into pages.
+  Future<List<PageSpec>> paginateSection(
+    PreparedSection section, {
+    List<String> packageStylesheets = const [],
+  }) async {
+    final css = BookCssRules.parseAll([
+      ...packageStylesheets,
+      ...section.sectionStylesheets,
+    ]);
+    final parser = HtmlBlockParser(
+      fontSize: fontSize,
+      lineHeight: lineHeight,
+      textColor: textColor,
+      baseHref: section.href,
+      cssRules: css,
+    );
+    final blocks = parser.parse(section.html);
+    return _paginateBlocks(blocks, baseHref: section.href);
+  }
+
+  Future<List<PageSpec>> _paginateBlocks(
+    List<PageBlock> blocks, {
+    required String baseHref,
+  }) async {
     final pages = <PageSpec>[];
     var currentBlocks = <PageBlock>[];
     var usedHeight = 0.0;
@@ -91,7 +115,7 @@ class Paginator {
           final subBlocks = await _paginateTextBlock(textBlock);
           for (final sub in subBlocks) {
             final height = _textBlockHeight(sub) + sub.paragraphSpacing;
-            if (usedHeight + height > pageSize.height &&
+            if (usedHeight + height > _maxContentHeight &&
                 currentBlocks.isNotEmpty) {
               flushPage();
             }
@@ -99,29 +123,32 @@ class Paginator {
             usedHeight += height;
           }
         case ImageBlock imageBlock:
-          final sized = await _resolveImageBlock(imageBlock);
+          final sized = await _resolveImageBlock(
+            imageBlock,
+            baseHref: baseHref,
+          );
           final height = _imageHeight(sized) + block.paragraphSpacing;
 
-          if (usedHeight + height > pageSize.height &&
+          if (usedHeight + height > _maxContentHeight &&
               currentBlocks.isNotEmpty) {
             flushPage();
           }
           currentBlocks.add(sized);
           usedHeight += height;
 
-          if (usedHeight >= pageSize.height) {
+          if (usedHeight >= _maxContentHeight) {
             flushPage();
           }
         case RuleBlock _:
           const ruleHeight = 8.0;
           if (usedHeight + ruleHeight + block.paragraphSpacing >
-                  pageSize.height &&
+                  _maxContentHeight &&
               currentBlocks.isNotEmpty) {
             flushPage();
           }
           currentBlocks.add(block);
           usedHeight += ruleHeight + block.paragraphSpacing;
-          if (usedHeight >= pageSize.height) {
+          if (usedHeight >= _maxContentHeight) {
             flushPage();
           }
         case TableBlock _:
@@ -164,11 +191,13 @@ class Paginator {
   }
 
   Future<List<TextBlock>> _paginateTextBlock(TextBlock block) async {
+    final contentWidth =
+        (pageSize.width - block.textIndent).clamp(1.0, pageSize.width);
     final painter = TextPainter(
       text: block.span,
       textDirection: TextDirection.ltr,
       textScaler: textScaler,
-    )..layout(maxWidth: pageSize.width);
+    )..layout(maxWidth: contentWidth);
 
     final metrics = painter.computeLineMetrics();
     if (metrics.isEmpty) {
@@ -194,13 +223,14 @@ class Paginator {
 
     final subBlocks = <TextBlock>[];
     var lineIndex = 0;
+    var isFirstSubBlock = true;
 
     while (lineIndex < lineRanges.length) {
       var lineEnd = lineIndex;
       var linesHeight = 0.0;
       while (lineEnd < lineRanges.length) {
         final h = lineRanges[lineEnd].height;
-        if (linesHeight + h > pageSize.height && lineEnd > lineIndex) {
+        if (linesHeight + h > _maxContentHeight && lineEnd > lineIndex) {
           break;
         }
         linesHeight += h;
@@ -220,8 +250,10 @@ class Paginator {
           startRange.start,
           endRange.end,
           paragraphSpacing: isLastPiece ? block.paragraphSpacing : 0,
+          textIndent: isFirstSubBlock ? block.textIndent : 0,
         ),
       );
+      isFirstSubBlock = false;
 
       lineIndex = lineEnd;
     }
@@ -230,13 +262,30 @@ class Paginator {
     return subBlocks;
   }
 
-  Future<ImageBlock> _resolveImageBlock(ImageBlock block) async {
-    if (block.displaySize != null) return block;
+  Future<ImageBlock> _resolveImageBlock(
+    ImageBlock block, {
+    required String baseHref,
+  }) async {
+    final src = block.src.startsWith('data:')
+        ? block.src
+        : EpubImageExtension.resolveImageEntry(baseHref, block.src);
+    if (block.displaySize != null) {
+      return block.src == src
+          ? block
+          : ImageBlock(
+              src: src,
+              width: block.width,
+              height: block.height,
+              bytes: block.bytes,
+              displaySize: block.displaySize,
+              paragraphSpacing: block.paragraphSpacing,
+            );
+    }
 
-    final cached = _imageSizeCache[block.src];
+    final cached = _imageSizeCache[src];
     if (cached != null) {
       return ImageBlock(
-        src: block.src,
+        src: src,
         width: block.width,
         height: block.height,
         bytes: block.bytes,
@@ -245,19 +294,23 @@ class Paginator {
       );
     }
 
-    Size? size;
-    final bytes = block.bytes ?? await readBytes(block.src);
-    if (bytes != null && bytes.isNotEmpty) {
-      size = await _decodeImageSize(bytes);
+    // Prefer HTML width/height so we can skip ZIP read + decode during open.
+    Size? size = _sizeFromAttributes(block.width, block.height);
+    Uint8List? bytes = block.bytes;
+    if (size == null && !src.startsWith('data:')) {
+      bytes = await readBytes(src);
+      if (bytes != null && bytes.isNotEmpty) {
+        size = await _decodeImageSize(bytes);
+      }
     }
-    size ??= _sizeFromAttributes(block.width, block.height);
     size ??= const Size(200, 150);
 
-    _imageSizeCache[block.src] = size;
+    _imageSizeCache[src] = size;
     return ImageBlock(
-      src: block.src,
+      src: src,
       width: block.width,
       height: block.height,
+      // Keep bytes only when already loaded; otherwise paint loads lazily.
       bytes: bytes,
       displaySize: size,
       paragraphSpacing: block.paragraphSpacing,
@@ -269,17 +322,19 @@ class Paginator {
     if (size == null) return 150;
     final displayWidth = pageSize.width;
     final displayHeight = displayWidth / size.width * size.height;
-    return math.min(displayHeight, pageSize.height);
+    return math.min(displayHeight, _maxContentHeight);
   }
 
   double _textBlockHeight(TextBlock block) {
+    final contentWidth =
+        (pageSize.width - block.textIndent).clamp(1.0, pageSize.width);
     final painter = TextPainter(
       text: block.span,
       textDirection: TextDirection.ltr,
       textScaler: textScaler,
-    )..layout(maxWidth: pageSize.width);
-    final metrics = painter.computeLineMetrics();
-    final height = metrics.fold(0.0, (sum, m) => sum + m.height);
+    )..layout(maxWidth: contentWidth);
+    // Prefer painter.height over summing line metrics — closer to RichText.
+    final height = painter.height;
     painter.dispose();
     return height;
   }

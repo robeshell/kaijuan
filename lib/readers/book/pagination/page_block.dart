@@ -12,10 +12,13 @@ abstract class PageBlock {
 
 /// A run of inline text with a specific style.
 class InlineRun {
-  const InlineRun({required this.text, required this.style});
+  const InlineRun({required this.text, required this.style, this.href});
 
   final String text;
   final TextStyle style;
+
+  /// Resolved EPUB archive path + optional `#fragment` for internal links.
+  final String? href;
 }
 
 /// Text block that can be split across pages at line boundaries.
@@ -24,12 +27,14 @@ class TextBlock extends PageBlock {
     required this.runs,
     required this.baseStyle,
     super.paragraphSpacing = 0,
+    this.textIndent = 0,
   }) {
     _buildPlainText();
   }
 
   final List<InlineRun> runs;
   final TextStyle baseStyle;
+  final double textIndent;
 
   late final String plainText;
   final _runRanges = <_RunRange>[];
@@ -40,12 +45,12 @@ class TextBlock extends PageBlock {
     for (final run in runs) {
       final start = buffer.length;
       buffer.write(run.text);
-      _runRanges.add(_RunRange(start, buffer.length, run.style));
+      _runRanges.add(_RunRange(start, buffer.length, run.style, run.href));
     }
     plainText = buffer.toString();
   }
 
-  /// Full span for measuring the whole block.
+  /// Full span for measuring the whole block (no gesture recognizers).
   InlineSpan get span => TextSpan(
         style: baseStyle,
         children: [
@@ -76,6 +81,7 @@ class TextBlock extends PageBlock {
     int start,
     int end, {
     double? paragraphSpacing,
+    double? textIndent,
   }) {
     final sliced = <InlineRun>[];
     for (final range in _runRanges) {
@@ -86,6 +92,7 @@ class TextBlock extends PageBlock {
           InlineRun(
             text: plainText.substring(overlapStart, overlapEnd),
             style: range.style,
+            href: range.href,
           ),
         );
       }
@@ -94,16 +101,18 @@ class TextBlock extends PageBlock {
       runs: sliced,
       baseStyle: baseStyle,
       paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
+      textIndent: textIndent ?? 0,
     );
   }
 }
 
 class _RunRange {
-  _RunRange(this.start, this.end, this.style);
+  _RunRange(this.start, this.end, this.style, this.href);
 
   final int start;
   final int end;
   final TextStyle style;
+  final String? href;
 }
 
 /// Image block. The paginator fills in [bytes] and [displaySize].

@@ -435,7 +435,10 @@ class FlutterHtmlBookEngineAdapter {
         }
 
         startIndices[i] = allPages.length;
-        final pages = await paginator.paginateSection(_sections[i]);
+        final pages = await paginator.paginateSection(
+          _sections[i],
+          packageStylesheets: _packageStylesheets,
+        );
         if (gen != _paginationGen) return;
         allPages.addAll(pages);
 
