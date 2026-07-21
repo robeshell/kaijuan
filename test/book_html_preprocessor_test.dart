@@ -2,6 +2,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaika/readers/book/book_html_preprocessor.dart';
 
 void main() {
+  test('linkedStylesheetHrefs extracts head link tags', () {
+    final hrefs = BookHtmlPreprocessor.linkedStylesheetHrefs('''<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <link rel="stylesheet" href="../Styles/main.css" type="text/css"/>
+  <link rel="stylesheet" href="local.css"/>
+  <link rel="alternate" href="feed.xml"/>
+</head>
+<body><p>Text.</p></body>
+</html>''');
+    expect(hrefs, ['../Styles/main.css', 'local.css']);
+  });
+
   test('prepareSection extracts body and inlines CSS', () {
     final result = BookHtmlPreprocessor.prepareSection(
       rawHtml: '''<?xml version="1.0"?>
@@ -12,11 +25,11 @@ void main() {
       baseHref: 'OEBPS/chap1.xhtml',
       stylesheets: ['p { font-size: 18px; }'],
     );
-    expect(result, contains('<p>Hello.</p>'));
-    expect(result, contains('<style>'));
-    expect(result, contains('font-size: 18px'));
-    expect(result, isNot(contains('<html>')));
-    expect(result, isNot(contains('<head>')));
+    expect(result.html, contains('<p>Hello.</p>'));
+    expect(result.html, contains('<style>'));
+    expect(result.html, contains('font-size: 18px'));
+    expect(result.html, isNot(contains('<html>')));
+    expect(result.html, isNot(contains('<head>')));
   });
 
   test('prepareSection removes scripts and iframes', () {
@@ -35,14 +48,14 @@ void main() {
       baseHref: 'OEBPS/chap1.xhtml',
       stylesheets: const [],
     );
-    expect(result, contains('Before'));
-    expect(result, contains('After'));
-    expect(result, isNot(contains('<script>')));
-    expect(result, isNot(contains('<iframe>')));
-    expect(result, isNot(contains('<video>')));
-    expect(result, isNot(contains('<audio>')));
-    expect(result, isNot(contains('<object>')));
-    expect(result, isNot(contains('<form>')));
+    expect(result.html, contains('Before'));
+    expect(result.html, contains('After'));
+    expect(result.html, isNot(contains('<script>')));
+    expect(result.html, isNot(contains('<iframe>')));
+    expect(result.html, isNot(contains('<video>')));
+    expect(result.html, isNot(contains('<audio>')));
+    expect(result.html, isNot(contains('<object>')));
+    expect(result.html, isNot(contains('<form>')));
   });
 
   test('prepareSection strips xmlns and epub:type attributes', () {
@@ -53,8 +66,8 @@ void main() {
       baseHref: 'OEBPS/chap1.xhtml',
       stylesheets: const [],
     );
-    expect(result, contains('<p>Text.</p>'));
-    expect(result, isNot(contains('xmlns')));
-    expect(result, isNot(contains('epub:type')));
+    expect(result.html, contains('<p>Text.</p>'));
+    expect(result.html, isNot(contains('xmlns')));
+    expect(result.html, isNot(contains('epub:type')));
   });
 }
