@@ -10,11 +10,16 @@ class BookSection {
     required this.href,
     required this.title,
     required this.plainText,
+    required this.rawHtml,
   });
 
   final String href;
   final String title;
   final String plainText;
+
+  /// Original XHTML of this spine item, before tag stripping. Used by
+  /// flutter_html rendering engines.
+  final String rawHtml;
 }
 
 /// Parsed reflow EPUB (text spine). Not for image-only manga packs.
@@ -23,11 +28,15 @@ class BookEpubDocument {
     required this.title,
     required this.sections,
     this.coverEntry,
+    this.stylesheets = const [],
   });
 
   final String title;
   final List<BookSection> sections;
   final String? coverEntry;
+
+  /// CSS texts from OPF manifest items, in manifest order.
+  final List<String> stylesheets;
 
   int get sectionCount => sections.length;
 }
@@ -93,6 +102,16 @@ abstract final class BookEpub {
         mediaType: _attr(attrs, 'media-type')?.toLowerCase() ?? '',
         properties: _attr(attrs, 'properties') ?? '',
       );
+    }
+
+    final stylesheets = <String>[];
+    for (final item in manifest.values) {
+      if (item.mediaType == 'text/css') {
+        final css = _readText(archive, item.href);
+        if (css != null && css.trim().isNotEmpty) {
+          stylesheets.add(css);
+        }
+      }
     }
 
     String? coverEntry;
@@ -174,6 +193,7 @@ abstract final class BookEpub {
               ? '第 ${sections.length + 1} 节'
               : sectionTitle.trim(),
           plainText: plain.trim(),
+          rawHtml: html,
         ),
       );
     }
@@ -188,6 +208,7 @@ abstract final class BookEpub {
       title: title.trim().isEmpty ? '未命名' : title.trim(),
       sections: List.unmodifiable(sections),
       coverEntry: coverEntry,
+      stylesheets: List.unmodifiable(stylesheets),
     );
   }
 

@@ -13,7 +13,7 @@ import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/persistence/app_database.dart';
 import 'presentation/controllers/library_controller.dart';
-import 'readers/comic/comic_models.dart';
+import 'readers/book/book_theme.dart';
 
 /// Single App bootstrap for Kaika.
 ///
@@ -42,7 +42,7 @@ Future<void> bootstrap() async {
   );
   final bookReadingPreferences = await BookReadingPreferences.load(
     supportDirectory: supportDir,
-    defaultReadingTheme: ComicReadingTheme.paper,
+    defaultReadingTheme: BookReadingTheme.paper,
   );
 
   final database = AppDatabase.named(brand.databaseName);

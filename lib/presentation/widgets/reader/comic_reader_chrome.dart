@@ -1,11 +1,10 @@
-import 'dart:ui';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
 import '../../../readers/comic/comic_models.dart';
 import '../../controllers/comic_reader_controller.dart';
+import 'glass_bar.dart';
 
 /// Top + bottom glass chrome for the comic reader.
 ///
@@ -48,7 +47,7 @@ class ComicReaderChrome extends StatelessWidget {
           top: 0,
           left: 0,
           right: 0,
-          child: _GlassBar(
+          child: GlassBar(
             glass: glass,
             // Top padding from app-level desktop MediaQuery via SafeArea.
             child: SafeArea(
@@ -129,7 +128,7 @@ class ComicReaderChrome extends StatelessWidget {
           left: 0,
           right: 0,
           bottom: 0,
-          child: _GlassBar(
+          child: GlassBar(
             glass: glass,
             child: SafeArea(
               top: false,
@@ -203,34 +202,5 @@ class ComicReaderChrome extends StatelessWidget {
       case 'theme':
         controller.setReadingTheme(ComicReadingTheme.fromStorage(parts[1]));
     }
-  }
-}
-
-class _GlassBar extends StatelessWidget {
-  const _GlassBar({required this.glass, required this.child});
-
-  final Color glass;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: glass,
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x1F000000),
-                blurRadius: 16,
-                offset: Offset(0, 4),
-              ),
-            ],
-          ),
-          child: child,
-        ),
-      ),
-    );
   }
 }

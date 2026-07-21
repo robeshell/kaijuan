@@ -1,17 +1,22 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:katbook_epub_reader/katbook_epub_reader.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/book_reading_preferences.dart';
 import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
-import '../../readers/comic/comic_models.dart';
+import '../../readers/book/flutter_html_engine_adapter.dart';
+import '../../readers/book/book_theme.dart';
+import '../controllers/book_reader_controller.dart';
+import '../widgets/reader/book_reader_chrome.dart';
 
-/// Full-screen reflow reader powered by katbook_epub_reader.
+/// Full-screen reflow book reader.
+///
+/// The screen itself is stateless: all reading state lives in
+/// [BookReaderController], and the actual rendering engine is provided by
+/// [FlutterHtmlBookEngineAdapter]. This mirrors the comic reader architecture and
+/// makes the reflow engine replaceable.
 class BookReaderScreen extends StatefulWidget {
   const BookReaderScreen({
     super.key,
@@ -46,232 +51,192 @@ class BookReaderScreen extends StatefulWidget {
 }
 
 class _BookReaderScreenState extends State<BookReaderScreen> {
-  final _controller = KatbookEpubController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  Timer? _saveDebounce;
-  bool _loading = true;
-  Object? _error;
-  ReadingPosition? _initialPosition;
-
-  ReaderTheme _theme = ReaderTheme.light;
-  double _fontSize = 16;
-  bool _chromeVisible = true;
-
-  static const _macTrafficLightClearance = 78.0;
+  late final BookReaderController _controller;
+  late final FlutterHtmlBookEngineAdapter _engine;
+  late final FocusNode _focusNode;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-  }
-
-  Future<void> _load() async {
-    try {
-      final file = File(widget.item.filePath);
-      if (!await file.exists()) {
-        throw Exception('文件不存在：${widget.item.filePath}');
-      }
-      await _controller.openBook(await file.readAsBytes());
-      if (!mounted) return;
-
-      final progress = await widget.database.progressFor(widget.item.id);
-      if (progress != null) {
-        _initialPosition = _tryDecodePosition(progress.locatorJson);
-      }
-
-      final prefs = widget.readingPreferences;
-      _theme = _toKatbookTheme(prefs?.readingTheme);
-      _fontSize = prefs?.fontSize.clamp(10.0, 32.0) ?? 16.0;
-
-      await widget.database.touchLastOpened(widget.item.id, DateTime.now());
-    } catch (e) {
-      _error = e;
-    }
-    if (mounted) setState(() => _loading = false);
-  }
-
-  static ReadingPosition? _tryDecodePosition(String json) {
-    try {
-      final map = jsonDecode(json) as Map<String, dynamic>;
-      if (map.containsKey('paragraphIndex')) {
-        return ReadingPosition.fromJson(map);
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  void _savePosition(ReadingPosition pos) {
-    _saveDebounce?.cancel();
-    _saveDebounce = Timer(const Duration(milliseconds: 500), () {
-      widget.database.upsertProgress(
-        itemId: widget.item.id,
-        locatorJson: jsonEncode(pos.toJson()),
-        progressFraction: (pos.progressPercent / 100).clamp(0.0, 1.0),
-        updatedAt: DateTime.now(),
-      );
-    });
+    _controller = BookReaderController(
+      database: widget.database,
+      item: widget.item,
+      readingPreferences: widget.readingPreferences,
+    );
+    _engine = FlutterHtmlBookEngineAdapter(readerController: _controller);
+    _focusNode = FocusNode();
+    _engine.attach();
+    unawaited(_engine.open(widget.item.filePath));
   }
 
   void _exit() => Navigator.of(context, rootNavigator: true).pop();
 
-  // ------------------------------------------------------------------
-  // Skins
-  // ------------------------------------------------------------------
+  void _openToc() => _scaffoldKey.currentState?.openDrawer();
 
-  static ReaderTheme _toKatbookTheme(ComicReadingTheme? theme) {
-    return switch (theme) {
-      ComicReadingTheme.sepia => ReaderTheme.sepia,
-      ComicReadingTheme.dark || ComicReadingTheme.pureBlack => ReaderTheme.dark,
-      _ => ReaderTheme.light,
-    };
-  }
+  void _onTapContent() => _controller.toggleChrome();
 
-  ReaderThemeData get _themeData => ReaderThemeData.fromTheme(_theme);
-
-  bool get _isDark => _themeData.isDark;
-
-  Color get _fg =>
-      _isDark ? const Color(0xFFF2F2F4) : const Color(0xFF1C1C1E);
-
-  Color get _fgMuted =>
-      _isDark ? const Color(0x99F2F2F4) : const Color(0x991C1C1E);
-
-  Color get _glassBg =>
-      _isDark ? const Color(0xB3212124) : const Color(0xB3FFFFFF);
-
-  double get _macLead =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
-          ? _macTrafficLightClearance
-          : 0.0;
-
-  double get _progress {
-    final pos = _controller.currentPosition;
-    if (pos == null || pos.totalParagraphs == 0) return 0.0;
-    return (pos.paragraphIndex / pos.totalParagraphs).clamp(0.0, 1.0);
-  }
-
-  // ------------------------------------------------------------------
-  // Chrome widgets
-  // ------------------------------------------------------------------
-
-  Widget _buildAppBar() {
-    final pct = (_progress * 100).toStringAsFixed(1);
-    return Material(
-      color: _glassBg,
-      child: SafeArea(
-        bottom: false,
-        child: SizedBox(
-          height: 52,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // Centred title + progress.
-              Padding(
-                padding: EdgeInsets.only(left: _macLead + 44, right: 140),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _fg,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      '$pct%',
-                      style: TextStyle(color: _fgMuted, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-              // Left: back.
-              Row(
-                children: [
-                  SizedBox(width: _macLead),
-                  IconButton(
-                    tooltip: '返回',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: _exit,
-                    icon: Icon(Icons.arrow_back_outlined,
-                        color: _fg, weight: 300),
-                  ),
-                  const Spacer(),
-                  // Right: TOC.
-                  IconButton(
-                    tooltip: '目录',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () =>
-                        _scaffoldKey.currentState?.openDrawer(),
-                    icon: Icon(Icons.list_outlined, color: _fg, weight: 300),
-                  ),
-                  // Font size.
-                  PopupMenuButton<String>(
-                    tooltip: '字号',
-                    padding: EdgeInsets.zero,
-                    icon: Icon(Icons.format_size_outlined,
-                        color: _fg, weight: 300),
-                    onSelected: (v) {
-                      setState(() {
-                        _fontSize = ((_fontSize + (v == '-' ? -2 : 2)))
-                            .clamp(10.0, 32.0);
-                      });
-                    },
-                    itemBuilder: (_) => [
-                      PopupMenuItem(
-                        value: '-',
-                        child:
-                            Text('缩小（${_fontSize.toStringAsFixed(0)}）'),
-                      ),
-                      const PopupMenuItem(value: '+', child: Text('放大')),
-                    ],
-                  ),
-                  // Theme.
-                  PopupMenuButton<String>(
-                    tooltip: '主题',
-                    padding: EdgeInsets.zero,
-                    icon: Icon(Icons.brightness_6_outlined,
-                        color: _fg, weight: 300),
-                    onSelected: (v) {
-                      setState(() {
-                        _theme = ReaderTheme.values.firstWhere(
-                          (t) => t.name == v,
-                          orElse: () => ReaderTheme.light,
-                        );
-                      });
-                    },
-                    itemBuilder: (_) => [
-                      for (final t in ReaderTheme.values)
-                        CheckedPopupMenuItem(
-                          value: t.name,
-                          checked: _theme == t,
-                          child: Text(switch (t) {
-                            ReaderTheme.light => '浅色',
-                            ReaderTheme.sepia => '米色',
-                            ReaderTheme.dark => '深色',
-                          }),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(width: 4),
-                ],
-              ),
-            ],
+  Widget _buildTapOverlay() {
+    // In page mode, left/right edges turn pages; center toggles chrome.
+    // In scroll mode, the whole area toggles chrome.
+    if (_controller.readingMode == BookReadingMode.page) {
+      return Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _controller.goPreviousPage,
+              child: const SizedBox.expand(),
+            ),
           ),
-        ),
-      ),
+          Expanded(
+            flex: 2,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _onTapContent,
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _controller.goNextPage,
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ],
+      );
+    }
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: _onTapContent,
+      child: const SizedBox.expand(),
+    );
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_controller.chromeVisible) {
+        _controller.hideChrome();
+      } else {
+        _exit();
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.keyT) {
+      _openToc();
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.equal ||
+        event.logicalKey == LogicalKeyboardKey.add ||
+        event.logicalKey == LogicalKeyboardKey.numpadAdd) {
+      _controller.changeFontSize(2);
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.minus ||
+        event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
+      _controller.changeFontSize(-2);
+      return KeyEventResult.handled;
+    }
+
+    final isPage = _controller.readingMode == BookReadingMode.page;
+    if (isPage) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+          event.logicalKey == LogicalKeyboardKey.pageUp) {
+        _controller.goPreviousPage();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
+          event.logicalKey == LogicalKeyboardKey.pageDown ||
+          event.logicalKey == LogicalKeyboardKey.space) {
+        _controller.goNextPage();
+        return KeyEventResult.handled;
+      }
+    } else {
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        _controller.goPreviousSection();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        _controller.goNextSection();
+        return KeyEventResult.handled;
+      }
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _controller,
+      builder: (context, _) {
+        final theme = _controller.readingTheme;
+        final bg = Color(theme.backgroundArgb);
+
+        if (_controller.openError != null) {
+          return Scaffold(
+            backgroundColor: bg,
+            body: _ErrorBody(
+              error: _controller.openError.toString(),
+              onBack: _exit,
+              theme: theme,
+            ),
+          );
+        }
+
+        if (!_controller.isReady) {
+          return Scaffold(
+            backgroundColor: bg,
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        return Focus(
+          focusNode: _focusNode,
+          autofocus: true,
+          onKeyEvent: _handleKeyEvent,
+          child: Scaffold(
+            key: _scaffoldKey,
+            drawerEnableOpenDragGesture: false,
+            drawer: _buildTocDrawer(),
+            backgroundColor: bg,
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                _engine.buildView(context),
+                _buildTapOverlay(),
+                IgnorePointer(
+                  ignoring: !_controller.chromeVisible,
+                  child: AnimatedOpacity(
+                    opacity: _controller.chromeVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    child: BookReaderChrome(
+                      controller: _controller,
+                      onBack: _exit,
+                      onOpenToc: _openToc,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
   Widget _buildTocDrawer() {
-    final chapters = _controller.tableOfContents;
+    final titles = _controller.tocTitles;
+    final currentIndex = _controller.sectionIndex;
     final accent = Theme.of(context).colorScheme.primary;
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final currentIndex =
-        _controller.currentPosition?.paragraphIndex ?? -1;
 
     return Drawer(
       child: SafeArea(
@@ -293,15 +258,12 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: chapters.length,
+                itemCount: titles.length,
                 itemBuilder: (_, i) {
-                  final ch = chapters[i];
-                  final active = ch.startIndex <= currentIndex &&
-                      (i + 1 >= chapters.length ||
-                          chapters[i + 1].startIndex > currentIndex);
+                  final active = i == currentIndex;
                   return ListTile(
                     title: Text(
-                      ch.title,
+                      titles[i],
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -313,8 +275,8 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                     selected: active,
                     dense: true,
                     onTap: () {
-                      Navigator.pop(context);
-                      _controller.jumpToIndex(ch.startIndex);
+                      Navigator.of(context).pop();
+                      _controller.goToSection(i);
                     },
                   );
                 },
@@ -326,80 +288,50 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     );
   }
 
-  // ------------------------------------------------------------------
-  // Build
-  // ------------------------------------------------------------------
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _engine.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+class _ErrorBody extends StatelessWidget {
+  const _ErrorBody({
+    required this.error,
+    required this.onBack,
+    required this.theme,
+  });
+
+  final String error;
+  final VoidCallback onBack;
+  final BookReadingTheme theme;
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return Scaffold(
-        backgroundColor: _themeData.backgroundColor,
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (_error != null) {
-      return Scaffold(
-        backgroundColor: _themeData.backgroundColor,
-        body: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_error.toString(),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: _fgMuted)),
-                  const SizedBox(height: 16),
-                  FilledButton(onPressed: _exit, child: const Text('返回')),
-                ],
+    final fgMuted = theme.isDark
+        ? const Color(0x99F2F2F4)
+        : const Color(0x991C1C1E);
+
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                error,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: fgMuted),
               ),
-            ),
+              const SizedBox(height: 16),
+              FilledButton(onPressed: onBack, child: const Text('返回')),
+            ],
           ),
         ),
-      );
-    }
-
-    return Scaffold(
-      key: _scaffoldKey,
-      drawerEnableOpenDragGesture: false,
-      drawer: _buildTocDrawer(),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Reader — no built-in app bar.
-          KatbookEpubReader(
-            controller: _controller,
-            initialTheme: _theme,
-            initialFontSize: _fontSize,
-            initialReadingMode: ReadingMode.scroll,
-            initialPosition: _initialPosition,
-            onPositionChanged: _savePosition,
-            showAppBar: false,
-            showThemeButton: false,
-            showLanguageButton: false,
-          ),
-          // Custom glass top bar.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: () => setState(() => _chromeVisible = !_chromeVisible),
-              child: _chromeVisible ? _buildAppBar() : const SizedBox.shrink(),
-            ),
-          ),
-        ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _saveDebounce?.cancel();
-    _controller.dispose();
-    super.dispose();
   }
 }

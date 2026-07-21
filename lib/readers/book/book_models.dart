@@ -52,3 +52,75 @@ class BookLocator {
     );
   }
 }
+
+/// Paragraph index boundaries for a reflow engine that thinks in flat
+/// paragraphs but must expose spine-style section coordinates.
+class BookSectionMap {
+  const BookSectionMap({
+    required this.startIndices,
+    required this.totalParagraphs,
+  });
+
+  /// Start paragraph index of every section/chapter, in ascending order.
+  final List<int> startIndices;
+
+  /// Total number of paragraphs in the book.
+  final int totalParagraphs;
+
+  int get sectionCount => startIndices.length;
+
+  int _sectionLength(int index) {
+    final start = startIndices[index];
+    final end = index + 1 < startIndices.length
+        ? startIndices[index + 1]
+        : totalParagraphs;
+    return end - start;
+  }
+
+  /// Maps a flat paragraph position to a [BookLocator].
+  BookLocator locatorFromParagraph({
+    required int paragraphIndex,
+    double paragraphOffset = 0,
+  }) {
+    if (startIndices.isEmpty || totalParagraphs <= 0) {
+      return const BookLocator(sectionIndex: 0);
+    }
+    final clamped = paragraphIndex.clamp(0, totalParagraphs - 1);
+
+    // Binary search for the section containing [clamped].
+    var low = 0;
+    var high = startIndices.length - 1;
+    var section = 0;
+    while (low <= high) {
+      final mid = (low + high) ~/ 2;
+      if (startIndices[mid] <= clamped) {
+        section = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    final start = startIndices[section];
+    final length = _sectionLength(section);
+    final local = (clamped - start).clamp(0, length);
+    final progress = length <= 0
+        ? 0.0
+        : ((local + paragraphOffset) / length).clamp(0.0, 1.0);
+    return BookLocator(
+      sectionIndex: section,
+      progressInSection: progress,
+    );
+  }
+
+  /// Maps a [BookLocator] back to a flat paragraph index suitable for the
+  /// engine's `jumpToIndex`.
+  int paragraphFromLocator(BookLocator locator) {
+    if (startIndices.isEmpty || totalParagraphs <= 0) return 0;
+    final section = locator.sectionIndex.clamp(0, startIndices.length - 1);
+    final start = startIndices[section];
+    final length = _sectionLength(section);
+    final local = (locator.progressInSection * length).floor();
+    return (start + local).clamp(0, totalParagraphs - 1);
+  }
+}

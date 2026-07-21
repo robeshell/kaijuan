@@ -28,10 +28,10 @@ dependencies:
   package_info_plus: ^10.2.1
 
   # Book reader
-  katbook_epub_reader:
-    git:
-      url: https://github.com/norphiil/katbook_epub_reader.git
-      ref: main
+  flutter_html: ^3.0.0
+  flutter_html_table: ^3.0.0
+  flutter_html_svg: ^3.0.0
+  html: ^0.15.5
 
 dev_dependencies:
   flutter_test:

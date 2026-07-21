@@ -9,6 +9,8 @@ import '../../app/theme_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
 import '../widgets/app_overlays.dart';
+import '../widgets/reading_theme_chip.dart';
+import '../../readers/book/book_theme.dart';
 import '../../readers/comic/comic_models.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -179,11 +181,12 @@ class SettingsScreen extends StatelessWidget {
                   runSpacing: 10,
                   children: [
                     for (final t in ComicReadingTheme.values)
-                      _ReadingThemeChip(
-                        theme: t,
+                      ReadingThemeChip(
+                        background: Color(t.backgroundArgb),
+                        isDark: t.isDark,
+                        label: t.label,
                         selected: readingPreferences!.readingTheme == t,
-                        onTap: () =>
-                            readingPreferences!.setReadingTheme(t),
+                        onTap: () => readingPreferences!.setReadingTheme(t),
                       ),
                   ],
                 ),
@@ -213,9 +216,11 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 Slider(
                   value: bookReadingPreferences!.fontSize,
-                  min: 14,
-                  max: 28,
-                  divisions: 14,
+                  min: BookReadingPreferences.minFontSize,
+                  max: BookReadingPreferences.maxFontSize,
+                  divisions: (BookReadingPreferences.maxFontSize -
+                          BookReadingPreferences.minFontSize)
+                      .toInt(),
                   label: bookReadingPreferences!.fontSize.toStringAsFixed(0),
                   onChanged: (v) => bookReadingPreferences!.setFontSize(v),
                 ),
@@ -229,11 +234,63 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 Slider(
                   value: bookReadingPreferences!.lineHeight,
-                  min: 1.2,
-                  max: 2.2,
-                  divisions: 10,
+                  min: BookReadingPreferences.minLineHeight,
+                  max: BookReadingPreferences.maxLineHeight,
+                  divisions: ((BookReadingPreferences.maxLineHeight -
+                              BookReadingPreferences.minLineHeight) *
+                          5)
+                      .round(),
                   label: bookReadingPreferences!.lineHeight.toStringAsFixed(1),
                   onChanged: (v) => bookReadingPreferences!.setLineHeight(v),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '阅读模式',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: semantics.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<BookReadingMode>(
+                  emptySelectionAllowed: false,
+                  showSelectedIcon: false,
+                  segments: [
+                    for (final m in BookReadingMode.values)
+                      ButtonSegment(
+                        value: m,
+                        label: Text(m.label, style: const TextStyle(fontSize: 12)),
+                      ),
+                  ],
+                  selected: {bookReadingPreferences!.readingMode},
+                  onSelectionChanged: (s) =>
+                      bookReadingPreferences!.setReadingMode(s.first),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '版心',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: semantics.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<double>(
+                  emptySelectionAllowed: false,
+                  showSelectedIcon: false,
+                  segments: [
+                    for (var i = 0; i < BookReadingPreferences.marginPresets.length; i++)
+                      ButtonSegment(
+                        value: BookReadingPreferences.marginPresets[i],
+                        label: Text(
+                          ['窄', '中', '宽'][i],
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                  ],
+                  selected: {bookReadingPreferences!.margin},
+                  onSelectionChanged: (s) =>
+                      bookReadingPreferences!.setMargin(s.first),
                 ),
                 const SizedBox(height: 12),
                 Text(
@@ -248,9 +305,11 @@ class SettingsScreen extends StatelessWidget {
                   spacing: 10,
                   runSpacing: 10,
                   children: [
-                    for (final t in ComicReadingTheme.values)
-                      _ReadingThemeChip(
-                        theme: t,
+                    for (final t in BookReadingTheme.values)
+                      ReadingThemeChip(
+                        background: Color(t.backgroundArgb),
+                        isDark: t.isDark,
+                        label: t.label,
                         selected:
                             bookReadingPreferences!.readingTheme == t,
                         onTap: () =>
@@ -269,68 +328,6 @@ class SettingsScreen extends StatelessWidget {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _ReadingThemeChip extends StatelessWidget {
-  const _ReadingThemeChip({
-    required this.theme,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final ComicReadingTheme theme;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
-    final bg = Color(theme.backgroundArgb);
-    final fg = theme.isDark ? const Color(0xFFF2F2F4) : const Color(0xFF1C1C1E);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          width: 88,
-          padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? accent : semantics.hairline,
-              width: selected ? 2 : 1,
-            ),
-          ),
-          child: Column(
-            children: [
-              Text(
-                'Aa',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: fg,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                theme.label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: fg.withValues(alpha: 0.85),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
