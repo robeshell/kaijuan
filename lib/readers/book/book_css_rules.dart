@@ -113,6 +113,11 @@ class BookCssRules {
       final parsed = _lengthToPixels(fontSize, baseFontSize);
       if (parsed != null) style = style.copyWith(fontSize: parsed);
     }
+    final family = props['font-family'];
+    if (family != null) {
+      final name = family.split(',').first.trim().replaceAll('"', '').replaceAll("'", '');
+      if (name.isNotEmpty) style = style.copyWith(fontFamily: name);
+    }
     return style;
   }
 

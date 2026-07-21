@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../presentation/controllers/book_reader_controller.dart';
 import '../../readers/book/book_epub.dart';
+import '../../readers/book/book_epub_fonts.dart';
 import '../../readers/book/book_footnotes.dart';
 import '../../readers/book/book_html_preprocessor.dart';
 import '../../readers/book/book_models.dart';
@@ -26,6 +27,7 @@ class FlutterHtmlBookEngineAdapter {
   BookEpubSession? _session;
   List<PreparedSection> _sections = const [];
   List<String> _packageStylesheets = const [];
+  Set<String> _loadedFontFamilies = const {};
   final _prepared = <int>{};
   final _prepareInflight = <int, Future<void>>{};
   final _byteCache = <String, Uint8List>{};
@@ -69,6 +71,10 @@ class FlutterHtmlBookEngineAdapter {
       _session = session;
       _sections = stubs;
       _packageStylesheets = await session.stylesheets();
+      _loadedFontFamilies = await BookEpubFonts.loadFromStylesheets(
+        session,
+        _packageStylesheets,
+      );
       _prepared.clear();
       _prepareInflight.clear();
       _byteCache.clear();
@@ -114,6 +120,15 @@ class FlutterHtmlBookEngineAdapter {
           final resolved = BookEpub.resolveHref(href, linkHref).path;
           final css = await session.readCss(resolved);
           if (css != null) sectionStylesheets.add(css);
+        }
+        if (sectionStylesheets.isNotEmpty) {
+          final extraFonts = await BookEpubFonts.loadFromStylesheets(
+            session,
+            sectionStylesheets,
+          );
+          if (extraFonts.isNotEmpty) {
+            _loadedFontFamilies = {..._loadedFontFamilies, ...extraFonts};
+          }
         }
         final preparedHtml = BookHtmlPreprocessor.prepareSection(
           rawHtml: rawHtml,
@@ -508,6 +523,7 @@ class FlutterHtmlBookEngineAdapter {
     _prepared.clear();
     _prepareInflight.clear();
     _packageStylesheets = const [];
+    _loadedFontFamilies = const {};
     _session = null;
   }
 

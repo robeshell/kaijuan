@@ -143,7 +143,7 @@ python3 tool/generate_brand_icons.py
 
 **图书引擎**：全端自研 reflow（不接 Readium）；`epub_pro` 解析 + `flutter_html` / 窗口分页。
 
-**图书 CSS 管线**：`BookEpubSession.stylesheets()` 包级 CSS 只加载一次；`ensureSectionPrepared` 解析节内 `<link rel="stylesheet">` → `PreparedSection.sectionStylesheets`；滚动由 `HtmlSectionView` 注入 `<style>`，翻页由 `BookCssRules` 做 class→样式映射（非完整 CSS 引擎）。用户阅读偏好仍覆盖 `body` 基准字号/行距/主题色。
+**图书 CSS 管线**：`BookEpubSession.stylesheets()` 包级 CSS 只加载一次；`ensureSectionPrepared` 解析节内 `<link rel="stylesheet">` → `PreparedSection.sectionStylesheets`；滚动由 `HtmlSectionView` 注入 `<style>`，翻页由 `BookCssRules` 做 class→样式映射（非完整 CSS 引擎）。`BookEpubFonts` 在打开书时解析 `@font-face` 并 `FontLoader` 注册嵌入字体。
 
 ---
 
