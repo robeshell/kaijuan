@@ -86,9 +86,7 @@ class _PagedModeViewState extends State<PagedModeView> {
       itemBuilder: (context, index) {
         final page = widget.result.pages[index];
         return Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: widget.pageSize.width * 0.06,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -110,9 +108,15 @@ class _PagedModeViewState extends State<PagedModeView> {
       case ImageBlock imageBlock:
         return _buildImage(imageBlock, fg);
       case RuleBlock _:
-        return Divider(
-          height: 24,
-          color: fg.withValues(alpha: 0.2),
+        return SizedBox(
+          height: 8,
+          child: Center(
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: fg.withValues(alpha: 0.2),
+            ),
+          ),
         );
       case TableBlock tableBlock:
         return Expanded(
