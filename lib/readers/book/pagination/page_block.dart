@@ -72,7 +72,11 @@ class TextBlock extends PageBlock {
   }
 
   /// Creates a new block from a subset of this block's text range.
-  TextBlock subBlock(int start, int end) {
+  TextBlock subBlock(
+    int start,
+    int end, {
+    double? paragraphSpacing,
+  }) {
     final sliced = <InlineRun>[];
     for (final range in _runRanges) {
       final overlapStart = start.clamp(range.start, range.end);
@@ -89,7 +93,7 @@ class TextBlock extends PageBlock {
     return TextBlock(
       runs: sliced,
       baseStyle: baseStyle,
-      paragraphSpacing: paragraphSpacing,
+      paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
     );
   }
 }

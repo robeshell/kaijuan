@@ -85,24 +85,34 @@ class FlutterHtmlBookEngineAdapter {
     final sectionIndex = readerController.sectionIndex;
     final progressInSection = readerController.progressInSection;
 
+    final safe = MediaQuery.paddingOf(context);
+    const chromeHeight = kBookReaderChromeBarHeight;
+    final contentInsets = EdgeInsets.only(
+      top: safe.top + chromeHeight,
+      bottom: safe.bottom + chromeHeight,
+    );
+
     return ColoredBox(
       color: Color(theme.backgroundArgb),
-      child: readerController.readingMode == BookReadingMode.page
-          ? _buildPagedView(context)
-          : ScrollModeView(
-              sections: _sections,
-              readBytes: _readBytes,
-              initialSection: sectionIndex,
-              initialProgress: progressInSection,
-              jumpTargetSection: _consumeJumpSection(),
-              onPositionChanged: (section, progress) {
-                readerController.reportPosition(section, progress);
-              },
-              fontSize: readerController.fontSize,
-              lineHeight: readerController.lineHeight,
-              margin: readerController.margin,
-              theme: theme,
-            ),
+      child: Padding(
+        padding: contentInsets,
+        child: readerController.readingMode == BookReadingMode.page
+            ? _buildPagedView(context)
+            : ScrollModeView(
+                sections: _sections,
+                readBytes: _readBytes,
+                initialSection: sectionIndex,
+                initialProgress: progressInSection,
+                jumpTargetSection: _consumeJumpSection(),
+                onPositionChanged: (section, progress) {
+                  readerController.reportPosition(section, progress);
+                },
+                fontSize: readerController.fontSize,
+                lineHeight: readerController.lineHeight,
+                margin: readerController.margin,
+                theme: theme,
+              ),
+      ),
     );
   }
 

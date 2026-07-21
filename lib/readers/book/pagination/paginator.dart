@@ -87,13 +87,16 @@ class Paginator {
 
     for (final block in blocks) {
       switch (block) {
-        case TextBlock _:
-          // For simplicity each text block starts on a fresh page to avoid
-          // having to measure partial-block fits.
-          if (currentBlocks.isNotEmpty) flushPage();
-          final blockPages = await _paginateTextBlock(block);
-          for (final sub in blockPages) {
-            pages.add(PageSpec([sub]));
+        case TextBlock textBlock:
+          final subBlocks = await _paginateTextBlock(textBlock);
+          for (final sub in subBlocks) {
+            final height = _textBlockHeight(sub) + sub.paragraphSpacing;
+            if (usedHeight + height > pageSize.height &&
+                currentBlocks.isNotEmpty) {
+              flushPage();
+            }
+            currentBlocks.add(sub);
+            usedHeight += height;
           }
         case ImageBlock imageBlock:
           final sized = await _resolveImageBlock(imageBlock);
@@ -104,7 +107,7 @@ class Paginator {
             flushPage();
           }
           currentBlocks.add(sized);
-          usedHeight += _imageHeight(sized) + block.paragraphSpacing;
+          usedHeight += height;
 
           if (usedHeight >= pageSize.height) {
             flushPage();
@@ -132,6 +135,31 @@ class Paginator {
     }
 
     flushPage();
+
+    if (pages.isEmpty) {
+      pages.add(
+        PageSpec([
+          TextBlock(
+            runs: [
+              InlineRun(
+                text: '本章无正文',
+                style: TextStyle(
+                  fontSize: fontSize,
+                  height: lineHeight,
+                  color: textColor,
+                ),
+              ),
+            ],
+            baseStyle: TextStyle(
+              fontSize: fontSize,
+              height: lineHeight,
+              color: textColor,
+            ),
+          ),
+        ]),
+      );
+    }
+
     return pages;
   }
 
@@ -186,8 +214,13 @@ class Paginator {
 
       final startRange = lineRanges[lineIndex];
       final endRange = lineRanges[lineEnd - 1];
+      final isLastPiece = lineEnd >= lineRanges.length;
       subBlocks.add(
-        block.subBlock(startRange.start, endRange.end),
+        block.subBlock(
+          startRange.start,
+          endRange.end,
+          paragraphSpacing: isLastPiece ? block.paragraphSpacing : 0,
+        ),
       );
 
       lineIndex = lineEnd;
@@ -237,6 +270,18 @@ class Paginator {
     final displayWidth = pageSize.width;
     final displayHeight = displayWidth / size.width * size.height;
     return math.min(displayHeight, pageSize.height);
+  }
+
+  double _textBlockHeight(TextBlock block) {
+    final painter = TextPainter(
+      text: block.span,
+      textDirection: TextDirection.ltr,
+      textScaler: textScaler,
+    )..layout(maxWidth: pageSize.width);
+    final metrics = painter.computeLineMetrics();
+    final height = metrics.fold(0.0, (sum, m) => sum + m.height);
+    painter.dispose();
+    return height;
   }
 
   static Future<Size?> _decodeImageSize(Uint8List bytes) async {
