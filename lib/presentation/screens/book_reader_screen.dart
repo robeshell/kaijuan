@@ -373,6 +373,7 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
             controller: _controller,
             initialTheme: _theme,
             initialFontSize: _fontSize,
+            initialReadingMode: ReadingMode.scroll,
             initialPosition: _initialPosition,
             onPositionChanged: _savePosition,
             showAppBar: false,
