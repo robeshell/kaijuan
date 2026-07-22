@@ -10,10 +10,13 @@
 | 产品功能、阶段、非目标 | [PRODUCT.md](./PRODUCT.md) |
 | 共享视觉 | [DESIGN_FOUNDATION.md](./DESIGN_FOUNDATION.md) |
 | 工程结构 / 单入口 / 数据沿用 | [ENGINEERING.md](./ENGINEERING.md) |
+| Anx Reader 全链路研究与取舍 | [research/anx-reader-architecture.md](./research/anx-reader-architecture.md) |
 | 某屏交互 | [specs/](./specs/) |
 | 给 Open Design | [opendesign/HANDOFF.md](./opendesign/HANDOFF.md) |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
 | 会话交接（易过期） | [dev-handoff.md](./dev-handoff.md) |
+
+> 当前交接状态（2026-07-22）：Foliate 大改造尚未提交，Android metadata probe 存在已定位的 `style.allowScript` 启动参数阻塞。接手前先读 [dev-handoff.md](./dev-handoff.md)。
 
 ## 目录树
 
@@ -24,6 +27,8 @@ docs/
   DESIGN_FOUNDATION.md       ← 视觉权威
   ENGINEERING.md             ← 工程骨架
   dev-handoff.md
+  research/
+    anx-reader-architecture.md
   specs/
     _TEMPLATE.md
     library.md / shelf.md / search.md / lists.md / collections.md

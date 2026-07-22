@@ -27,7 +27,8 @@
 ```
 
 - 导入扩展名：CBZ / ZIP / EPUB。  
-- EPUB 按内容自动路由：正文 → book；页图 → comic（`EpubImportRouter`）。  
+- Android SAF 不可靠识别 EPUB MIME；Android 文件选择器允许浏览全部文件，返回应用后再按扩展名严格接收 CBZ / ZIP / EPUB。其他平台继续在选择器阶段过滤扩展名。
+- EPUB 按内容自动路由：正文 → book；spine 抽样中绝大多数章节为低文字页图 → comic（`EpubImportRouter`）；普通封面和零散插图不参与漫画判定。
 - **书单**与**合集**入口文案、图标必须区分（列表 vs 拼贴盒）。
 
 ## 打开路由
@@ -46,6 +47,7 @@
 - **单本卡**：封面 + 两行标题；可选进度 / 格式角标。  
 - **合集卡**：单本卡同尺寸外框 + 内部小封面拼贴；见 collections.md。  
 - 空态文案：「导入 CBZ、ZIP 或 EPUB」，主按钮「导入」。  
+- 窄屏顶部不得复用桌面单行工具栏：书单 / 合集 / 布局 / 多选 / 导入保留为图标操作，搜索与排序下沉到下一行，禁止横向溢出。
 - Token 与间距见 DESIGN_FOUNDATION。
 
 ## 多选

@@ -4,7 +4,7 @@
 
 **目标**：一个 git 仓库，打出一个 **Kaika** 本地阅读 App；内部同时包含漫画页图引擎与图书 reflow 引擎。
 
-当前仓库已切换到 **单 App 入口**；原双 flavor 正在最小化收口。
+当前仓库已切换到 **单 App 入口**；Android 已移除 product flavor，Apple 端旧 scheme 继续逐步收口。
 
 ---
 
@@ -17,7 +17,7 @@ KaikaNext/                          # 仓库名
     main.dart                       # 唯一入口
     main_comic.dart / main_book.dart # 兼容重定向到 main
     brand/brand_config.dart         # 单 App 配置
-    library/import/                 # ComicImportService + BookImportService + EpubImportRouter
+    library/import/                 # 格式判定、内容寻址、元数据、DB 提交
     readers/comic/                  # 页图引擎
     readers/book/                   # reflow 引擎
     presentation/                   # UI / controllers
@@ -49,7 +49,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 ## 2. 过渡形态（当前）
 
 - `lib/main.dart` 是唯一入口。
-- `lib/main_comic.dart` / `lib/main_book.dart` 重定向到 `bootstrap()`，保证旧 `--flavor` / `-t` 调用仍能编译运行同一 App。
+- `lib/main_comic.dart` / `lib/main_book.dart` 重定向到 `bootstrap()`，仅兼容旧 `-t` 入口；Android 不再接受 `--flavor comic/book`。
 - `BrandConfig.app` 单例；`AppBrand` enum 已移除。
 - 数据沿用 `app_library` + support root，**不**迁移旧 `book_library`。
 
@@ -67,6 +67,46 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 | EpubImportRouter | | |
 
 禁止：core 依赖某个品牌文案；image 引擎包 import book 引擎（仅 import service / router 可桥接）。
+
+### 图书排版实现
+
+- EPUB 正文采用 Anx Reader 维护的 MIT `foliate-js` 内核，经 `flutter_inappwebview` 承载；保留其 Paginator 的章节按需挂载、手势方向锁定、跟手滚动、200–300ms 吸附动画和 ResizeObserver 重排，不再维护 Kaika 自有分页器。
+- 禁止在 Dart UI isolate 上用 `TextPainter` 预分页整章、邻章或整本。系统 WebView 的 HTML/CSS columns 负责 reflow，Dart 只维护 locator、偏好和 chrome。
+- EPUB 与 `foliate-js` 静态资源由只绑定 `127.0.0.1` 的临时 HTTP server 流式提供；前端按 Anx Reader 的 `fetch → File → zip.js BlobReader` 链路打开，禁止 Dart `readAsBytes` 后展开成 JavaScript 整数数组。
+- WebView 实例在普通尺寸变化时保持存活，由 foliate Paginator 的 ResizeObserver 以当前 anchor/CFI 重排。尺寸/生命周期切换开始时先冻结最后一个稳定 CFI，并忽略离屏或零尺寸阶段的 relocation。部分 Android 折叠屏切换物理显示器时系统会主动终止 WebView renderer；adapter 必须移除失效 WebView，并在 resumed 后用冻结的 CFI 重建，不能继续调用已死亡的 renderer。
+- 首次打开只能由 `View.init(lastLocation)` 发起一次定位；空 CFI 不得额外并发调用 `renderer.next()`，否则 Android WebView 会同时创建两个章节 iframe，形成 ResizeObserver/分页重排竞争。
+- 引入或修改的 BSD / MIT / Apache 源码与依赖必须保留许可证声明；应用业务层继续自有，开源 renderer 通过 adapter 接入 controller。
+
+完整的 Anx 导入、打开、阅读和 App 分层对照见 [research/anx-reader-architecture.md](./research/anx-reader-architecture.md)。核心取舍是复用 Foliate 的格式/rendition 语义，不复制 Anx 的 UI、DAO 直连或全局 service 组织。
+
+### 图书全链路边界
+
+| 边界 | 职责 | 禁止 |
+|---|---|---|
+| `EpubImportRouter` | 有界抽样，判定 book/comic | 整本 `readAsBytes()`、写 DB、弹 UI |
+| `BookImportService` | hash、内容落盘、metadata、事务提交 | 构建阅读 WebView、持有 screen context |
+| `BookReaderController` | locator、书签、偏好、chrome、持久化 | 解析 EPUB、操作 DOM、直写 renderer 状态 |
+| `FoliateJsBookEngineAdapter` | controller 与 typed Foliate event 的适配 | 直连 drift、承载书库业务 |
+| `BookRenditionSession` | 单书 loopback、WebView generation lease、阶段耗时 | UI 状态、书签和偏好 |
+| `foliate-js` | EPUB 解析、TOC、CFI、reflow、输入 | 认识 Kaika 数据表和导航层 |
+
+导入与阅读统一使用 Foliate：导入阶段按 Anx Reader 的不可见 WebView 思路，通过 metadata-only 页面直接调用同一份 `foliate-js` EPUB package parser，读取 metadata、封面、spine 与有界正文样本，但不创建 `foliate-view` / Paginator；阅读阶段再由可见 rendition 打开。`epub_pro` 与旧 `BookEpub` 适配层删除，避免两套 EPUB 解析结果和兼容性边界不一致。导入 probe 必须有超时、错误回传和无条件 dispose，且不得进入阅读 controller。book/comic 判定必须基于 spine 抽样语义：只有绝大多数抽样章节同时“低文字且含页图”才路由漫画；封面或零散插图不得把正文 EPUB 判成漫画。
+
+### 导入提交协议
+
+```text
+source
+  → 单次流式复制到 .import-staging，同时计算 SHA-256
+  → 在 staging 文件上完成 kind/metadata/page list/cover
+  → 内容与封面按 hash 原子 rename 到 library/covers
+  → AppDatabase upsert
+  → 任一步失败：删除 staging，并补偿删除本事务新建的 target
+```
+
+- staging、`library` 与 `covers` 必须位于同一个 support root，确保 rename 不跨文件系统。
+- rollback 只能删除当前事务实际创建的 target；同 hash 的既有文件不得删除。
+- 正式目录在解析完成前不可见半成品。文件提交后若 DB 写入失败，执行补偿回滚。
+- debug timing 分为 `foliate-probe`、`book`、`comic` 三条管线；至少标记 validated、content-staged、metadata/page-list、cover-staged、files-committed、database-committed 或 rolled-back。
 
 ---
 
@@ -88,6 +128,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 ```sh
 # 推荐
 flutter run -d macos
+flutter run -d <android-device>
 
 # 旧脚本兼容（brand 参数被忽略）
 tool/run_brand.sh comic
@@ -99,13 +140,13 @@ flutter run -t lib/main.dart
 
 macOS 日常开发不再强制 `--flavor comic`。若 Xcode scheme 仍绑定 flavor，可先用 `comic` scheme（显示名已改为 Kaika）；`book` scheme 标 deprecated。
 
-### 5.2 原生 flavor 最小收口（P2）
+### 5.2 原生 flavor 收口
 
-- Android：保留 `comic` productFlavor；`book` flavor 标 deprecated 或后续移除；applicationId 统一 `com.kaika.reader`；应用名 Kaika。
+- Android：**无 productFlavor**；普通 `flutter run` / `assembleDebug` 直接构建；namespace 与 applicationId 均为 `com.kaika.reader`，应用名 Kaika。
 - iOS/macOS：保留 `comic` scheme；`book` scheme 标 deprecated；App 显示名 Kaika。
 - 图标：`brands/icons/comic/master_1024.png` 继续作为 Kaika 图标源；`book` 目录可归档。
 
-完整收口（第二刀）：删除 `book` flavor/scheme/xcconfig/icon set。
+后续清理：删除 Apple 端 `book` scheme/xcconfig/icon set，以及 Android 已失效的旧 flavor 图标目录。
 
 ### 5.3 图标
 
@@ -125,7 +166,7 @@ python3 tool/generate_brand_icons.py
 4. **双 import service + EpubImportRouter** ✅
 5. **LibraryController 类型筛选 + 混排** ✅
 6. **UI 打开路径 / 设置 / 文案** ✅
-7. **原生 flavor 最小收口** — P2 可选
+7. **Apple 原生 scheme 收口** — P2 可选
 
 ---
 
@@ -139,11 +180,15 @@ python3 tool/generate_brand_icons.py
 | `LibraryController` | 双 service + `LibraryKindFilter` |
 | `AppDatabase.watchLibraryEntries([kind])` | 可选 kind 查询 |
 | `readers/comic/*` | 漫画页图引擎 |
-| `readers/book/*` | 图书 reflow：`epub_pro` 解析 + `flutter_html` / 分页渲染 |
+| `readers/book/*` | 图书 reflow：导入探测与阅读渲染统一使用 Anx Reader foliate-js + 系统 WebView |
 
-**图书引擎**：全端自研 reflow（不接 Readium）；`epub_pro` 解析 + `flutter_html` / 窗口分页。
+**图书引擎**：业务管线、locator 和输入适配保留 Kaika controller 边界；排版、分页和触摸交互复用 Anx Reader 的 foliate-js + 平台 WebView。
 
-**图书 CSS 管线**：`BookEpubSession.stylesheets()` 包级 CSS 只加载一次；`ensureSectionPrepared` 解析节内 `<link rel="stylesheet">` → `PreparedSection.sectionStylesheets`；滚动由 `HtmlSectionView` 注入 `<style>`，翻页由 `BookCssRules` 做 class→样式映射（非完整 CSS 引擎）。`BookEpubFonts` 在打开书时解析 `@font-face` 并 `FontLoader` 注册嵌入字体。
+**图书平台能力**：`BookReaderCapabilities` 是模式入口的单一判定；iOS / iPadOS / Android 开放滚动与翻页，macOS / Windows（以及非目标 Linux 桌面）仅开放翻页。controller 必须再次约束模式，不能只依赖设置 UI 隐藏。
+
+**阅读偏好入口**：漫画与图书偏好继续由各自 preferences 持久化，但只允许在对应阅读器内修改；App「设置」页不承载阅读模式、方向、字号、版心或阅读背景。
+
+**图书 CSS 管线**：foliate-js 在 WebView 中按 EPUB 原始路径加载章节 CSS、图片与嵌入字体；用户字号、行距、页边距和主题通过 Anx style bridge 覆盖内容基准。旧 `FlutterHtmlBookEngineAdapter` / Dart paginator / Dart pageMap 已删除，仓库只保留一条阅读渲染链。
 
 ---
 
