@@ -60,7 +60,7 @@ class BookReadingPreferences extends ChangeNotifier {
   static const double minFontSize = 14.0;
   static const double maxFontSize = 28.0;
 
-  static const double defaultLineHeight = 1.6;
+  static const double defaultLineHeight = 1.7;
   static const double minLineHeight = 1.2;
   static const double maxLineHeight = 2.2;
 

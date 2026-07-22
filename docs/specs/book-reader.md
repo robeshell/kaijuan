@@ -30,20 +30,39 @@
 
 EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版，滚动和翻页共用同一浏览器 CSS 实现。OPF / 章节样式、class、选择器、媒体查询、图片与 `@font-face` 均按包内相对路径解析；用户字号、行距、页边距和阅读主题通过 style bridge 覆盖内容基准。不在 Dart 中维护第二套 CSS 解析器。
 
+### Kaika 阅读基线（覆盖作者默认）
+
+默认 `useBookStyles: false`：Kaika 注入的阅读 CSS **强制**覆盖作者默认字体、段首缩进、段距、正文色与链接色；EPUB class 的粗体 / 斜体等局部强调仍可生效。版式手感对齐微信读书：宽版心、上下留白、页眉页脚弱信息。
+
+| 项 | 默认 |
+|----|------|
+| 字体 | PingFang SC → Hiragino Sans GB → Noto Sans SC → Microsoft YaHei → `sans-serif` |
+| 纸白主题 | 背景 `#F7F7F7`、正文 `#333333` |
+| 段首缩进 | `2em` |
+| 段距 | 约 `0.35`（缩进为主，略留气口） |
+| 行距 | 偏好默认 `1.7` |
+| 移动端侧边距 | Foliate `gap` 约 `8%–16%`（**每侧 = gap/2**；默认 margin=24 → gap≈10% → 每侧约 5%） |
+| 桌面侧边距 | `gap` 约 `4%–8%`；宽屏仍可自动双栏 |
+| 上下边距 | 移动 `safeArea ± 50`；桌面上 `safeAreaTop + 52`、下 `safeAreaBottom + 32` |
+| 页眉 | 左上当前章节（TOC label），弱灰常显；交互 chrome 打开时淡出 |
+| 页脚 | 右下全书进度 `当前页 / 总页`（Foliate location；无则百分比） |
+| 链接 / 标题色 | 主题 `linkColor` / `headingColor` |
+| `@font-face` | 仅当用户提供 `fontPath` 时写入；系统字体栈不伪造空 face |
+
 ### 阅读主题 token（Readium 启发）
 
 阅读主题与 App chrome 独立；token 级取值参考 Readium CSS，**不**整包注入 Readium 样式表。
 
 | 主题 | 背景 | 正文 | 链接 | 标题（略柔于正文） |
 |------|------|------|------|-------------------|
-| paper | `#FFFFFF` | `#121212` | `#1A0DAB` | `#2A2A2A` |
+| paper | `#F7F7F7` | `#333333` | `#1A0DAB` | `#2A2A2A` |
 | sepia | `#FAF4E8` | `#5F4B32` | `#6B5344` | `#4A3A28` |
 | dark | `#121212` | `#B0B0B0` | `#63CAFF` | `#CCCCCC` |
 | pureBlack | `#000000` | `#FEFEFE` | `#63CAFF` | `#E8E8E8` |
 
-- **正文字体**：Georgia → Charter / Palatino → PingFang SC / Songti SC / Noto Serif SC → `serif`（Latin serif + CJK 系统衬线 fallback）。
+- **正文字体**：见上表 Kaika 基线；经 Foliate `fontName` 注入完整 CSS 列表。
 - **链接**：使用主题 `linkColor`；脚注上标仍弱化、无下划线。
-- **用户字号 / 行距 / 边距**仍覆盖 `body` 基准；主题色覆盖作者 CSS 的正文/链接/标题默认（EPUB class 粗体、缩进等仍生效）。
+- **用户字号 / 行距 / 边距**仍覆盖 `body` 基准；主题色覆盖作者 CSS 的正文/链接/标题默认。
 
 ### 标题默认比例（相对用户字号）
 

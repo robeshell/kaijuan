@@ -654,6 +654,8 @@ const getCSS = ({ fontSize,
   paragraphSpacing,
   fontColor,
   backgroundColor,
+  linkColor,
+  headingColor,
   justify,
   textAlign,
   hyphenate,
@@ -664,6 +666,8 @@ const getCSS = ({ fontSize,
   customCSSEnabled,
   useBookStyles,
   headingFontSize,
+  headingScales,
+  headingMargins,
   codeHighlightTheme
 }) => {
 
@@ -677,15 +681,44 @@ const getCSS = ({ fontSize,
   // controls apply consistently across the whole reading surface.
   const backgroundImageCSS = 'background: none !important;'
 
+  const fontFaceCSS = fontPath
+    ? `@font-face {
+      font-family: ${fontName};
+      src: url('${fontPath}');
+      font-display: swap;
+    }`
+    : ''
+
+  const scales = headingScales || {
+    h1: 1.75, h2: 1.45, h3: 1.25, h4: 1.15, h5: 1.10, h6: 1.05,
+  }
+  const margins = headingMargins || {
+    h1: { top: 1.4, bottom: 0.9 },
+    h2: { top: 1.2, bottom: 0.75 },
+    h3: { top: 1.0, bottom: 0.6 },
+    h4: { top: 0.8, bottom: 0.5 },
+    h5: { top: 0.7, bottom: 0.45 },
+    h6: { top: 0.6, bottom: 0.4 },
+  }
+  const headingMultiplier = headingFontSize ?? 1
+  const headingLineHeight = Math.max(1.25, (spacing ?? 1.7) * 0.9)
+  const resolvedLinkColor = linkColor || fontColor
+  const resolvedHeadingColor = headingColor || fontColor
+
+  const headingRule = (tag) => `
+    ${tag} {
+        font-size: calc(${scales[tag]}em * ${headingMultiplier}) !important;
+        line-height: ${headingLineHeight} !important;
+        margin-block-start: ${margins[tag].top}rem !important;
+        margin-block-end: ${margins[tag].bottom}rem !important;
+        font-weight: bold !important;
+        color: ${resolvedHeadingColor} !important;
+    }`
 
   // Some CSS selectors are inspired by https://github.com/readest/foliate-js
   return `
     @namespace epub "http://www.idpf.org/2007/ops";
-    @font-face {
-      font-family: ${fontName};
-      src: url('${fontPath}');
-      font-display: swap;
-    }
+    ${fontFaceCSS}
 
     html {
         ${writingModeCSS}
@@ -720,8 +753,9 @@ const getCSS = ({ fontSize,
         // width: initial !important;
     }
 
-    a:link {
-        color:rgb(167, 96, 52) !important;
+    a:link,
+    a:visited {
+        color: ${resolvedLinkColor} !important;
     }
     
     a > img {
@@ -734,30 +768,12 @@ const getCSS = ({ fontSize,
     }
 
     ${useBookStyles ? '' : `
-    h1 { 
-        font-size: calc(2em * ${headingFontSize}) !important; 
-        line-height: ${spacing} !important;
-    }
-    h2 { 
-        font-size: calc(1.5em * ${headingFontSize}) !important; 
-        line-height: ${spacing} !important;
-    }
-    h3 { 
-        font-size: calc(1.17em * ${headingFontSize}) !important; 
-        line-height: ${spacing} !important;
-    }
-    h4 { 
-        font-size: calc(1em * ${headingFontSize}) !important; 
-        line-height: ${spacing} !important;
-    }
-    h5 { 
-        font-size: calc(0.83em * ${headingFontSize}) !important; 
-        line-height: ${spacing} !important;
-    }
-    h6 { 
-        font-size: calc(0.67em * ${headingFontSize}) !important; 
-        line-height: ${spacing} !important;
-    }
+    ${headingRule('h1')}
+    ${headingRule('h2')}
+    ${headingRule('h3')}
+    ${headingRule('h4')}
+    ${headingRule('h5')}
+    ${headingRule('h6')}
     `}
 
     p, li, blockquote, dd, div:not(:has(*:not(b, a, em, i, strong, u, span))), font {
@@ -974,126 +990,11 @@ const readingFeaturesDocHandler = (doc) => {
 
 
 const footnoteDialog = document.getElementById('footnote-dialog')
-const footnoteBackdrop = document.getElementById('footnote-backdrop')
-
-const isFootnoteVisible = () => footnoteDialog.classList.contains('is-visible')
-
-const applyFootnoteTheme = () => {
-  const bg = style.backgroundColor || '#FFFFFF'
-  const hex = bg.length >= 7 ? bg.slice(0, 7) : '#FFFFFF'
-  footnoteDialog.style.backgroundColor = `${hex}F5`
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  const isDark = luminance < 0.5
-  footnoteDialog.style.setProperty(
-    '--footnote-border',
-    isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)',
-  )
-  footnoteDialog.style.setProperty(
-    '--footnote-shadow',
-    isDark
-      ? '0 12px 40px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.25)'
-      : '0 12px 40px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06)',
-  )
-  if (footnoteBackdrop) {
-    footnoteBackdrop.style.background = isDark
-      ? 'rgba(0, 0, 0, 0.45)'
-      : 'rgba(0, 0, 0, 0.18)'
-  }
-}
-
-const getFootnoteMaxHeightPx = () =>
-  Math.min(window.innerHeight * 0.58, 340)
-
-const getFootnoteMainPadding = () => {
-  const main = footnoteDialog.querySelector('main')
-  if (!main) return 0
-  const computed = getComputedStyle(main)
-  return parseFloat(computed.paddingTop) + parseFloat(computed.paddingBottom)
-}
-
-const measureFootnoteContentHeight = (view) => {
-  const contents = view?.renderer?.getContents?.()
-  const doc = contents?.[0]?.doc
-  if (!doc) return 0
-  return Math.ceil(
-    doc.documentElement.scrollHeight || doc.body.scrollHeight || 0,
-  )
-}
-
-const fitFootnoteDialogToContent = () => {
-  const main = footnoteDialog.querySelector('main')
-  const view = main?.querySelector('foliate-view')
-  if (!main || !view) return
-
-  const maxTotal = getFootnoteMaxHeightPx()
-  const padding = getFootnoteMainPadding()
-  const maxContent = Math.max(maxTotal - padding, 48)
-  const contentHeight = measureFootnoteContentHeight(view)
-  if (!contentHeight) return
-
-  if (contentHeight <= maxContent) {
-    view.style.height = `${contentHeight}px`
-    main.style.height = `${contentHeight}px`
-    main.style.maxHeight = ''
-    main.style.overflowY = 'hidden'
-    footnoteDialog.style.height = `${contentHeight + padding}px`
-  } else {
-    view.style.height = `${contentHeight}px`
-    main.style.height = `${maxContent}px`
-    main.style.maxHeight = `${maxContent}px`
-    main.style.overflowY = 'auto'
-    footnoteDialog.style.height = `${maxTotal}px`
-  }
-  footnoteDialog.style.maxHeight = `${maxTotal}px`
-}
-
-const resetFootnoteDialogSize = () => {
-  footnoteDialog.style.height = ''
-  footnoteDialog.style.maxHeight = ''
-  const main = footnoteDialog.querySelector('main')
-  const view = main?.querySelector('foliate-view')
-  if (main) {
-    main.style.height = ''
-    main.style.maxHeight = ''
-    main.style.overflowY = ''
-  }
-  if (view) view.style.height = ''
-}
-
-const relayoutFootnoteView = () => {
-  const view = footnoteDialog.querySelector('main foliate-view')
-  view?.renderer?.render?.()
-  requestAnimationFrame(() => {
-    fitFootnoteDialogToContent()
-    const doc = view?.renderer?.getContents?.()?.[0]?.doc
-    doc?.fonts?.ready?.then(() => fitFootnoteDialogToContent())
-  })
-}
-
-const showFootnoteDialog = () => {
-  applyFootnoteTheme()
-  footnoteDialog.style.display = 'flex'
-  footnoteBackdrop?.classList.add('is-visible')
-  footnoteDialog.classList.add('is-visible')
-  requestAnimationFrame(() => {
-    relayoutFootnoteView()
-  })
-}
-
-const hideFootnoteDialog = () => {
-  footnoteBackdrop?.classList.remove('is-visible')
-  footnoteDialog.classList.remove('is-visible')
-  footnoteDialog.style.display = 'none'
-  resetFootnoteDialogSize()
-  callFlutter('onFootnoteClose')
-}
-
 footnoteDialog.style.display = 'none'
-footnoteBackdrop?.addEventListener('click', hideFootnoteDialog)
-footnoteDialog.addEventListener('click', () => hideFootnoteDialog())
+footnoteDialog.addEventListener('click', () => {
+  footnoteDialog.style.display = 'none'
+  callFlutter('onFootnoteClose')
+})
 
 const replaceFootnote = (view) => {
   clearSelection()
@@ -1107,7 +1008,10 @@ const replaceFootnote = (view) => {
     readingFeaturesDocHandler(doc)
     doc.__isFootNote = true
 
-    setTimeout(() => showFootnoteDialog(), 0)
+    setTimeout(() => {
+      const dialog = document.getElementById('footnote-dialog')
+      dialog.style.display = 'block'
+    }, 0)
   })
 
   const { renderer } = view
@@ -1121,9 +1025,12 @@ const replaceFootnote = (view) => {
     fontPath: style.fontPath,
     letterSpacing: style.letterSpacing,
     spacing: style.spacing,
+    paragraphSpacing: style.paragraphSpacing,
     textIndent: style.textIndent,
     fontColor: style.fontColor,
     backgroundColor: 'transparent',
+    linkColor: style.linkColor,
+    headingColor: style.headingColor,
     justify: true,
     textAlign: style.textAlign,
     hyphenate: true,
@@ -1132,10 +1039,14 @@ const replaceFootnote = (view) => {
     writingMode: style.writingMode,
     useBookStyles: style.useBookStyles,
     headingFontSize: style.headingFontSize,
+    headingScales: style.headingScales,
+    headingMargins: style.headingMargins,
   }
   renderer.setStyles(getCSS(footNoteStyle))
-  applyFootnoteTheme()
+  footnoteDialog.style.backgroundColor = style.backgroundColor.slice(0, 7) + '33'
 }
+footnoteDialog.addEventListener('click', e =>
+  e.target === footnoteDialog ? footnoteDialog.close?.() : null)
 
 class Reader {
   annotations = new Map()
@@ -1159,7 +1070,7 @@ class Reader {
       replaceFootnote(view)
     })
     this.#footnoteHandler.addEventListener('render', e => {
-      showFootnoteDialog()
+      footnoteDialog.showModal?.()
     })
     this.#originalContent = null
   }
@@ -1782,6 +1693,8 @@ const setStyle = (oldStyle) => {
     textIndent: style.textIndent,
     fontColor: style.fontColor,
     backgroundColor: style.backgroundColor,
+    linkColor: style.linkColor,
+    headingColor: style.headingColor,
     justify: style.justify,
     textAlign: style.textAlign,
     hyphenate: style.hyphenate,
@@ -1791,12 +1704,14 @@ const setStyle = (oldStyle) => {
     customCSS: style.customCSS,
     customCSSEnabled: style.customCSSEnabled,
     useBookStyles: style.useBookStyles,
-    headingFontSize: style.headingFontSize
+    headingFontSize: style.headingFontSize,
+    headingScales: style.headingScales,
+    headingMargins: style.headingMargins,
   }
   reader.view.renderer.setStyles?.(getCSS(newStyle))
 
-  if (!style.useBookStyles && style.fontColor) {
-    fixHeadingColor(style.fontColor)
+  if (!style.useBookStyles && (style.headingColor || style.fontColor)) {
+    fixHeadingColor(style.headingColor || style.fontColor)
   }
 
   if (!oldStyle) {
@@ -2110,9 +2025,12 @@ window.getChapterContentByHref = async (href, opts) =>
 
 // window.bionicReading = (enable) => reader.bionicReading(enable)
 
-window.isFootNoteOpen = () => isFootnoteVisible()
+window.isFootNoteOpen = () => footnoteDialog.getAttribute('style').includes('display: block')
 
-window.closeFootNote = () => hideFootnoteDialog()
+window.closeFootNote = () => {
+  footnoteDialog.style.display = 'none'
+  callFlutter('onFootnoteClose')
+}
 
 window.readingFeatures = (rules) => {
   readingRules = { ...readingRules, ...rules }

@@ -71,6 +71,9 @@ class BookReaderController extends ChangeNotifier {
   VoidCallback? _externalPreviousPage;
   String? _renditionCfi;
   double? _renditionProgress;
+  String? _chapterTitle;
+  int? _bookCurrentPage;
+  int? _bookTotalPages;
 
   // ------------------------------------------------------------------
   // Getters
@@ -135,6 +138,28 @@ class BookReaderController extends ChangeNotifier {
   String get progressPercentLabel {
     final pct = (progressFraction * 100).toStringAsFixed(1);
     return '$pct%';
+  }
+
+  /// Current TOC chapter for the WeChat-style page meta (top-left).
+  String get currentChapterTitle {
+    final live = _chapterTitle?.trim();
+    if (live != null && live.isNotEmpty) return live;
+    if (_sectionIndex >= 0 && _sectionIndex < _tocTitles.length) {
+      final title = _tocTitles[_sectionIndex].trim();
+      if (title.isNotEmpty) return title;
+    }
+    return item.title;
+  }
+
+  /// Whole-book progress for the WeChat-style page meta (bottom-right).
+  /// Prefers Foliate location pages (`20 / 5856`); falls back to percent.
+  String get bookProgressLabel {
+    final current = _bookCurrentPage;
+    final total = _bookTotalPages;
+    if (current != null && total != null && total > 0) {
+      return '$current / $total';
+    }
+    return progressPercentLabel;
   }
 
   double get progressFraction {
@@ -216,6 +241,9 @@ class BookReaderController extends ChangeNotifier {
     required int sectionIndex,
     required double progress,
     required String cfi,
+    String? chapterTitle,
+    int? bookCurrentPage,
+    int? bookTotalPages,
   }) {
     if (_disposed || sectionCount <= 0) return;
     final nextSection = sectionIndex.clamp(0, sectionCount - 1);
@@ -228,6 +256,15 @@ class BookReaderController extends ChangeNotifier {
     _progressInSection = estimatedLocal;
     _renditionProgress = global;
     _renditionCfi = cfi;
+    if (chapterTitle != null && chapterTitle.trim().isNotEmpty) {
+      _chapterTitle = chapterTitle.trim();
+    }
+    if (bookCurrentPage != null && bookCurrentPage > 0) {
+      _bookCurrentPage = bookCurrentPage;
+    }
+    if (bookTotalPages != null && bookTotalPages > 0) {
+      _bookTotalPages = bookTotalPages;
+    }
     _pendingJumpLocator = null;
     notifyListeners();
     _debouncedPersist();

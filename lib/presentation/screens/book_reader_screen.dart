@@ -11,6 +11,7 @@ import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
 import '../controllers/book_reader_controller.dart';
+import '../widgets/reader/book_page_meta_overlay.dart';
 import '../widgets/reader/book_reader_chrome.dart';
 
 /// Full-screen reflow book reader.
@@ -256,7 +257,8 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                           },
                         ),
                       ),
-                    if (_controller.isReady && !_showReveal)
+                    if (_controller.isReady && !_showReveal) ...[
+                      BookPageMetaOverlay(controller: _controller),
                       IgnorePointer(
                         ignoring: !_controller.chromeVisible,
                         child: AnimatedOpacity(
@@ -270,6 +272,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                           ),
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),

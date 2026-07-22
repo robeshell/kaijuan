@@ -272,6 +272,9 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       sectionIndex: sectionIndex.clamp(0, _sectionHrefs.length - 1),
       progress: relocation.percentage,
       cfi: relocation.cfi,
+      chapterTitle: relocation.chapterTitle,
+      bookCurrentPage: relocation.bookCurrentPage,
+      bookTotalPages: relocation.bookTotalPages,
     );
   }
 
@@ -394,26 +397,41 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
         : readerController.pageTurnEffect.resolved == BookPageTurnEffect.none
         ? 'noAnimation'
         : 'slide';
+    final mobile = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.android);
+    // Foliate `gap` is the TOTAL gutter; each side gets gap/2 in padding.
+    // Mobile: ~5% per side at margin=24. Desktop: milder — single column is
+    // already centered by the paginator grid, so large gap looks sparse.
+    final sideMargin = mobile
+        ? (6 + readerController.margin / 6).clamp(8.0, 16.0)
+        : (3 + readerController.margin / 8).clamp(4.0, 8.0);
+    // Meta band for chapter / progress. Phone needs more air; desktop less.
+    // Desktop top gets +20 so the chapter label sits clearer under the title bar.
+    final topMetaBand = mobile ? 50.0 : 52.0;
+    final bottomMetaBand = mobile ? 50.0 : 32.0;
     return {
       'fontSize': readerController.fontSize / 16,
-      'fontName': 'system',
+      // WeChat Reading–like sans stack for the default reading face.
+      'fontName': BookReadingTheme.cssReadingFontFamily,
       'fontPath': '',
       'fontWeight': 400,
       'letterSpacing': 0,
       'spacing': readerController.lineHeight,
-      'paragraphSpacing': 0.5,
-      'textIndent': 0,
+      // Indent + mild paragraph gap (WeChat-like air, not web-article gaps).
+      'paragraphSpacing': 0.35,
+      'textIndent': 2,
       'fontColor': _cssColor(Color(theme.foregroundArgb)),
       'backgroundColor': _cssColor(Color(theme.backgroundArgb)),
-      // Chrome overlays the page, so it must not consume a toolbar-height
-      // inset. Only the physical safe area plus a small reading gutter is
-      // stable across chrome visibility and foldable display changes.
-      'topMargin': _safeTop + 8,
-      'bottomMargin': _safeBottom + 8,
-      'sideMargin': (1 + readerController.margin / 8).clamp(2.0, 7.0),
+      'linkColor': _cssColor(Color(theme.linkColorArgb)),
+      'headingColor': _cssColor(Color(theme.headingColorArgb)),
+      'topMargin': _safeTop + topMetaBand,
+      'bottomMargin': _safeBottom + bottomMetaBand,
+      'sideMargin': sideMargin,
       'justify': true,
       'hyphenate': false,
       'pageTurnStyle': turnStyle,
+      // Keep Foliate auto columns (desktop may spread to two).
       'maxColumnCount': 0,
       'columnThreshold': 720,
       'writingMode': 'horizontal-tb',
@@ -427,6 +445,17 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       'customCSSEnabled': false,
       'useBookStyles': false,
       'headingFontSize': 1,
+      'headingScales': {
+        for (final tag in const ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+          tag: bookHeadingScale(tag),
+      },
+      'headingMargins': {
+        for (final tag in const ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+          tag: {
+            'top': bookHeadingMargins(tag, 1).top,
+            'bottom': bookHeadingMargins(tag, 1).bottom,
+          },
+      },
       'codeHighlightTheme': 'off',
     };
   }

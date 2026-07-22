@@ -142,10 +142,16 @@ class FoliateRelocation {
     required this.cfi,
     required this.percentage,
     this.chapterHref,
+    this.chapterTitle,
+    this.bookCurrentPage,
+    this.bookTotalPages,
   });
 
   final String cfi;
   final String? chapterHref;
+  final String? chapterTitle;
+  final int? bookCurrentPage;
+  final int? bookTotalPages;
   final double percentage;
 
   static FoliateRelocation? fromHandlerArguments(List<dynamic> arguments) {
@@ -158,11 +164,28 @@ class FoliateRelocation {
       String value => double.tryParse(value) ?? 0,
       _ => 0.0,
     };
+    final chapterTitle = payload['chapterTitle']?.toString().trim();
     return FoliateRelocation(
       cfi: cfi,
       chapterHref: payload['chapterHref']?.toString(),
+      chapterTitle: (chapterTitle == null || chapterTitle.isEmpty)
+          ? null
+          : chapterTitle,
+      bookCurrentPage: _positiveInt(payload['bookCurrentPage']),
+      bookTotalPages: _positiveInt(payload['bookTotalPages']),
       percentage: percentage.clamp(0.0, 1.0),
     );
+  }
+
+  static int? _positiveInt(Object? value) {
+    final parsed = switch (value) {
+      int number => number,
+      num number => number.toInt(),
+      String text => int.tryParse(text),
+      _ => null,
+    };
+    if (parsed == null || parsed <= 0) return null;
+    return parsed;
   }
 }
 

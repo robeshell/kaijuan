@@ -36,14 +36,15 @@ enum BookReadingTheme {
   };
 
   int get backgroundArgb => switch (this) {
-    paper => 0xFFFFFFFF,
+    // WeChat Reading–like off-white paper (not pure #FFF).
+    paper => 0xFFF7F7F7,
     sepia => 0xFFFAF4E8,
     dark => 0xFF121212,
     pureBlack => 0xFF000000,
   };
 
   int get foregroundArgb => switch (this) {
-    paper => 0xFF121212,
+    paper => 0xFF333333,
     sepia => 0xFF5F4B32,
     dark => 0xFFB0B0B0,
     pureBlack => 0xFFFEFEFE,
@@ -65,6 +66,14 @@ enum BookReadingTheme {
     pureBlack => 0xFFE8E8E8,
   };
 
+  /// Soft meta labels (chapter / progress) for page chrome.
+  int get metaColorArgb => switch (this) {
+    paper => 0xFF999999,
+    sepia => 0xFF9A8B78,
+    dark => 0xFF7A7A7A,
+    pureBlack => 0xFF6A6A6A,
+  };
+
   /// Primary serif for Latin body text (CJK via [serifFontFamilyFallback]).
   static const String serifFontFamily = 'Georgia';
 
@@ -78,6 +87,31 @@ enum BookReadingTheme {
     'Noto Serif SC',
     'serif',
   ];
+
+  /// WeChat Reading–like CJK sans stack for the default mobile reading feel.
+  static const List<String> sansFontFamily = [
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Noto Sans SC',
+    'Microsoft YaHei',
+    'system-ui',
+    'sans-serif',
+  ];
+
+  /// CSS `font-family` list for Foliate style injection (not bare `system-ui`).
+  static String get cssSerifFontFamily {
+    final names = <String>[serifFontFamily, ...serifFontFamilyFallback];
+    return names
+        .map((name) => name.contains(' ') ? '"$name"' : name)
+        .join(', ');
+  }
+
+  /// Default reading face: sans, matching 微信读书版心手感.
+  static String get cssReadingFontFamily {
+    return sansFontFamily
+        .map((name) => name.contains(' ') ? '"$name"' : name)
+        .join(', ');
+  }
 }
 
 /// Default heading scale and vertical rhythm (relative to user font size).

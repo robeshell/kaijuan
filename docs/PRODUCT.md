@@ -157,8 +157,8 @@ App 仍是三 Tab（宽屏 Rail / 窄屏 BottomBar）：
 | 纵向同步 / 双页步进 | **已有** | 漫画 |
 | Chrome 玻璃语言 | **已有** | 共享组件 |
 | 书签 UI | **已有** | 阅读器内添加/移除当前位置、列表跳转；漫画与图书共用存储契约 |
-| Reflow + 目录 + 字号/主题 | **已有（spike）** | 图书；iOS/iPadOS/Android 支持滚动与翻页，macOS/Windows 仅翻页 |
-| EPUB CSS 子集（滚动 + 翻页 class） | **近** | 图书 |
+| Reflow + 目录 + 字号/主题 | **已有** | 图书；iOS/iPadOS/Android 支持滚动与翻页，macOS/Windows 仅翻页 |
+| Kaika 阅读基线（字体/缩进/段距/链接色） | **已有** | 图书；覆盖作者默认，见 book-reader.md |
 | 划线笔记 | **远** | 偏图书 |
 
 ### 4.7 设置

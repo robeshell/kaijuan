@@ -191,7 +191,7 @@ python3 tool/generate_brand_icons.py
 
 **阅读偏好入口**：漫画与图书偏好继续由各自 preferences 持久化，但只允许在对应阅读器内修改；App「设置」页不承载阅读模式、方向、字号、版心或阅读背景。
 
-**图书 CSS 管线**：foliate-js 在 WebView 中按 EPUB 原始路径加载章节 CSS、图片与嵌入字体；用户字号、行距、页边距和主题通过 Anx style bridge 覆盖内容基准。旧 `FlutterHtmlBookEngineAdapter` / Dart paginator / Dart pageMap 已删除，仓库只保留一条阅读渲染链。
+**图书 CSS 管线**：foliate-js 在 WebView 中按 EPUB 原始路径加载章节 CSS、图片与嵌入字体；Kaika 通过 Anx style bridge 注入阅读基线（微信读书式黑体栈、宽版心侧边距、上下 meta 留白、`textIndent=2`、主题正文/链接/标题色、规格化标题倍率）。页眉章节 / 页脚全书页码由 Flutter `BookPageMetaOverlay` 叠在 Foliate 边距带上。空 `fontPath` 不写 `@font-face`。旧 `FlutterHtmlBookEngineAdapter` / Dart paginator / Dart pageMap 已删除，仓库只保留一条阅读渲染链。
 
 ---
 
