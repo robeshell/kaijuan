@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/persistence/app_database.dart';
 import 'presentation/controllers/library_controller.dart';
+import 'readers/book/book_loopback_server.dart';
 import 'readers/book/book_theme.dart';
 
 /// Single App bootstrap for Kaika.
@@ -31,6 +33,10 @@ Future<void> bootstrap() async {
   if (brand.storageNamespace.isNotEmpty) {
     await supportDir.create(recursive: true);
   }
+
+  await BookLoopbackServer.configureSupportDirectory(supportDir);
+  // Warm the shared Foliate origin before the first open/import.
+  unawaited(BookLoopbackServer.ensureStarted());
 
   final themePreferences = await ThemePreferences.load(
     supportDirectory: supportDir,

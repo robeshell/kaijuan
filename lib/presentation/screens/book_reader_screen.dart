@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,10 +15,9 @@ import '../widgets/reader/book_reader_chrome.dart';
 
 /// Full-screen reflow book reader.
 ///
-/// The screen itself is stateless: all reading state lives in
-/// [BookReaderController], and the actual rendering engine is provided by
-/// [FoliateJsBookEngineAdapter]. This mirrors the comic reader architecture while
-/// keeping WebView layout details outside the presentation layer.
+/// Open UX follows Apple Books: fitted cover on the reading backdrop, wait for
+/// Foliate, dissolve the cover into that backdrop, then ease the backdrop into
+/// the text.
 class BookReaderScreen extends StatefulWidget {
   const BookReaderScreen({
     super.key,
@@ -37,12 +37,19 @@ class BookReaderScreen extends StatefulWidget {
     BookReadingPreferences? readingPreferences,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => BookReaderScreen(
-          database: database,
-          item: item,
-          readingPreferences: readingPreferences,
-        ),
+      PageRouteBuilder<void>(
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return BookReaderScreen(
+            database: database,
+            item: item,
+            readingPreferences: readingPreferences,
+          );
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
       ),
     );
   }
@@ -51,11 +58,15 @@ class BookReaderScreen extends StatefulWidget {
   State<BookReaderScreen> createState() => _BookReaderScreenState();
 }
 
-class _BookReaderScreenState extends State<BookReaderScreen> {
+class _BookReaderScreenState extends State<BookReaderScreen>
+    with SingleTickerProviderStateMixin {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   late final BookReaderController _controller;
   late final FoliateJsBookEngineAdapter _engine;
   late final FocusNode _focusNode;
+  late final AnimationController _reveal;
+  bool _showReveal = true;
+  bool _revealStarted = false;
 
   @override
   void initState() {
@@ -76,11 +87,31 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     }
     _engine = FoliateJsBookEngineAdapter(readerController: _controller);
     _focusNode = FocusNode();
+    // Phase A (~first half): cover dissolves into reading backdrop.
+    // Phase B (~second half): backdrop eases away into the text.
+    _reveal = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 720),
+    );
+    _reveal.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        setState(() => _showReveal = false);
+      }
+    });
     _engine.attach();
     unawaited(_engine.open(widget.item.filePath));
   }
 
-  void _exit() => Navigator.of(context, rootNavigator: true).pop();
+  void _maybeStartReveal(bool contentReady) {
+    if (!contentReady || _revealStarted || !_showReveal) return;
+    _revealStarted = true;
+    unawaited(_reveal.forward());
+  }
+
+  void _exit() {
+    if (_controller.chromeVisible) _controller.hideChrome();
+    Navigator.of(context, rootNavigator: true).pop();
+  }
 
   void _openToc() => _scaffoldKey.currentState?.openDrawer();
 
@@ -164,10 +195,15 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
             }
 
             final contentReady = _controller.isReady && _engine.rendererReady;
+            if (contentReady && !_revealStarted && _showReveal) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _maybeStartReveal(true);
+              });
+            }
 
             return Focus(
               focusNode: _focusNode,
-              autofocus: contentReady,
+              autofocus: contentReady && !_showReveal,
               onKeyEvent: _handleKeyEvent,
               child: Scaffold(
                 key: _scaffoldKey,
@@ -178,12 +214,49 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                   fit: StackFit.expand,
                   children: [
                     _engine.buildView(context),
-                    if (!contentReady)
-                      ColoredBox(
-                        color: bg,
-                        child: const Center(child: CircularProgressIndicator()),
+                    if (_showReveal)
+                      IgnorePointer(
+                        child: AnimatedBuilder(
+                          animation: _reveal,
+                          builder: (context, _) {
+                            final coverT = Curves.easeOutCubic.transform(
+                              const Interval(
+                                0,
+                                0.52,
+                              ).transform(_reveal.value),
+                            );
+                            final pageT = Curves.easeInOut.transform(
+                              const Interval(
+                                0.48,
+                                1,
+                              ).transform(_reveal.value),
+                            );
+                            return Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                // Reading backdrop under the cover; holds until
+                                // the cover is gone, then eases into the text.
+                                Opacity(
+                                  opacity: (1 - pageT).clamp(0.0, 1.0),
+                                  child: ColoredBox(color: bg),
+                                ),
+                                Opacity(
+                                  opacity: (1 - coverT).clamp(0.0, 1.0),
+                                  child: Transform.scale(
+                                    scale: 1 + 0.1 * coverT,
+                                    filterQuality: FilterQuality.low,
+                                    child: _WaitingCover(
+                                      coverPath: widget.item.coverPath,
+                                      title: widget.item.title,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ),
-                    if (_controller.isReady)
+                    if (_controller.isReady && !_showReveal)
                       IgnorePointer(
                         ignoring: !_controller.chromeVisible,
                         child: AnimatedOpacity(
@@ -273,10 +346,66 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
 
   @override
   void dispose() {
+    _reveal.dispose();
     _focusNode.dispose();
     _engine.dispose();
     _controller.dispose();
     super.dispose();
+  }
+}
+
+/// Window-fitted cover art only — backdrop is painted by the reveal layer.
+class _WaitingCover extends StatelessWidget {
+  const _WaitingCover({
+    required this.coverPath,
+    required this.title,
+  });
+
+  final String? coverPath;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = coverPath;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 48),
+        child: Center(
+          child: path != null && path.isNotEmpty
+              ? Image.file(
+                  File(path),
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  errorBuilder: (_, _, _) => _TitleFallback(title: title),
+                )
+              : _TitleFallback(title: title),
+        ),
+      ),
+    );
+  }
+}
+
+class _TitleFallback extends StatelessWidget {
+  const _TitleFallback({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final semantics = Theme.of(context).extension<AppSemantics>();
+    final fg = semantics?.textPrimary ?? const Color(0xFF1C1C1E);
+    return Text(
+      title,
+      textAlign: TextAlign.center,
+      maxLines: 6,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: fg.withValues(alpha: 0.72),
+        fontSize: 28,
+        fontWeight: FontWeight.w600,
+        height: 1.25,
+      ),
+    );
   }
 }
 

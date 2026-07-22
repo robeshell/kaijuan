@@ -50,10 +50,6 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   Future<void> open(String filePath) async {
     final generation = ++_openGeneration;
     try {
-      final initialCfi =
-          (await readerController.loadInitialLocator())?.cfi ?? '';
-      if (_disposed || generation != _openGeneration) return;
-      _initialCfi = initialCfi;
       _webReady = false;
       _metadataAttached = false;
       _engineAttached = false;
@@ -64,12 +60,23 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       _webLease = null;
       final previous = _session;
       _session = null;
-      if (previous != null) await previous.close();
-      if (_disposed || generation != _openGeneration) return;
-      final session = await BookRenditionSession.open(
-        File(filePath),
-        onTiming: (timing) => debugPrint('[BookRendition] $timing'),
-      );
+      // Locator DB read and loopback mount run together so the first reader
+      // frame is not gated on a serial await chain.
+      final locatorFuture = readerController.loadInitialLocator();
+      final sessionFuture = () async {
+        if (previous != null) await previous.close();
+        return BookRenditionSession.open(
+          File(filePath),
+          onTiming: (timing) => debugPrint('[BookRendition] $timing'),
+        );
+      }();
+      final locator = await locatorFuture;
+      if (_disposed || generation != _openGeneration) {
+        await sessionFuture.then((session) => session.close());
+        return;
+      }
+      _initialCfi = locator?.cfi ?? '';
+      final session = await sessionFuture;
       if (_disposed || generation != _openGeneration) {
         await session.close();
         return;
@@ -93,14 +100,22 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   }
 
   Widget buildView(BuildContext context) {
+    final themeBg = Color(readerController.readingTheme.backgroundArgb);
     final session = _session;
     if (session == null) {
-      return const Center(child: CircularProgressIndicator());
+      // Match the reading canvas immediately; never flash a spinner hole.
+      return ColoredBox(color: themeBg);
     }
     final media = MediaQuery.of(context);
     _safeTop = media.viewPadding.top;
     _safeBottom = media.viewPadding.bottom;
-    return _FoliateJsEngineView(adapter: this, readerUri: _readerUri(session));
+    return ColoredBox(
+      color: themeBg,
+      child: _FoliateJsEngineView(
+        adapter: this,
+        readerUri: _readerUri(session),
+      ),
+    );
   }
 
   void openTocEntry(BookTocEntry entry) {
@@ -558,7 +573,6 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
         color: Color(
           widget.adapter.readerController.readingTheme.backgroundArgb,
         ),
-        child: const Center(child: CircularProgressIndicator()),
       );
     }
     return InAppWebView(

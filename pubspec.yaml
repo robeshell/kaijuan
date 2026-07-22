@@ -46,14 +46,14 @@ dependency_overrides:
 flutter:
   uses-material-design: true
   assets:
-    - assets/anx_reader/ANX_READER_LICENSE
-    - assets/anx_reader/ANX_READER_README.md
-    - assets/anx_reader/foliate-js/index.html
-    - assets/anx_reader/foliate-js/metadata-probe.html
-    - assets/anx_reader/foliate-js/dist/
-    - assets/anx_reader/foliate-js/src/
-    - assets/anx_reader/foliate-js/src/vendor/
-    - assets/anx_reader/foliate-js/src/vendor/pdfjs/
-    - assets/anx_reader/foliate-js/src/vendor/prism/
-    - assets/anx_reader/foliate-js/src/vendor/prism/components/
-    - assets/anx_reader/foliate-js/src/vendor/prism/themes/
+    - assets/book/FOLIATE_UPSTREAM_LICENSE
+    - assets/book/UPSTREAM_ATTRIBUTION.md
+    - assets/book/foliate-js/index.html
+    - assets/book/foliate-js/metadata-probe.html
+    - assets/book/foliate-js/dist/
+    - assets/book/foliate-js/src/
+    - assets/book/foliate-js/src/vendor/
+    - assets/book/foliate-js/src/vendor/pdfjs/
+    - assets/book/foliate-js/src/vendor/prism/
+    - assets/book/foliate-js/src/vendor/prism/components/
+    - assets/book/foliate-js/src/vendor/prism/themes/

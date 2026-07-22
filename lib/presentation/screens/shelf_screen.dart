@@ -122,9 +122,12 @@ class ShelfScreen extends StatelessWidget {
                       hairline: semantics.hairline,
                       muted: semantics.textSecondary,
                       cover: _FileOrFallbackCover(
+                        itemId: recent.first.item.id,
                         path: recent.first.item.coverPath,
+                        title: recent.first.item.title,
                       ),
-                      onTap: () => _openReal(context, recent.first.item),
+                      onTap: () =>
+                          _openReal(context, recent.first.item),
                     ),
                     if (recent.length > 1) ...[
                       const SizedBox(height: 32),
@@ -145,7 +148,9 @@ class ShelfScreen extends StatelessWidget {
                               accent: accent,
                               hairline: semantics.hairline,
                               cover: _FileOrFallbackCover(
+                                itemId: e.item.id,
                                 path: e.item.coverPath,
+                                title: e.item.title,
                               ),
                               onTap: () => _openReal(context, e.item),
                             );
@@ -173,7 +178,9 @@ class ShelfScreen extends StatelessWidget {
                             accent: accent,
                             hairline: semantics.hairline,
                             cover: _FileOrFallbackCover(
+                              itemId: item.id,
                               path: item.coverPath,
+                              title: item.title,
                             ),
                             onTap: () => _openReal(context, item),
                             onLongPress: () =>
@@ -426,8 +433,14 @@ class _CoverCard extends StatelessWidget {
 }
 
 class _FileOrFallbackCover extends StatelessWidget {
-  const _FileOrFallbackCover({required this.path});
+  const _FileOrFallbackCover({
+    required this.itemId,
+    required this.path,
+    required this.title,
+  });
+  final String itemId;
   final String? path;
+  final String title;
 
   @override
   Widget build(BuildContext context) {

@@ -16,8 +16,9 @@ abstract interface class EpubImportProbe {
 /// Opens an EPUB through the same Foliate parser used by the visible reader.
 ///
 /// This follows Anx Reader's import path: a short-lived headless WebView emits
-/// `onMetadata`, then both the WebView and loopback server are unconditionally
-/// disposed. It deliberately has no dependency on reader controllers or DB.
+/// `onMetadata`, then the WebView is disposed and the book mount is released.
+/// The shared loopback server stays warm for subsequent import/open. It
+/// deliberately has no dependency on reader controllers or DB.
 class FoliateJsImportProbe implements EpubImportProbe {
   const FoliateJsImportProbe({this.timeout = const Duration(seconds: 30)});
 

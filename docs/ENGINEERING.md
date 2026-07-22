@@ -72,12 +72,12 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 
 - EPUB 正文采用 Anx Reader 维护的 MIT `foliate-js` 内核，经 `flutter_inappwebview` 承载；保留其 Paginator 的章节按需挂载、手势方向锁定、跟手滚动、200–300ms 吸附动画和 ResizeObserver 重排，不再维护 Kaika 自有分页器。
 - 禁止在 Dart UI isolate 上用 `TextPainter` 预分页整章、邻章或整本。系统 WebView 的 HTML/CSS columns 负责 reflow，Dart 只维护 locator、偏好和 chrome。
-- EPUB 与 `foliate-js` 静态资源由只绑定 `127.0.0.1` 的临时 HTTP server 流式提供；前端按 Anx Reader 的 `fetch → File → zip.js BlobReader` 链路打开，禁止 Dart `readAsBytes` 后展开成 JavaScript 整数数组。
+- EPUB 与 `foliate-js` 静态资源由只绑定 `127.0.0.1` 的 **App 级共享** loopback server 流式提供；端口尽量复用并持久化，稳定 WebView origin 以便二次打开命中静态资源缓存。各阅读/导入 session 只挂载自己的 `/books/<id>.epub`，关闭时卸挂，不销毁共享 listener。前端按 Anx Reader 的 `fetch → File → zip.js BlobReader` 链路打开，禁止 Dart `readAsBytes` 后展开成 JavaScript 整数数组。
 - WebView 实例在普通尺寸变化时保持存活，由 foliate Paginator 的 ResizeObserver 以当前 anchor/CFI 重排。尺寸/生命周期切换开始时先冻结最后一个稳定 CFI，并忽略离屏或零尺寸阶段的 relocation。部分 Android 折叠屏切换物理显示器时系统会主动终止 WebView renderer；adapter 必须移除失效 WebView，并在 resumed 后用冻结的 CFI 重建，不能继续调用已死亡的 renderer。
 - 首次打开只能由 `View.init(lastLocation)` 发起一次定位；空 CFI 不得额外并发调用 `renderer.next()`，否则 Android WebView 会同时创建两个章节 iframe，形成 ResizeObserver/分页重排竞争。
 - 引入或修改的 BSD / MIT / Apache 源码与依赖必须保留许可证声明；应用业务层继续自有，开源 renderer 通过 adapter 接入 controller。
 
-完整的 Anx 导入、打开、阅读和 App 分层对照见 [research/anx-reader-architecture.md](./research/anx-reader-architecture.md)。核心取舍是复用 Foliate 的格式/rendition 语义，不复制 Anx 的 UI、DAO 直连或全局 service 组织。
+完整的 Anx 导入、打开、阅读和 App 分层对照见 [research/foliate-architecture.md](./research/foliate-architecture.md)。核心取舍是复用 Foliate 的格式/rendition 语义，不复制 Anx 的 UI、DAO 直连或全局 service 组织。
 
 ### 图书全链路边界
 
@@ -87,7 +87,8 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 | `BookImportService` | hash、内容落盘、metadata、事务提交 | 构建阅读 WebView、持有 screen context |
 | `BookReaderController` | locator、书签、偏好、chrome、持久化 | 解析 EPUB、操作 DOM、直写 renderer 状态 |
 | `FoliateJsBookEngineAdapter` | controller 与 typed Foliate event 的适配 | 直连 drift、承载书库业务 |
-| `BookRenditionSession` | 单书 loopback、WebView generation lease、阶段耗时 | UI 状态、书签和偏好 |
+| `BookLoopbackServer` | App 级 loopback、固定 origin、白名单资源与按 id 挂载书籍 | 接受客户端绝对路径、离开阅读器即杀 listener |
+| `BookRenditionSession` | 单书 mount、WebView generation lease、阶段耗时 | UI 状态、书签和偏好、独占销毁共享 server |
 | `foliate-js` | EPUB 解析、TOC、CFI、reflow、输入 | 认识 Kaika 数据表和导航层 |
 
 导入与阅读统一使用 Foliate：导入阶段按 Anx Reader 的不可见 WebView 思路，通过 metadata-only 页面直接调用同一份 `foliate-js` EPUB package parser，读取 metadata、封面、spine 与有界正文样本，但不创建 `foliate-view` / Paginator；阅读阶段再由可见 rendition 打开。`epub_pro` 与旧 `BookEpub` 适配层删除，避免两套 EPUB 解析结果和兼容性边界不一致。导入 probe 必须有超时、错误回传和无条件 dispose，且不得进入阅读 controller。book/comic 判定必须基于 spine 抽样语义：只有绝大多数抽样章节同时“低文字且含页图”才路由漫画；封面或零散插图不得把正文 EPUB 判成漫画。

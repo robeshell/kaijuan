@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaika/readers/book/book_loopback_server.dart';
 import 'package:kaika/readers/book/book_rendition_session.dart';
 
 void main() {
@@ -24,6 +25,7 @@ void main() {
       await session.close();
     }
     sessions.clear();
+    await BookLoopbackServer.debugStop();
     if (await tempDirectory.exists()) {
       await tempDirectory.delete(recursive: true);
     }
@@ -40,7 +42,7 @@ void main() {
     return session;
   }
 
-  test('loopback exposes only the fixed book route', () async {
+  test('loopback exposes only the mounted book route', () async {
     final session = await openSession();
     final client = HttpClient();
     addTearDown(client.close);
@@ -53,14 +55,73 @@ void main() {
     expect(response.statusCode, HttpStatus.ok);
     expect(response.headers.contentType?.mimeType, 'application/epub+zip');
     expect(bytes, await bookFile.readAsBytes());
+    expect(session.bookUri.path, matches(r'^/books/\d+\.epub$'));
 
     final missing = await (await client.getUrl(
       session.bookUri.resolve('/not-a-book.epub'),
     )).close();
     expect(missing.statusCode, HttpStatus.notFound);
 
+    final absolutePath = await (await client.getUrl(
+      session.bookUri.resolve('/book/${Uri.encodeComponent(bookFile.path)}'),
+    )).close();
+    expect(absolutePath.statusCode, HttpStatus.notFound);
+
     final post = await (await client.postUrl(session.bookUri)).close();
     expect(post.statusCode, HttpStatus.methodNotAllowed);
+  });
+
+  test('closing a session unmounts the book but keeps the shared origin', () async {
+    final first = await openSession();
+    final origin = first.indexUri.origin;
+    final bookUri = first.bookUri;
+    final client = HttpClient();
+    addTearDown(client.close);
+
+    await first.close();
+    sessions.remove(first);
+
+    final unmounted = await (await client.getUrl(bookUri)).close();
+    expect(unmounted.statusCode, HttpStatus.notFound);
+
+    final second = await openSession();
+    expect(second.indexUri.origin, origin);
+
+    final assets = await (await client.getUrl(second.indexUri)).close();
+    expect(assets.statusCode, HttpStatus.ok);
+  });
+
+  test('two sessions can mount different books on the shared server', () async {
+    final other = File('${tempDirectory.path}/other.epub');
+    await other.writeAsBytes([0x50, 0x4b, 0x03, 0x04, 9, 8, 7, 6]);
+
+    final first = await openSession();
+    final second = await BookRenditionSession.open(other);
+    sessions.add(second);
+    final client = HttpClient();
+    addTearDown(client.close);
+
+    expect(first.bookUri, isNot(second.bookUri));
+    expect(first.indexUri.origin, second.indexUri.origin);
+
+    final firstBytes = await (await client.getUrl(first.bookUri))
+        .close()
+        .then(
+          (response) => response.fold<List<int>>(
+            <int>[],
+            (all, chunk) => all..addAll(chunk),
+          ),
+        );
+    final secondBytes = await (await client.getUrl(second.bookUri))
+        .close()
+        .then(
+          (response) => response.fold<List<int>>(
+            <int>[],
+            (all, chunk) => all..addAll(chunk),
+          ),
+        );
+    expect(firstBytes, await bookFile.readAsBytes());
+    expect(secondBytes, await other.readAsBytes());
   });
 
   test(

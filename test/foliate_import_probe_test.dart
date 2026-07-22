@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaika/domain/reader_models.dart';
 import 'package:kaika/library/import/comic_archive.dart';
 import 'package:kaika/library/import/epub_import_router.dart';
+import 'package:kaika/readers/book/book_loopback_server.dart';
 import 'package:kaika/readers/book/book_rendition_session.dart';
 import 'package:kaika/readers/book/foliate_import_probe.dart';
 import 'package:kaika/readers/book/foliate_js_bridge.dart';
@@ -175,6 +176,7 @@ void main() {
       await session.close();
     }
     sessions.clear();
+    await BookLoopbackServer.debugStop();
     if (await tempRoot.exists()) {
       await tempRoot.delete(recursive: true);
     }
@@ -201,7 +203,7 @@ void main() {
 
   test('epub.js Loader no longer requires style query parameter', () {
     final loaderSource = File(
-      'assets/anx_reader/foliate-js/src/epub.js',
+      'assets/book/foliate-js/src/epub.js',
     ).readAsStringSync();
     expect(loaderSource, contains('styleParam'));
     expect(

@@ -63,6 +63,7 @@ class BookReaderController extends ChangeNotifier {
 
   Timer? _saveDebounce;
   BookLocator? _pendingJumpLocator;
+  String? _progressLocatorJson;
   List<ReaderBookmark> _bookmarks = const [];
   StreamSubscription<List<ReaderBookmark>>? _bookmarksSubscription;
 
@@ -154,8 +155,12 @@ class BookReaderController extends ChangeNotifier {
   /// Reads the native CFI before the WebView starts so the renderer can open
   /// directly at the saved position instead of painting page one and jumping.
   Future<BookLocator?> loadInitialLocator() async {
+    if (_progressLocatorJson != null) {
+      return BookLocator.tryDecode(_progressLocatorJson!);
+    }
     final row = await database.progressFor(item.id);
     if (row == null || _disposed) return null;
+    _progressLocatorJson = row.locatorJson;
     return BookLocator.tryDecode(row.locatorJson);
   }
 
@@ -241,18 +246,25 @@ class BookReaderController extends ChangeNotifier {
   // ------------------------------------------------------------------
 
   Future<BookLocator?> _restoreProgress(BookSectionMap map) async {
-    final row = await database.progressFor(item.id);
-    if (row == null || _disposed) return null;
+    // Reuse the locator JSON already loaded for the initial CFI so attach
+    // does not pay a second progressFor round-trip on every open.
+    var locatorJson = _progressLocatorJson;
+    if (locatorJson == null) {
+      final row = await database.progressFor(item.id);
+      if (row == null || _disposed) return null;
+      locatorJson = row.locatorJson;
+      _progressLocatorJson = locatorJson;
+    }
 
     BookLocator? locator;
 
     // 1. Native format.
     locator = BookLocator.tryDecode(
-      row.locatorJson,
+      locatorJson,
     )?.validated(sectionCount: map.sectionCount);
 
     // 2. Legacy katbook format migration (paragraphIndex/totalParagraphs).
-    locator ??= _tryMigrateLegacyLocator(row.locatorJson, map);
+    locator ??= _tryMigrateLegacyLocator(locatorJson, map);
 
     return _disposed ? null : locator;
   }

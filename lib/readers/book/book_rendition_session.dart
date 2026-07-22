@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
+
+import 'book_loopback_server.dart';
 
 typedef BookJavascriptEvaluator = Future<dynamic> Function(String source);
 typedef BookRenditionTimingListener = void Function(BookRenditionTiming timing);
@@ -24,23 +25,22 @@ class BookRenditionTiming {
       'delta=${sincePrevious.inMilliseconds}ms';
 }
 
-/// Owns one opened book's loopback input, active WebView lease and timings.
+/// Owns one opened book's mount, active WebView lease and timings.
 ///
-/// Every WebView attachment receives a monotonically increasing lease. Async
-/// callbacks must carry that lease; callbacks from a replaced renderer become
-/// harmless instead of mutating the next rendition.
+/// The HTTP listener is the shared [BookLoopbackServer]. Every WebView
+/// attachment receives a monotonically increasing lease. Async callbacks must
+/// carry that lease; callbacks from a replaced renderer become harmless
+/// instead of mutating the next rendition.
 class BookRenditionSession {
   BookRenditionSession._(
     this._server,
-    this._bookFile,
+    this._mountId,
     this._timingListener,
     this._clock,
   );
 
-  static const _assetRoot = 'assets/anx_reader/foliate-js/';
-
-  final HttpServer _server;
-  final File _bookFile;
+  final BookLoopbackServer _server;
+  final String _mountId;
   final BookRenditionTimingListener? _timingListener;
   final Stopwatch _clock;
   final List<BookRenditionTiming> _timings = [];
@@ -49,12 +49,9 @@ class BookRenditionSession {
   BookJavascriptEvaluator? _evaluator;
   bool _closed = false;
 
-  Uri get indexUri =>
-      Uri.parse('http://127.0.0.1:${_server.port}/foliate-js/index.html');
-  Uri get probeUri => Uri.parse(
-    'http://127.0.0.1:${_server.port}/foliate-js/metadata-probe.html',
-  );
-  Uri get bookUri => Uri.parse('http://127.0.0.1:${_server.port}/book.epub');
+  Uri get indexUri => _server.indexUri;
+  Uri get probeUri => _server.probeUri;
+  Uri get bookUri => _server.bookUriFor(_mountId);
   bool get isClosed => _closed;
   List<BookRenditionTiming> get timings => List.unmodifiable(_timings);
 
@@ -66,10 +63,10 @@ class BookRenditionSession {
       throw Exception('文件不存在：${bookFile.path}');
     }
     final clock = Stopwatch()..start();
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final session = BookRenditionSession._(server, bookFile, onTiming, clock);
+    final server = await BookLoopbackServer.ensureStarted();
+    final mountId = server.mount(bookFile);
+    final session = BookRenditionSession._(server, mountId, onTiming, clock);
     session.mark('server-ready');
-    unawaited(session._serve());
     return session;
   }
 
@@ -124,92 +121,13 @@ class BookRenditionSession {
     _timingListener?.call(timing);
   }
 
-  Future<void> _serve() async {
-    try {
-      await for (final request in _server) {
-        unawaited(_handle(request));
-      }
-    } on HttpException catch (_) {
-      // Expected when close(force: true) interrupts the accept loop.
-    }
-  }
-
-  Future<void> _handle(HttpRequest request) async {
-    final response = request.response;
-    response.headers.set('Access-Control-Allow-Origin', '*');
-    response.headers.set('X-Content-Type-Options', 'nosniff');
-    try {
-      if (request.method != 'GET' && request.method != 'HEAD') {
-        response.statusCode = HttpStatus.methodNotAllowed;
-      } else if (request.uri.path == '/book.epub') {
-        response.headers.contentType = ContentType('application', 'epub+zip');
-        response.contentLength = await _bookFile.length();
-        if (request.method == 'GET') {
-          await response.addStream(_bookFile.openRead());
-        }
-      } else if (request.uri.path.startsWith('/foliate-js/')) {
-        final relative = request.uri.path.substring('/foliate-js/'.length);
-        if (!_isSafeAssetPath(relative)) {
-          response.statusCode = HttpStatus.notFound;
-        } else {
-          final data = await rootBundle.load('$_assetRoot$relative');
-          final bytes = data.buffer.asUint8List(
-            data.offsetInBytes,
-            data.lengthInBytes,
-          );
-          response.headers.contentType = ContentType.parse(
-            _contentTypeFor(relative),
-          );
-          response.headers.set('Cache-Control', 'public, max-age=3600');
-          response.contentLength = bytes.length;
-          if (request.method == 'GET') response.add(bytes);
-        }
-      } else {
-        response.statusCode = HttpStatus.notFound;
-      }
-    } catch (error) {
-      debugPrint('[BookRendition] loopback request failed: $error');
-      try {
-        response.statusCode = HttpStatus.notFound;
-      } on StateError {
-        // Headers may already be committed by a failed streaming response.
-      }
-    } finally {
-      await response.close();
-    }
-  }
-
-  static bool _isSafeAssetPath(String relative) {
-    if (relative.isEmpty || relative.startsWith('/')) return false;
-    final segments = relative.replaceAll('\\', '/').split('/');
-    return !segments.contains('..') && !segments.contains('.');
-  }
-
-  static String _contentTypeFor(String path) {
-    final extension = path.contains('.')
-        ? path.substring(path.lastIndexOf('.') + 1).toLowerCase()
-        : '';
-    return switch (extension) {
-      'html' => 'text/html; charset=utf-8',
-      'css' => 'text/css; charset=utf-8',
-      'js' => 'application/javascript; charset=utf-8',
-      'json' || 'map' => 'application/json; charset=utf-8',
-      'svg' => 'image/svg+xml',
-      'png' => 'image/png',
-      'jpg' || 'jpeg' => 'image/jpeg',
-      'woff' => 'font/woff',
-      'woff2' => 'font/woff2',
-      _ => 'application/octet-stream',
-    };
-  }
-
   Future<void> close() async {
     if (_closed) return;
     _evaluator = null;
     _webGeneration++;
     _closed = true;
     _clock.stop();
-    await _server.close(force: true);
+    _server.unmount(_mountId);
   }
 }
 

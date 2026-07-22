@@ -10,7 +10,7 @@
 | 产品功能、阶段、非目标 | [PRODUCT.md](./PRODUCT.md) |
 | 共享视觉 | [DESIGN_FOUNDATION.md](./DESIGN_FOUNDATION.md) |
 | 工程结构 / 单入口 / 数据沿用 | [ENGINEERING.md](./ENGINEERING.md) |
-| Anx Reader 全链路研究与取舍 | [research/anx-reader-architecture.md](./research/anx-reader-architecture.md) |
+| Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | 某屏交互 | [specs/](./specs/) |
 | 给 Open Design | [opendesign/HANDOFF.md](./opendesign/HANDOFF.md) |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
@@ -28,7 +28,7 @@ docs/
   ENGINEERING.md             ← 工程骨架
   dev-handoff.md
   research/
-    anx-reader-architecture.md
+    foliate-architecture.md
   specs/
     _TEMPLATE.md
     library.md / shelf.md / search.md / lists.md / collections.md

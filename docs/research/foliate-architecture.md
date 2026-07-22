@@ -1,6 +1,6 @@
 # Anx Reader 全链路研究与 Kaika 取舍
 
-研究基线：[`Anxcye/anx-reader`](https://github.com/Anxcye/anx-reader) commit `107f4fa74db0e7247c846c49d6211df3edf9887c`，MIT License。Kaika 已在 `assets/anx_reader/` 保留来源说明与许可证。
+研究基线：[`Anxcye/anx-reader`](https://github.com/Anxcye/anx-reader) commit `107f4fa74db0e7247c846c49d6211df3edf9887c`，MIT License。Kaika 已在 `assets/book/` 保留来源说明与许可证。
 
 本文是实现决策记录，不把 Anx Reader 当成 Kaika 的产品规格。我们复用成熟的 EPUB rendition 行为，但不照搬其 UI、数据库或大文件组织。
 
@@ -32,7 +32,7 @@
 | 本地服务 | `service/book_player/book_player_server.dart` | 单例 loopback server 同时服务书籍、renderer、字体和背景图。 |
 | 打开路由 | `service/book.dart#pushToReadingPage` | 先检查本地文件/同步/权限，再初始化当前阅读状态并进入 ReadingPage。 |
 | rendition | `page/book_player/epub_player.dart` | 初始 CFI、样式、WebView bridge、进度保存都集中在一个较大的 StatefulWidget。 |
-| Foliate | `assets/foliate-js/src/book.js` | `fetch → Blob → File → Reader.open`；导入模式取元数据，阅读模式上报 load/TOC/relocation。 |
+| Foliate | `assets/book/foliate-js/src/book.js` | `fetch → Blob → File → Reader.open`；导入模式取元数据，阅读模式上报 load/TOC/relocation。 |
 | 数据 | `models/book.dart`、`dao/book.dart`、`providers/book_list.dart` | Book 同时承担领域对象和数据库记录；provider 会直接调用 DAO。 |
 
 ## 2. 值得借鉴的设计
@@ -53,7 +53,7 @@
 | provider 直接读写 DAO | 表现层只认 controller；数据库不会暴露给 screen/widget。 |
 | Book model 含路径、进度、删除状态和展示字段 | `ReadingItem`、format-owned locator、偏好与 rendition 状态分开。 |
 | MD5 去重、按标题和时间生成文件名 | 继续使用 SHA-256 content-addressed storage，同一内容只存一份。 |
-| 全局 server / headless WebView 单例 | 阅读 session 自己拥有 server/WebView，dispose 释放；导入探针必须可取消且不能污染当前阅读 session。 |
+| 全局 server / headless WebView 单例 | **共享 loopback listener + 固定/记忆端口**（体验热路径）；每书仍是独立 mount，WebView/lease 仍由 session 拥有。导入探针可与阅读并行挂载，互不覆盖 `/books/<id>.epub`。不照搬 Anx 的绝对路径 `/book/<path>` 或 DAO 直连。 |
 | loopback URL 携带绝对路径 | Kaika server 暴露固定 `/book.epub`，不接受客户端传入任意文件路径。 |
 | 一次扩展 mobi/azw3/fb2/txt/pdf 并统一转换 | 当前只保证 EPUB/CBZ/ZIP；新增格式必须单独定产品与转换策略。 |
 
@@ -76,7 +76,7 @@ reading
   BookReaderScreen
     → BookReaderController         # locator、书签、偏好、chrome
       → FoliateJsBookEngineAdapter # session 生命周期与 typed bridge
-        → SessionLoopbackServer    # 固定资源路由、仅 loopback
+        → BookLoopbackServer       # App 级固定 origin、按 id 挂载
         → foliate-js rendition     # EPUB、TOC、CFI、reflow、输入
 ```
 
@@ -91,7 +91,7 @@ reading
 - 位置：数据库只保存不透明 `BookLocator`；CFI 存在时优先 CFI，section/fraction 是兼容与展示坐标。
 - resize/fold：冻结最后稳定 CFI；普通 reflow 保活 WebView，renderer 被系统杀死时才重建。
 - persistence：bridge 只上报位置；controller 负责 debounce 和数据库写入。
-- 安全：server 只绑定 loopback、路由白名单化、拒绝 `..`，离开阅读器立即关闭。
+- 安全：server 只绑定 loopback、路由白名单化、拒绝 `..`；离开阅读器只卸挂当前书，不暴露绝对路径。
 
 ## 5. 分阶段落地
 
@@ -101,7 +101,7 @@ reading
 - CFI 首屏恢复、TOC、relocation、样式、翻页/滚动与折叠屏恢复由 Foliate adapter 接回 Kaika controller。
 - 删除 Flutter HTML / TextPainter 自有分页器及其 pageMap 状态，避免双渲染链继续漂移。
 - EPUB kind 探测改为 file-backed probe，不再整本读入 Dart 内存后重复解析。
-- `BookRenditionSession` 独立拥有固定路由 loopback server 和 WebView generation lease；被替换 renderer 的迟到回调不再能修改当前阅读状态。
+- `BookLoopbackServer` 在 App 生命周期内复用固定 origin；`BookRenditionSession` 只拥有 book mount 与 WebView generation lease，被替换 renderer 的迟到回调不再能修改当前阅读状态。
 - publication / TOC / relocation / viewport click 已收口为 typed bridge model；打开链记录 server、WebView、renderer、publication 和首个 relocation 的分段耗时。
 - book/comic 导入统一改为 `.import-staging`：复制与 SHA-256 单次流式完成，解析成功后原子提交内容/封面，DB 失败执行补偿回滚；失败测试验证正式目录无半成品。
 - `foliate-probe`、book metadata、comic page list、cover、文件提交和 DB 提交均记录分段 timing；导入与阅读使用同一份 Foliate EPUB 语义。

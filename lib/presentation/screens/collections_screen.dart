@@ -750,8 +750,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                           File(item.coverPath!),
                                           fit: BoxFit.cover,
                                           width: double.infinity,
-                                          errorBuilder: (_, _, _) =>
-                                              ColoredBox(
+                                          errorBuilder: (_, _, _) => ColoredBox(
                                             color: semantics.canvas,
                                           ),
                                         )

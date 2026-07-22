@@ -1,51 +1,109 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Anx Reader</title>
+<title>Kaika Reader</title>
+<script>
+  // Apply reading theme before Foliate loads so the canvas never flashes
+  // the WebView default white while zip.js / book.js are still starting.
+  (function () {
+    try {
+      const raw = new URLSearchParams(window.location.search).get('style');
+      if (!raw) return;
+      const style = JSON.parse(raw);
+      const bg = style && style.backgroundColor;
+      if (!bg) return;
+      const root = document.documentElement;
+      root.style.backgroundColor = bg;
+      if (document.body) document.body.style.backgroundColor = bg;
+      else {
+        document.addEventListener('DOMContentLoaded', function () {
+          document.body.style.backgroundColor = bg;
+        });
+      }
+    } catch (_) {}
+  })();
+</script>
 <style>
   html {
     height: 100vh;
     overflow: hidden;
+    background: #ffffff;
   }
 
   body {
     user-select: none;
     margin: 0 !important;
-    height: 100vh;  
+    height: 100vh;
+    background: #ffffff;
   }
 
+  #footnote-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+  }
+
+  #footnote-backdrop.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
 
   #footnote-dialog {
-    /*
-    padding: var(safe-area-inset-top) var(safe-area-inset-right) var(safe-area-inset-bottom) var(safe-area-inset-left);
-    */
+    --footnote-border: rgba(0, 0, 0, 0.08);
+    --footnote-shadow: 0 12px 40px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+    --footnote-max-height: min(58vh, 340px);
     position: fixed;
-    width: 80vw;
-    height: 80vh;
-    max-width: 400px;
-    max-height: 200px;
-    min-width: 300px;
-    min-height: 200px;
-    border-radius: 15px;
-    border: 1px solid grey;
+    width: min(88vw, 420px);
+    height: auto;
+    max-height: var(--footnote-max-height);
+    min-width: 280px;
+    min-height: 0;
+    border-radius: 16px;
+    border: 1px solid var(--footnote-border);
+    box-shadow: var(--footnote-shadow);
     user-select: none;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
     outline: none;
     z-index: 1000;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%) scale(0.98);
+    opacity: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  #footnote-dialog.is-visible {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
   }
 
   #footnote-dialog main {
     overflow: auto;
+    flex: 0 1 auto;
+    min-height: 0;
     width: 100%;
-    height: 100%;
+    height: auto;
+    max-height: var(--footnote-max-height);
+    padding: 16px 20px 20px;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.95em;
+    line-height: 1.55;
+  }
+
+  #footnote-dialog main foliate-view {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 1px;
   }
 </style>
+<div id="footnote-backdrop"></div>
 <div id="footnote-dialog">
   <main></main>
 </div>
@@ -57,7 +115,7 @@
   (function () {
     const ua = navigator.userAgent || '';
     const platform = navigator.platform || '';
-    console.log('AnxUA', ua);
+    console.log('KaikaUA', ua);
 
     const isAppleDevice = /iPad|iPhone|iPod/.test(ua)
       || (/Mac/.test(platform) && navigator.maxTouchPoints > 1)
