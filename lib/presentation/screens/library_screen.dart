@@ -128,7 +128,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: ListView.separated(
               shrinkWrap: true,
               itemCount: failures.length,
-              separatorBuilder: (_, _) => Divider(height: 1, color: semantics.hairline),
+              separatorBuilder: (_, _) =>
+                  Divider(height: 1, color: semantics.hairline),
               itemBuilder: (_, i) {
                 final f = failures[i];
                 final name = f.path.isEmpty ? '（未知）' : f.fileName;
@@ -137,9 +138,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text(f.reason, style: TextStyle(fontSize: 12, color: semantics.textSecondary)),
+                      Text(
+                        f.reason,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: semantics.textSecondary,
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -288,8 +301,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
     }
     if (colId == null || !mounted) return;
-    await widget.controller
-        .addItemsToCollection(collectionId: colId, itemIds: ids);
+    await widget.controller.addItemsToCollection(
+      collectionId: colId,
+      itemIds: ids,
+    );
     if (!mounted) return;
     _exitSelecting();
     showAppSnackBar(context, '已将 ${ids.length} 本加入合集');
@@ -361,29 +376,182 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   String _sortLabel(LibrarySort sort) => switch (sort) {
-        LibrarySort.addedDesc => '最近导入',
-        LibrarySort.titleAsc => '标题',
-        LibrarySort.lastOpenedDesc => '最近阅读',
-      };
+    LibrarySort.addedDesc => '最近导入',
+    LibrarySort.titleAsc => '标题',
+    LibrarySort.lastOpenedDesc => '最近阅读',
+  };
 
   String _readFilterLabel(LibraryReadFilter f) => switch (f) {
-        LibraryReadFilter.all => '状态',
-        LibraryReadFilter.unread => '未读',
-        LibraryReadFilter.reading => '在读',
-        LibraryReadFilter.finished => '已读完',
-      };
+    LibraryReadFilter.all => '状态',
+    LibraryReadFilter.unread => '未读',
+    LibraryReadFilter.reading => '在读',
+    LibraryReadFilter.finished => '已读完',
+  };
 
   String _shelfFilterLabel(LibraryShelfFilter f) => switch (f) {
-        LibraryShelfFilter.all => '全部',
-        LibraryShelfFilter.onShelfOnly => '已上架',
-        LibraryShelfFilter.notOnShelf => '未上架',
-      };
+    LibraryShelfFilter.all => '全部',
+    LibraryShelfFilter.onShelfOnly => '已上架',
+    LibraryShelfFilter.notOnShelf => '未上架',
+  };
 
   String _kindFilterLabel(LibraryKindFilter f) => switch (f) {
-        LibraryKindFilter.all => '类型',
-        LibraryKindFilter.comic => '漫画',
-        LibraryKindFilter.book => '图书',
-      };
+    LibraryKindFilter.all => '类型',
+    LibraryKindFilter.comic => '漫画',
+    LibraryKindFilter.book => '图书',
+  };
+
+  Widget _buildCompactHeader(
+    BuildContext context,
+    LibraryController controller, {
+    required bool importing,
+    required Color accent,
+    required AppSemantics semantics,
+  }) {
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                if (_selecting) ...[
+                  IconButton(
+                    tooltip: '取消选择',
+                    onPressed: _exitSelecting,
+                    icon: const Icon(Icons.close),
+                  ),
+                  Text(
+                    '已选 ${_selected.length}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ] else ...[
+                  const Text(
+                    '书库',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: '书单',
+                    onPressed: () => ListsScreen.open(
+                      context,
+                      brand: widget.brand,
+                      controller: controller,
+                      readingPreferences: widget.readingPreferences,
+                      bookReadingPreferences: widget.bookReadingPreferences,
+                    ),
+                    icon: Icon(Icons.playlist_play_outlined, color: accent),
+                  ),
+                  IconButton(
+                    tooltip: '合集',
+                    onPressed: () => CollectionsScreen.open(
+                      context,
+                      brand: widget.brand,
+                      controller: controller,
+                      readingPreferences: widget.readingPreferences,
+                      bookReadingPreferences: widget.bookReadingPreferences,
+                    ),
+                    icon: Icon(
+                      Icons.collections_bookmark_outlined,
+                      color: accent,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: _layout == _LibraryLayout.grid ? '列表视图' : '网格视图',
+                    onPressed: () => setState(() {
+                      _layout = _layout == _LibraryLayout.grid
+                          ? _LibraryLayout.list
+                          : _LibraryLayout.grid;
+                    }),
+                    icon: Icon(
+                      _layout == _LibraryLayout.grid
+                          ? Icons.view_list_outlined
+                          : Icons.grid_view_outlined,
+                      color: semantics.textSecondary,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '多选',
+                    onPressed: _enterSelecting,
+                    icon: Icon(Icons.checklist_outlined, color: accent),
+                  ),
+                  IconButton(
+                    tooltip: '导入（CBZ / ZIP / EPUB）',
+                    onPressed: importing ? null : _import,
+                    icon: importing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(Icons.add, color: accent),
+                  ),
+                ],
+              ],
+            ),
+            if (!_selecting) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 40,
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) => setState(() => _query = value),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '搜索标题…',
+                    hintStyle: TextStyle(
+                      color: semantics.textSecondary,
+                      fontSize: 14,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      size: 18,
+                      color: semantics.textSecondary,
+                    ),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: '清除',
+                            icon: const Icon(Icons.close, size: 16),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                          ),
+                    filled: true,
+                    fillColor: AppColors.lightWash,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: accent, width: 1.2),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -398,234 +566,252 @@ class _LibraryScreenState extends State<LibraryScreen> {
         builder: (context, _) {
           final c = widget.controller;
           final importing = c.isImporting;
+          final compact = MediaQuery.sizeOf(context).width < 720;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(32, 24, 24, 8),
-                  child: Row(
-                    children: [
-                      if (_selecting) ...[
-                        IconButton(
-                          tooltip: '取消选择',
-                          onPressed: _exitSelecting,
-                          icon: const Icon(Icons.close),
-                        ),
-                        Text(
-                          '已选 ${_selected.length}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
+              if (compact)
+                _buildCompactHeader(
+                  context,
+                  c,
+                  importing: importing,
+                  accent: accent,
+                  semantics: semantics,
+                )
+              else
+                SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(32, 24, 24, 8),
+                    child: Row(
+                      children: [
+                        if (_selecting) ...[
+                          IconButton(
+                            tooltip: '取消选择',
+                            onPressed: _exitSelecting,
+                            icon: const Icon(Icons.close),
                           ),
-                        ),
-                      ] else ...[
-                        const Text(
-                          '书库',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        // Explicit secondary entry — 书单 is library sub-page, not a tab.
-                        TextButton.icon(
-                          onPressed: () => ListsScreen.open(
-                            context,
-                            brand: widget.brand,
-                            controller: c,
-                            readingPreferences: widget.readingPreferences,
-                            bookReadingPreferences:
-                                widget.bookReadingPreferences,
-                          ),
-                          icon: Icon(
-                            Icons.playlist_play_outlined,
-                            size: 18,
-                            weight: 300,
-                            color: accent,
-                          ),
-                          label: Text(
-                            '书单',
-                            style: TextStyle(
-                              fontSize: 14,
+                          Text(
+                            '已选 ${_selected.length}',
+                            style: const TextStyle(
+                              fontSize: 18,
                               fontWeight: FontWeight.w600,
-                              color: accent,
                             ),
                           ),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ),
-                        TextButton.icon(
-                          onPressed: () => CollectionsScreen.open(
-                            context,
-                            brand: widget.brand,
-                            controller: c,
-                            readingPreferences: widget.readingPreferences,
-                            bookReadingPreferences:
-                                widget.bookReadingPreferences,
-                          ),
-                          icon: Icon(
-                            Icons.collections_bookmark_outlined,
-                            size: 18,
-                            weight: 300,
-                            color: accent,
-                          ),
-                          label: Text(
-                            '合集',
+                        ] else ...[
+                          const Text(
+                            '书库',
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 22,
                               fontWeight: FontWeight.w600,
-                              color: accent,
+                              letterSpacing: -0.4,
                             ),
                           ),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            visualDensity: VisualDensity.compact,
+                          const SizedBox(width: 16),
+                          // Explicit secondary entry — 书单 is library sub-page, not a tab.
+                          TextButton.icon(
+                            onPressed: () => ListsScreen.open(
+                              context,
+                              brand: widget.brand,
+                              controller: c,
+                              readingPreferences: widget.readingPreferences,
+                              bookReadingPreferences:
+                                  widget.bookReadingPreferences,
+                            ),
+                            icon: Icon(
+                              Icons.playlist_play_outlined,
+                              size: 18,
+                              weight: 300,
+                              color: accent,
+                            ),
+                            label: Text(
+                              '书单',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: accent,
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                            ),
                           ),
-                        ),
-                      ],
-                      const Spacer(),
-                      if (!_selecting) ...[
-                        IconButton(
-                          tooltip: '列表视图',
-                          onPressed: _layout == _LibraryLayout.list
-                              ? null
-                              : () => setState(
+                          TextButton.icon(
+                            onPressed: () => CollectionsScreen.open(
+                              context,
+                              brand: widget.brand,
+                              controller: c,
+                              readingPreferences: widget.readingPreferences,
+                              bookReadingPreferences:
+                                  widget.bookReadingPreferences,
+                            ),
+                            icon: Icon(
+                              Icons.collections_bookmark_outlined,
+                              size: 18,
+                              weight: 300,
+                              color: accent,
+                            ),
+                            label: Text(
+                              '合集',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: accent,
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        if (!_selecting) ...[
+                          IconButton(
+                            tooltip: '列表视图',
+                            onPressed: _layout == _LibraryLayout.list
+                                ? null
+                                : () => setState(
                                     () => _layout = _LibraryLayout.list,
                                   ),
-                          icon: Icon(
-                            Icons.view_list_outlined,
-                            color: _layout == _LibraryLayout.list
-                                ? accent
-                                : semantics.textSecondary,
+                            icon: Icon(
+                              Icons.view_list_outlined,
+                              color: _layout == _LibraryLayout.list
+                                  ? accent
+                                  : semantics.textSecondary,
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: '网格视图',
-                          onPressed: _layout == _LibraryLayout.grid
-                              ? null
-                              : () => setState(
+                          IconButton(
+                            tooltip: '网格视图',
+                            onPressed: _layout == _LibraryLayout.grid
+                                ? null
+                                : () => setState(
                                     () => _layout = _LibraryLayout.grid,
                                   ),
-                          icon: Icon(
-                            Icons.grid_view_outlined,
-                            color: _layout == _LibraryLayout.grid
-                                ? accent
-                                : semantics.textSecondary,
+                            icon: Icon(
+                              Icons.grid_view_outlined,
+                              color: _layout == _LibraryLayout.grid
+                                  ? accent
+                                  : semantics.textSecondary,
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: '多选',
-                          onPressed: () => _enterSelecting(),
-                          icon: Icon(Icons.checklist_outlined, color: accent),
-                        ),
-                        PopupMenuButton<LibrarySort>(
-                          tooltip: '',
-                          initialValue: c.sort,
-                          onSelected: c.setSort,
-                          itemBuilder: (ctx) => [
-                            for (final s in LibrarySort.values)
-                              PopupMenuItem(
-                                value: s,
-                                child: Text(_sortLabel(s)),
+                          IconButton(
+                            tooltip: '多选',
+                            onPressed: () => _enterSelecting(),
+                            icon: Icon(Icons.checklist_outlined, color: accent),
+                          ),
+                          PopupMenuButton<LibrarySort>(
+                            tooltip: '',
+                            initialValue: c.sort,
+                            onSelected: c.setSort,
+                            itemBuilder: (ctx) => [
+                              for (final s in LibrarySort.values)
+                                PopupMenuItem(
+                                  value: s,
+                                  child: Text(_sortLabel(s)),
+                                ),
+                            ],
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
                               ),
-                          ],
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.sort_outlined,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.sort_outlined,
+                                    size: 18,
+                                    color: semantics.textSecondary,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _sortLabel(c.sort),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: semantics.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 180,
+                            height: 36,
+                            child: TextField(
+                              controller: _searchController,
+                              onChanged: (v) => setState(() => _query = v),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                hintText: '搜索标题…',
+                                hintStyle: TextStyle(
+                                  color: semantics.textSecondary,
+                                  fontSize: 14,
+                                ),
+                                prefixIcon: Icon(
+                                  Icons.search,
                                   size: 18,
                                   color: semantics.textSecondary,
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _sortLabel(c.sort),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: semantics.textSecondary,
+                                suffixIcon: _query.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: '清除',
+                                        icon: const Icon(Icons.close, size: 16),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          setState(() => _query = '');
+                                        },
+                                      ),
+                                filled: true,
+                                fillColor: AppColors.lightWash,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: accent,
+                                    width: 1.2,
                                   ),
                                 ),
-                              ],
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: 180,
-                          height: 36,
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (v) => setState(() => _query = v),
-                            decoration: InputDecoration(
-                              isDense: true,
-                              hintText: '搜索标题…',
-                              hintStyle: TextStyle(
-                                color: semantics.textSecondary,
-                                fontSize: 14,
-                              ),
-                              prefixIcon: Icon(
-                                Icons.search,
-                                size: 18,
-                                color: semantics.textSecondary,
-                              ),
-                              suffixIcon: _query.isEmpty
-                                  ? null
-                                  : IconButton(
-                                      tooltip: '清除',
-                                      icon: const Icon(Icons.close, size: 16),
-                                      onPressed: () {
-                                        _searchController.clear();
-                                        setState(() => _query = '');
-                                      },
+                          const SizedBox(width: 8),
+                          IconButton(
+                            tooltip: '导入（CBZ / ZIP / EPUB）',
+                            onPressed: importing ? null : _import,
+                            icon: importing
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
                                     ),
-                              filled: true,
-                              fillColor: AppColors.lightWash,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide:
-                                    BorderSide(color: accent, width: 1.2),
-                              ),
-                            ),
+                                  )
+                                : Icon(Icons.add, color: accent),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          tooltip: '导入（CBZ / ZIP / EPUB）',
-                          onPressed: importing ? null : _import,
-                          icon: importing
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Icon(Icons.add, color: accent),
-                        ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
               if (!_selecting)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(32, 0, 24, 8),
@@ -634,6 +820,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
+                      if (compact)
+                        _FilterMenu<LibrarySort>(
+                          label: _sortLabel(c.sort),
+                          icon: Icons.sort_outlined,
+                          active: c.sort != LibrarySort.addedDesc,
+                          items: LibrarySort.values,
+                          itemLabel: _sortLabel,
+                          onSelected: c.setSort,
+                        ),
                       _FilterMenu<LibraryKindFilter>(
                         label: _kindFilterLabel(c.kindFilter),
                         icon: Icons.category_outlined,
@@ -663,8 +858,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         icon: Icons.insert_drive_file_outlined,
                         active: c.formatFilter != null,
                         items: const ['all', 'cbz', 'zip', 'epub'],
-                        itemLabel: (v) =>
-                            v == 'all' ? '格式' : v.toUpperCase(),
+                        itemLabel: (v) => v == 'all' ? '格式' : v.toUpperCase(),
                         onSelected: (v) =>
                             c.setFormatFilter(v == 'all' ? null : v),
                       ),
@@ -683,8 +877,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     return StreamBuilder<List<LibraryEntry>>(
                       stream: c.watchLibraryEntries(),
                       builder: (context, snapshot) {
-                        final entries =
-                            snapshot.data ?? const <LibraryEntry>[];
+                        final entries = snapshot.data ?? const <LibraryEntry>[];
                         final allCollections =
                             colSnap.data ?? const <CollectionSummary>[];
                         // 已在合集中的单本不在书库主列表重复出现。
@@ -705,9 +898,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             ? const <CollectionSummary>[]
                             : allCollections.where((s) {
                                 if (q.isEmpty) return true;
-                                if (s.collection.name
-                                    .toLowerCase()
-                                    .contains(q)) {
+                                if (s.collection.name.toLowerCase().contains(
+                                  q,
+                                )) {
                                   return true;
                                 }
                                 // 成员标题匹配也露出合集卡（不展开单本）。
@@ -743,9 +936,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           return Center(
                             child: Text(
                               '没有匹配的书',
-                              style: TextStyle(
-                                color: semantics.textSecondary,
-                              ),
+                              style: TextStyle(color: semantics.textSecondary),
                             ),
                           );
                         }
@@ -789,8 +980,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 totalVisible: filtered.length,
                                 onSelectAll: () => _selectAll(filtered),
                                 onShelf: () => _batchShelf(onShelf: true),
-                                onUnshelf: () =>
-                                    _batchShelf(onShelf: false),
+                                onUnshelf: () => _batchShelf(onShelf: false),
                                 onAddToList: _batchAddToList,
                                 onAddToCollection: _batchAddToCollection,
                                 onDelete: _batchDelete,
@@ -847,58 +1037,130 @@ class _SelectionBar extends StatelessWidget {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-          child: Row(
-            children: [
-              TextButton(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final selectAll = TextButton(
                 onPressed: onSelectAll,
-                child: Text(
-                  selectedCount == totalVisible ? '取消全选' : '全选',
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                tooltip: '加入书架',
-                onPressed: enabled ? onShelf : null,
-                icon: Icon(Icons.bookmark_add_outlined, color: accent, weight: 300),
-              ),
-              IconButton(
-                tooltip: '移出书架',
-                onPressed: enabled ? onUnshelf : null,
-                icon: Icon(Icons.bookmark_remove_outlined, color: accent, weight: 300),
-              ),
-              IconButton(
-                tooltip: '加入书单',
-                onPressed: enabled ? onAddToList : null,
-                icon: Icon(Icons.playlist_add_outlined, color: accent, weight: 300),
-              ),
-              IconButton(
-                tooltip: '加入合集',
-                onPressed: enabled ? onAddToCollection : null,
-                icon: Icon(
-                  Icons.collections_bookmark_outlined,
-                  color: accent,
-                  weight: 300,
-                ),
-              ),
-              IconButton(
-                tooltip: '删除',
-                onPressed: enabled ? onDelete : null,
-                icon: Icon(
-                  Icons.delete_outline,
-                  weight: 300,
-                  color: enabled
-                      ? Theme.of(context).colorScheme.error
-                      : semantics.textSecondary,
-                ),
-              ),
-              TextButton(onPressed: onCancel, child: const Text('完成')),
-            ],
+                child: Text(selectedCount == totalVisible ? '取消全选' : '全选'),
+              );
+              final done = TextButton(
+                onPressed: onCancel,
+                child: const Text('完成'),
+              );
+              if (constraints.maxWidth < 520) {
+                return Row(
+                  children: [
+                    selectAll,
+                    Text('$selectedCount 项'),
+                    const Spacer(),
+                    PopupMenuButton<_SelectionAction>(
+                      tooltip: '批量操作',
+                      enabled: enabled,
+                      onSelected: (action) {
+                        switch (action) {
+                          case _SelectionAction.shelf:
+                            onShelf();
+                          case _SelectionAction.unshelf:
+                            onUnshelf();
+                          case _SelectionAction.list:
+                            onAddToList();
+                          case _SelectionAction.collection:
+                            onAddToCollection();
+                          case _SelectionAction.delete:
+                            onDelete();
+                        }
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: _SelectionAction.shelf,
+                          child: Text('加入书架'),
+                        ),
+                        PopupMenuItem(
+                          value: _SelectionAction.unshelf,
+                          child: Text('移出书架'),
+                        ),
+                        PopupMenuItem(
+                          value: _SelectionAction.list,
+                          child: Text('加入书单'),
+                        ),
+                        PopupMenuItem(
+                          value: _SelectionAction.collection,
+                          child: Text('加入合集'),
+                        ),
+                        PopupMenuItem(
+                          value: _SelectionAction.delete,
+                          child: Text('删除'),
+                        ),
+                      ],
+                      icon: const Icon(Icons.more_horiz),
+                    ),
+                    done,
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  selectAll,
+                  const Spacer(),
+                  IconButton(
+                    tooltip: '加入书架',
+                    onPressed: enabled ? onShelf : null,
+                    icon: Icon(
+                      Icons.bookmark_add_outlined,
+                      color: accent,
+                      weight: 300,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '移出书架',
+                    onPressed: enabled ? onUnshelf : null,
+                    icon: Icon(
+                      Icons.bookmark_remove_outlined,
+                      color: accent,
+                      weight: 300,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '加入书单',
+                    onPressed: enabled ? onAddToList : null,
+                    icon: Icon(
+                      Icons.playlist_add_outlined,
+                      color: accent,
+                      weight: 300,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '加入合集',
+                    onPressed: enabled ? onAddToCollection : null,
+                    icon: Icon(
+                      Icons.collections_bookmark_outlined,
+                      color: accent,
+                      weight: 300,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '删除',
+                    onPressed: enabled ? onDelete : null,
+                    icon: Icon(
+                      Icons.delete_outline,
+                      weight: 300,
+                      color: enabled
+                          ? Theme.of(context).colorScheme.error
+                          : semantics.textSecondary,
+                    ),
+                  ),
+                  done,
+                ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 }
+
+enum _SelectionAction { shelf, unshelf, list, collection, delete }
 
 class _GridBody extends StatelessWidget {
   const _GridBody({
@@ -1007,15 +1269,14 @@ class _ListBody extends StatelessWidget {
         if (i < collections.length) {
           final s = collections[i];
           return ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 6,
+            ),
             leading: SizedBox(
               width: 48,
               height: 64,
-              child: CollectionCover(
-                coverPaths: s.coverPaths,
-                borderRadius: 6,
-              ),
+              child: CollectionCover(coverPaths: s.coverPaths, borderRadius: 6),
             ),
             title: Text(
               s.collection.name,
@@ -1041,8 +1302,10 @@ class _ListBody extends StatelessWidget {
         final item = entry.item;
         final isSelected = selected.contains(item.id);
         return ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 6,
+          ),
           leading: SizedBox(
             width: 48,
             height: 64,
@@ -1114,10 +1377,7 @@ class _ListBody extends StatelessWidget {
 }
 
 class _LibraryCollectionCard extends StatelessWidget {
-  const _LibraryCollectionCard({
-    required this.summary,
-    required this.onTap,
-  });
+  const _LibraryCollectionCard({required this.summary, required this.onTap});
 
   final CollectionSummary summary;
   final VoidCallback onTap;
@@ -1221,9 +1481,7 @@ class _FilterMenu<T> extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: active
-              ? accent.withValues(alpha: 0.12)
-              : AppColors.lightWash,
+          color: active ? accent.withValues(alpha: 0.12) : AppColors.lightWash,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: active ? accent.withValues(alpha: 0.35) : semantics.hairline,

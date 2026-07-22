@@ -65,8 +65,6 @@ class _AppShellState extends State<AppShell> {
       SettingsScreen(
         brand: widget.brand,
         themePreferences: widget.themePreferences,
-        readingPreferences: widget.readingPreferences,
-        bookReadingPreferences: widget.bookReadingPreferences,
       ),
     ];
   }
@@ -75,7 +73,8 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
     final body = IndexedStack(index: _index, children: _screens);
-    final useSideRail = _isDesktopHost ||
+    final useSideRail =
+        _isDesktopHost ||
         MediaQuery.sizeOf(context).width >= desktopMinSize.width;
     // Title-bar metrics come from [DesktopTitleBarMediaQuery] (app builder).
     final titleInset = platformTitleBarHeight;
@@ -223,7 +222,9 @@ class _SidebarRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
     final color = selected ? accent : semantics.textSecondary;
-    final labelColor = selected ? semantics.textPrimary : semantics.textSecondary;
+    final labelColor = selected
+        ? semantics.textPrimary
+        : semantics.textSecondary;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
@@ -248,11 +249,7 @@ class _SidebarRow extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(
-                  selected ? selectedIcon : icon,
-                  size: 20,
-                  color: color,
-                ),
+                Icon(selected ? selectedIcon : icon, size: 20, color: color),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(

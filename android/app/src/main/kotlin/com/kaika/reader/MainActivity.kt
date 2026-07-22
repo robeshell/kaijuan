@@ -1,4 +1,4 @@
-package com.kaika.kaika
+package com.kaika.reader
 
 import io.flutter.embedding.android.FlutterActivity
 

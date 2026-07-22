@@ -3,45 +3,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../../app/book_reading_preferences.dart';
-import '../../app/comic_reading_preferences.dart';
 import '../../app/theme_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
 import '../widgets/app_overlays.dart';
-import '../widgets/reading_theme_chip.dart';
-import '../../readers/book/book_theme.dart';
-import '../../readers/comic/comic_models.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
     super.key,
     required this.brand,
     required this.themePreferences,
-    this.readingPreferences,
-    this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final ThemePreferences themePreferences;
-  final ComicReadingPreferences? readingPreferences;
-  final BookReadingPreferences? bookReadingPreferences;
 
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final listenables = <Listenable>[themePreferences];
-    if (readingPreferences != null) {
-      listenables.add(readingPreferences!);
-    }
-    if (bookReadingPreferences != null) {
-      listenables.add(bookReadingPreferences!);
-    }
 
     return Scaffold(
       backgroundColor: semantics.canvas,
       body: ListenableBuilder(
-        listenable: Listenable.merge(listenables),
+        listenable: themePreferences,
         builder: (context, _) {
           // Parent shell SafeArea already applies desktop top inset; keep
           // bottom/start padding only. Nested SafeArea would zero out top.
@@ -99,225 +83,16 @@ class SettingsScreen extends StatelessWidget {
                               : null,
                         ),
                         child: preset.id == themePreferences.accent.id
-                            ? const Icon(Icons.check,
-                                color: Colors.white, size: 18)
+                            ? const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 18,
+                              )
                             : null,
                       ),
                     ),
                 ],
               ),
-              if (readingPreferences != null) ...[
-                const SizedBox(height: 32),
-                const Text(
-                  '漫画阅读默认',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '新打开漫画时使用；在阅读器内修改会同步保存到这里。',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '翻页模式',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<ComicReaderMode>(
-                  emptySelectionAllowed: false,
-                  showSelectedIcon: false,
-                  segments: [
-                    for (final m in ComicReaderMode.values)
-                      ButtonSegment(
-                        value: m,
-                        label: Text(m.label, style: const TextStyle(fontSize: 12)),
-                      ),
-                  ],
-                  selected: {readingPreferences!.mode},
-                  onSelectionChanged: (s) =>
-                      readingPreferences!.setMode(s.first),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  '阅读方向',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<ComicReadDirection>(
-                  emptySelectionAllowed: false,
-                  showSelectedIcon: false,
-                  segments: [
-                    for (final d in ComicReadDirection.values)
-                      ButtonSegment(
-                        value: d,
-                        label: Text(d.label, style: const TextStyle(fontSize: 12)),
-                      ),
-                  ],
-                  selected: {readingPreferences!.direction},
-                  onSelectionChanged: (s) =>
-                      readingPreferences!.setDirection(s.first),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  '阅读背景',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final t in ComicReadingTheme.values)
-                      ReadingThemeChip(
-                        background: Color(t.backgroundArgb),
-                        isDark: t.isDark,
-                        label: t.label,
-                        selected: readingPreferences!.readingTheme == t,
-                        onTap: () => readingPreferences!.setReadingTheme(t),
-                      ),
-                  ],
-                ),
-              ],
-              if (bookReadingPreferences != null) ...[
-                const SizedBox(height: 32),
-                const Text(
-                  '图书阅读默认',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '新打开图书时使用；在阅读器内修改会同步保存到这里。',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '字号 ${bookReadingPreferences!.fontSize.toStringAsFixed(0)}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                Slider(
-                  value: bookReadingPreferences!.fontSize,
-                  min: BookReadingPreferences.minFontSize,
-                  max: BookReadingPreferences.maxFontSize,
-                  divisions: (BookReadingPreferences.maxFontSize -
-                          BookReadingPreferences.minFontSize)
-                      .toInt(),
-                  label: bookReadingPreferences!.fontSize.toStringAsFixed(0),
-                  onChanged: (v) => bookReadingPreferences!.setFontSize(v),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '行距 ${bookReadingPreferences!.lineHeight.toStringAsFixed(1)}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                Slider(
-                  value: bookReadingPreferences!.lineHeight,
-                  min: BookReadingPreferences.minLineHeight,
-                  max: BookReadingPreferences.maxLineHeight,
-                  divisions: ((BookReadingPreferences.maxLineHeight -
-                              BookReadingPreferences.minLineHeight) *
-                          5)
-                      .round(),
-                  label: bookReadingPreferences!.lineHeight.toStringAsFixed(1),
-                  onChanged: (v) => bookReadingPreferences!.setLineHeight(v),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '阅读模式',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<BookReadingMode>(
-                  emptySelectionAllowed: false,
-                  showSelectedIcon: false,
-                  segments: [
-                    for (final m in BookReadingMode.values)
-                      ButtonSegment(
-                        value: m,
-                        label: Text(m.label, style: const TextStyle(fontSize: 12)),
-                      ),
-                  ],
-                  selected: {bookReadingPreferences!.readingMode},
-                  onSelectionChanged: (s) =>
-                      bookReadingPreferences!.setReadingMode(s.first),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '版心',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<double>(
-                  emptySelectionAllowed: false,
-                  showSelectedIcon: false,
-                  segments: [
-                    for (var i = 0; i < BookReadingPreferences.marginPresets.length; i++)
-                      ButtonSegment(
-                        value: BookReadingPreferences.marginPresets[i],
-                        label: Text(
-                          ['窄', '中', '宽'][i],
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                  ],
-                  selected: {bookReadingPreferences!.margin},
-                  onSelectionChanged: (s) =>
-                      bookReadingPreferences!.setMargin(s.first),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '阅读背景',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: semantics.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final t in BookReadingTheme.values)
-                      ReadingThemeChip(
-                        background: Color(t.backgroundArgb),
-                        isDark: t.isDark,
-                        label: t.label,
-                        selected:
-                            bookReadingPreferences!.readingTheme == t,
-                        onTap: () =>
-                            bookReadingPreferences!.setReadingTheme(t),
-                      ),
-                  ],
-                ),
-              ],
               const SizedBox(height: 32),
               const Text(
                 '关于',
@@ -347,8 +122,7 @@ class _AboutCardState extends State<_AboutCard> {
 
   String get _tagline => '本地漫画与图书阅读 · CBZ / ZIP / EPUB';
 
-  String get _blurb =>
-      '文件与进度保存在本机，不上传、不刮削云端。EPUB 按内容自动进入页图或正文阅读器。';
+  String get _blurb => '文件与进度保存在本机，不上传、不刮削云端。EPUB 按内容自动进入页图或正文阅读器。';
 
   String get _formatsLabel =>
       widget.brand.importExtensions.map((e) => e.toUpperCase()).join(' · ');
@@ -440,18 +214,12 @@ class _AboutCardState extends State<_AboutCard> {
               _AboutRow(
                 label: '包名',
                 value: widget.brand.applicationId,
-                onCopy: () => _copy(
-                  context,
-                  widget.brand.applicationId,
-                  '已复制包名',
-                ),
+                onCopy: () =>
+                    _copy(context, widget.brand.applicationId, '已复制包名'),
               ),
               _AboutRow(label: '支持格式', value: _formatsLabel),
               if (!kIsWeb)
-                _AboutRow(
-                  label: '平台',
-                  value: defaultTargetPlatform.name,
-                ),
+                _AboutRow(label: '平台', value: defaultTargetPlatform.name),
             ],
           );
         },
@@ -467,11 +235,7 @@ class _AboutCardState extends State<_AboutCard> {
 }
 
 class _AboutRow extends StatelessWidget {
-  const _AboutRow({
-    required this.label,
-    required this.value,
-    this.onCopy,
-  });
+  const _AboutRow({required this.label, required this.value, this.onCopy});
 
   final String label;
   final String value;
@@ -489,19 +253,13 @@ class _AboutRow extends StatelessWidget {
             width: 72,
             child: Text(
               label,
-              style: TextStyle(
-                fontSize: 13,
-                color: semantics.textSecondary,
-              ),
+              style: TextStyle(fontSize: 13, color: semantics.textSecondary),
             ),
           ),
           Expanded(
             child: SelectableText(
               value,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
           ),
           if (onCopy != null)

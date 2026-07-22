@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.kaika.kaika"
+    namespace = "com.kaika.reader"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,26 +15,11 @@ android {
     }
 
     defaultConfig {
-        // Overridden per productFlavor. See docs/ENGINEERING.md.
         applicationId = "com.kaika.reader"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-    }
-
-    flavorDimensions += "brand"
-    productFlavors {
-        create("comic") {
-            dimension = "brand"
-            applicationId = "com.kaika.reader"
-            resValue("string", "app_name", "Kaika")
-        }
-        create("book") {
-            dimension = "brand"
-            applicationId = "com.kaika.book"
-            resValue("string", "app_name", "Kaika Book")
-        }
     }
 
     buildTypes {
