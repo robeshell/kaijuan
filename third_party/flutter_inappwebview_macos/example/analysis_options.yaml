@@ -9,12 +9,6 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
-analyzer:
-  # Vendored platform plugins are validated upstream and may carry examples
-  # whose sibling-package paths do not exist in this application checkout.
-  exclude:
-    - third_party/**
-
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`
