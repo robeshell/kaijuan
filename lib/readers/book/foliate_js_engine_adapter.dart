@@ -42,11 +42,53 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   double? _lastFontSize;
   double? _lastLineHeight;
   double? _lastMargin;
+  double? _lastVerticalMargin;
+  bool? _lastBold;
+  BookBodyFont? _lastBodyFont;
+  double? _lastLetterSpacing;
+  double? _lastParagraphSpacing;
+  BookTextAlign? _lastTextAlign;
+  bool? _lastFirstLineIndent;
+  bool? _lastHyphenate;
   BookReadingTheme? _lastTheme;
   BookReadingMode? _lastMode;
   BookPageTurnEffect? _lastEffect;
+  double? _lastBrightness;
+  Timer? _prefsApplyTimer;
+  /// Desktop PlatformView (WKWebView / WebView2) often keeps a stale surface
+  /// until the next input; flip a sub-pixel translate to force a composite.
+  bool _desktopPaintNudge = false;
 
   bool get rendererReady => _webReady;
+
+  static bool get _isDesktop {
+    if (kIsWeb) return false;
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.macOS ||
+      TargetPlatform.windows ||
+      TargetPlatform.linux => true,
+      _ => false,
+    };
+  }
+
+  static const _desktopStylePaintNudgeJs = '''
+(function () {
+  try {
+    var r = reader && reader.view && reader.view.renderer;
+    if (r && typeof r.getContents === 'function') {
+      var cs = r.getContents() || [];
+      for (var i = 0; i < cs.length; i++) {
+        var d = cs[i] && cs[i].doc;
+        if (d && d.documentElement) void d.documentElement.offsetHeight;
+      }
+    }
+    var host = document.documentElement;
+    host.style.transform = 'translateZ(0)';
+    void host.offsetHeight;
+    requestAnimationFrame(function () { host.style.transform = ''; });
+  } catch (e) {}
+})()
+''';
 
   Future<void> open(String filePath) async {
     final generation = ++_openGeneration;
@@ -97,7 +139,12 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       nextPage: _nextPage,
       previousPage: _previousPage,
     );
+    readerController.attachExternalSeek(_seekToFraction);
     readerController.addListener(_onControllerChanged);
+  }
+
+  void _seekToFraction(double fraction) {
+    unawaited(_evaluate('window.goToPercent(${jsonEncode(fraction)})'));
   }
 
   Widget buildView(BuildContext context) {
@@ -112,9 +159,13 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     _safeBottom = media.viewPadding.bottom;
     return ColoredBox(
       color: themeBg,
-      child: _FoliateJsEngineView(
-        adapter: this,
-        readerUri: _readerUri(session),
+      child: Transform.translate(
+        // Sub-pixel nudge only flips on desktop after style apply.
+        offset: Offset(0, _desktopPaintNudge ? 0.1 : 0),
+        child: _FoliateJsEngineView(
+          adapter: this,
+          readerUri: _readerUri(session),
+        ),
       ),
     );
   }
@@ -158,8 +209,30 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
 
   void _onControllerChanged() {
     if (!_webReady || _disposed) return;
-    _applyPreferences();
+    // Defer past the active pointer so evaluateJavascript is not swallowed
+    // mid-gesture (mobile). Desktop also needs a post-apply surface nudge.
+    _prefsApplyTimer?.cancel();
+    _prefsApplyTimer = Timer(const Duration(milliseconds: 16), () {
+      unawaited(_flushPreferences());
+    });
+  }
+
+  Future<void> _flushPreferences() async {
+    if (!_webReady || _disposed) return;
+    await _applyPreferences();
+    if (_disposed || !_webReady) return;
+    await _applyReaderBrightness();
+    if (_disposed) return;
     _applyPendingJump();
+  }
+
+  Future<void> _applyReaderBrightness() async {
+    final brightness = readerController.brightness;
+    if (brightness == _lastBrightness) return;
+    _lastBrightness = brightness;
+    await _evaluate(
+      'window.setReaderBrightness(${jsonEncode(brightness)})',
+    );
   }
 
   Future<void> _onLoadEnd(BookRenditionWebLease lease) async {
@@ -211,6 +284,8 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       // the snapshot avoids an identical changeStyle() and a second reflow on
       // the first visible frame.
       _rememberPreferenceState();
+      _lastBrightness = null;
+      unawaited(_applyReaderBrightness());
       final pending = readerController.pendingJump;
       if (pending?.cfi == _initialCfi && _initialCfi.isNotEmpty) {
         readerController.clearPendingJump();
@@ -309,10 +384,18 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     readerController.clearPendingJump();
   }
 
-  void _applyPreferences({bool force = false}) {
+  Future<void> _applyPreferences({bool force = false}) async {
     final fontSize = readerController.fontSize;
     final lineHeight = readerController.lineHeight;
     final margin = readerController.margin;
+    final verticalMargin = readerController.verticalMargin;
+    final bold = readerController.bold;
+    final bodyFont = readerController.bodyFont;
+    final letterSpacing = readerController.letterSpacing;
+    final paragraphSpacing = readerController.paragraphSpacing;
+    final textAlign = readerController.textAlign;
+    final firstLineIndent = readerController.firstLineIndent;
+    final hyphenate = readerController.hyphenate;
     final theme = readerController.readingTheme;
     final mode = readerController.readingMode;
     final effect = readerController.pageTurnEffect;
@@ -320,19 +403,42 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
         fontSize == _lastFontSize &&
         lineHeight == _lastLineHeight &&
         margin == _lastMargin &&
+        verticalMargin == _lastVerticalMargin &&
+        bold == _lastBold &&
+        bodyFont == _lastBodyFont &&
+        letterSpacing == _lastLetterSpacing &&
+        paragraphSpacing == _lastParagraphSpacing &&
+        textAlign == _lastTextAlign &&
+        firstLineIndent == _lastFirstLineIndent &&
+        hyphenate == _lastHyphenate &&
         theme == _lastTheme &&
         mode == _lastMode &&
         effect == _lastEffect) {
       return;
     }
     _rememberPreferenceState();
-    unawaited(_evaluate('window.changeStyle(${jsonEncode(_styleJson())})'));
+    await _evaluate('window.changeStyle(${jsonEncode(_styleJson())})');
+    if (_disposed || !_webReady) return;
+    if (_isDesktop) {
+      await _evaluate(_desktopStylePaintNudgeJs);
+      if (_disposed) return;
+      _desktopPaintNudge = !_desktopPaintNudge;
+      notifyListeners();
+    }
   }
 
   void _rememberPreferenceState() {
     _lastFontSize = readerController.fontSize;
     _lastLineHeight = readerController.lineHeight;
     _lastMargin = readerController.margin;
+    _lastVerticalMargin = readerController.verticalMargin;
+    _lastBold = readerController.bold;
+    _lastBodyFont = readerController.bodyFont;
+    _lastLetterSpacing = readerController.letterSpacing;
+    _lastParagraphSpacing = readerController.paragraphSpacing;
+    _lastTextAlign = readerController.textAlign;
+    _lastFirstLineIndent = readerController.firstLineIndent;
+    _lastHyphenate = readerController.hyphenate;
     _lastTheme = readerController.readingTheme;
     _lastMode = readerController.readingMode;
     _lastEffect = readerController.pageTurnEffect;
@@ -406,36 +512,38 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     final sideMargin = mobile
         ? (6 + readerController.margin / 6).clamp(8.0, 16.0)
         : (3 + readerController.margin / 8).clamp(4.0, 8.0);
-    // Meta band for chapter / progress. Phone needs more air; desktop less.
-    // Desktop top gets +20 so the chapter label sits clearer under the title bar.
-    final topMetaBand = mobile ? 50.0 : 52.0;
-    final bottomMetaBand = mobile ? 50.0 : 32.0;
+    // Label band (chapter / progress) + user vertical margin.
+    // Default verticalMargin=26 → mobile ≈ safe+50; desktop top ≈ safe+52,
+    // bottom ≈ safe+32.
+    final labelTop = mobile ? 24.0 : 26.0;
+    final labelBottom = mobile ? 24.0 : 6.0;
+    final vExtra = readerController.verticalMargin;
     return {
       'fontSize': readerController.fontSize / 16,
-      // WeChat Reading–like sans stack for the default reading face.
-      'fontName': BookReadingTheme.cssReadingFontFamily,
+      'fontName': readerController.bodyFont.cssFontName,
       'fontPath': '',
-      'fontWeight': 400,
-      'letterSpacing': 0,
+      'fontWeight': readerController.bold ? 700 : 400,
+      'letterSpacing': readerController.letterSpacing,
       'spacing': readerController.lineHeight,
-      // Indent + mild paragraph gap (WeChat-like air, not web-article gaps).
-      'paragraphSpacing': 0.35,
-      'textIndent': 2,
+      'paragraphSpacing': readerController.paragraphSpacing,
+      'textIndent': readerController.firstLineIndent ? 2.0 : 0.0,
       'fontColor': _cssColor(Color(theme.foregroundArgb)),
       'backgroundColor': _cssColor(Color(theme.backgroundArgb)),
       'linkColor': _cssColor(Color(theme.linkColorArgb)),
       'headingColor': _cssColor(Color(theme.headingColorArgb)),
-      'topMargin': _safeTop + topMetaBand,
-      'bottomMargin': _safeBottom + bottomMetaBand,
+      'topMargin': _safeTop + labelTop + vExtra,
+      'bottomMargin': _safeBottom + labelBottom + vExtra,
       'sideMargin': sideMargin,
-      'justify': true,
-      'hyphenate': false,
+      'justify': readerController.textAlign == BookTextAlign.justify,
+      'hyphenate': readerController.hyphenate,
       'pageTurnStyle': turnStyle,
       // Keep Foliate auto columns (desktop may spread to two).
       'maxColumnCount': 0,
       'columnThreshold': 720,
       'writingMode': 'horizontal-tb',
-      'textAlign': 'justify',
+      'textAlign': readerController.textAlign == BookTextAlign.justify
+          ? 'justify'
+          : 'start',
       'backgroundImage': 'none',
       'bgimgBlur': 0,
       'bgimgOpacity': 1,
@@ -510,9 +618,12 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _prefsApplyTimer?.cancel();
+    _prefsApplyTimer = null;
     _openGeneration++;
     readerController.removeListener(_onControllerChanged);
     readerController.detachExternalPageNavigation();
+    readerController.detachExternalSeek();
     _session?.invalidateWebView(_webLease);
     _webLease = null;
     unawaited(_session?.close());

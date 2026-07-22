@@ -1679,6 +1679,11 @@ const setStyle = (oldStyle) => {
   reader.view.renderer.setAttribute('bgimg-opacity', style.bgimgOpacity ?? 1)
   reader.view.renderer.setAttribute('bgimg-fit', style.bgimgFit ?? 'cover')
 
+  // Keep the host document canvas in sync; init only painted this once.
+  const canvasBg = style.backgroundColor || '#FFFFFF'
+  document.documentElement.style.backgroundColor = canvasBg
+  document.body.style.backgroundColor = canvasBg
+
   turn.animated ? reader.view.renderer.setAttribute('animated', 'true')
     : reader.view.renderer.removeAttribute('animated')
 
@@ -1713,6 +1718,15 @@ const setStyle = (oldStyle) => {
   if (!style.useBookStyles && (style.headingColor || style.fontColor)) {
     fixHeadingColor(style.headingColor || style.fontColor)
   }
+
+  // Force iframe style paint; desktop WKWebView under Flutter often keeps a
+  // stale composited surface until the next host input otherwise.
+  try {
+    const contents = reader.view?.renderer?.getContents?.() || []
+    for (const c of contents) {
+      if (c?.doc?.documentElement) void c.doc.documentElement.offsetHeight
+    }
+  } catch (_) {}
 
   if (!oldStyle) {
     return
@@ -1854,6 +1868,29 @@ window.changeStyle = (newStyle) => {
   if (newStyle.codeHighlightTheme !== undefined) {
     changeCodeHighlightTheme(newStyle.codeHighlightTheme)
   }
+}
+
+/// In-reader dimming overlay. Lives inside the WebView with pointer-events:none
+/// so Flutter desktop PlatformViews keep receiving clicks (a Flutter overlay
+/// above InAppWebView swallows mouse hit-testing on macOS/Windows).
+window.setReaderBrightness = (value) => {
+  const b = Math.max(0.15, Math.min(1, Number(value)))
+  let dim = document.getElementById('kaika-reader-dim')
+  if (!dim) {
+    dim = document.createElement('div')
+    dim.id = 'kaika-reader-dim'
+    dim.setAttribute('aria-hidden', 'true')
+    Object.assign(dim.style, {
+      position: 'fixed',
+      inset: '0',
+      pointerEvents: 'none',
+      zIndex: '2147483647',
+      transition: 'background-color 80ms linear',
+    })
+    document.documentElement.appendChild(dim)
+  }
+  const alpha = (1 - b) * 0.72
+  dim.style.backgroundColor = alpha <= 0.001 ? 'transparent' : `rgba(0,0,0,${alpha})`
 }
 
 window.goToHref = href => reader.view.goTo(href)

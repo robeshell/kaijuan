@@ -1,9 +1,9 @@
 /// Height of the book reader's top chrome bar (icon row inside SafeArea).
 const double kBookReaderChromeBarHeight = 56.0;
 
-/// Height of the book reader's bottom chrome content band (padding + icons).
-/// Keep in sync with [BookReaderChrome] bottom `EdgeInsets` + IconButton (48).
-const double kBookReaderChromeBottomHeight = 8 + 48 + 12;
+/// Approximate bottom tool-strip content height (progress + keys), excluding
+/// safe area. Keep in sync with [BookReaderToolStrip].
+const double kBookReaderChromeBottomHeight = 12 + 28 + 8 + 48 + 12;
 
 /// Reading themes for the reflow book reader.
 ///

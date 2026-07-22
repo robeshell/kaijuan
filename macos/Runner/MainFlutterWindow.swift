@@ -8,6 +8,8 @@ class MainFlutterWindow: NSWindow {
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
+    // Match the Flutter splash canvas so the first native frame is not black.
+    flutterViewController.backgroundColor = NSColor.white
     self.contentViewController = flutterViewController
     self.backgroundColor = NSColor(
       srgbRed: 1,

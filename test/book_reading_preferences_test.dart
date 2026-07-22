@@ -20,9 +20,18 @@ void main() {
   test('defaults when file is missing', () async {
     final prefs = await BookReadingPreferences.load(supportDirectory: tempDir);
     expect(prefs.fontSize, 18.0);
-    expect(prefs.lineHeight, 1.6);
+    expect(prefs.lineHeight, 1.7);
     expect(prefs.readingTheme, BookReadingTheme.paper);
     expect(prefs.margin, 24.0);
+    expect(prefs.verticalMargin, 26.0);
+    expect(prefs.bold, isFalse);
+    expect(prefs.brightness, 1.0);
+    expect(prefs.bodyFont, BookBodyFont.defaultFont);
+    expect(prefs.letterSpacing, 0.0);
+    expect(prefs.paragraphSpacing, 0.35);
+    expect(prefs.textAlign, BookTextAlign.justify);
+    expect(prefs.firstLineIndent, isTrue);
+    expect(prefs.hyphenate, isFalse);
     expect(prefs.readingMode, BookReadingMode.page);
     expect(prefs.pageTurnEffect, BookPageTurnEffect.slide);
   });
@@ -33,6 +42,15 @@ void main() {
     await prefs.setLineHeight(1.8);
     await prefs.setReadingTheme(BookReadingTheme.sepia);
     await prefs.setMargin(32);
+    await prefs.setVerticalMargin(12);
+    await prefs.setBold(true);
+    await prefs.setBrightness(0.6);
+    await prefs.setBodyFont(BookBodyFont.georgia);
+    await prefs.setLetterSpacing(-0.1);
+    await prefs.setParagraphSpacing(0.7);
+    await prefs.setTextAlign(BookTextAlign.start);
+    await prefs.setFirstLineIndent(false);
+    await prefs.setHyphenate(true);
     await prefs.setReadingMode(BookReadingMode.page);
     await prefs.setPageTurnEffect(BookPageTurnEffect.none);
 
@@ -43,6 +61,15 @@ void main() {
     expect(reloaded.lineHeight, 1.8);
     expect(reloaded.readingTheme, BookReadingTheme.sepia);
     expect(reloaded.margin, 32.0);
+    expect(reloaded.verticalMargin, 12.0);
+    expect(reloaded.bold, isTrue);
+    expect(reloaded.brightness, 0.6);
+    expect(reloaded.bodyFont, BookBodyFont.georgia);
+    expect(reloaded.letterSpacing, -0.1);
+    expect(reloaded.paragraphSpacing, 0.7);
+    expect(reloaded.textAlign, BookTextAlign.start);
+    expect(reloaded.firstLineIndent, isFalse);
+    expect(reloaded.hyphenate, isTrue);
     expect(reloaded.readingMode, BookReadingMode.page);
     expect(reloaded.pageTurnEffect, BookPageTurnEffect.none);
   });
@@ -55,6 +82,12 @@ void main() {
     expect(prefs.lineHeight, 1.2);
     await prefs.setMargin(100);
     expect(prefs.margin, 48.0);
+    await prefs.setVerticalMargin(100);
+    expect(prefs.verticalMargin, 48.0);
+    await prefs.setLetterSpacing(-5);
+    expect(prefs.letterSpacing, -1.0);
+    await prefs.setParagraphSpacing(9);
+    expect(prefs.paragraphSpacing, 2.0);
   });
 
   test('migrates old ComicReadingTheme storage strings', () async {
@@ -66,9 +99,12 @@ void main() {
 
     final prefs = await BookReadingPreferences.load(supportDirectory: tempDir);
     expect(prefs.readingTheme, BookReadingTheme.dark);
-    expect(prefs.margin, 24.0); // default
-    expect(prefs.readingMode, BookReadingMode.page); // default
-    expect(prefs.pageTurnEffect, BookPageTurnEffect.slide); // default
+    expect(prefs.margin, 24.0);
+    expect(prefs.verticalMargin, 26.0);
+    expect(prefs.bold, isFalse);
+    expect(prefs.bodyFont, BookBodyFont.defaultFont);
+    expect(prefs.readingMode, BookReadingMode.page);
+    expect(prefs.pageTurnEffect, BookPageTurnEffect.slide);
   });
 
   test('curl resolves to slide until curl renderer ships', () {

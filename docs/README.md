@@ -12,6 +12,7 @@
 | 工程结构 / 单入口 / 数据沿用 | [ENGINEERING.md](./ENGINEERING.md) |
 | Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | 某屏交互 | [specs/](./specs/) |
+| 图书工具条大改计划 | [specs/book-reader-tool-strip-plan.md](./specs/book-reader-tool-strip-plan.md) |
 | 给 Open Design | [opendesign/HANDOFF.md](./opendesign/HANDOFF.md) |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
 | 会话交接（易过期） | [dev-handoff.md](./dev-handoff.md) |
@@ -33,6 +34,7 @@ docs/
     _TEMPLATE.md
     library.md / shelf.md / search.md / lists.md / collections.md
     reader-chrome.md / book-reader.md
+    book-reader-tool-strip-plan.md   ← 图书底栏工具条大改（计划）
   opendesign/
     HANDOFF.md / CONTEXT.md / DESIGN.md / BRIEFS.md
 ```

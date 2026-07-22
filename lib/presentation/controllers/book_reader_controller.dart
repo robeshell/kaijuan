@@ -30,6 +30,30 @@ class BookReaderController extends ChangeNotifier {
            readingPreferences?.readingTheme ?? BookReadingTheme.paper,
        _margin =
            readingPreferences?.margin ?? BookReadingPreferences.defaultMargin,
+       _verticalMargin =
+           readingPreferences?.verticalMargin ??
+           BookReadingPreferences.defaultVerticalMargin,
+       _bold = readingPreferences?.bold ?? BookReadingPreferences.defaultBold,
+       _brightness =
+           readingPreferences?.brightness ??
+           BookReadingPreferences.defaultBrightness,
+       _bodyFont =
+           readingPreferences?.bodyFont ?? BookReadingPreferences.defaultBodyFont,
+       _letterSpacing =
+           readingPreferences?.letterSpacing ??
+           BookReadingPreferences.defaultLetterSpacing,
+       _paragraphSpacing =
+           readingPreferences?.paragraphSpacing ??
+           BookReadingPreferences.defaultParagraphSpacing,
+       _textAlign =
+           readingPreferences?.textAlign ??
+           BookReadingPreferences.defaultTextAlign,
+       _firstLineIndent =
+           readingPreferences?.firstLineIndent ??
+           BookReadingPreferences.defaultFirstLineIndent,
+       _hyphenate =
+           readingPreferences?.hyphenate ??
+           BookReadingPreferences.defaultHyphenate,
        _readingMode = scrollModeEnabled
            ? readingPreferences?.readingMode ??
                  BookReadingPreferences.defaultReadingMode
@@ -58,6 +82,15 @@ class BookReaderController extends ChangeNotifier {
   double _lineHeight;
   BookReadingTheme _readingTheme;
   double _margin;
+  double _verticalMargin;
+  bool _bold;
+  double _brightness;
+  BookBodyFont _bodyFont;
+  double _letterSpacing;
+  double _paragraphSpacing;
+  BookTextAlign _textAlign;
+  bool _firstLineIndent;
+  bool _hyphenate;
   BookReadingMode _readingMode;
   BookPageTurnEffect _pageTurnEffect;
 
@@ -69,6 +102,7 @@ class BookReaderController extends ChangeNotifier {
 
   VoidCallback? _externalNextPage;
   VoidCallback? _externalPreviousPage;
+  void Function(double fraction)? _externalSeek;
   String? _renditionCfi;
   double? _renditionProgress;
   String? _chapterTitle;
@@ -93,6 +127,15 @@ class BookReaderController extends ChangeNotifier {
   double get lineHeight => _lineHeight;
   BookReadingTheme get readingTheme => _readingTheme;
   double get margin => _margin;
+  double get verticalMargin => _verticalMargin;
+  bool get bold => _bold;
+  double get brightness => _brightness;
+  BookBodyFont get bodyFont => _bodyFont;
+  double get letterSpacing => _letterSpacing;
+  double get paragraphSpacing => _paragraphSpacing;
+  BookTextAlign get textAlign => _textAlign;
+  bool get firstLineIndent => _firstLineIndent;
+  bool get hyphenate => _hyphenate;
   BookReadingMode get readingMode => _readingMode;
   BookPageTurnEffect get pageTurnEffect => _pageTurnEffect;
 
@@ -235,6 +278,23 @@ class BookReaderController extends ChangeNotifier {
   void detachExternalPageNavigation() {
     _externalNextPage = null;
     _externalPreviousPage = null;
+  }
+
+  void attachExternalSeek(void Function(double fraction) seek) {
+    _externalSeek = seek;
+  }
+
+  void detachExternalSeek() {
+    _externalSeek = null;
+  }
+
+  /// Optimistic scrub to a whole-book fraction; Foliate relocate confirms CFI.
+  void seekToFraction(double fraction) {
+    if (_disposed || !_ready) return;
+    final next = fraction.clamp(0.0, 1.0);
+    _renditionProgress = next;
+    notifyListeners();
+    _externalSeek?.call(next);
   }
 
   void reportRenditionLocation({
@@ -519,6 +579,99 @@ class BookReaderController extends ChangeNotifier {
     _margin = next;
     notifyListeners();
     await _prefs?.setMargin(next);
+  }
+
+  Future<void> setVerticalMargin(double margin) async {
+    final next = margin.clamp(
+      BookReadingPreferences.minVerticalMargin,
+      BookReadingPreferences.maxVerticalMargin,
+    );
+    if (next == _verticalMargin) return;
+    _verticalMargin = next;
+    notifyListeners();
+    await _prefs?.setVerticalMargin(next);
+  }
+
+  Future<void> setBold(bool bold) async {
+    if (bold == _bold) return;
+    _bold = bold;
+    notifyListeners();
+    await _prefs?.setBold(bold);
+  }
+
+  Future<void> setBrightness(double value) async {
+    final next = value.clamp(
+      BookReadingPreferences.minBrightness,
+      BookReadingPreferences.maxBrightness,
+    );
+    if (next == _brightness) {
+      await _prefs?.setBrightness(next);
+      return;
+    }
+    _brightness = next;
+    notifyListeners();
+    await _prefs?.setBrightness(next);
+  }
+
+  /// Live dimming while dragging; persist with [setBrightness] on drag end.
+  void previewBrightness(double value) {
+    final next = value.clamp(
+      BookReadingPreferences.minBrightness,
+      BookReadingPreferences.maxBrightness,
+    );
+    if (next == _brightness) return;
+    _brightness = next;
+    notifyListeners();
+  }
+
+  Future<void> setBodyFont(BookBodyFont font) async {
+    if (font == _bodyFont) return;
+    _bodyFont = font;
+    notifyListeners();
+    await _prefs?.setBodyFont(font);
+  }
+
+  Future<void> setLetterSpacing(double spacing) async {
+    final next = spacing.clamp(
+      BookReadingPreferences.minLetterSpacing,
+      BookReadingPreferences.maxLetterSpacing,
+    );
+    if (next == _letterSpacing) return;
+    _letterSpacing = next;
+    notifyListeners();
+    await _prefs?.setLetterSpacing(next);
+  }
+
+  Future<void> setParagraphSpacing(double spacing) async {
+    final next = spacing.clamp(
+      BookReadingPreferences.minParagraphSpacing,
+      BookReadingPreferences.maxParagraphSpacing,
+    );
+    if (next == _paragraphSpacing) return;
+    _paragraphSpacing = next;
+    notifyListeners();
+    await _prefs?.setParagraphSpacing(next);
+  }
+
+  Future<void> setTextAlign(BookTextAlign align) async {
+    if (align == _textAlign) return;
+    _textAlign = align;
+    notifyListeners();
+    await _prefs?.setTextAlign(align);
+  }
+
+  Future<void> setFirstLineIndent(bool enabled) async {
+    if (enabled == _firstLineIndent) return;
+    _firstLineIndent = enabled;
+    notifyListeners();
+    await _prefs?.setFirstLineIndent(enabled);
+  }
+
+  Future<void> setHyphenate(bool enabled) async {
+    if (enabled == _hyphenate) return;
+    _hyphenate = enabled;
+    notifyListeners();
+    await _prefs?.setHyphenate(enabled);
   }
 
   Future<void> setReadingMode(BookReadingMode mode) async {

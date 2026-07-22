@@ -1,14 +1,16 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../../core/theme.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
-import 'book_reader_settings_sheet.dart';
+import 'book_reader_tool_strip.dart';
 import 'glass_bar.dart';
 import 'reader_bookmarks_sheet.dart';
 
 /// Top + bottom glass chrome for the reflow book reader.
+///
+/// Bottom is the WeChat-style tool strip (progress + five keys). Typography /
+/// brightness / reading-mode expand above the keys — no Material default sheets.
 class BookReaderChrome extends StatelessWidget {
   const BookReaderChrome({
     super.key,
@@ -27,16 +29,11 @@ class BookReaderChrome extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = controller.readingTheme;
-    final isPureBlack = theme == BookReadingTheme.pureBlack;
-    final glass = isPureBlack
-        ? const Color(0xB3000000)
-        : theme.isDark
-        ? const Color(0xB3212124)
-        : const Color(0xB3FFFFFF);
-    final fg = theme.isDark ? const Color(0xFFF2F2F4) : const Color(0xFF1C1C1E);
-    final fgMuted = theme.isDark
-        ? const Color(0x99F2F2F4)
-        : const Color(0x991C1C1E);
+    // Opaque reading surface — translucent glass made the tool strip unreadable.
+    final surface = Color(theme.backgroundArgb);
+    final fg = Color(theme.foregroundArgb);
+    final fgMuted = Color(theme.metaColorArgb);
+    final accent = Theme.of(context).colorScheme.primary;
 
     final leadingClearance =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
@@ -51,7 +48,8 @@ class BookReaderChrome extends StatelessWidget {
           left: 0,
           right: 0,
           child: GlassBar(
-            glass: glass,
+            glass: surface,
+            blur: false,
             child: SafeArea(
               bottom: false,
               child: SizedBox(
@@ -93,11 +91,6 @@ class BookReaderChrome extends StatelessWidget {
                         ),
                       ),
                       IconButton(
-                        tooltip: '目录',
-                        onPressed: onOpenToc,
-                        icon: Icon(Icons.list_outlined, color: fg, weight: 300),
-                      ),
-                      IconButton(
                         tooltip: controller.isCurrentPositionBookmarked
                             ? '移除当前位置书签'
                             : '添加当前位置书签',
@@ -126,16 +119,6 @@ class BookReaderChrome extends StatelessWidget {
                           weight: 300,
                         ),
                       ),
-                      IconButton(
-                        tooltip: '排版',
-                        onPressed: () =>
-                            showBookReaderSettingsSheet(context, controller),
-                        icon: Icon(
-                          Icons.format_size_outlined,
-                          color: fg,
-                          weight: 300,
-                        ),
-                      ),
                       if (leadingClearance > 0)
                         SizedBox(width: leadingClearance - 8),
                     ],
@@ -150,69 +133,19 @@ class BookReaderChrome extends StatelessWidget {
           right: 0,
           bottom: 0,
           child: GlassBar(
-            glass: glass,
+            glass: surface,
+            blur: false,
             child: SafeArea(
               top: false,
               child: Material(
                 type: MaterialType.transparency,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.x4,
-                    AppSpacing.x2,
-                    AppSpacing.x4,
-                    AppSpacing.x3,
-                  ),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        tooltip: controller.hasPageMode ? '上一页' : '上一节',
-                        onPressed: controller.hasPageMode
-                            ? (controller.canGoPreviousPage
-                                  ? controller.goPreviousPage
-                                  : null)
-                            : (controller.sectionIndex > 0
-                                  ? controller.goPreviousSection
-                                  : null),
-                        icon: Icon(
-                          Icons.skip_previous_outlined,
-                          color: controller.hasPageMode
-                              ? (controller.canGoPreviousPage ? fg : fgMuted)
-                              : (controller.sectionIndex > 0 ? fg : fgMuted),
-                          weight: 300,
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          controller.hasPageMode
-                              ? controller.pageLabel
-                              : '${controller.sectionLabel} 节',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: fg, fontSize: 13),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: controller.hasPageMode ? '下一页' : '下一节',
-                        onPressed: controller.hasPageMode
-                            ? (controller.canGoNextPage
-                                  ? controller.goNextPage
-                                  : null)
-                            : (controller.sectionIndex <
-                                      controller.sectionCount - 1
-                                  ? controller.goNextSection
-                                  : null),
-                        icon: Icon(
-                          Icons.skip_next_outlined,
-                          color: controller.hasPageMode
-                              ? (controller.canGoNextPage ? fg : fgMuted)
-                              : (controller.sectionIndex <
-                                        controller.sectionCount - 1
-                                    ? fg
-                                    : fgMuted),
-                          weight: 300,
-                        ),
-                      ),
-                    ],
-                  ),
+                child: BookReaderToolStrip(
+                  controller: controller,
+                  fg: fg,
+                  fgMuted: fgMuted,
+                  accent: accent,
+                  onOpenToc: onOpenToc,
+                  chromeVisible: controller.chromeVisible,
                 ),
               ),
             ),

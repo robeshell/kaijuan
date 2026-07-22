@@ -594,6 +594,8 @@ export class Paginator extends HTMLElement {
       case 'max-block-size':
       case 'background-color':
         this.#top.style.setProperty('--_' + name, value)
+        // Force a paint when only the canvas color changes (no layout resize).
+        this.#applyBackground()
         break
       case 'bottom-margin':
       case 'gap':
