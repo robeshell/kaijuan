@@ -12,14 +12,80 @@ import 'package:kaika/library/persistence/app_database.dart';
 import 'package:kaika/presentation/controllers/library_controller.dart';
 import 'package:path/path.dart' as p;
 
+import 'support/fake_epub_import_probe.dart';
+
 /// Minimal 1x1 PNG (valid for zip entry + cover extract).
 final _pngBytes = Uint8List.fromList(<int>[
-  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00,
-  0x0C, 0x49, 0x44, 0x41, 0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
-  0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE, 0xD4, 0xEF, 0x00, 0x00,
-  0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+  0x89,
+  0x50,
+  0x4E,
+  0x47,
+  0x0D,
+  0x0A,
+  0x1A,
+  0x0A,
+  0x00,
+  0x00,
+  0x00,
+  0x0D,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x08,
+  0x02,
+  0x00,
+  0x00,
+  0x00,
+  0x90,
+  0x77,
+  0x53,
+  0xDE,
+  0x00,
+  0x00,
+  0x00,
+  0x0C,
+  0x49,
+  0x44,
+  0x41,
+  0x54,
+  0x08,
+  0xD7,
+  0x63,
+  0xF8,
+  0xCF,
+  0xC0,
+  0x00,
+  0x00,
+  0x00,
+  0x03,
+  0x00,
+  0x01,
+  0x00,
+  0x05,
+  0xFE,
+  0xD4,
+  0xEF,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x49,
+  0x45,
+  0x4E,
+  0x44,
+  0xAE,
+  0x42,
+  0x60,
+  0x82,
 ]);
 
 Future<File> _writeZip(Directory dir, String name, List<String> pages) async {
@@ -52,6 +118,7 @@ void main() {
       bookImportService: BookImportService(
         database: database,
         supportDirectory: tempRoot,
+        probe: FakeEpubImportProbe((_) => imageSnapshot(title: 'Spine Comic')),
       ),
     );
   });
@@ -123,7 +190,9 @@ void main() {
 
   test('rejects archives with no image pages', () async {
     final archive = Archive()
-      ..addFile(ArchiveFile('readme.txt', 5, Uint8List.fromList('hello'.codeUnits)));
+      ..addFile(
+        ArchiveFile('readme.txt', 5, Uint8List.fromList('hello'.codeUnits)),
+      );
     final bytes = ZipEncoder().encode(archive);
     final file = File(p.join(tempRoot.path, 'empty.zip'));
     await file.writeAsBytes(bytes, flush: true);
@@ -132,6 +201,12 @@ void main() {
     expect(result.added, 0);
     expect(result.failures, hasLength(1));
     expect(result.failures.single.reason, contains('找不到图片页'));
+    for (final name in ['library', 'covers', '.import-staging']) {
+      final directory = Directory(p.join(tempRoot.path, name));
+      if (await directory.exists()) {
+        expect(await directory.list().toList(), isEmpty, reason: name);
+      }
+    }
   });
 
   test('imports image EPUB using OPF spine order and dc:title', () async {
@@ -156,10 +231,7 @@ void main() {
     expect(item.pageCount, 2);
 
     final pages = await ComicArchive.listPages(item.filePath);
-    expect(pages, [
-      'OEBPS/images/page_b.png',
-      'OEBPS/images/page_a.png',
-    ]);
+    expect(pages, ['OEBPS/images/page_b.png', 'OEBPS/images/page_a.png']);
   });
 }
 
@@ -201,7 +273,8 @@ Future<File> _writeImageEpub(
     final imgPath = pages[i].$2;
     final htmlName = 'OEBPS/p$i.xhtml';
     final relImg = imgPath.replaceFirst('OEBPS/', '');
-    final html = '''
+    final html =
+        '''
 <?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <body><img src="$relImg"/></body>
@@ -220,7 +293,8 @@ Future<File> _writeImageEpub(
     spine.writeln('    <itemref idref="html_$id"/>');
   }
 
-  final opf = '''
+  final opf =
+      '''
 <?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">

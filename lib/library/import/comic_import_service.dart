@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:path/path.dart' as p;
 
@@ -8,6 +7,7 @@ import '../../domain/reader_models.dart';
 import '../persistence/app_database.dart';
 import 'comic_archive.dart';
 import 'import_models.dart';
+import 'import_staging.dart';
 
 /// Imports comic files into content-addressed storage:
 ///
@@ -17,10 +17,16 @@ import 'import_models.dart';
 /// Supports CBZ/ZIP and **image-based EPUB** (OPF spine → images).
 /// Content addressing makes re-imports idempotent and dedup free.
 class ComicImportService {
-  ComicImportService({required this.database, required this.supportDirectory});
+  ComicImportService({
+    required this.database,
+    required this.supportDirectory,
+    this.onTiming,
+  }) : _staging = ImportStagingArea(supportDirectory);
 
   final AppDatabase database;
   final Directory supportDirectory;
+  final ImportTimingListener? onTiming;
+  final ImportStagingArea _staging;
 
   static const supportedFormats = {
     ReaderFormat.cbz,
@@ -57,6 +63,11 @@ class ComicImportService {
   }
 
   Future<_Outcome> _importOne(String path) async {
+    final trace = ImportPipelineTrace(
+      pipeline: 'comic',
+      sourcePath: path,
+      onTiming: onTiming,
+    );
     final format = ReaderFormat.fromExtension(p.extension(path));
     if (format == null || !supportedFormats.contains(format)) {
       throw ImportException('不支持的漫画格式：${p.extension(path)}');
@@ -65,72 +76,78 @@ class ComicImportService {
     if (!await file.exists()) {
       throw ImportException('文件不存在');
     }
+    trace.mark('validated');
 
-    final hash = (await sha256.bind(file.openRead()).first).toString();
-    final storedPath = p.join(_libraryDir.path, '$hash${p.extension(path)}');
-    if (!await File(storedPath).exists()) {
-      await _libraryDir.create(recursive: true);
-      await file.copy(storedPath);
-    }
+    StagedContentFile? content;
+    StagedImportFile? cover;
+    try {
+      content = await _staging.stageContent(file);
+      final hash = content.hash;
+      trace.mark('content-staged');
 
-    final listing = await ComicArchive.listPagesDetailed(storedPath);
-    if (listing.pageNames.isEmpty) {
-      await File(storedPath).delete().catchError((_) => File(storedPath));
-      throw ImportException(
-        format == ReaderFormat.epub
-            ? 'EPUB 里找不到可用的图片页（仅支持页图式 / 固定版式漫画 EPUB）'
-            : '压缩包里找不到图片页',
+      final listing = await ComicArchive.listPagesDetailed(
+        content.file.stagedPath,
       );
+      if (listing.pageNames.isEmpty) {
+        throw ImportException(
+          format == ReaderFormat.epub
+              ? 'EPUB 里找不到可用的图片页（仅支持页图式 / 固定版式漫画 EPUB）'
+              : '压缩包里找不到图片页',
+        );
+      }
+      trace.mark('page-list-ready');
+
+      final coverEntry = listing.pageNames.firstWhere(
+        (entry) => ComicArchive.imageExtensions.contains(
+          p.extension(entry).toLowerCase(),
+        ),
+        orElse: () => listing.pageNames.first,
+      );
+      final coverBytes = await ComicArchive.readEntry(
+        content.file.stagedPath,
+        coverEntry,
+      );
+      if (coverBytes == null) throw ImportException('封面提取失败');
+      final coverExtension = p.extension(coverEntry).toLowerCase();
+      cover = await _staging.stageCover(
+        hash: hash,
+        extension: coverExtension.isEmpty ? '.img' : coverExtension,
+        bytes: coverBytes,
+      );
+      trace.mark('cover-staged');
+
+      final fallbackTitle = p.basenameWithoutExtension(path);
+      final title = (listing.title?.trim().isNotEmpty ?? false)
+          ? listing.title!.trim()
+          : fallbackTitle;
+      final existing = await database.readingItemByHash(hash);
+      final storedPath = await content.file.commit();
+      final coverPath = await cover.commit();
+      trace.mark('files-committed');
+
+      final now = DateTime.now();
+      await database.upsertReadingItem(
+        ReadingItemsCompanion(
+          id: Value(existing?.id ?? hash),
+          kind: Value(ReaderKind.comic.storageValue),
+          format: Value(format.storageValue),
+          title: Value(existing?.title ?? title),
+          filePath: Value(storedPath),
+          contentHash: Value(hash),
+          coverPath: Value(coverPath),
+          pageCount: Value(listing.pageNames.length),
+          pageOrderVersion: const Value(ComicPageOrder.version),
+          addedAt: Value(existing?.addedAt ?? now),
+          updatedAt: Value(now),
+        ),
+      );
+      trace.mark('database-committed');
+      return existing == null ? _Outcome.added : _Outcome.updated;
+    } catch (_) {
+      await rollbackStagedFiles([cover, content?.file]);
+      trace.mark('rolled-back');
+      rethrow;
     }
-
-    final coverEntry = listing.pageNames.firstWhere(
-      (e) => ComicArchive.imageExtensions.contains(
-        p.extension(e).toLowerCase(),
-      ),
-      orElse: () => listing.pageNames.first,
-    );
-    final coverPath = await _ensureCover(hash, storedPath, coverEntry);
-    final fallbackTitle = p.basenameWithoutExtension(path);
-    final title = (listing.title?.trim().isNotEmpty ?? false)
-        ? listing.title!.trim()
-        : fallbackTitle;
-
-    final existing = await database.readingItemByHash(hash);
-    final now = DateTime.now();
-    await database.upsertReadingItem(
-      ReadingItemsCompanion(
-        id: Value(existing?.id ?? hash),
-        kind: Value(ReaderKind.comic.storageValue),
-        format: Value(format.storageValue),
-        title: Value(existing?.title ?? title),
-        filePath: Value(storedPath),
-        contentHash: Value(hash),
-        coverPath: Value(coverPath),
-        pageCount: Value(listing.pageNames.length),
-        pageOrderVersion: const Value(ComicPageOrder.version),
-        addedAt: Value(existing?.addedAt ?? now),
-        updatedAt: Value(now),
-      ),
-    );
-    return existing == null ? _Outcome.added : _Outcome.updated;
-  }
-
-  Future<String> _ensureCover(
-    String hash,
-    String archivePath,
-    String firstPage,
-  ) async {
-    final ext = p.extension(firstPage).toLowerCase();
-    final coverPath = p.join(
-      _coversDir.path,
-      '$hash${ext.isEmpty ? '.img' : ext}',
-    );
-    if (await File(coverPath).exists()) return coverPath;
-    final bytes = await ComicArchive.readEntry(archivePath, firstPage);
-    if (bytes == null) throw ImportException('封面提取失败');
-    await _coversDir.create(recursive: true);
-    await File(coverPath).writeAsBytes(bytes, flush: true);
-    return coverPath;
   }
 
   Future<void> _deleteIfExists(String path) async {
@@ -139,11 +156,6 @@ class ComicImportService {
       await file.delete();
     }
   }
-
-  Directory get _libraryDir =>
-      Directory(p.join(supportDirectory.path, 'library'));
-  Directory get _coversDir =>
-      Directory(p.join(supportDirectory.path, 'covers'));
 }
 
 enum _Outcome { added, updated }
