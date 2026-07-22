@@ -59,6 +59,22 @@ class ReaderLocator {
   final String payloadJson;
 }
 
+/// Engine-agnostic bookmark metadata. [locatorJson] remains format-owned and
+/// is interpreted only by the matching reader controller.
+class ReaderBookmark {
+  const ReaderBookmark({
+    required this.id,
+    required this.locatorJson,
+    required this.createdAt,
+    this.label,
+  });
+
+  final int id;
+  final String locatorJson;
+  final String? label;
+  final DateTime createdAt;
+}
+
 /// Comic page-order contract. Progress locators store a page index; if the
 /// sort rules change, bump [version] so restored progress can be invalidated
 /// instead of silently pointing at the wrong page.

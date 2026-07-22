@@ -21,11 +21,11 @@ class ComicReaderController extends ChangeNotifier {
     this._database,
     this.item,
     ComicReadingPreferences? readingPreferences,
-  )   : _readingPreferences = readingPreferences,
-        _mode = readingPreferences?.mode ?? ComicReaderMode.slide,
-        _direction = readingPreferences?.direction ?? ComicReadDirection.ltr,
-        _readingTheme =
-            readingPreferences?.readingTheme ?? ComicReadingTheme.comicDefault;
+  ) : _readingPreferences = readingPreferences,
+      _mode = readingPreferences?.mode ?? ComicReaderMode.slide,
+      _direction = readingPreferences?.direction ?? ComicReadDirection.ltr,
+      _readingTheme =
+          readingPreferences?.readingTheme ?? ComicReadingTheme.comicDefault;
 
   final AppDatabase _database;
   final ReadingItem item;
@@ -42,6 +42,8 @@ class ComicReaderController extends ChangeNotifier {
   ComicReadingTheme _readingTheme;
   bool _ready = false;
   bool _disposed = false;
+  List<ReaderBookmark> _bookmarks = const [];
+  StreamSubscription<List<ReaderBookmark>>? _bookmarksSubscription;
 
   /// Slider draft while the user is dragging; committed on changeEnd.
   int? _sliderPreview;
@@ -57,6 +59,17 @@ class ComicReaderController extends ChangeNotifier {
   ComicReadDirection get direction => _direction;
   ComicReadingTheme get readingTheme => _readingTheme;
   int get displayPage => _sliderPreview ?? _pageIndex;
+  List<ReaderBookmark> get bookmarks => _bookmarks;
+
+  ReaderBookmark? get currentBookmark {
+    for (final bookmark in _bookmarks) {
+      final locator = _validBookmarkLocator(bookmark);
+      if (locator?.pageIndex == _pageIndex) return bookmark;
+    }
+    return null;
+  }
+
+  bool get isCurrentPageBookmarked => currentBookmark != null;
 
   String get pageLabel {
     final total = pageCount;
@@ -80,6 +93,7 @@ class ComicReaderController extends ChangeNotifier {
       _session = session;
       _cache = ComicPageCache(session: session);
       await _restoreProgress();
+      _watchBookmarks();
       await _database.touchLastOpened(item.id, DateTime.now());
       _ready = true;
       _openError = null;
@@ -103,6 +117,61 @@ class ComicReaderController extends ChangeNotifier {
     if (valid != null) {
       _pageIndex = valid.pageIndex;
     }
+  }
+
+  void _watchBookmarks() {
+    _bookmarksSubscription?.cancel();
+    _bookmarksSubscription = _database.watchBookmarksFor(item.id).listen((
+      rows,
+    ) {
+      if (_disposed) return;
+      final valid =
+          rows.where((row) => _validBookmarkLocator(row) != null).toList()
+            ..sort(
+              (a, b) => _validBookmarkLocator(
+                a,
+              )!.pageIndex.compareTo(_validBookmarkLocator(b)!.pageIndex),
+            );
+      _bookmarks = List.unmodifiable(valid);
+      notifyListeners();
+    });
+  }
+
+  ComicLocator? _validBookmarkLocator(ReaderBookmark bookmark) {
+    return ComicLocator.tryDecode(bookmark.locatorJson)?.validated(
+      pageCount: pageCount,
+      itemPageOrderVersion: item.pageOrderVersion,
+    );
+  }
+
+  String bookmarkLabel(ReaderBookmark bookmark) {
+    final page = _validBookmarkLocator(bookmark)?.pageIndex;
+    return page == null ? '位置不可用' : '第 ${page + 1} 页';
+  }
+
+  Future<void> toggleBookmark() async {
+    final existing = currentBookmark;
+    if (existing != null) {
+      await _database.deleteBookmark(existing.id);
+      return;
+    }
+    if (pageCount <= 0) return;
+    await _database.addBookmark(
+      itemId: item.id,
+      locatorJson: ComicLocator(
+        pageIndex: _pageIndex,
+        pageOrderVersion: ComicPageOrder.version,
+      ).encode(),
+    );
+  }
+
+  void goToBookmark(ReaderBookmark bookmark) {
+    final locator = _validBookmarkLocator(bookmark);
+    if (locator != null) jumpTo(locator.pageIndex);
+  }
+
+  Future<void> removeBookmark(ReaderBookmark bookmark) {
+    return _database.deleteBookmark(bookmark.id);
   }
 
   void toggleChrome() {
@@ -221,6 +290,7 @@ class ComicReaderController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_bookmarksSubscription?.cancel());
     unawaited(_persistProgress());
     _cache?.dispose();
     unawaited(_session?.close() ?? Future<void>.value());

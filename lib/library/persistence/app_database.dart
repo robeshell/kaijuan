@@ -8,10 +8,7 @@ part 'app_database.g.dart';
 /// One row on the shelf "continue reading" surface.
 /// Progress fraction is for chrome only; page restore uses opaque locator JSON.
 class ContinueReadingEntry {
-  const ContinueReadingEntry({
-    required this.item,
-    this.progressFraction,
-  });
+  const ContinueReadingEntry({required this.item, this.progressFraction});
 
   final ReadingItem item;
   final double? progressFraction;
@@ -19,28 +16,21 @@ class ContinueReadingEntry {
 
 /// Library grid row: item + optional progress for filters / badges.
 class LibraryEntry {
-  const LibraryEntry({
-    required this.item,
-    this.progressFraction,
-  });
+  const LibraryEntry({required this.item, this.progressFraction});
 
   final ReadingItem item;
   final double? progressFraction;
 
   bool get isUnread => item.lastOpenedAt == null;
 
-  bool get isFinished =>
-      progressFraction != null && progressFraction! >= 0.98;
+  bool get isFinished => progressFraction != null && progressFraction! >= 0.98;
 
   bool get isReading => !isUnread && !isFinished;
 }
 
 /// Named collection of library items (书单). Not the same as onShelf pin.
 class ReadingListSummary {
-  const ReadingListSummary({
-    required this.list,
-    required this.memberCount,
-  });
+  const ReadingListSummary({required this.list, required this.memberCount});
 
   final ReadingList list;
   final int memberCount;
@@ -57,11 +47,12 @@ class ReadingItems extends Table {
   TextColumn get contentHash => text()();
   TextColumn get coverPath => text().nullable()();
   TextColumn get seriesName => text().nullable()();
+
   /// Image page count for comics; 0 for books until reflow metrics land.
   IntColumn get pageCount => integer().withDefault(const Constant(0))();
+
   /// [ComicPageOrder.version] frozen at import time. 0 = unknown/legacy.
-  IntColumn get pageOrderVersion =>
-      integer().withDefault(const Constant(0))();
+  IntColumn get pageOrderVersion => integer().withDefault(const Constant(0))();
   BoolColumn get onShelf => boolean().withDefault(const Constant(false))();
   DateTimeColumn get addedAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
@@ -72,22 +63,18 @@ class ReadingItems extends Table {
 
   @override
   List<Set<Column<Object>>> get uniqueKeys => [
-        {contentHash},
-      ];
+    {contentHash},
+  ];
 }
 
 /// The locator payload is format-owned JSON (see domain/reader_models.dart).
 /// The database never interprets it — stable reading-position and annotation
 /// identity lives inside the payload.
 class ReadingProgress extends Table {
-  TextColumn get itemId => text().references(
-        ReadingItems,
-        #id,
-        onDelete: KeyAction.cascade,
-      )();
+  TextColumn get itemId =>
+      text().references(ReadingItems, #id, onDelete: KeyAction.cascade)();
   TextColumn get locatorJson => text()();
-  RealColumn get progressFraction =>
-      real().withDefault(const Constant(0.0))();
+  RealColumn get progressFraction => real().withDefault(const Constant(0.0))();
   DateTimeColumn get updatedAt => dateTime()();
 
   @override
@@ -96,11 +83,8 @@ class ReadingProgress extends Table {
 
 class Bookmarks extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get itemId => text().references(
-        ReadingItems,
-        #id,
-        onDelete: KeyAction.cascade,
-      )();
+  TextColumn get itemId =>
+      text().references(ReadingItems, #id, onDelete: KeyAction.cascade)();
   TextColumn get locatorJson => text()();
   TextColumn get label => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
@@ -119,16 +103,10 @@ class ReadingLists extends Table {
 }
 
 class ReadingListMembers extends Table {
-  TextColumn get listId => text().references(
-        ReadingLists,
-        #id,
-        onDelete: KeyAction.cascade,
-      )();
-  TextColumn get itemId => text().references(
-        ReadingItems,
-        #id,
-        onDelete: KeyAction.cascade,
-      )();
+  TextColumn get listId =>
+      text().references(ReadingLists, #id, onDelete: KeyAction.cascade)();
+  TextColumn get itemId =>
+      text().references(ReadingItems, #id, onDelete: KeyAction.cascade)();
   DateTimeColumn get addedAt => dateTime()();
 
   @override
@@ -139,6 +117,7 @@ class ReadingListMembers extends Table {
 class Collections extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
+
   /// Legacy pin flag; 合集主展示在书库，默认 false。
   BoolColumn get onShelf => boolean().withDefault(const Constant(false))();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
@@ -150,16 +129,10 @@ class Collections extends Table {
 }
 
 class CollectionMembers extends Table {
-  TextColumn get collectionId => text().references(
-        Collections,
-        #id,
-        onDelete: KeyAction.cascade,
-      )();
-  TextColumn get itemId => text().references(
-        ReadingItems,
-        #id,
-        onDelete: KeyAction.cascade,
-      )();
+  TextColumn get collectionId =>
+      text().references(Collections, #id, onDelete: KeyAction.cascade)();
+  TextColumn get itemId =>
+      text().references(ReadingItems, #id, onDelete: KeyAction.cascade)();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
   DateTimeColumn get addedAt => dateTime()();
 
@@ -179,6 +152,7 @@ class CollectionSummary {
   final Collection collection;
   final int memberCount;
   final List<String> coverPaths;
+
   /// All member item ids — library hides these singles when the 合集 is shown.
   final List<String> memberIds;
 }
@@ -201,12 +175,12 @@ class AppDatabase extends _$AppDatabase {
 
   /// Per-brand database file (see [BrandConfig.databaseName]).
   AppDatabase.named(String name)
-      : super(
-          driftDatabase(
-            name: name,
-            native: const DriftNativeOptions(shareAcrossIsolates: true),
-          ),
-        );
+    : super(
+        driftDatabase(
+          name: name,
+          native: const DriftNativeOptions(shareAcrossIsolates: true),
+        ),
+      );
 
   @override
   int get schemaVersion => 4;
@@ -239,8 +213,9 @@ class AppDatabase extends _$AppDatabase {
         for (final row in rows)
           LibraryEntry(
             item: row.readTable(readingItems),
-            progressFraction:
-                row.readTableOrNull(readingProgress)?.progressFraction,
+            progressFraction: row
+                .readTableOrNull(readingProgress)
+                ?.progressFraction,
           ),
       ],
     );
@@ -268,10 +243,7 @@ class AppDatabase extends _$AppDatabase {
     }
     final at = DateTime.now();
     return (update(readingItems)..where((t) => t.id.equals(id))).write(
-      ReadingItemsCompanion(
-        title: Value(trimmed),
-        updatedAt: Value(at),
-      ),
+      ReadingItemsCompanion(title: Value(trimmed), updatedAt: Value(at)),
     );
   }
 
@@ -289,22 +261,24 @@ class AppDatabase extends _$AppDatabase {
 
   /// Recently opened items for the shelf "continue reading" surface.
   Stream<List<ContinueReadingEntry>> watchContinueReading({int limit = 24}) {
-    final query = select(readingItems).join([
-      leftOuterJoin(
-        readingProgress,
-        readingProgress.itemId.equalsExp(readingItems.id),
-      ),
-    ])
-      ..where(readingItems.lastOpenedAt.isNotNull())
-      ..orderBy([OrderingTerm.desc(readingItems.lastOpenedAt)])
-      ..limit(limit);
+    final query =
+        select(readingItems).join([
+            leftOuterJoin(
+              readingProgress,
+              readingProgress.itemId.equalsExp(readingItems.id),
+            ),
+          ])
+          ..where(readingItems.lastOpenedAt.isNotNull())
+          ..orderBy([OrderingTerm.desc(readingItems.lastOpenedAt)])
+          ..limit(limit);
     return query.watch().map(
       (rows) => [
         for (final row in rows)
           ContinueReadingEntry(
             item: row.readTable(readingItems),
-            progressFraction:
-                row.readTableOrNull(readingProgress)?.progressFraction,
+            progressFraction: row
+                .readTableOrNull(readingProgress)
+                ?.progressFraction,
           ),
       ],
     );
@@ -322,10 +296,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> setOnShelf(String id, {required bool onShelf}) {
     final at = DateTime.now();
     return (update(readingItems)..where((t) => t.id.equals(id))).write(
-      ReadingItemsCompanion(
-        onShelf: Value(onShelf),
-        updatedAt: Value(at),
-      ),
+      ReadingItemsCompanion(onShelf: Value(onShelf), updatedAt: Value(at)),
     );
   }
 
@@ -353,22 +324,68 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  // --- Bookmarks -----------------------------------------------------------
+
+  Stream<List<ReaderBookmark>> watchBookmarksFor(String itemId) {
+    final query = select(bookmarks)
+      ..where((t) => t.itemId.equals(itemId))
+      ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]);
+    return query.watch().map(
+      (rows) => [
+        for (final row in rows)
+          ReaderBookmark(
+            id: row.id,
+            locatorJson: row.locatorJson,
+            label: row.label,
+            createdAt: row.createdAt,
+          ),
+      ],
+    );
+  }
+
+  Future<int> addBookmark({
+    required String itemId,
+    required String locatorJson,
+    String? label,
+  }) async {
+    final existing =
+        await (select(bookmarks)..where(
+              (t) =>
+                  t.itemId.equals(itemId) & t.locatorJson.equals(locatorJson),
+            ))
+            .getSingleOrNull();
+    if (existing != null) return existing.id;
+    return into(bookmarks).insert(
+      BookmarksCompanion.insert(
+        itemId: itemId,
+        locatorJson: locatorJson,
+        label: Value(label),
+        createdAt: DateTime.now(),
+      ),
+    );
+  }
+
+  Future<void> deleteBookmark(int id) {
+    return (delete(bookmarks)..where((t) => t.id.equals(id))).go();
+  }
+
   // --- Reading lists -------------------------------------------------------
 
   Stream<List<ReadingListSummary>> watchReadingLists() {
     final memberCount = readingListMembers.itemId.count();
-    final query = select(readingLists).join([
-      leftOuterJoin(
-        readingListMembers,
-        readingListMembers.listId.equalsExp(readingLists.id),
-      ),
-    ])
-      ..addColumns([memberCount])
-      ..groupBy([readingLists.id])
-      ..orderBy([
-        OrderingTerm.asc(readingLists.sortOrder),
-        OrderingTerm.desc(readingLists.updatedAt),
-      ]);
+    final query =
+        select(readingLists).join([
+            leftOuterJoin(
+              readingListMembers,
+              readingListMembers.listId.equalsExp(readingLists.id),
+            ),
+          ])
+          ..addColumns([memberCount])
+          ..groupBy([readingLists.id])
+          ..orderBy([
+            OrderingTerm.asc(readingLists.sortOrder),
+            OrderingTerm.desc(readingLists.updatedAt),
+          ]);
     return query.watch().map(
       (rows) => [
         for (final row in rows)
@@ -408,10 +425,7 @@ class AppDatabase extends _$AppDatabase {
     if (trimmed.isEmpty) return Future.value();
     final at = DateTime.now();
     return (update(readingLists)..where((t) => t.id.equals(id))).write(
-      ReadingListsCompanion(
-        name: Value(trimmed),
-        updatedAt: Value(at),
-      ),
+      ReadingListsCompanion(name: Value(trimmed), updatedAt: Value(at)),
     );
   }
 
@@ -420,14 +434,15 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Stream<List<ReadingItem>> watchListMembers(String listId) {
-    final query = select(readingItems).join([
-      innerJoin(
-        readingListMembers,
-        readingListMembers.itemId.equalsExp(readingItems.id),
-      ),
-    ])
-      ..where(readingListMembers.listId.equals(listId))
-      ..orderBy([OrderingTerm.desc(readingListMembers.addedAt)]);
+    final query =
+        select(readingItems).join([
+            innerJoin(
+              readingListMembers,
+              readingListMembers.itemId.equalsExp(readingItems.id),
+            ),
+          ])
+          ..where(readingListMembers.listId.equals(listId))
+          ..orderBy([OrderingTerm.desc(readingListMembers.addedAt)]);
     return query.watch().map(
       (rows) => [for (final row in rows) row.readTable(readingItems)],
     );
@@ -454,11 +469,9 @@ class AppDatabase extends _$AppDatabase {
     required String listId,
     required String itemId,
   }) async {
-    await (delete(readingListMembers)
-          ..where(
-            (t) => t.listId.equals(listId) & t.itemId.equals(itemId),
-          ))
-        .go();
+    await (delete(
+      readingListMembers,
+    )..where((t) => t.listId.equals(listId) & t.itemId.equals(itemId))).go();
     await (update(readingLists)..where((t) => t.id.equals(listId))).write(
       ReadingListsCompanion(updatedAt: Value(DateTime.now())),
     );
@@ -496,18 +509,19 @@ class AppDatabase extends _$AppDatabase {
       watchCollections(onShelfOnly: true);
 
   Future<CollectionSummary> _collectionSummary(Collection c) async {
-    final members = await (select(collectionMembers).join([
-      innerJoin(
-        readingItems,
-        readingItems.id.equalsExp(collectionMembers.itemId),
-      ),
-    ])
-          ..where(collectionMembers.collectionId.equals(c.id))
-          ..orderBy([
-            OrderingTerm.asc(collectionMembers.sortOrder),
-            OrderingTerm.desc(collectionMembers.addedAt),
-          ]))
-        .get();
+    final members =
+        await (select(collectionMembers).join([
+                innerJoin(
+                  readingItems,
+                  readingItems.id.equalsExp(collectionMembers.itemId),
+                ),
+              ])
+              ..where(collectionMembers.collectionId.equals(c.id))
+              ..orderBy([
+                OrderingTerm.asc(collectionMembers.sortOrder),
+                OrderingTerm.desc(collectionMembers.addedAt),
+              ]))
+            .get();
     final covers = <String>[];
     final ids = <String>[];
     for (final row in members) {
@@ -556,10 +570,7 @@ class AppDatabase extends _$AppDatabase {
     if (trimmed.isEmpty) return Future.value();
     final at = DateTime.now();
     return (update(collections)..where((t) => t.id.equals(id))).write(
-      CollectionsCompanion(
-        name: Value(trimmed),
-        updatedAt: Value(at),
-      ),
+      CollectionsCompanion(name: Value(trimmed), updatedAt: Value(at)),
     );
   }
 
@@ -570,25 +581,23 @@ class AppDatabase extends _$AppDatabase {
   Future<void> setCollectionOnShelf(String id, {required bool onShelf}) {
     final at = DateTime.now();
     return (update(collections)..where((t) => t.id.equals(id))).write(
-      CollectionsCompanion(
-        onShelf: Value(onShelf),
-        updatedAt: Value(at),
-      ),
+      CollectionsCompanion(onShelf: Value(onShelf), updatedAt: Value(at)),
     );
   }
 
   Stream<List<ReadingItem>> watchCollectionMembers(String collectionId) {
-    final query = select(readingItems).join([
-      innerJoin(
-        collectionMembers,
-        collectionMembers.itemId.equalsExp(readingItems.id),
-      ),
-    ])
-      ..where(collectionMembers.collectionId.equals(collectionId))
-      ..orderBy([
-        OrderingTerm.asc(collectionMembers.sortOrder),
-        OrderingTerm.desc(collectionMembers.addedAt),
-      ]);
+    final query =
+        select(readingItems).join([
+            innerJoin(
+              collectionMembers,
+              collectionMembers.itemId.equalsExp(readingItems.id),
+            ),
+          ])
+          ..where(collectionMembers.collectionId.equals(collectionId))
+          ..orderBy([
+            OrderingTerm.asc(collectionMembers.sortOrder),
+            OrderingTerm.desc(collectionMembers.addedAt),
+          ]);
     return query.watch().map(
       (rows) => [for (final row in rows) row.readTable(readingItems)],
     );
@@ -600,9 +609,9 @@ class AppDatabase extends _$AppDatabase {
     required String itemId,
   }) async {
     final now = DateTime.now();
-    await (delete(collectionMembers)
-          ..where((t) => t.itemId.equals(itemId)))
-        .go();
+    await (delete(
+      collectionMembers,
+    )..where((t) => t.itemId.equals(itemId))).go();
     await into(collectionMembers).insertOnConflictUpdate(
       CollectionMembersCompanion.insert(
         collectionId: collectionId,
@@ -619,11 +628,9 @@ class AppDatabase extends _$AppDatabase {
     required String collectionId,
     required String itemId,
   }) async {
-    await (delete(collectionMembers)
-          ..where(
-            (t) =>
-                t.collectionId.equals(collectionId) & t.itemId.equals(itemId),
-          ))
+    await (delete(collectionMembers)..where(
+          (t) => t.collectionId.equals(collectionId) & t.itemId.equals(itemId),
+        ))
         .go();
     await (update(collections)..where((t) => t.id.equals(collectionId))).write(
       CollectionsCompanion(updatedAt: Value(DateTime.now())),
@@ -631,9 +638,9 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<String?> collectionIdForItem(String itemId) async {
-    final row = await (select(collectionMembers)
-          ..where((t) => t.itemId.equals(itemId)))
-        .getSingleOrNull();
+    final row = await (select(
+      collectionMembers,
+    )..where((t) => t.itemId.equals(itemId))).getSingleOrNull();
     return row?.collectionId;
   }
 
@@ -648,27 +655,24 @@ class AppDatabase extends _$AppDatabase {
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (migrator) => migrator.createAll(),
-        onUpgrade: (migrator, from, to) async {
-          if (from < 2) {
-            await migrator.addColumn(readingItems, readingItems.pageCount);
-            await migrator.addColumn(
-              readingItems,
-              readingItems.pageOrderVersion,
-            );
-          }
-          if (from < 3) {
-            await migrator.createTable(readingLists);
-            await migrator.createTable(readingListMembers);
-          }
-          if (from < 4) {
-            await migrator.createTable(collections);
-            await migrator.createTable(collectionMembers);
-          }
-        },
-        beforeOpen: (_) async {
-          await customStatement('PRAGMA journal_mode = WAL');
-          await customStatement('PRAGMA foreign_keys = ON');
-        },
-      );
+    onCreate: (migrator) => migrator.createAll(),
+    onUpgrade: (migrator, from, to) async {
+      if (from < 2) {
+        await migrator.addColumn(readingItems, readingItems.pageCount);
+        await migrator.addColumn(readingItems, readingItems.pageOrderVersion);
+      }
+      if (from < 3) {
+        await migrator.createTable(readingLists);
+        await migrator.createTable(readingListMembers);
+      }
+      if (from < 4) {
+        await migrator.createTable(collections);
+        await migrator.createTable(collectionMembers);
+      }
+    },
+    beforeOpen: (_) async {
+      await customStatement('PRAGMA journal_mode = WAL');
+      await customStatement('PRAGMA foreign_keys = ON');
+    },
+  );
 }

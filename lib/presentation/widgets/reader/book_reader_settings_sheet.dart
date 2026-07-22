@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../app/book_reading_preferences.dart';
@@ -22,13 +24,30 @@ void showBookReaderSettingsSheet(
   );
 }
 
-class _BookReaderSettingsSheet extends StatelessWidget {
+class _BookReaderSettingsSheet extends StatefulWidget {
   const _BookReaderSettingsSheet({required this.controller});
 
   final BookReaderController controller;
 
+  @override
+  State<_BookReaderSettingsSheet> createState() =>
+      _BookReaderSettingsSheetState();
+}
+
+class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
+  BookReaderController get controller => widget.controller;
+
+  late double _previewFontSize;
+  bool _draggingFontSize = false;
+
   static const List<double> _lineHeightPresets = [1.4, 1.6, 1.8, 2.0];
   static const List<String> _marginLabels = ['窄', '中', '宽'];
+
+  @override
+  void initState() {
+    super.initState();
+    _previewFontSize = controller.fontSize;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +56,9 @@ class _BookReaderSettingsSheet extends StatelessWidget {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
+        if (!_draggingFontSize) {
+          _previewFontSize = controller.fontSize;
+        }
         final theme = controller.readingTheme;
         final fg = Color(theme.foregroundArgb);
         final fgMuted = theme.isDark
@@ -50,133 +72,176 @@ class _BookReaderSettingsSheet extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: fgMuted.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(2),
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: fgMuted.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '排版',
-                  style: TextStyle(
-                    color: fg,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
+                  const SizedBox(height: 16),
+                  Text(
+                    '排版',
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                _label('阅读模式', fgMuted),
-                const SizedBox(height: 8),
-                SegmentedButton<BookReadingMode>(
-                  emptySelectionAllowed: false,
-                  showSelectedIcon: false,
-                  style: SegmentedButton.styleFrom(
-                    foregroundColor: fg,
-                    selectedForegroundColor: fg,
-                    selectedBackgroundColor: accent.withValues(alpha: 0.2),
-                  ),
-                  segments: [
-                    for (final m in BookReadingMode.values)
-                      ButtonSegment(
-                        value: m,
-                        label: Text(m.label, style: const TextStyle(fontSize: 13)),
+                  const SizedBox(height: 20),
+                  if (controller.scrollModeEnabled) ...[
+                    _label('阅读模式', fgMuted),
+                    const SizedBox(height: 8),
+                    SegmentedButton<BookReadingMode>(
+                      emptySelectionAllowed: false,
+                      showSelectedIcon: false,
+                      style: SegmentedButton.styleFrom(
+                        foregroundColor: fg,
+                        selectedForegroundColor: fg,
+                        selectedBackgroundColor: accent.withValues(alpha: 0.2),
                       ),
+                      segments: [
+                        for (final m in BookReadingMode.values)
+                          ButtonSegment(
+                            value: m,
+                            label: Text(
+                              m.label,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                      ],
+                      selected: {controller.readingMode},
+                      onSelectionChanged: (s) =>
+                          controller.setReadingMode(s.first),
+                    ),
                   ],
-                  selected: {controller.readingMode},
-                  onSelectionChanged: (s) => controller.setReadingMode(s.first),
-                ),
-                const SizedBox(height: 16),
-                _label('字号 ${controller.fontSize.toStringAsFixed(0)}', fgMuted),
-                Slider(
-                  value: controller.fontSize,
-                  min: BookReadingPreferences.minFontSize,
-                  max: BookReadingPreferences.maxFontSize,
-                  divisions: (BookReadingPreferences.maxFontSize -
-                          BookReadingPreferences.minFontSize)
-                      .toInt(),
-                  label: controller.fontSize.toStringAsFixed(0),
-                  activeColor: accent,
-                  inactiveColor: fgMuted.withValues(alpha: 0.2),
-                  onChanged: controller.setFontSize,
-                ),
-                const SizedBox(height: 8),
-                _label('行距', fgMuted),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final h in _lineHeightPresets)
-                      ChoiceChip(
-                        label: Text(h.toStringAsFixed(1)),
-                        selected: (controller.lineHeight - h).abs() < 0.05,
-                        onSelected: (_) => controller.setLineHeight(h),
-                        backgroundColor:
-                            theme.isDark ? Colors.white12 : Colors.black12,
-                        selectedColor: accent.withValues(alpha: 0.2),
-                        labelStyle: TextStyle(color: fg),
+                  if (controller.readingMode == BookReadingMode.page) ...[
+                    const SizedBox(height: 16),
+                    _label('翻页效果', fgMuted),
+                    const SizedBox(height: 8),
+                    SegmentedButton<BookPageTurnEffect>(
+                      emptySelectionAllowed: false,
+                      showSelectedIcon: false,
+                      style: SegmentedButton.styleFrom(
+                        foregroundColor: fg,
+                        selectedForegroundColor: fg,
+                        selectedBackgroundColor: accent.withValues(alpha: 0.2),
                       ),
+                      segments: [
+                        for (final e in BookPageTurnEffect.values)
+                          ButtonSegment(
+                            value: e,
+                            label: Text(
+                              e.label,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                      ],
+                      selected: {controller.pageTurnEffect},
+                      onSelectionChanged: (s) =>
+                          controller.setPageTurnEffect(s.first),
+                    ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                _label('版心', fgMuted),
-                const SizedBox(height: 8),
-                SegmentedButton<double>(
-                  emptySelectionAllowed: false,
-                  showSelectedIcon: false,
-                  style: SegmentedButton.styleFrom(
-                    foregroundColor: fg,
-                    selectedForegroundColor: fg,
-                    selectedBackgroundColor: accent.withValues(alpha: 0.2),
+                  const SizedBox(height: 16),
+                  _label('字号 ${_previewFontSize.toStringAsFixed(0)}', fgMuted),
+                  Slider(
+                    value: _previewFontSize,
+                    min: BookReadingPreferences.minFontSize,
+                    max: BookReadingPreferences.maxFontSize,
+                    divisions:
+                        (BookReadingPreferences.maxFontSize -
+                                BookReadingPreferences.minFontSize)
+                            .toInt(),
+                    label: _previewFontSize.toStringAsFixed(0),
+                    activeColor: accent,
+                    inactiveColor: fgMuted.withValues(alpha: 0.2),
+                    onChangeStart: (_) => _draggingFontSize = true,
+                    onChanged: (value) {
+                      setState(() => _previewFontSize = value);
+                    },
+                    onChangeEnd: (value) {
+                      _draggingFontSize = false;
+                      unawaited(controller.setFontSize(value));
+                    },
                   ),
-                  segments: [
-                    for (var i = 0; i < BookReadingPreferences.marginPresets.length; i++)
-                      ButtonSegment(
-                        value: BookReadingPreferences.marginPresets[i],
-                        label: Text(
-                          _marginLabels[i],
-                          style: const TextStyle(fontSize: 13),
+                  const SizedBox(height: 8),
+                  _label('行距', fgMuted),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final h in _lineHeightPresets)
+                        ChoiceChip(
+                          label: Text(h.toStringAsFixed(1)),
+                          selected: (controller.lineHeight - h).abs() < 0.05,
+                          onSelected: (_) => controller.setLineHeight(h),
+                          backgroundColor: theme.isDark
+                              ? Colors.white12
+                              : Colors.black12,
+                          selectedColor: accent.withValues(alpha: 0.2),
+                          labelStyle: TextStyle(color: fg),
                         ),
-                      ),
-                  ],
-                  selected: {controller.margin},
-                  onSelectionChanged: (s) => controller.setMargin(s.first),
-                ),
-                const SizedBox(height: 16),
-                _label('阅读背景', fgMuted),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final t in BookReadingTheme.values)
-                      ReadingThemeChip(
-                        background: Color(t.backgroundArgb),
-                        isDark: t.isDark,
-                        label: t.label,
-                        selected: controller.readingTheme == t,
-                        onTap: () => controller.setReadingTheme(t),
-                      ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _label('版心', fgMuted),
+                  const SizedBox(height: 8),
+                  SegmentedButton<double>(
+                    emptySelectionAllowed: false,
+                    showSelectedIcon: false,
+                    style: SegmentedButton.styleFrom(
+                      foregroundColor: fg,
+                      selectedForegroundColor: fg,
+                      selectedBackgroundColor: accent.withValues(alpha: 0.2),
+                    ),
+                    segments: [
+                      for (
+                        var i = 0;
+                        i < BookReadingPreferences.marginPresets.length;
+                        i++
+                      )
+                        ButtonSegment(
+                          value: BookReadingPreferences.marginPresets[i],
+                          label: Text(
+                            _marginLabels[i],
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                    ],
+                    selected: {controller.margin},
+                    onSelectionChanged: (s) => controller.setMargin(s.first),
+                  ),
+                  const SizedBox(height: 16),
+                  _label('阅读背景', fgMuted),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final t in BookReadingTheme.values)
+                        ReadingThemeChip(
+                          background: Color(t.backgroundArgb),
+                          isDark: t.isDark,
+                          label: t.label,
+                          selected: controller.readingTheme == t,
+                          onTap: () => controller.setReadingTheme(t),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      );
+        );
       },
     );
   }
 
   Widget _label(String text, Color color) {
-    return Text(
-      text,
-      style: TextStyle(fontSize: 13, color: color),
-    );
+    return Text(text, style: TextStyle(fontSize: 13, color: color));
   }
 }

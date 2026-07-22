@@ -1,10 +1,32 @@
 import 'dart:convert';
 
+/// One row in the reader TOC, mapped onto the EPUB spine.
+///
+/// This is a renderer-facing model rather than an import-parser detail. Both
+/// the Foliate bridge and import probe may produce it without coupling the
+/// presentation controller to either implementation.
+class BookTocEntry {
+  const BookTocEntry({
+    required this.title,
+    required this.href,
+    this.fragment,
+    this.sectionIndex,
+    this.depth = 0,
+  });
+
+  final String title;
+  final String href;
+  final String? fragment;
+  final int? sectionIndex;
+  final int depth;
+}
+
 /// Format-owned book locator. DB stores [encode] opaquely.
 class BookLocator {
   const BookLocator({
     required this.sectionIndex,
     this.progressInSection = 0,
+    this.cfi,
     this.spineVersion = spineVersionCurrent,
   });
 
@@ -12,13 +34,15 @@ class BookLocator {
 
   final int sectionIndex;
   final double progressInSection;
+  final String? cfi;
   final int spineVersion;
 
   Map<String, Object?> toJson() => {
-        'sectionIndex': sectionIndex,
-        'progressInSection': progressInSection,
-        'spineVersion': spineVersion,
-      };
+    'sectionIndex': sectionIndex,
+    'progressInSection': progressInSection,
+    if (cfi != null) 'cfi': cfi,
+    'spineVersion': spineVersion,
+  };
 
   String encode() => jsonEncode(toJson());
 
@@ -29,9 +53,11 @@ class BookLocator {
       if (index is! int) return null;
       final progress = map['progressInSection'];
       final version = map['spineVersion'];
+      final cfi = map['cfi'];
       return BookLocator(
         sectionIndex: index,
         progressInSection: progress is num ? progress.toDouble() : 0,
+        cfi: cfi is String && cfi.isNotEmpty ? cfi : null,
         spineVersion: version is int ? version : 0,
       );
     } catch (_) {
@@ -48,6 +74,7 @@ class BookLocator {
     return BookLocator(
       sectionIndex: sectionIndex,
       progressInSection: progressInSection.clamp(0.0, 1.0),
+      cfi: cfi,
       spineVersion: spineVersionCurrent,
     );
   }
@@ -68,6 +95,16 @@ class BookSectionMap {
   final int totalParagraphs;
 
   int get sectionCount => startIndices.length;
+
+  /// Page/paragraph count for [index], or 0 when the section is a windowed
+  /// placeholder (same start as the next entry / total).
+  int sectionLength(int index) {
+    if (index < 0 || index >= startIndices.length) return 0;
+    return _sectionLength(index);
+  }
+
+  /// True when [index] has at least one paginated page/paragraph.
+  bool sectionHasContent(int index) => sectionLength(index) > 0;
 
   int _sectionLength(int index) {
     final start = startIndices[index];
@@ -107,10 +144,7 @@ class BookSectionMap {
     final progress = length <= 0
         ? 0.0
         : ((local + paragraphOffset) / length).clamp(0.0, 1.0);
-    return BookLocator(
-      sectionIndex: section,
-      progressInSection: progress,
-    );
+    return BookLocator(sectionIndex: section, progressInSection: progress);
   }
 
   /// Maps a [BookLocator] back to a flat paragraph index suitable for the

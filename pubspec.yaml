@@ -28,11 +28,8 @@ dependencies:
   package_info_plus: ^10.2.1
 
   # Book reader
-  flutter_html: ^3.0.0
-  flutter_html_table: ^3.0.0
-  flutter_html_svg: ^3.0.0
-  html: ^0.15.5
-
+  image: ^4.1.7
+  flutter_inappwebview: ^6.2.0-beta.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -40,5 +37,23 @@ dev_dependencies:
   drift_dev: ^2.34.2+1
   flutter_lints: ^6.0.0
 
+dependency_overrides:
+  # Upstream 1.2.0-beta.3 declares macOS 10.14 while using APIs available
+  # from 10.15. Keep the Apache-2.0 package local until the fix is released.
+  flutter_inappwebview_macos:
+    path: third_party/flutter_inappwebview_macos
+
 flutter:
   uses-material-design: true
+  assets:
+    - assets/anx_reader/ANX_READER_LICENSE
+    - assets/anx_reader/ANX_READER_README.md
+    - assets/anx_reader/foliate-js/index.html
+    - assets/anx_reader/foliate-js/metadata-probe.html
+    - assets/anx_reader/foliate-js/dist/
+    - assets/anx_reader/foliate-js/src/
+    - assets/anx_reader/foliate-js/src/vendor/
+    - assets/anx_reader/foliate-js/src/vendor/pdfjs/
+    - assets/anx_reader/foliate-js/src/vendor/prism/
+    - assets/anx_reader/foliate-js/src/vendor/prism/components/
+    - assets/anx_reader/foliate-js/src/vendor/prism/themes/

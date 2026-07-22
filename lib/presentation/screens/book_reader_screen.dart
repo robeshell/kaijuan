@@ -6,8 +6,9 @@ import 'package:flutter/services.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
-import '../../readers/book/flutter_html_engine_adapter.dart';
+import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
+import '../../readers/book/foliate_js_engine_adapter.dart';
 import '../controllers/book_reader_controller.dart';
 import '../widgets/reader/book_reader_chrome.dart';
 
@@ -15,8 +16,8 @@ import '../widgets/reader/book_reader_chrome.dart';
 ///
 /// The screen itself is stateless: all reading state lives in
 /// [BookReaderController], and the actual rendering engine is provided by
-/// [FlutterHtmlBookEngineAdapter]. This mirrors the comic reader architecture and
-/// makes the reflow engine replaceable.
+/// [FoliateJsBookEngineAdapter]. This mirrors the comic reader architecture while
+/// keeping WebView layout details outside the presentation layer.
 class BookReaderScreen extends StatefulWidget {
   const BookReaderScreen({
     super.key,
@@ -53,18 +54,27 @@ class BookReaderScreen extends StatefulWidget {
 class _BookReaderScreenState extends State<BookReaderScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   late final BookReaderController _controller;
-  late final FlutterHtmlBookEngineAdapter _engine;
+  late final FoliateJsBookEngineAdapter _engine;
   late final FocusNode _focusNode;
 
   @override
   void initState() {
     super.initState();
+    final scrollModeEnabled =
+        BookReaderCapabilities.supportsScrollModeOnCurrentPlatform;
     _controller = BookReaderController(
       database: widget.database,
       item: widget.item,
       readingPreferences: widget.readingPreferences,
+      scrollModeEnabled: scrollModeEnabled,
     );
-    _engine = FlutterHtmlBookEngineAdapter(readerController: _controller);
+    if (!scrollModeEnabled &&
+        widget.readingPreferences?.readingMode == BookReadingMode.scroll) {
+      unawaited(
+        widget.readingPreferences?.setReadingMode(BookReadingMode.page),
+      );
+    }
+    _engine = FoliateJsBookEngineAdapter(readerController: _controller);
     _focusNode = FocusNode();
     _engine.attach();
     unawaited(_engine.open(widget.item.filePath));
@@ -73,46 +83,6 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
   void _exit() => Navigator.of(context, rootNavigator: true).pop();
 
   void _openToc() => _scaffoldKey.currentState?.openDrawer();
-
-  void _onTapContent() => _controller.toggleChrome();
-
-  Widget _buildTapOverlay() {
-    // In page mode, left/right edges turn pages; center toggles chrome.
-    // In scroll mode, the whole area toggles chrome.
-    if (_controller.readingMode == BookReadingMode.page) {
-      return Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _controller.goPreviousPage,
-              child: const SizedBox.expand(),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _onTapContent,
-              child: const SizedBox.expand(),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _controller.goNextPage,
-              child: const SizedBox.expand(),
-            ),
-          ),
-        ],
-      );
-    }
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onTap: _onTapContent,
-      child: const SizedBox.expand(),
-    );
-  }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
@@ -174,66 +144,71 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: _controller,
+      listenable: _engine,
       builder: (context, _) {
-        final theme = _controller.readingTheme;
-        final bg = Color(theme.backgroundArgb);
+        return ListenableBuilder(
+          listenable: _controller,
+          builder: (context, _) {
+            final theme = _controller.readingTheme;
+            final bg = Color(theme.backgroundArgb);
 
-        if (_controller.openError != null) {
-          return Scaffold(
-            backgroundColor: bg,
-            body: _ErrorBody(
-              error: _controller.openError.toString(),
-              onBack: _exit,
-              theme: theme,
-            ),
-          );
-        }
-
-        if (!_controller.isReady) {
-          return Scaffold(
-            backgroundColor: bg,
-            body: const Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        return Focus(
-          focusNode: _focusNode,
-          autofocus: true,
-          onKeyEvent: _handleKeyEvent,
-          child: Scaffold(
-            key: _scaffoldKey,
-            drawerEnableOpenDragGesture: false,
-            drawer: _buildTocDrawer(),
-            backgroundColor: bg,
-            body: Stack(
-              fit: StackFit.expand,
-              children: [
-                _engine.buildView(context),
-                _buildTapOverlay(),
-                IgnorePointer(
-                  ignoring: !_controller.chromeVisible,
-                  child: AnimatedOpacity(
-                    opacity: _controller.chromeVisible ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                    child: BookReaderChrome(
-                      controller: _controller,
-                      onBack: _exit,
-                      onOpenToc: _openToc,
-                    ),
-                  ),
+            if (_controller.openError != null) {
+              return Scaffold(
+                backgroundColor: bg,
+                body: _ErrorBody(
+                  error: _controller.openError.toString(),
+                  onBack: _exit,
+                  theme: theme,
                 ),
-              ],
-            ),
-          ),
+              );
+            }
+
+            final contentReady = _controller.isReady && _engine.rendererReady;
+
+            return Focus(
+              focusNode: _focusNode,
+              autofocus: contentReady,
+              onKeyEvent: _handleKeyEvent,
+              child: Scaffold(
+                key: _scaffoldKey,
+                drawerEnableOpenDragGesture: false,
+                drawer: _controller.isReady ? _buildTocDrawer() : null,
+                backgroundColor: bg,
+                body: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _engine.buildView(context),
+                    if (!contentReady)
+                      ColoredBox(
+                        color: bg,
+                        child: const Center(child: CircularProgressIndicator()),
+                      ),
+                    if (_controller.isReady)
+                      IgnorePointer(
+                        ignoring: !_controller.chromeVisible,
+                        child: AnimatedOpacity(
+                          opacity: _controller.chromeVisible ? 1 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOut,
+                          child: BookReaderChrome(
+                            controller: _controller,
+                            onBack: _exit,
+                            onOpenToc: _openToc,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
   }
 
   Widget _buildTocDrawer() {
-    final titles = _controller.tocTitles;
+    final entries = _controller.tocEntries;
     final currentIndex = _controller.sectionIndex;
     final accent = Theme.of(context).colorScheme.primary;
     final semantics = Theme.of(context).extension<AppSemantics>()!;
@@ -258,26 +233,34 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: titles.length,
+                itemCount: entries.length,
                 itemBuilder: (_, i) {
-                  final active = i == currentIndex;
+                  final entry = entries[i];
+                  final active = entry.sectionIndex == currentIndex;
+                  final indent = (entry.depth * 12.0).clamp(0.0, 48.0);
                   return ListTile(
+                    contentPadding: EdgeInsets.only(
+                      left: 16 + indent,
+                      right: 16,
+                    ),
                     title: Text(
-                      titles[i],
-                      maxLines: 1,
+                      entry.title,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontWeight:
-                            active ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                         color: active ? accent : semantics.textPrimary,
                       ),
                     ),
                     selected: active,
+                    enabled: entry.sectionIndex != null,
                     dense: true,
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      _controller.goToSection(i);
-                    },
+                    onTap: entry.sectionIndex == null
+                        ? null
+                        : () {
+                            Navigator.of(context).pop();
+                            _engine.openTocEntry(entry);
+                          },
                   );
                 },
               ),

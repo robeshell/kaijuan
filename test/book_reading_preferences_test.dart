@@ -24,6 +24,7 @@ void main() {
     expect(prefs.readingTheme, BookReadingTheme.paper);
     expect(prefs.margin, 24.0);
     expect(prefs.readingMode, BookReadingMode.page);
+    expect(prefs.pageTurnEffect, BookPageTurnEffect.slide);
   });
 
   test('persists all fields', () async {
@@ -33,14 +34,17 @@ void main() {
     await prefs.setReadingTheme(BookReadingTheme.sepia);
     await prefs.setMargin(32);
     await prefs.setReadingMode(BookReadingMode.page);
+    await prefs.setPageTurnEffect(BookPageTurnEffect.none);
 
-    final reloaded =
-        await BookReadingPreferences.load(supportDirectory: tempDir);
+    final reloaded = await BookReadingPreferences.load(
+      supportDirectory: tempDir,
+    );
     expect(reloaded.fontSize, 22.0);
     expect(reloaded.lineHeight, 1.8);
     expect(reloaded.readingTheme, BookReadingTheme.sepia);
     expect(reloaded.margin, 32.0);
     expect(reloaded.readingMode, BookReadingMode.page);
+    expect(reloaded.pageTurnEffect, BookPageTurnEffect.none);
   });
 
   test('clamps out-of-range values', () async {
@@ -64,6 +68,13 @@ void main() {
     expect(prefs.readingTheme, BookReadingTheme.dark);
     expect(prefs.margin, 24.0); // default
     expect(prefs.readingMode, BookReadingMode.page); // default
+    expect(prefs.pageTurnEffect, BookPageTurnEffect.slide); // default
+  });
+
+  test('curl resolves to slide until curl renderer ships', () {
+    expect(BookPageTurnEffect.curl.resolved, BookPageTurnEffect.slide);
+    expect(BookPageTurnEffect.slide.resolved, BookPageTurnEffect.slide);
+    expect(BookPageTurnEffect.none.resolved, BookPageTurnEffect.none);
   });
 
   test('corrupted file falls back to defaults', () async {

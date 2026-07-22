@@ -11,6 +11,8 @@ import 'package:kaika/readers/book/book_models.dart';
 import 'package:kaika/readers/book/book_theme.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late Directory tempDir;
   late AppDatabase database;
 
@@ -56,10 +58,7 @@ void main() {
   group('defaults', () {
     test('without prefs', () async {
       final item = await insertBook(id: 'defaults');
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
+      final controller = BookReaderController(database: database, item: item);
 
       expect(controller.fontSize, 18.0);
       expect(controller.lineHeight, 1.6);
@@ -67,12 +66,15 @@ void main() {
       expect(controller.margin, 24.0);
       expect(controller.readingMode, BookReadingMode.page);
       expect(controller.isReady, isFalse);
+      expect(controller.chromeVisible, isFalse);
 
       controller.dispose();
     });
 
     test('with prefs', () async {
-      final prefs = await BookReadingPreferences.load(supportDirectory: tempDir);
+      final prefs = await BookReadingPreferences.load(
+        supportDirectory: tempDir,
+      );
       await prefs.setFontSize(22);
       await prefs.setLineHeight(1.8);
       await prefs.setReadingTheme(BookReadingTheme.sepia);
@@ -98,12 +100,11 @@ void main() {
 
   test('attachEngine makes controller ready and exposes metadata', () async {
     final item = await insertBook(id: 'attach');
-    final controller = BookReaderController(
-      database: database,
-      item: item,
-    );
+    final controller = BookReaderController(database: database, item: item);
 
-    controller.attachEngine(sectionMap, tocTitles);
+    final attaching = controller.attachEngine(sectionMap, tocTitles);
+    expect(controller.isReady, isFalse);
+    await attaching;
 
     expect(controller.isReady, isTrue);
     expect(controller.sectionCount, 3);
@@ -113,12 +114,24 @@ void main() {
     controller.dispose();
   });
 
-  test('font size and line height clamp', () async {
-    final item = await insertBook(id: 'clamp');
+  test('desktop capability rejects scroll mode', () async {
+    final item = await insertBook(id: 'page-only');
     final controller = BookReaderController(
       database: database,
       item: item,
+      scrollModeEnabled: false,
     );
+
+    await controller.setReadingMode(BookReadingMode.scroll);
+
+    expect(controller.readingMode, BookReadingMode.page);
+    expect(controller.scrollModeEnabled, isFalse);
+    controller.dispose();
+  });
+
+  test('font size and line height clamp', () async {
+    final item = await insertBook(id: 'clamp');
+    final controller = BookReaderController(database: database, item: item);
 
     await controller.setFontSize(5);
     expect(controller.fontSize, 14.0);
@@ -137,10 +150,7 @@ void main() {
 
   test('pureBlack theme is preserved', () async {
     final item = await insertBook(id: 'pure-black');
-    final controller = BookReaderController(
-      database: database,
-      item: item,
-    );
+    final controller = BookReaderController(database: database, item: item);
 
     await controller.setReadingTheme(BookReadingTheme.pureBlack);
     expect(controller.readingTheme, BookReadingTheme.pureBlack);
@@ -161,24 +171,20 @@ void main() {
         updatedAt: DateTime.utc(2026, 1, 2),
       );
 
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
-      controller.attachEngine(sectionMap, tocTitles);
+      final controller = BookReaderController(database: database, item: item);
+      await controller.attachEngine(sectionMap, tocTitles);
 
       // Restore is async; wait for it.
       await pumpEventQueue();
 
       expect(controller.sectionIndex, 1);
       expect(controller.progressInSection, closeTo(0.5, 1e-9));
-      expect(
-        controller.consumePendingJump(),
-        sectionMap.paragraphFromLocator(
-          const BookLocator(sectionIndex: 1, progressInSection: 0.5),
-        ),
-      );
-      expect(controller.consumePendingJump(), isNull);
+      final jump = controller.pendingJump;
+      expect(jump, isNotNull);
+      expect(jump!.sectionIndex, 1);
+      expect(jump.progressInSection, closeTo(0.5, 1e-9));
+      controller.clearPendingJump();
+      expect(controller.pendingJump, isNull);
 
       controller.dispose();
     });
@@ -196,7 +202,7 @@ void main() {
         database: database,
         item: legacyItem,
       );
-      legacyController.attachEngine(sectionMap, tocTitles);
+      await legacyController.attachEngine(sectionMap, tocTitles);
       await pumpEventQueue();
 
       expect(legacyController.sectionIndex, 1);
@@ -205,18 +211,19 @@ void main() {
       legacyController.dispose();
     });
 
-    test('reportPosition maps to BookLocator and persists', () async {
+    test('rendition CFI location persists', () async {
       final item = await insertBook(id: 'persist');
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
-      controller.attachEngine(sectionMap, tocTitles);
+      final controller = BookReaderController(database: database, item: item);
+      await controller.attachEngine(sectionMap, tocTitles);
       await pumpEventQueue();
 
-      controller.reportPosition(17, 0);
+      controller.reportRenditionLocation(
+        sectionIndex: 1,
+        progress: 0.49,
+        cfi: 'epubcfi(/6/4!/4/2)',
+      );
       expect(controller.sectionIndex, 1);
-      expect(controller.progressInSection, closeTo(7 / 15, 1e-9));
+      expect(controller.currentLocator.cfi, 'epubcfi(/6/4!/4/2)');
 
       // Wait for the 500 ms debounce.
       await Future.delayed(const Duration(milliseconds: 600));
@@ -226,7 +233,7 @@ void main() {
       final locator = BookLocator.tryDecode(progress!.locatorJson);
       expect(locator, isNotNull);
       expect(locator!.sectionIndex, 1);
-      expect(locator.progressInSection, closeTo(7 / 15, 1e-9));
+      expect(locator.cfi, 'epubcfi(/6/4!/4/2)');
 
       controller.dispose();
     });
@@ -235,17 +242,15 @@ void main() {
   group('navigation', () {
     test('goToSection and prev/next clamp at bounds', () async {
       final item = await insertBook(id: 'nav');
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
-      controller.attachEngine(sectionMap, tocTitles);
+      final controller = BookReaderController(database: database, item: item);
+      await controller.attachEngine(sectionMap, tocTitles);
 
       controller.goToSection(2);
       expect(controller.sectionIndex, 2);
       expect(controller.progressInSection, 0.0);
-      expect(controller.consumePendingJump(), isNotNull);
-      expect(controller.consumePendingJump(), isNull);
+      expect(controller.pendingJump, isNotNull);
+      controller.clearPendingJump();
+      expect(controller.pendingJump, isNull);
 
       controller.goNextSection();
       expect(controller.sectionIndex, 2); // clamped
@@ -258,6 +263,93 @@ void main() {
 
       controller.dispose();
     });
+
+    test(
+      'setReadingMode keeps a semantic locator for Foliate reflow',
+      () async {
+        final item = await insertBook(id: 'scroll-handoff');
+        final controller = BookReaderController(database: database, item: item);
+        await controller.attachEngine(sectionMap, tocTitles);
+        controller.goToSection(2, progressInSection: 0.42);
+
+        await controller.setReadingMode(BookReadingMode.scroll);
+
+        expect(controller.readingMode, BookReadingMode.scroll);
+        expect(controller.pendingJump?.sectionIndex, 2);
+        expect(controller.pendingJump?.progressInSection, closeTo(0.42, 0.001));
+
+        controller.dispose();
+      },
+    );
+
+    test('page actions delegate only to the active rendition', () async {
+      final item = await insertBook(id: 'rendition-navigation');
+      final controller = BookReaderController(database: database, item: item);
+      var nextCount = 0;
+      var previousCount = 0;
+
+      expect(controller.hasPageMode, isFalse);
+      controller.attachExternalPageNavigation(
+        nextPage: () => nextCount++,
+        previousPage: () => previousCount++,
+      );
+      expect(controller.hasPageMode, isTrue);
+
+      controller.goNextPage();
+      controller.goPreviousPage();
+      expect(nextCount, 1);
+      expect(previousCount, 1);
+
+      controller.detachExternalPageNavigation();
+      expect(controller.hasPageMode, isFalse);
+      controller.dispose();
+    });
+  });
+
+  test('bookmarks sort by locator, toggle, and jump', () async {
+    final item = await insertBook(id: 'bookmark-controller');
+    final controller = BookReaderController(database: database, item: item);
+    await controller.attachEngine(sectionMap, tocTitles);
+    await pumpEventQueue();
+
+    await database.addBookmark(
+      itemId: item.id,
+      locatorJson: const BookLocator(
+        sectionIndex: 2,
+        progressInSection: 0.5,
+      ).encode(),
+    );
+    await database.addBookmark(
+      itemId: item.id,
+      locatorJson: const BookLocator(
+        sectionIndex: 0,
+        progressInSection: 0.25,
+      ).encode(),
+    );
+    await pumpEventQueue();
+
+    expect(controller.bookmarks, hasLength(2));
+    expect(
+      controller.bookmarkLabel(controller.bookmarks.first),
+      'Chapter 1 · 25%',
+    );
+
+    controller.goToBookmark(controller.bookmarks.first);
+    expect(controller.sectionIndex, 0);
+    expect(controller.progressInSection, closeTo(0.25, 1e-9));
+    expect(controller.isCurrentPositionBookmarked, isTrue);
+
+    await controller.toggleBookmark();
+    await pumpEventQueue();
+    expect(controller.bookmarks, hasLength(1));
+    expect(controller.isCurrentPositionBookmarked, isFalse);
+
+    await controller.toggleBookmark();
+    await pumpEventQueue();
+    expect(controller.bookmarks, hasLength(2));
+    expect(controller.isCurrentPositionBookmarked, isTrue);
+
+    controller.dispose();
   });
 
   test('preferences are persisted through controller setters', () async {
@@ -274,14 +366,17 @@ void main() {
     await controller.setReadingTheme(BookReadingTheme.dark);
     await controller.setMargin(40);
     await controller.setReadingMode(BookReadingMode.page);
+    await controller.setPageTurnEffect(BookPageTurnEffect.none);
 
-    final reloaded =
-        await BookReadingPreferences.load(supportDirectory: tempDir);
+    final reloaded = await BookReadingPreferences.load(
+      supportDirectory: tempDir,
+    );
     expect(reloaded.fontSize, 20.0);
     expect(reloaded.lineHeight, 1.8);
     expect(reloaded.readingTheme, BookReadingTheme.dark);
     expect(reloaded.margin, 40.0);
     expect(reloaded.readingMode, BookReadingMode.page);
+    expect(reloaded.pageTurnEffect, BookPageTurnEffect.none);
 
     controller.dispose();
   });

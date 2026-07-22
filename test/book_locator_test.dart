@@ -7,18 +7,17 @@ void main() {
       const loc = BookLocator(
         sectionIndex: 2,
         progressInSection: 0.4,
+        cfi: 'epubcfi(/6/6!/4/2/2)',
       );
       final decoded = BookLocator.tryDecode(loc.encode())!;
       expect(decoded.sectionIndex, 2);
       expect(decoded.progressInSection, closeTo(0.4, 1e-9));
+      expect(decoded.cfi, 'epubcfi(/6/6!/4/2/2)');
       expect(decoded.spineVersion, BookLocator.spineVersionCurrent);
     });
 
     test('validated clamps progress and rejects out-of-range index', () {
-      const withinRange = BookLocator(
-        sectionIndex: 1,
-        progressInSection: 1.2,
-      );
+      const withinRange = BookLocator(sectionIndex: 1, progressInSection: 1.2);
       final valid = withinRange.validated(sectionCount: 3)!;
       expect(valid.sectionIndex, 1);
       expect(valid.progressInSection, 1.0);
@@ -34,10 +33,7 @@ void main() {
     });
 
     test('spineVersion mismatch rejects', () {
-      const loc = BookLocator(
-        sectionIndex: 0,
-        spineVersion: 999,
-      );
+      const loc = BookLocator(sectionIndex: 0, spineVersion: 999);
       expect(loc.validated(sectionCount: 3), isNull);
     });
 
@@ -48,10 +44,7 @@ void main() {
   });
 
   group('BookSectionMap', () {
-    const map = BookSectionMap(
-      startIndices: [0, 10, 25],
-      totalParagraphs: 40,
-    );
+    const map = BookSectionMap(startIndices: [0, 10, 25], totalParagraphs: 40);
 
     test('locatorFromParagraph maps boundaries correctly', () {
       final first = map.locatorFromParagraph(paragraphIndex: 0);
@@ -98,10 +91,7 @@ void main() {
     });
 
     test('empty map returns safe defaults', () {
-      const empty = BookSectionMap(
-        startIndices: [],
-        totalParagraphs: 0,
-      );
+      const empty = BookSectionMap(startIndices: [], totalParagraphs: 0);
       final loc = empty.locatorFromParagraph(paragraphIndex: 5);
       expect(loc.sectionIndex, 0);
       expect(loc.progressInSection, 0.0);

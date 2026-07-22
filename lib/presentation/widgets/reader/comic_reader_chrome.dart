@@ -5,6 +5,7 @@ import '../../../core/theme.dart';
 import '../../../readers/comic/comic_models.dart';
 import '../../controllers/comic_reader_controller.dart';
 import 'glass_bar.dart';
+import 'reader_bookmarks_sheet.dart';
 
 /// Top + bottom glass chrome for the comic reader.
 ///
@@ -37,8 +38,8 @@ class ComicReaderChrome extends StatelessWidget {
 
     final leadingClearance =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
-            ? _macTrafficLightClearance
-            : 0.0;
+        ? _macTrafficLightClearance
+        : 0.0;
 
     return Stack(
       fit: StackFit.expand,
@@ -59,64 +60,93 @@ class ComicReaderChrome extends StatelessWidget {
                   child: Material(
                     type: MaterialType.transparency,
                     child: Row(
-                    children: [
-                      IconButton(
-                        tooltip: '返回',
-                        onPressed: onBack,
-                        icon: Icon(
-                          Icons.arrow_back_outlined,
-                          color: fg,
-                          weight: 300,
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          controller.item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
+                      children: [
+                        IconButton(
+                          tooltip: '返回',
+                          onPressed: onBack,
+                          icon: Icon(
+                            Icons.arrow_back_outlined,
                             color: fg,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+                            weight: 300,
                           ),
                         ),
-                      ),
-                      PopupMenuButton<String>(
-                        tooltip: '阅读选项',
-                        icon: Icon(
-                          Icons.more_horiz_outlined,
-                          color: fg,
-                          weight: 300,
+                        Expanded(
+                          child: Text(
+                            controller.item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: fg,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
-                        onSelected: (value) => _onMenu(value),
-                        itemBuilder: (context) => [
-                          for (final mode in ComicReaderMode.values)
-                            CheckedPopupMenuItem(
-                              value: 'mode:${mode.storageValue}',
-                              checked: controller.mode == mode,
-                              child: Text(mode.label),
-                            ),
-                          const PopupMenuDivider(),
-                          for (final d in ComicReadDirection.values)
-                            CheckedPopupMenuItem(
-                              value: 'dir:${d.storageValue}',
-                              checked: controller.direction == d,
-                              child: Text(d.label),
-                            ),
-                          const PopupMenuDivider(),
-                          for (final t in ComicReadingTheme.values)
-                            CheckedPopupMenuItem(
-                              value: 'theme:${t.storageValue}',
-                              checked: controller.readingTheme == t,
-                              child: Text(t.label),
-                            ),
-                        ],
-                      ),
-                      // Balance leading traffic-light clearance so title stays centered.
-                      if (leadingClearance > 0)
-                        SizedBox(width: leadingClearance - 8),
-                    ],
+                        IconButton(
+                          tooltip: controller.isCurrentPageBookmarked
+                              ? '移除当前页书签'
+                              : '添加当前页书签',
+                          onPressed: controller.toggleBookmark,
+                          icon: Icon(
+                            controller.isCurrentPageBookmarked
+                                ? Icons.bookmark
+                                : Icons.bookmark_border_outlined,
+                            color: fg,
+                            weight: 300,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '书签列表',
+                          onPressed: () => showReaderBookmarksSheet(
+                            context,
+                            listenable: controller,
+                            bookmarks: () => controller.bookmarks,
+                            labelFor: controller.bookmarkLabel,
+                            onOpen: controller.goToBookmark,
+                            onRemove: controller.removeBookmark,
+                          ),
+                          icon: Icon(
+                            Icons.bookmarks_outlined,
+                            color: fg,
+                            weight: 300,
+                          ),
+                        ),
+                        PopupMenuButton<String>(
+                          tooltip: '阅读选项',
+                          icon: Icon(
+                            Icons.more_horiz_outlined,
+                            color: fg,
+                            weight: 300,
+                          ),
+                          onSelected: (value) => _onMenu(value),
+                          itemBuilder: (context) => [
+                            for (final mode in ComicReaderMode.values)
+                              CheckedPopupMenuItem(
+                                value: 'mode:${mode.storageValue}',
+                                checked: controller.mode == mode,
+                                child: Text(mode.label),
+                              ),
+                            const PopupMenuDivider(),
+                            for (final d in ComicReadDirection.values)
+                              CheckedPopupMenuItem(
+                                value: 'dir:${d.storageValue}',
+                                checked: controller.direction == d,
+                                child: Text(d.label),
+                              ),
+                            const PopupMenuDivider(),
+                            for (final t in ComicReadingTheme.values)
+                              CheckedPopupMenuItem(
+                                value: 'theme:${t.storageValue}',
+                                checked: controller.readingTheme == t,
+                                child: Text(t.label),
+                              ),
+                          ],
+                        ),
+                        // Balance leading traffic-light clearance so title stays centered.
+                        if (leadingClearance > 0)
+                          SizedBox(width: leadingClearance - 8),
+                      ],
                     ),
                   ),
                 ),
@@ -173,9 +203,10 @@ class ComicReaderChrome extends StatelessWidget {
                           child: Slider(
                             min: 0,
                             max: (controller.pageCount - 1).toDouble(),
-                            value: controller.displayPage
-                                .toDouble()
-                                .clamp(0, controller.pageCount - 1),
+                            value: controller.displayPage.toDouble().clamp(
+                              0,
+                              controller.pageCount - 1,
+                            ),
                             onChanged: controller.onSliderChanged,
                             onChangeEnd: controller.onSliderChangeEnd,
                           ),

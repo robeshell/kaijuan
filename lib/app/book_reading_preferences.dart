@@ -22,13 +22,39 @@ enum BookReadingMode {
   String get storageValue => name;
 
   String get label => switch (this) {
-        scroll => '滚动',
-        page => '翻页',
-      };
+    scroll => '滚动',
+    page => '翻页',
+  };
+}
+
+/// Page-mode turn effect. [curl] is persisted / selectable but falls back to
+/// [slide] until a real page-curl renderer ships.
+enum BookPageTurnEffect {
+  slide,
+  none,
+  curl;
+
+  static BookPageTurnEffect fromStorage(String? value) {
+    for (final effect in values) {
+      if (effect.storageValue == value) return effect;
+    }
+    return slide;
+  }
+
+  String get storageValue => name;
+
+  String get label => switch (this) {
+    slide => '滑动',
+    none => '无效果',
+    curl => '仿真翻页',
+  };
+
+  /// Effect the engine should actually apply (curl → slide for now).
+  BookPageTurnEffect get resolved => this == curl ? slide : this;
 }
 
 /// Book reflow defaults (font size / line height / reading theme / margin /
-/// reading mode).
+/// reading mode / page-turn effect).
 class BookReadingPreferences extends ChangeNotifier {
   static const double defaultFontSize = 18.0;
   static const double minFontSize = 14.0;
@@ -44,6 +70,8 @@ class BookReadingPreferences extends ChangeNotifier {
   static const List<double> marginPresets = [8.0, 24.0, 48.0];
 
   static const BookReadingMode defaultReadingMode = BookReadingMode.page;
+  static const BookPageTurnEffect defaultPageTurnEffect =
+      BookPageTurnEffect.slide;
 
   BookReadingPreferences._(
     this._file,
@@ -52,6 +80,7 @@ class BookReadingPreferences extends ChangeNotifier {
     this._readingTheme,
     this._margin,
     this._readingMode,
+    this._pageTurnEffect,
   );
 
   final File _file;
@@ -60,12 +89,14 @@ class BookReadingPreferences extends ChangeNotifier {
   BookReadingTheme _readingTheme;
   double _margin;
   BookReadingMode _readingMode;
+  BookPageTurnEffect _pageTurnEffect;
 
   double get fontSize => _fontSize;
   double get lineHeight => _lineHeight;
   BookReadingTheme get readingTheme => _readingTheme;
   double get margin => _margin;
   BookReadingMode get readingMode => _readingMode;
+  BookPageTurnEffect get pageTurnEffect => _pageTurnEffect;
 
   static Future<BookReadingPreferences> load({
     Directory? supportDirectory,
@@ -85,6 +116,7 @@ class BookReadingPreferences extends ChangeNotifier {
           BookReadingTheme.fromStorage(json['readingTheme'] as String?),
           (json['margin'] as num?)?.toDouble() ?? defaultMargin,
           BookReadingMode.fromStorage(json['readingMode'] as String?),
+          BookPageTurnEffect.fromStorage(json['pageTurnEffect'] as String?),
         );
       }
     } catch (_) {}
@@ -95,6 +127,7 @@ class BookReadingPreferences extends ChangeNotifier {
       fallbackTheme,
       defaultMargin,
       defaultReadingMode,
+      defaultPageTurnEffect,
     );
   }
 
@@ -136,6 +169,13 @@ class BookReadingPreferences extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setPageTurnEffect(BookPageTurnEffect effect) async {
+    if (effect == _pageTurnEffect) return;
+    _pageTurnEffect = effect;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() async {
     await _file.parent.create(recursive: true);
     await _file.writeAsString(
@@ -145,6 +185,7 @@ class BookReadingPreferences extends ChangeNotifier {
         'readingTheme': _readingTheme.storageValue,
         'margin': _margin,
         'readingMode': _readingMode.storageValue,
+        'pageTurnEffect': _pageTurnEffect.storageValue,
       }),
       flush: true,
     );

@@ -6,6 +6,7 @@ import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import 'book_reader_settings_sheet.dart';
 import 'glass_bar.dart';
+import 'reader_bookmarks_sheet.dart';
 
 /// Top + bottom glass chrome for the reflow book reader.
 class BookReaderChrome extends StatelessWidget {
@@ -30,8 +31,8 @@ class BookReaderChrome extends StatelessWidget {
     final glass = isPureBlack
         ? const Color(0xB3000000)
         : theme.isDark
-            ? const Color(0xB3212124)
-            : const Color(0xB3FFFFFF);
+        ? const Color(0xB3212124)
+        : const Color(0xB3FFFFFF);
     final fg = theme.isDark ? const Color(0xFFF2F2F4) : const Color(0xFF1C1C1E);
     final fgMuted = theme.isDark
         ? const Color(0x99F2F2F4)
@@ -39,8 +40,8 @@ class BookReaderChrome extends StatelessWidget {
 
     final leadingClearance =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
-            ? _macTrafficLightClearance
-            : 0.0;
+        ? _macTrafficLightClearance
+        : 0.0;
 
     return Stack(
       fit: StackFit.expand,
@@ -86,10 +87,7 @@ class BookReaderChrome extends StatelessWidget {
                             ),
                             Text(
                               controller.progressPercentLabel,
-                              style: TextStyle(
-                                color: fgMuted,
-                                fontSize: 11,
-                              ),
+                              style: TextStyle(color: fgMuted, fontSize: 11),
                             ),
                           ],
                         ),
@@ -97,18 +95,41 @@ class BookReaderChrome extends StatelessWidget {
                       IconButton(
                         tooltip: '目录',
                         onPressed: onOpenToc,
+                        icon: Icon(Icons.list_outlined, color: fg, weight: 300),
+                      ),
+                      IconButton(
+                        tooltip: controller.isCurrentPositionBookmarked
+                            ? '移除当前位置书签'
+                            : '添加当前位置书签',
+                        onPressed: controller.toggleBookmark,
                         icon: Icon(
-                          Icons.list_outlined,
+                          controller.isCurrentPositionBookmarked
+                              ? Icons.bookmark
+                              : Icons.bookmark_border_outlined,
+                          color: fg,
+                          weight: 300,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '书签列表',
+                        onPressed: () => showReaderBookmarksSheet(
+                          context,
+                          listenable: controller,
+                          bookmarks: () => controller.bookmarks,
+                          labelFor: controller.bookmarkLabel,
+                          onOpen: controller.goToBookmark,
+                          onRemove: controller.removeBookmark,
+                        ),
+                        icon: Icon(
+                          Icons.bookmarks_outlined,
                           color: fg,
                           weight: 300,
                         ),
                       ),
                       IconButton(
                         tooltip: '排版',
-                        onPressed: () => showBookReaderSettingsSheet(
-                          context,
-                          controller,
-                        ),
+                        onPressed: () =>
+                            showBookReaderSettingsSheet(context, controller),
                         icon: Icon(
                           Icons.format_size_outlined,
                           color: fg,
@@ -146,16 +167,16 @@ class BookReaderChrome extends StatelessWidget {
                       IconButton(
                         tooltip: controller.hasPageMode ? '上一页' : '上一节',
                         onPressed: controller.hasPageMode
-                            ? (controller.pageIndex > 0
-                                ? controller.goPreviousPage
-                                : null)
+                            ? (controller.canGoPreviousPage
+                                  ? controller.goPreviousPage
+                                  : null)
                             : (controller.sectionIndex > 0
-                                ? controller.goPreviousSection
-                                : null),
+                                  ? controller.goPreviousSection
+                                  : null),
                         icon: Icon(
                           Icons.skip_previous_outlined,
                           color: controller.hasPageMode
-                              ? (controller.pageIndex > 0 ? fg : fgMuted)
+                              ? (controller.canGoPreviousPage ? fg : fgMuted)
                               : (controller.sectionIndex > 0 ? fg : fgMuted),
                           weight: 300,
                         ),
@@ -172,23 +193,21 @@ class BookReaderChrome extends StatelessWidget {
                       IconButton(
                         tooltip: controller.hasPageMode ? '下一页' : '下一节',
                         onPressed: controller.hasPageMode
-                            ? (controller.pageIndex < controller.pageCount - 1
-                                ? controller.goNextPage
-                                : null)
+                            ? (controller.canGoNextPage
+                                  ? controller.goNextPage
+                                  : null)
                             : (controller.sectionIndex <
-                                    controller.sectionCount - 1
-                                ? controller.goNextSection
-                                : null),
+                                      controller.sectionCount - 1
+                                  ? controller.goNextSection
+                                  : null),
                         icon: Icon(
                           Icons.skip_next_outlined,
                           color: controller.hasPageMode
-                              ? (controller.pageIndex < controller.pageCount - 1
-                                  ? fg
-                                  : fgMuted)
+                              ? (controller.canGoNextPage ? fg : fgMuted)
                               : (controller.sectionIndex <
-                                      controller.sectionCount - 1
-                                  ? fg
-                                  : fgMuted),
+                                        controller.sectionCount - 1
+                                    ? fg
+                                    : fgMuted),
                           weight: 300,
                         ),
                       ),

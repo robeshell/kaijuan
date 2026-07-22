@@ -1,45 +1,56 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../../app/book_reading_preferences.dart';
+import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/book/book_models.dart';
 import '../../readers/book/book_theme.dart';
 
-/// Owns reflow book session: engine-agnostic state, chrome, progress, prefs.
+/// Owns reflow book session state, chrome, progress, and preferences.
 ///
-/// The actual rendering engine is injected via [attachEngine] (or reported as
-/// failed via [engineFailed]). This keeps every engine-specific import out of
-/// the controller and makes the engine replaceable.
+/// Rendering details stay in the reader pipeline; this controller is the
+/// presentation boundary used by screens and widgets.
 class BookReaderController extends ChangeNotifier {
   BookReaderController({
     required this.database,
     required this.item,
     BookReadingPreferences? readingPreferences,
-  })  : _prefs = readingPreferences,
-        _fontSize = readingPreferences?.fontSize ??
-            BookReadingPreferences.defaultFontSize,
-        _lineHeight = readingPreferences?.lineHeight ??
-            BookReadingPreferences.defaultLineHeight,
-        _readingTheme = readingPreferences?.readingTheme ??
-            BookReadingTheme.paper,
-        _margin = readingPreferences?.margin ??
-            BookReadingPreferences.defaultMargin,
-        _readingMode = readingPreferences?.readingMode ??
-            BookReadingPreferences.defaultReadingMode;
+    this.scrollModeEnabled = true,
+  }) : _prefs = readingPreferences,
+       _fontSize =
+           readingPreferences?.fontSize ??
+           BookReadingPreferences.defaultFontSize,
+       _lineHeight =
+           readingPreferences?.lineHeight ??
+           BookReadingPreferences.defaultLineHeight,
+       _readingTheme =
+           readingPreferences?.readingTheme ?? BookReadingTheme.paper,
+       _margin =
+           readingPreferences?.margin ?? BookReadingPreferences.defaultMargin,
+       _readingMode = scrollModeEnabled
+           ? readingPreferences?.readingMode ??
+                 BookReadingPreferences.defaultReadingMode
+           : BookReadingMode.page,
+       _pageTurnEffect =
+           readingPreferences?.pageTurnEffect ??
+           BookReadingPreferences.defaultPageTurnEffect;
 
   final AppDatabase database;
   final ReadingItem item;
   final BookReadingPreferences? _prefs;
+  final bool scrollModeEnabled;
 
   BookSectionMap? _sectionMap;
   List<String> _tocTitles = const [];
+  List<BookTocEntry> _tocEntries = const [];
   Object? _openError;
   bool _ready = false;
   bool _disposed = false;
-  bool _chromeVisible = true;
+  int _attachGeneration = 0;
+  bool _chromeVisible = false;
 
   int _sectionIndex = 0;
   double _progressInSection = 0;
@@ -48,12 +59,17 @@ class BookReaderController extends ChangeNotifier {
   BookReadingTheme _readingTheme;
   double _margin;
   BookReadingMode _readingMode;
+  BookPageTurnEffect _pageTurnEffect;
 
   Timer? _saveDebounce;
-  int? _pendingJumpParagraph;
+  BookLocator? _pendingJumpLocator;
+  List<ReaderBookmark> _bookmarks = const [];
+  StreamSubscription<List<ReaderBookmark>>? _bookmarksSubscription;
 
-  BookSectionMap? _pageMap;
-  int _pageIndex = 0;
+  VoidCallback? _externalNextPage;
+  VoidCallback? _externalPreviousPage;
+  String? _renditionCfi;
+  double? _renditionProgress;
 
   // ------------------------------------------------------------------
   // Getters
@@ -63,8 +79,8 @@ class BookReaderController extends ChangeNotifier {
   bool get isReady => _ready;
   bool get chromeVisible => _chromeVisible;
   BookSectionMap? get sectionMap => _sectionMap;
-  BookSectionMap? get pageMap => _pageMap;
   List<String> get tocTitles => _tocTitles;
+  List<BookTocEntry> get tocEntries => _tocEntries;
 
   int get sectionCount => _sectionMap?.sectionCount ?? 0;
   int get sectionIndex => _sectionIndex;
@@ -74,10 +90,36 @@ class BookReaderController extends ChangeNotifier {
   BookReadingTheme get readingTheme => _readingTheme;
   double get margin => _margin;
   BookReadingMode get readingMode => _readingMode;
+  BookPageTurnEffect get pageTurnEffect => _pageTurnEffect;
 
-  bool get hasPageMode => pageCount > 0;
-  int get pageIndex => _pageIndex;
-  int get pageCount => _pageMap?.sectionCount ?? 0;
+  bool get hasPageMode =>
+      _readingMode == BookReadingMode.page && _externalNextPage != null;
+  List<ReaderBookmark> get bookmarks => _bookmarks;
+
+  bool get canGoPreviousPage => _externalPreviousPage != null;
+  bool get canGoNextPage => _externalNextPage != null;
+
+  /// Pending programmatic jump (restore / TOC / bookmark). Not cleared until
+  /// the active view reports success via [clearPendingJump].
+  BookLocator? get pendingJump => _pendingJumpLocator;
+
+  BookLocator get currentLocator => BookLocator(
+    sectionIndex: _sectionIndex,
+    progressInSection: _progressInSection,
+    cfi: _renditionCfi,
+  );
+
+  ReaderBookmark? get currentBookmark {
+    for (final bookmark in _bookmarks) {
+      final locator = _validBookmarkLocator(bookmark);
+      if (locator != null && _samePosition(locator, currentLocator)) {
+        return bookmark;
+      }
+    }
+    return null;
+  }
+
+  bool get isCurrentPositionBookmarked => currentBookmark != null;
 
   String get sectionLabel {
     final total = sectionCount;
@@ -86,9 +128,7 @@ class BookReaderController extends ChangeNotifier {
   }
 
   String get pageLabel {
-    final total = pageCount;
-    if (total <= 0) return '—';
-    return '${_pageIndex + 1} / $total 页';
+    return '$sectionLabel 节';
   }
 
   String get progressPercentLabel {
@@ -97,6 +137,10 @@ class BookReaderController extends ChangeNotifier {
   }
 
   double get progressFraction {
+    final renditionProgress = _renditionProgress;
+    if (renditionProgress != null) {
+      return renditionProgress.clamp(0.0, 1.0);
+    }
     final total = sectionCount;
     if (total <= 0) return 0;
     if (total == 1) return _progressInSection.clamp(0.0, 1.0);
@@ -107,31 +151,81 @@ class BookReaderController extends ChangeNotifier {
   // Engine lifecycle
   // ------------------------------------------------------------------
 
+  /// Reads the native CFI before the WebView starts so the renderer can open
+  /// directly at the saved position instead of painting page one and jumping.
+  Future<BookLocator?> loadInitialLocator() async {
+    final row = await database.progressFor(item.id);
+    if (row == null || _disposed) return null;
+    return BookLocator.tryDecode(row.locatorJson);
+  }
+
   /// Called by the engine adapter once parsing is done and the flat-paragraph
   /// boundaries are known.
-  void attachEngine(BookSectionMap map, List<String> tocTitles) {
+  Future<void> attachEngine(
+    BookSectionMap map,
+    List<String> tocTitles, {
+    List<BookTocEntry> tocEntries = const [],
+  }) async {
     if (_disposed) return;
+    final generation = ++_attachGeneration;
+    _ready = false;
     _sectionMap = map;
     _tocTitles = List.unmodifiable(tocTitles);
-    _restoreProgress();
+    _tocEntries = List.unmodifiable(
+      tocEntries.isEmpty
+          ? [
+              for (var i = 0; i < tocTitles.length; i++)
+                BookTocEntry(title: tocTitles[i], href: '', sectionIndex: i),
+            ]
+          : tocEntries,
+    );
+    final locator = await _restoreProgress(map);
+    if (_disposed || generation != _attachGeneration) return;
+    if (locator != null) {
+      _sectionIndex = locator.sectionIndex;
+      _progressInSection = locator.progressInSection;
+      _renditionCfi = locator.cfi;
+      _pendingJumpLocator = locator;
+    }
+    _watchBookmarks();
     _ready = true;
     _openError = null;
     notifyListeners();
     unawaited(database.touchLastOpened(item.id, DateTime.now()));
   }
 
-  /// Called by the engine adapter once pagination is done for page mode.
-  /// [pageMap] uses page indices as paragraphs.
-  void attachPageMap(BookSectionMap pageMap) {
-    if (_disposed) return;
-    _pageMap = pageMap;
-    _pageIndex = pageMap.paragraphFromLocator(
-      BookLocator(
-        sectionIndex: _sectionIndex,
-        progressInSection: _progressInSection,
-      ),
+  void attachExternalPageNavigation({
+    required VoidCallback nextPage,
+    required VoidCallback previousPage,
+  }) {
+    _externalNextPage = nextPage;
+    _externalPreviousPage = previousPage;
+  }
+
+  void detachExternalPageNavigation() {
+    _externalNextPage = null;
+    _externalPreviousPage = null;
+  }
+
+  void reportRenditionLocation({
+    required int sectionIndex,
+    required double progress,
+    required String cfi,
+  }) {
+    if (_disposed || sectionCount <= 0) return;
+    final nextSection = sectionIndex.clamp(0, sectionCount - 1);
+    final global = progress.clamp(0.0, 1.0);
+    final estimatedLocal = (global * sectionCount - nextSection).clamp(
+      0.0,
+      1.0,
     );
+    _sectionIndex = nextSection;
+    _progressInSection = estimatedLocal;
+    _renditionProgress = global;
+    _renditionCfi = cfi;
+    _pendingJumpLocator = null;
     notifyListeners();
+    _debouncedPersist();
   }
 
   /// Called by the engine adapter when the book could not be opened.
@@ -146,70 +240,21 @@ class BookReaderController extends ChangeNotifier {
   // Progress: engine -> controller -> DB
   // ------------------------------------------------------------------
 
-  /// Engine reports a flat paragraph position; we map it to our spine-style
-  /// locator and debounce-persist it.
-  void reportPosition(int paragraphIndex, double paragraphOffset) {
-    if (_disposed) return;
-    final map = _sectionMap;
-    if (map == null) return;
-    final locator = map.locatorFromParagraph(
-      paragraphIndex: paragraphIndex,
-      paragraphOffset: paragraphOffset,
-    );
-    if (locator.sectionIndex == _sectionIndex &&
-        (locator.progressInSection - _progressInSection).abs() < 0.005) {
-      return;
-    }
-    _sectionIndex = locator.sectionIndex;
-    _progressInSection = locator.progressInSection;
-    notifyListeners();
-    _debouncedPersist();
-  }
-
-  /// Page-mode engine reports a page index; we update the page counter and
-  /// derive the spine locator for persistence.
-  void reportPage(int pageIndex) {
-    if (_disposed) return;
-    final count = pageCount;
-    if (count <= 0) return;
-    final next = pageIndex.clamp(0, count - 1);
-    if (next == _pageIndex) return;
-    _pageIndex = next;
-    _updateSectionFromPage();
-    notifyListeners();
-    _debouncedPersist();
-  }
-
-  void _restoreProgress() {
-    final map = _sectionMap;
-    if (map == null) return;
-
-    // Engine calls are synchronous; DB is async. We cannot block here, so we
-    // kick off a future and update state when it arrives. The screen will show
-    // the book at the start until the restore resolves, then jump if needed.
-    unawaited(_restoreProgressAsync(map));
-  }
-
-  Future<void> _restoreProgressAsync(BookSectionMap map) async {
+  Future<BookLocator?> _restoreProgress(BookSectionMap map) async {
     final row = await database.progressFor(item.id);
-    if (row == null || _disposed) return;
+    if (row == null || _disposed) return null;
 
     BookLocator? locator;
 
     // 1. Native format.
-    locator = BookLocator.tryDecode(row.locatorJson)?.validated(
-      sectionCount: map.sectionCount,
-    );
+    locator = BookLocator.tryDecode(
+      row.locatorJson,
+    )?.validated(sectionCount: map.sectionCount);
 
     // 2. Legacy katbook format migration (paragraphIndex/totalParagraphs).
     locator ??= _tryMigrateLegacyLocator(row.locatorJson, map);
 
-    if (locator == null || _disposed) return;
-
-    _sectionIndex = locator.sectionIndex;
-    _progressInSection = locator.progressInSection;
-    _pendingJumpParagraph = map.paragraphFromLocator(locator);
-    notifyListeners();
+    return _disposed ? null : locator;
   }
 
   static BookLocator? _tryMigrateLegacyLocator(
@@ -230,18 +275,38 @@ class BookReaderController extends ChangeNotifier {
   // Navigation
   // ------------------------------------------------------------------
 
-  void goToSection(int index) {
+  void goToSection(int index, {double progressInSection = 0}) {
     final total = sectionCount;
     if (total <= 0) return;
     final next = index.clamp(0, total - 1);
-    if (next == _sectionIndex && _progressInSection == 0) return;
+    final progress = progressInSection.clamp(0.0, 1.0);
+    if (next == _sectionIndex &&
+        (progress - _progressInSection).abs() < 0.0005) {
+      return;
+    }
     _sectionIndex = next;
-    _progressInSection = 0;
-    _pendingJumpParagraph = _sectionMap?.paragraphFromLocator(
-      BookLocator(sectionIndex: _sectionIndex),
+    _progressInSection = progress;
+    _renditionCfi = null;
+    _renditionProgress = null;
+    _pendingJumpLocator = BookLocator(
+      sectionIndex: _sectionIndex,
+      progressInSection: _progressInSection,
     );
     notifyListeners();
     _debouncedPersist();
+  }
+
+  void goToTocEntry(BookTocEntry entry, {double progressInSection = 0}) {
+    final index = entry.sectionIndex;
+    if (index == null) return;
+    goToSection(index, progressInSection: progressInSection);
+  }
+
+  void goToLocator(BookLocator locator) {
+    goToSection(
+      locator.sectionIndex,
+      progressInSection: locator.progressInSection,
+    );
   }
 
   void goNextSection() => goToSection(_sectionIndex + 1);
@@ -252,38 +317,90 @@ class BookReaderController extends ChangeNotifier {
   // Page-mode navigation
   // ------------------------------------------------------------------
 
-  void goToPage(int index) {
-    final count = pageCount;
-    if (count <= 0) return;
-    final next = index.clamp(0, count - 1);
-    if (next == _pageIndex) return;
-    _pageIndex = next;
-    _pendingJumpParagraph = next;
-    _updateSectionFromPage();
+  void goNextPage() {
+    final external = _externalNextPage;
+    external?.call();
+  }
+
+  void goPreviousPage() {
+    final external = _externalPreviousPage;
+    external?.call();
+  }
+
+  void clearPendingJump() {
+    _pendingJumpLocator = null;
+  }
+
+  // ------------------------------------------------------------------
+  // Bookmarks
+  // ------------------------------------------------------------------
+
+  void _watchBookmarks() {
+    _bookmarksSubscription?.cancel();
+    _bookmarksSubscription = database.watchBookmarksFor(item.id).listen((rows) {
+      if (_disposed) return;
+      final valid =
+          rows.where((row) => _validBookmarkLocator(row) != null).toList()
+            ..sort((a, b) {
+              final left = _validBookmarkLocator(a)!;
+              final right = _validBookmarkLocator(b)!;
+              final section = left.sectionIndex.compareTo(right.sectionIndex);
+              return section != 0
+                  ? section
+                  : left.progressInSection.compareTo(right.progressInSection);
+            });
+      _bookmarks = List.unmodifiable(valid);
+      notifyListeners();
+    });
+  }
+
+  BookLocator? _validBookmarkLocator(ReaderBookmark bookmark) {
+    return BookLocator.tryDecode(
+      bookmark.locatorJson,
+    )?.validated(sectionCount: sectionCount);
+  }
+
+  bool _samePosition(BookLocator a, BookLocator b) {
+    if (a.cfi != null && b.cfi != null) return a.cfi == b.cfi;
+    return a.sectionIndex == b.sectionIndex &&
+        (a.progressInSection - b.progressInSection).abs() < 0.01;
+  }
+
+  String bookmarkLabel(ReaderBookmark bookmark) {
+    final locator = _validBookmarkLocator(bookmark);
+    if (locator == null) return '位置不可用';
+    final title = locator.sectionIndex < _tocTitles.length
+        ? _tocTitles[locator.sectionIndex]
+        : '第 ${locator.sectionIndex + 1} 节';
+    final percent = (locator.progressInSection * 100).round();
+    return '$title · $percent%';
+  }
+
+  Future<void> toggleBookmark() async {
+    final existing = currentBookmark;
+    if (existing != null) {
+      await database.deleteBookmark(existing.id);
+      return;
+    }
+    if (sectionCount <= 0) return;
+    await database.addBookmark(
+      itemId: item.id,
+      locatorJson: currentLocator.encode(),
+    );
+  }
+
+  void goToBookmark(ReaderBookmark bookmark) {
+    final locator = _validBookmarkLocator(bookmark);
+    if (locator == null) return;
+    _sectionIndex = locator.sectionIndex;
+    _progressInSection = locator.progressInSection;
+    _pendingJumpLocator = locator;
     notifyListeners();
     _debouncedPersist();
   }
 
-  void goNextPage() => goToPage(_pageIndex + 1);
-
-  void goPreviousPage() => goToPage(_pageIndex - 1);
-
-  void _updateSectionFromPage() {
-    final map = _pageMap;
-    if (map == null) return;
-    final locator = map.locatorFromParagraph(
-      paragraphIndex: _pageIndex,
-      paragraphOffset: 0,
-    );
-    _sectionIndex = locator.sectionIndex;
-    _progressInSection = locator.progressInSection;
-  }
-
-  /// Engine adapter pulls the pending jump target once, then clears it.
-  int? consumePendingJump() {
-    final jump = _pendingJumpParagraph;
-    _pendingJumpParagraph = null;
-    return jump;
+  Future<void> removeBookmark(ReaderBookmark bookmark) {
+    return database.deleteBookmark(bookmark.id);
   }
 
   // ------------------------------------------------------------------
@@ -356,10 +473,21 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<void> setReadingMode(BookReadingMode mode) async {
+    if (mode == BookReadingMode.scroll && !scrollModeEnabled) return;
     if (mode == _readingMode) return;
     _readingMode = mode;
+    // Foliate reflows in place. Re-applying the stable locator after a mode
+    // switch keeps the same semantic position without a Dart page map.
+    _pendingJumpLocator = currentLocator;
     notifyListeners();
     await _prefs?.setReadingMode(mode);
+  }
+
+  Future<void> setPageTurnEffect(BookPageTurnEffect effect) async {
+    if (effect == _pageTurnEffect) return;
+    _pageTurnEffect = effect;
+    notifyListeners();
+    await _prefs?.setPageTurnEffect(effect);
   }
 
   // ------------------------------------------------------------------
@@ -375,10 +503,7 @@ class BookReaderController extends ChangeNotifier {
   Future<void> _persist() async {
     final total = sectionCount;
     if (total <= 0) return;
-    final locator = BookLocator(
-      sectionIndex: _sectionIndex,
-      progressInSection: _progressInSection,
-    );
+    final locator = currentLocator;
     await database.upsertProgress(
       itemId: item.id,
       locatorJson: locator.encode(),
@@ -390,7 +515,11 @@ class BookReaderController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _attachGeneration++;
     _saveDebounce?.cancel();
+    _externalNextPage = null;
+    _externalPreviousPage = null;
+    unawaited(_bookmarksSubscription?.cancel());
     unawaited(_persist());
     super.dispose();
   }
