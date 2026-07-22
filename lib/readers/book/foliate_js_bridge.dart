@@ -195,3 +195,29 @@ Map<dynamic, dynamic>? _firstMap(List<dynamic> arguments) {
   if (arguments.isEmpty || arguments.first is! Map) return null;
   return arguments.first as Map<dynamic, dynamic>;
 }
+
+/// External `http(s)` / `mailto` link emitted by Foliate's view click handler.
+class FoliateExternalLink {
+  const FoliateExternalLink({required this.href});
+
+  final String href;
+
+  static FoliateExternalLink? fromHandlerArguments(List<dynamic> arguments) {
+    final payload = _firstMap(arguments);
+    if (payload == null) return null;
+    final href = payload['href']?.toString().trim() ?? '';
+    if (href.isEmpty) return null;
+    return FoliateExternalLink(href: href);
+  }
+
+  Uri? get uri {
+    final parsed = Uri.tryParse(href);
+    if (parsed == null) return null;
+    if (parsed.isScheme('http') ||
+        parsed.isScheme('https') ||
+        parsed.isScheme('mailto')) {
+      return parsed;
+    }
+    return null;
+  }
+}

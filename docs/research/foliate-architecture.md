@@ -108,13 +108,13 @@ reading
 
 ### 下一阶段
 
-1. **P0：修复 metadata-only 页面启动契约。** 当前 `epub.js Loader` 隐式读取 URL 的 `style.allowScript`，而 probe URL 只传 `url`，Android 真机抛出 `Cannot read properties of null (reading 'allowScript')`。详见 [dev-handoff.md](../dev-handoff.md#2-当前-p0-阻塞正文-epub-被识别为漫画)。
-2. **P0：禁止 probe 失败后仅凭包内图片回退为 comic。** 正文 EPUB 的封面/插图不是页图 spine 证据；解析失败应成为可诊断错误。
-3. 用真实 HeadlessInAppWebView 集成样本验证正文 EPUB、带插图正文 EPUB和 image-only EPUB；现有 fake probe 单测不足以覆盖 JS 启动参数。
-4. 用真机 timing 验证修复后的 MetadataProbe 首本/连续导入、失败恢复和跨端表现。
-5. 把阅读和导入阶段耗时接入可导出的诊断记录，不只停留在 debug console。
-6. 清理超时遗留的 `.import-staging/*.partial`（仅删除确认未被活跃事务持有的旧文件）。
-7. 再接内部链接、脚注、选区/标注等 bridge；每项先定义 controller 契约，不直接把 Anx 页面逻辑搬入 screen。
+1. ~~**P0：修复 metadata-only 页面启动契约。**~~ ✅
+2. ~~**P0：禁止 probe 失败后仅凭包内图片回退为 comic。**~~ ✅
+3. ~~用真实 HeadlessInAppWebView 集成样本验证正文 EPUB、带插图正文 EPUB和 image-only EPUB。~~ ✅
+4. ~~用真机 timing 验证修复后的 MetadataProbe 首本/连续导入、失败恢复和跨端表现。~~ ✅（已人工验证）
+5. ~~把阅读和导入阶段耗时接入可导出的诊断记录，不只停留在 debug console。~~ ✅（`PipelineDiagnostics` + 设置复制）
+6. ~~清理超时遗留的 `.import-staging/*.partial`。~~ ✅（启动时年龄门限清扫）
+7. 书内相对链接 / 脚注由 Foliate 处理；~~外链系统打开~~ ✅。选区/标注等 bridge 仍按需：每项先定义 controller 契约，不直接把 Anx 页面逻辑搬入 screen。
 
 ## 6. 验证重点
 

@@ -97,6 +97,33 @@ class ImportStagingArea {
     );
   }
 
+  /// Deletes orphaned `.partial` files older than [maxAge].
+  ///
+  /// Active imports keep their staging files younger than the default window,
+  /// so age gating avoids deleting an in-flight transaction.
+  Future<int> purgeStalePartials({
+    Duration maxAge = const Duration(hours: 24),
+    DateTime Function()? clock,
+  }) async {
+    final staging = _stagingDirectory;
+    if (!await staging.exists()) return 0;
+    final now = clock?.call() ?? DateTime.now();
+    var deleted = 0;
+    await for (final entity in staging.list(followLinks: false)) {
+      if (entity is! File) continue;
+      if (!entity.path.endsWith('.partial')) continue;
+      try {
+        final modified = await entity.lastModified();
+        if (now.difference(modified) < maxAge) continue;
+        await entity.delete();
+        deleted++;
+      } catch (error) {
+        debugPrint('[Import] stale partial purge skipped ${entity.path}: $error');
+      }
+    }
+    return deleted;
+  }
+
   Directory get _stagingDirectory =>
       Directory(p.join(supportDirectory.path, '.import-staging'));
   Directory get _libraryDirectory =>

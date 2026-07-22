@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/pipeline_diagnostics.dart';
 import 'book_loopback_server.dart';
 
 typedef BookJavascriptEvaluator = Future<dynamic> Function(String source);
@@ -118,6 +119,9 @@ class BookRenditionSession {
       sincePrevious: elapsed - previous,
     );
     _timings.add(timing);
+    PipelineDiagnostics.instance.record(
+      '[BookRendition][$_mountId] $timing',
+    );
     _timingListener?.call(timing);
   }
 

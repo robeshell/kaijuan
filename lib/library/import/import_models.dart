@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/pipeline_diagnostics.dart';
+
 typedef ImportTimingListener = void Function(ImportPipelineTiming timing);
 
 class ImportPipelineTiming {
@@ -49,11 +51,12 @@ class ImportPipelineTrace {
       sincePrevious: elapsed - _previous,
     );
     _previous = elapsed;
-    (onTiming ?? _debugTiming)(timing);
-  }
-
-  static void _debugTiming(ImportPipelineTiming timing) {
-    if (kDebugMode) debugPrint('[Import] $timing');
+    PipelineDiagnostics.instance.record('[Import] $timing');
+    if (onTiming != null) {
+      onTiming!(timing);
+    } else if (kDebugMode) {
+      debugPrint('[Import] $timing');
+    }
   }
 }
 

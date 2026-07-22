@@ -12,6 +12,7 @@ import 'app/theme_preferences.dart';
 import 'brand/brand_config.dart';
 import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
+import 'library/import/import_staging.dart';
 import 'library/persistence/app_database.dart';
 import 'presentation/controllers/library_controller.dart';
 import 'readers/book/book_loopback_server.dart';
@@ -37,6 +38,8 @@ Future<void> bootstrap() async {
   await BookLoopbackServer.configureSupportDirectory(supportDir);
   // Warm the shared Foliate origin before the first open/import.
   unawaited(BookLoopbackServer.ensureStarted());
+  // Drop orphaned staging leftovers from crashed / killed imports.
+  unawaited(ImportStagingArea(supportDir).purgeStalePartials());
 
   final themePreferences = await ThemePreferences.load(
     supportDirectory: supportDir,

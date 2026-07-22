@@ -4,9 +4,7 @@
 
 ## 0. 当前结论
 
-KaikaNext 正在进行一次尚未提交的大改造：图书 reflow 主链已从 Dart 自研 HTML/分页器切到 Anx Reader 使用的 `foliate-js + flutter_inappwebview`，`epub_pro` 已移除。架构方向和大部分代码已经落地。**Android EPUB 导入 P0（metadata probe `allowScript` / 误判 comic）已在本轮修复**；真机完整回归（导入→打开→翻页→折叠屏）仍需在设备上确认。
-
-不要把当前工作树当作可发布状态；修复后勿再靠调低 book/comic 阈值掩盖 probe 失败。
+KaikaNext 图书 reflow 主链已切到 Anx Reader 的 `foliate-js + flutter_inappwebview`，`epub_pro` 已移除。Android EPUB 导入 P0、真机打开回归、工程卫生（可导出 timing / 超时 staging 清扫）与外链系统打开均已落地。选区/标注仍按需。
 
 ## 1. 本轮已完成的改造
 
@@ -97,18 +95,12 @@ EpubImportRouter → comic
 1. ~~先修 metadata probe 启动契约~~ ✅
 2. ~~给 router 加失败保护~~ ✅
 3. ~~增加真实 metadata 页面集成验证~~ ✅（`test/foliate_import_probe_test.dart` + `tool/verify_foliate_probe.dart`）
-4. Android 重测上述文件（`以日为鉴` EPUB）。正确日志应出现：
-
-   ```text
-   FoliateMetadataProbe package-ready <正数>
-   probe-metadata-ready
-   book sections=<正数> sampled=<正数> imageOnly=<较小值> ...
-   EpubImportRouter → book
-   ```
-
-5. 不必先删除误判条目；同一内容重新导入会按 hash upsert，预期把 `kind` 更新为 book。仍需实际验证 comic → book 的重导路径和旧 pageCount/cover 状态。
-6. 导入正确后再回归打开：应依次看到 `FoliateReader init-start`、`init-ready`、`onLoadEnd`、`reader ready`，并测试翻页、重开恢复和折叠屏往返。
-7. 修改 `assets/book/foliate-js/src/book.js` 后执行：
+4. ~~Android 重测上述文件（`以日为鉴` EPUB）~~ ✅（已人工验证 → book）
+5. ~~comic → book 同 hash 重导~~ ✅
+6. ~~导入后打开回归（翻页 / 恢复 / 折叠）~~ ✅
+7. ~~工程卫生：可导出 timing + 启动清扫超时 `.partial`~~ ✅
+8. ~~书内链接（Foliate）+ 外链系统打开~~ ✅；选区/标注仍按需
+9. 修改 `assets/book/foliate-js/src/book.js` 后执行：
 
    ```sh
    cd assets/book/foliate-js

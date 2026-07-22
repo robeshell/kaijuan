@@ -89,4 +89,31 @@ void main() {
     expect(unsafe.targetPath, endsWith('/covers/def.img'));
     await unsafe.rollback();
   });
+
+  test('purgeStalePartials only deletes aged .partial files', () async {
+    final area = ImportStagingArea(supportDirectory);
+    final staging = Directory('${supportDirectory.path}/.import-staging');
+    await staging.create(recursive: true);
+
+    final fresh = File('${staging.path}/fresh.partial');
+    final stale = File('${staging.path}/stale.partial');
+    final other = File('${staging.path}/notes.txt');
+    await fresh.writeAsString('fresh');
+    await stale.writeAsString('stale');
+    await other.writeAsString('keep');
+
+    final now = DateTime.utc(2026, 7, 22, 12);
+    await fresh.setLastModified(now.subtract(const Duration(hours: 1)));
+    await stale.setLastModified(now.subtract(const Duration(hours: 25)));
+
+    final deleted = await area.purgeStalePartials(
+      maxAge: const Duration(hours: 24),
+      clock: () => now,
+    );
+
+    expect(deleted, 1);
+    expect(await fresh.exists(), isTrue);
+    expect(await stale.exists(), isFalse);
+    expect(await other.exists(), isTrue);
+  });
 }

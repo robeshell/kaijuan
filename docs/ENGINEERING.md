@@ -108,6 +108,8 @@ source
 - rollback 只能删除当前事务实际创建的 target；同 hash 的既有文件不得删除。
 - 正式目录在解析完成前不可见半成品。文件提交后若 DB 写入失败，执行补偿回滚。
 - debug timing 分为 `foliate-probe`、`book`、`comic` 三条管线；至少标记 validated、content-staged、metadata/page-list、cover-staged、files-committed、database-committed 或 rolled-back。
+- 导入与打开 timing 同时写入进程内 `PipelineDiagnostics`；设置 → 关于可复制导出，不只依赖 debug console。
+- 启动时对 `.import-staging/*.partial` 做年龄门限清扫（默认 24h），只删确认过期且非活跃事务的残留。
 
 ---
 

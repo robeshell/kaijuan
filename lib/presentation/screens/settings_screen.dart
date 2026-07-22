@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../app/theme_preferences.dart';
 import '../../brand/brand_config.dart';
+import '../../core/pipeline_diagnostics.dart';
 import '../../core/theme.dart';
 import '../widgets/app_overlays.dart';
 
@@ -220,6 +221,15 @@ class _AboutCardState extends State<_AboutCard> {
               _AboutRow(label: '支持格式', value: _formatsLabel),
               if (!kIsWeb)
                 _AboutRow(label: '平台', value: defaultTargetPlatform.name),
+              _AboutRow(
+                label: '诊断',
+                value: '导入 / 打开耗时',
+                onCopy: () => _copy(
+                  context,
+                  PipelineDiagnostics.instance.exportText(),
+                  '已复制导入 / 打开诊断',
+                ),
+              ),
             ],
           );
         },

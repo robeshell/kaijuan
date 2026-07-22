@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/book_reading_preferences.dart';
 import '../../presentation/controllers/book_reader_controller.dart';
@@ -354,6 +355,17 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _openExternalLink(List<dynamic> arguments) async {
+    final link = FoliateExternalLink.fromHandlerArguments(arguments);
+    final uri = link?.uri;
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (error) {
+      debugPrint('[FoliateJs] open external link failed: $uri ($error)');
+    }
+  }
+
   void _beginViewportTransition() {
     if (_disposed || _relocationSuspended) return;
     _viewportTransitionCfi = readerController.currentLocator.cfi;
@@ -628,6 +640,14 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
             return null;
           },
         );
+        controller.addJavaScriptHandler(
+          handlerName: 'onExternalLink',
+          callback: (arguments) {
+            if (!lease.isCurrent) return null;
+            unawaited(widget.adapter._openExternalLink(arguments));
+            return null;
+          },
+        );
         for (final name in const [
           'renderAnnotations',
           'onSetToc',
@@ -641,7 +661,6 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
           'translateText',
           'onPushState',
           'onSearch',
-          'onExternalLink',
           'onMetadata',
         ]) {
           controller.addJavaScriptHandler(
