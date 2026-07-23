@@ -41,6 +41,21 @@ dev_dependencies:
   build_runner: ^2.15.1
   drift_dev: ^2.34.2+1
   flutter_lints: ^6.0.0
+  msix: ^3.16.12
+
+# Windows MSIX packaging (used by `dart run tool/release.dart windows`).
+# Version is overridden at release time from the pubspec version field.
+msix_config:
+  display_name: Kaika
+  publisher_display_name: com.kaika.reader
+  identity_name: com.kaika.reader
+  publisher: CN=com.kaika.reader
+  msix_version: 0.1.0.1
+  logo_path: macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
+  capabilities: internetClient, privateNetworkClientServer
+  languages: zh-cn, en-us
+  architecture: x64
+  install_certificate: false
 
 dependency_overrides:
   # Upstream 1.2.0-beta.3 declares macOS 10.14 while using APIs available

@@ -126,10 +126,10 @@ source
 
 ## 5. 构建与运行
 
-### 5.1 当前（单入口）
+### 5.1 日常开发
 
 ```sh
-# 推荐
+flutter pub get
 flutter run -d macos
 flutter run -d <android-device>
 
@@ -143,7 +143,18 @@ flutter run -t lib/main.dart
 
 macOS 日常开发不再强制 `--flavor comic`。若 Xcode scheme 仍绑定 flavor，可先用 `comic` scheme（显示名已改为 Kaika）；`book` scheme 标 deprecated。
 
-### 5.2 原生 flavor 收口
+### 5.2 验证
+
+```sh
+dart run build_runner build --delete-conflicting-outputs   # drift 生成（改表结构后必跑）
+flutter analyze
+flutter test
+flutter build apk --debug
+```
+
+CI（`.github/workflows/ci.yml`）在 `main` push / PR 上跑 analyze + test，并缓存 drift 生成。
+
+### 5.3 原生 flavor 收口
 
 - Android：**无 productFlavor**；普通 `flutter run` / `assembleDebug` 直接构建；namespace 与 applicationId 均为 `com.kaika.reader`，应用名 Kaika。
 - iOS/macOS：保留 `comic` scheme；`book` scheme 标 deprecated；App 显示名 Kaika。
@@ -151,13 +162,54 @@ macOS 日常开发不再强制 `--flavor comic`。若 Xcode scheme 仍绑定 fla
 
 后续清理：删除 Apple 端 `book` scheme/xcconfig/icon set，以及 Android 已失效的旧 flavor 图标目录。
 
-### 5.3 图标
+### 5.4 图标
 
 ```sh
 python3 tool/generate_brand_icons.py
 ```
 
 当前源图：`brands/icons/comic/master_1024.png`（Kaika 图标）。
+
+### 5.5 发布打包
+
+**不要**直接 `flutter build … --release` 发版。版本以 `pubspec.yaml` 为唯一来源：`MAJOR.MINOR.PATCH` 对用户可见；`+build` 为内部 build number。
+
+```sh
+# 预览下一版本（不改文件）
+dart run tool/release.dart --dry-run
+
+# bump patch 一次，构建所选平台，产物写入 dist/
+dart run tool/release.dart android
+dart run tool/release.dart android macos
+dart run tool/release.dart windows
+
+# 不 bump，用当前版本重打
+dart run tool/release.dart android --no-bump
+
+# 已有 drift 生成物时可跳过 codegen
+dart run tool/release.dart android --no-bump --skip-codegen
+```
+
+| 平台 | 产物（`dist/`） | 宿主要求 |
+|------|-----------------|----------|
+| android | `kaika-x.y.z-android.apk`、`.aab` | 任意 |
+| ios | `kaika-x.y.z-ios-unsigned.zip` | macOS |
+| macos | `kaika-x.y.z-macos.zip`（`Kaika.app`） | macOS |
+| windows | `kaika-x.y.z-windows.zip`；可选 `.msix`、`-setup.exe` | Windows |
+
+Windows 安装包细节见 [`packaging/windows/README.md`](../packaging/windows/README.md)。MSIX 依赖 `msix` dev 包与 `msix_config`（`pubspec.yaml`）；Setup.exe 需 [Inno Setup 6](https://jrsoftware.org/isinfo.php)。
+
+**GitHub Release**：推送 `vMAJOR.MINOR.PATCH` tag 触发 `.github/workflows/release.yml`，为 Android / iOS / macOS / Windows 打 unsigned 包并上传 Release（不含 MSIX / Inno，那些仅本地 `release.dart windows` 产出）。
+
+**签名（本地/商店，未接入 CI）**
+
+| 平台 | 模板 / 位置 |
+|------|-------------|
+| Android | `android/key.properties.example` → 复制为 `key.properties` + upload keystore；当前 `build.gradle.kts` release 仍用 debug 签名 |
+| Apple | Xcode 开发/分发证书；CI 产物为 `--no-codesign` |
+| Windows MSIX | `msix_config` 测试证书 sideload；商店需 Partner Center 身份 |
+
+bump 失败时 `release.dart` 会回滚 `pubspec.yaml`。
 
 ---
 

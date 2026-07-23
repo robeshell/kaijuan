@@ -1,0 +1,7 @@
+# Copy to android/key.properties and fill in before Play Store release builds.
+# Never commit key.properties or *.keystore / *.jks (see android/.gitignore).
+#
+# storePassword=
+# keyPassword=
+# keyAlias=
+# storeFile=../keystore/upload-keystore.jks
