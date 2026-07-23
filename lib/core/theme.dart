@@ -354,19 +354,18 @@ abstract final class AppTheme {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: semantics.surface,
-        contentTextStyle: TextStyle(
-          color: semantics.textPrimary,
+        backgroundColor: const Color(0xE62C2C2E),
+        contentTextStyle: const TextStyle(
+          color: Color(0xFFF4F4F5),
           fontSize: 13,
           fontWeight: FontWeight.w500,
+          height: 1.3,
+          letterSpacing: 0.2,
         ),
         behavior: SnackBarBehavior.floating,
-        elevation: 6,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.medium),
-          side: BorderSide(color: semantics.hairline),
-        ),
-        insetPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        elevation: 0,
+        shape: const StadiumBorder(),
+        insetPadding: const EdgeInsets.fromLTRB(24, 0, 24, 36),
       ),
       listTileTheme: ListTileThemeData(
         iconColor: semantics.textSecondary,

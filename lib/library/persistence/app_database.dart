@@ -90,6 +90,21 @@ class Bookmarks extends Table {
   DateTimeColumn get createdAt => dateTime()();
 }
 
+/// Foliate range markings (highlight / underline). Point bookmarks stay in
+/// [Bookmarks]; this table stores CFI ranges + style.
+@DataClassName('BookAnnotationRow')
+class BookAnnotations extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get itemId =>
+      text().references(ReadingItems, #id, onDelete: KeyAction.cascade)();
+  TextColumn get cfi => text()();
+  TextColumn get type => text()();
+  TextColumn get color => text()();
+  TextColumn get selectedText => text().nullable()();
+  TextColumn get note => text().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+}
+
 /// User-created reading lists (书单) within one brand DB.
 class ReadingLists extends Table {
   TextColumn get id => text()();
@@ -162,6 +177,7 @@ class CollectionSummary {
     ReadingItems,
     ReadingProgress,
     Bookmarks,
+    BookAnnotations,
     ReadingLists,
     ReadingListMembers,
     Collections,
@@ -183,7 +199,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   // --- Reading items -------------------------------------------------------
 
@@ -367,6 +383,89 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> deleteBookmark(int id) {
     return (delete(bookmarks)..where((t) => t.id.equals(id))).go();
+  }
+
+  // --- Book annotations (highlight / underline) ----------------------------
+
+  Stream<List<BookAnnotation>> watchAnnotationsFor(String itemId) {
+    final query = select(bookAnnotations)
+      ..where((t) => t.itemId.equals(itemId))
+      ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]);
+    return query.watch().map(
+      (rows) => [
+        for (final row in rows)
+          if (BookAnnotationType.fromStorage(row.type) != null)
+            BookAnnotation(
+              id: row.id,
+              cfi: row.cfi,
+              type: BookAnnotationType.fromStorage(row.type)!,
+              colorCss: row.color,
+              selectedText: row.selectedText,
+              note: row.note,
+              createdAt: row.createdAt,
+            ),
+      ],
+    );
+  }
+
+  /// Upsert by `(itemId, cfi)`. Style-only updates must pass [writeNote] false
+  /// so an existing note is not wiped.
+  Future<int> upsertAnnotation({
+    required String itemId,
+    required String cfi,
+    required String type,
+    required String color,
+    String? selectedText,
+    String? note,
+    bool writeNote = false,
+  }) async {
+    final existing =
+        await (select(bookAnnotations)..where(
+              (t) => t.itemId.equals(itemId) & t.cfi.equals(cfi),
+            ))
+            .getSingleOrNull();
+    if (existing != null) {
+      final keepOrSetText = selectedText != null && selectedText.trim().isNotEmpty
+          ? Value(selectedText.trim())
+          : const Value<String?>.absent();
+      await (update(
+        bookAnnotations,
+      )..where((t) => t.id.equals(existing.id))).write(
+        BookAnnotationsCompanion(
+          type: Value(type),
+          color: Value(color),
+          // Never wipe a stored quote with null/empty on style or note updates.
+          selectedText: keepOrSetText,
+          note: writeNote ? Value(note) : const Value.absent(),
+        ),
+      );
+      return existing.id;
+    }
+    return into(bookAnnotations).insert(
+      BookAnnotationsCompanion.insert(
+        itemId: itemId,
+        cfi: cfi,
+        type: type,
+        color: color,
+        selectedText: Value(selectedText),
+        note: Value(note),
+        createdAt: DateTime.now(),
+      ),
+    );
+  }
+
+  Future<void> deleteAnnotation(int id) {
+    return (delete(bookAnnotations)..where((t) => t.id.equals(id))).go();
+  }
+
+  Future<void> deleteAnnotationByCfi({
+    required String itemId,
+    required String cfi,
+  }) {
+    return (delete(bookAnnotations)..where(
+          (t) => t.itemId.equals(itemId) & t.cfi.equals(cfi),
+        ))
+        .go();
   }
 
   // --- Reading lists -------------------------------------------------------
@@ -668,6 +767,9 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) {
         await migrator.createTable(collections);
         await migrator.createTable(collectionMembers);
+      }
+      if (from < 5) {
+        await migrator.createTable(bookAnnotations);
       }
     },
     beforeOpen: (_) async {

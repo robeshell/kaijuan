@@ -160,14 +160,35 @@ export class View extends HTMLElement {
   async init({ lastLocation, showTextStart }) {
     const resolved = lastLocation ? this.resolveNavigation(lastLocation) : null
     if (resolved) {
-      await this.renderer.goTo(resolved)
-      this.history.pushState(lastLocation)
+      try {
+        // Progress CFIs are often page-span ranges; collapse to a point so
+        // restore does not leave a sticky Range selection that blocks clicks.
+        if (typeof resolved.anchor === 'function') {
+          const orig = resolved.anchor
+          resolved.anchor = (doc) => {
+            const range = orig(doc)
+            try {
+              if (range && typeof range.collapse === 'function') range.collapse(true)
+            } catch (_) {}
+            return range
+          }
+        }
+        await this.renderer.goTo(resolved)
+        this.history.pushState(lastLocation)
+        this.deselect()
+        return
+      } catch (e) {
+        // Broken / stale CFI must not abort open — otherwise Flutter stays on
+        // the cover forever (seen on desktop when Range.setEnd got a non-Node).
+        console.warn('FoliateReader: restore location failed, falling back', e)
+      }
     }
-    else if (showTextStart) await this.goToTextStart()
+    if (showTextStart) await this.goToTextStart()
     else {
       this.history.pushState(0)
       await this.next()
     }
+    this.deselect()
   }
   #emit(name, detail, cancelable) {
     return this.dispatchEvent(new CustomEvent(name, { detail, cancelable }))
@@ -295,8 +316,15 @@ export class View extends HTMLElement {
         return
       }
 
-      if (doc.getSelection().type === "Range")
+      // Only suppress page-turn/chrome when there is real selected text.
+      // Phantom `type === 'Range'` (empty) must not dead-end desktop clicks.
+      // While Kaika's selection menu is open we still emit so Flutter can dismiss.
+      const selectedText = doc.getSelection()?.toString?.()?.trim?.() ?? ''
+      if (selectedText
+          && !window.__kaikaMenuCursorZone
+          && !window.__kaikaSelectionMenuOpen) {
         return
+      }
 
       const position = doc.position
       const scale = doc.scale
@@ -325,7 +353,7 @@ export class View extends HTMLElement {
       this.#emit('click-view', { x: clientX, y: clientY })
     })
     this.renderer.addEventListener('click', e => {
-      const { clientX, clientY } = e
+      let { clientX, clientY } = e
       while (clientX > window.innerWidth) {
         clientX -= window.innerWidth
       }
@@ -375,6 +403,11 @@ export class View extends HTMLElement {
     doc.addEventListener('click', e => {
       const [value, range] = overlayer.hitTest(e)
       if (value && !value.startsWith(SEARCH_PREFIX)) {
+        // Ignore window: do not steal the gesture — let click-view page-turn.
+        if (window.__kaikaIgnoreAnnotationClickUntil
+            && Date.now() < window.__kaikaIgnoreAnnotationClickUntil) {
+          return
+        }
         e.preventDefault()
         e.stopPropagation()
         this.#emit('show-annotation', { value, index, range })

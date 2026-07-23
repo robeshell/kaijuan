@@ -12,7 +12,8 @@
 | 工程结构 / 单入口 / 数据沿用 | [ENGINEERING.md](./ENGINEERING.md) |
 | Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | 某屏交互 | [specs/](./specs/) |
-| 图书工具条大改计划 | [specs/book-reader-tool-strip-plan.md](./specs/book-reader-tool-strip-plan.md) |
+| 图书工具条大改计划 | [specs/book-reader-tool-strip-plan.md](./specs/book-reader-tool-strip-plan.md)（底栏已落地，可归档） |
+| 图书阅读下一程 | [specs/book-reader-next-plan.md](./specs/book-reader-next-plan.md) |
 | 给 Open Design | [opendesign/HANDOFF.md](./opendesign/HANDOFF.md) |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
 | 会话交接（易过期） | [dev-handoff.md](./dev-handoff.md) |

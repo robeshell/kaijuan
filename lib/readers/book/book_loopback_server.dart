@@ -16,6 +16,28 @@ class BookLoopbackServer {
   static const _assetRoot = 'assets/book/foliate-js/';
   static const _portFileName = 'foliate_loopback_port.txt';
 
+  /// First-paint Foliate modules (modern + legacy entry). Loaded once into
+  /// memory so open-book HTTP serves skip repeated `rootBundle.load`.
+  static const _hotAssets = <String>[
+    'index.html',
+    'src/book.js',
+    'src/view.js',
+    'src/epub.js',
+    'src/epubcfi.js',
+    'src/footnotes.js',
+    'src/overlayer.js',
+    'src/paginator.js',
+    'src/progress.js',
+    'src/text-walker.js',
+    'src/translator.js',
+    'src/tts.js',
+    'src/vendor/zip.js',
+    'src/vendor/pdfjs/pdf.js',
+    'src/vendor/pdfjs/pdf.worker.js',
+    'dist/bundle.js',
+    'dist/pdf-legacy.js',
+  ];
+
   static BookLoopbackServer? _shared;
   static Future<BookLoopbackServer>? _starting;
   static int? _preferredPort;
@@ -23,6 +45,7 @@ class BookLoopbackServer {
 
   final HttpServer _server;
   final Map<String, File> _mounts = {};
+  final Map<String, Uint8List> _assetCache = {};
   int _nextMountId = 0;
 
   int get port => _server.port;
@@ -69,6 +92,13 @@ class BookLoopbackServer {
     }
   }
 
+  /// Bind loopback and prime the Foliate asset cache (bootstrap / warm path).
+  static Future<BookLoopbackServer> warmHotAssets() async {
+    final server = await ensureStarted();
+    await server.warmAssets();
+    return server;
+  }
+
   static Future<BookLoopbackServer> _start() async {
     final preferred = _preferredPort;
     late final HttpServer server;
@@ -107,6 +137,40 @@ class BookLoopbackServer {
 
   void unmount(String mountId) {
     _mounts.remove(mountId);
+  }
+
+  /// Prefetch hot Foliate assets into [_assetCache] (idempotent).
+  Future<void> warmAssets() async {
+    await Future.wait(
+      _hotAssets.map((relative) async {
+        try {
+          await _loadAssetBytes(relative);
+        } catch (error) {
+          debugPrint('[BookLoopback] warm skip $relative: $error');
+        }
+      }),
+    );
+  }
+
+  Future<Uint8List> _loadAssetBytes(String relative) async {
+    // Never memoize HTML/JS: hot reload keeps this server alive and would keep
+    // serving a pre-fix overlayer.js (missing/broken squiggly, stale dismiss).
+    final skipMemo = relative.endsWith('.js') ||
+        relative.endsWith('.mjs') ||
+        relative.endsWith('.html');
+    if (!skipMemo) {
+      final cached = _assetCache[relative];
+      if (cached != null) return cached;
+    }
+    final data = await rootBundle.load('$_assetRoot$relative');
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+    if (!skipMemo) {
+      _assetCache[relative] = bytes;
+    }
+    return bytes;
   }
 
   Future<void> _persistPort() async {
@@ -153,16 +217,13 @@ class BookLoopbackServer {
         if (!_isSafeAssetPath(relative)) {
           response.statusCode = HttpStatus.notFound;
         } else {
-          final data = await rootBundle.load('$_assetRoot$relative');
-          final bytes = data.buffer.asUint8List(
-            data.offsetInBytes,
-            data.lengthInBytes,
-          );
+          final bytes = await _loadAssetBytes(relative);
           response.headers.contentType = ContentType.parse(
             _contentTypeFor(relative),
           );
-          // App-bundled renderer assets are immutable per release.
-          response.headers.set('Cache-Control', 'public, max-age=31536000');
+          // Loopback serves the same URL across hot restarts; avoid sticky
+          // WebView caches of old foliate sources (e.g. missing squiggly).
+          response.headers.set('Cache-Control', 'no-cache');
           response.contentLength = bytes.length;
           if (request.method == 'GET') response.add(bytes);
         }
@@ -222,6 +283,7 @@ class BookLoopbackServer {
     _starting = null;
     if (shared == null) return;
     shared._mounts.clear();
+    shared._assetCache.clear();
     await shared._server.close(force: true);
   }
 }

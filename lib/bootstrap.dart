@@ -98,8 +98,8 @@ Future<_BootServices> _loadBootServices() async {
   }
 
   await BookLoopbackServer.configureSupportDirectory(supportDir);
-  // Warm the shared Foliate origin before the first open/import.
-  unawaited(BookLoopbackServer.ensureStarted());
+  // Warm loopback + Foliate asset cache before the first open/import.
+  unawaited(BookLoopbackServer.warmHotAssets());
   // Drop orphaned staging leftovers from crashed / killed imports.
   unawaited(ImportStagingArea(supportDir).purgeStalePartials());
 

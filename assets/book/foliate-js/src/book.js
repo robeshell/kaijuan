@@ -1,10 +1,10 @@
 console.log('book.js')
 console.log('AnxUA', navigator.userAgent)
 
-import './view.js'
+import './view.js?v=20260723k'
 import { FootnoteHandler } from './footnotes.js'
-import { Overlayer } from './overlayer.js'
-import { collapse, compare, fromRange, toRange } from './epubcfi.js'
+import { Overlayer } from './overlayer.js?v=20260723k'
+import { collapse, compare, fromRange, toRange } from './epubcfi.js?v=20260723k'
 const { configure, ZipReader, BlobReader, TextWriter, BlobWriter } =
   await import('./vendor/zip.js')
 const { EPUB } = await import('./epub.js')
@@ -158,16 +158,14 @@ const handleSelection = (view, doc, index) => {
     text = newSelection.toString();
   }
 
-  const contextText = buildRangeContextText(range);
-
+  // Skip buildRangeContextText — Flutter selection menu only uses `text` + pos.
+  // Context probing walked the DOM and made mobile selection menus feel delayed.
   onSelectionEnd({
     index,
-    range,
     lang,
     cfi,
     pos: position,
     text,
-    contextText
   });
 };
 
@@ -256,6 +254,14 @@ const setSelectionHandler = (view, doc, index) => {
     if (!hasActiveSelection) return;
     hasActiveSelection = false;
     lastPointerUpRange = null;
+    // Menu-driven deselect must not eat the next page-turn tap.
+    if (window.__kaikaClearingForMenuDismiss) {
+      doc.__anxSelectionClearedAt = 0;
+      doc.__anxSuppressClick = false;
+      stopAutoPageSession(view);
+      callFlutter('onSelectionCleared');
+      return;
+    }
     doc.__anxSelectionClearedAt = Date.now();
     doc.__anxSuppressClick = true;
     stopAutoPageSession(view);
@@ -284,6 +290,59 @@ const setSelectionHandler = (view, doc, index) => {
   };
 
   //    doc.addEventListener('pointerdown', () => isSelecting = true);
+  // Suppress native text-selection chrome (iOS callout / Android ActionMode
+  // leftovers). Custom menu is shown by pointerup / debounced selectionchange.
+  doc.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+  }, true)
+  try {
+    const styleEl = doc.createElement('style')
+    styleEl.setAttribute('data-kaika-no-callout', '1')
+    styleEl.textContent = '*, *::before, *::after { -webkit-touch-callout: none !important; }'
+    ;(doc.head || doc.documentElement).appendChild(styleEl)
+    if (doc.documentElement) doc.documentElement.style.webkitTouchCallout = 'none'
+    if (doc.body) doc.body.style.webkitTouchCallout = 'none'
+  } catch (_) {}
+
+  const selectionMenuGate = (() => {
+    let timer
+    let lastShownKey = ''
+    let suppressScheduleUntil = 0
+    const rangeKey = (range) => {
+      try {
+        return [
+          range.startContainer,
+          range.startOffset,
+          range.endContainer,
+          range.endOffset,
+        ].join(':')
+      } catch (_) {
+        return String(Date.now())
+      }
+    }
+    const showNow = () => {
+      clearTimeout(timer)
+      timer = undefined
+      const selRange = getSelectionRange(doc.getSelection())
+      if (!selRange) return
+      const key = rangeKey(selRange)
+      // Same range while menu already open — ignore (pointerup + selectionchange).
+      if (key === lastShownKey && window.__kaikaSelectionMenuOpen) return
+      lastShownKey = key
+      // Prevent the trailing selectionchange debounce from re-firing (~160ms lag).
+      suppressScheduleUntil = Date.now() + 280
+      handleSelection(view, doc, index)
+    }
+    // Only for handle-drag settle when pointerup is swallowed — keep short.
+    const schedule = (ms = 120) => {
+      if (Date.now() < suppressScheduleUntil) return
+      if (!getSelectionRange(doc.getSelection())) return
+      clearTimeout(timer)
+      timer = setTimeout(showNow, ms)
+    }
+    return { showNow, schedule }
+  })()
+
   // if macos or iOS
   if (navigator.platform.includes('Mac')
     || navigator.platform.includes('iPhone')
@@ -291,16 +350,16 @@ const setSelectionHandler = (view, doc, index) => {
   ) {
     doc.addEventListener('pointerup', () => {
       if (shouldSkipPointerUp()) return;
-      handleSelection(view, doc, index);
+      selectionMenuGate.showNow();
     });
+    // iPadOS desktop mode / touch Mac: selection handles may swallow pointerup.
+    if (navigator.maxTouchPoints > 0) {
+      doc.addEventListener('selectionchange', () => {
+        selectionMenuGate.schedule(120);
+      });
+    }
   }
   else if (navigator.platform.includes('Win')) {
-    // Prevent the default WebView2 context menu (back, reload, save as, print)
-    // from appearing on right-click inside the book content frame.
-    doc.addEventListener('contextmenu', e => {
-      e.preventDefault();
-    });
-
     if (navigator.maxTouchPoints > 0) {
       // In Edge, the longpress by touch generates following touch event sequence:
       // pointerover -> enter -> down -> move(n) -> cancel -> out -> leave
@@ -316,7 +375,7 @@ const setSelectionHandler = (view, doc, index) => {
       doc.addEventListener('pointerup', (e) => {
         if (e.pointerType === 'touch') return;
         if (shouldSkipPointerUp()) return;
-        handleSelection(view, doc, index);
+        selectionMenuGate.showNow();
       });
 
       // filter out selectionchange event cause by mouse
@@ -330,77 +389,36 @@ const setSelectionHandler = (view, doc, index) => {
         isMouseSelecting = false;
       });
 
-      var debounceTimerId = undefined;
       doc.addEventListener('selectionchange', () => {
         if (isMouseSelecting) return;
-
-        const selRange = getSelectionRange(doc.getSelection())
-        if (!selRange) return;
-
-        clearTimeout(debounceTimerId);
-        let delay = 500;
-        debounceTimerId = setTimeout(() => {
-          handleSelection(view, doc, index);
-        }, delay);
+        selectionMenuGate.schedule(120);
       });
 
     } else {
       doc.addEventListener('pointerup', () => {
         if (shouldSkipPointerUp()) return;
-        handleSelection(view, doc, index);
+        selectionMenuGate.showNow();
       });
     }
   }
 
   else if (navigator.userAgent.includes('Phone; OpenHarmony')) {
-    doc.addEventListener('contextmenu', e => {
-      e.preventDefault();
-    });
-
-    var debounceTimerId = undefined;
     doc.addEventListener('selectionchange', () => {
-      const selRange = getSelectionRange(doc.getSelection());
-      if (!selRange) return;
-
-      clearTimeout(debounceTimerId);
-      // Wait for selection to settle (e.g. 600ms after last change)
-      // This handles the case where pointerup/touchend is swallowed by native handles
-      debounceTimerId = setTimeout(() => {
-        handleSelection(view, doc, index);
-      }, 600);
+      selectionMenuGate.schedule(120);
     });
   } else { // Android
-    let hasNativeSelectionStarted = false;
-
-    doc.addEventListener('pointerdown', () => {
-      hasNativeSelectionStarted = false;
-    });
-
-    // When the native selection handles appear, the browser loses control of the pointer
-    // This event signals that the user has started dragging handles
-    doc.addEventListener('pointercancel', () => {
-      hasNativeSelectionStarted = true;
-    });
-
-    doc.addEventListener('contextmenu', e => {
-      // Allow mouse context menu (if any)
-      if (e.pointerType === 'mouse') {
-        handleSelection(view, doc, index);
+    // Native ActionMode is disabled via InAppWebViewSettings.disableContextMenu.
+    // Finger up → show immediately; selectionchange debounce only for handle drags.
+    doc.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') {
+        selectionMenuGate.showNow();
         return;
       }
-
-      // If we haven't lost pointer control yet (no pointercancel),
-      // this is the "early" long-press event during drag start.
-      // We block it to prevent the custom menu from interfering with the drag.
-      if (!hasNativeSelectionStarted) {
-        e.preventDefault();
-        return;
-      }
-
-      // If we have entered native selection mode (pointercancel happened),
-      // this contextmenu event is likely triggered by the system or user interaction
-      // after the selection phase (e.g. on release). We handle it.
-      handleSelection(view, doc, index);
+      if (shouldSkipPointerUp()) return;
+      selectionMenuGate.showNow();
+    });
+    doc.addEventListener('selectionchange', () => {
+      selectionMenuGate.schedule(120);
     });
   }
   // doc.addEventListener('selectionchange', () => handleSelection(view, doc, index));
@@ -1119,18 +1137,60 @@ class Reader {
     })
 
     view.addEventListener('draw-annotation', e => {
-      const { draw, annotation } = e.detail
+      const { draw, annotation, range } = e.detail
       const { color, type } = annotation
       const opts = { color, writingMode: this.view.renderer.writingMode }
-      if (type === 'highlight') draw(Overlayer.highlight, { ...opts })
-      else if (type === 'underline') draw(Overlayer.underline, { ...opts })
+      const withNoteMarker = (painter) => (rects, options) => {
+        const g = painter(rects, options)
+        try {
+          appendNoteMarker(g, rects, annotation, range)
+        } catch (err) {
+          console.warn('[Kaika] note marker failed', err)
+        }
+        return g
+      }
+      try {
+        if (type === 'highlight') draw(withNoteMarker(Overlayer.highlight), { ...opts })
+        else if (type === 'underline') draw(withNoteMarker(Overlayer.underline), { ...opts })
+        else if (type === 'wavy' || type === 'squiggly') {
+          if (typeof Overlayer.squiggly === 'function') {
+            draw(withNoteMarker(Overlayer.squiggly), { ...opts })
+          } else {
+            console.warn('[Kaika] Overlayer.squiggly missing; falling back')
+            draw(withNoteMarker(Overlayer.underline), { ...opts })
+          }
+        } else {
+          draw(withNoteMarker(Overlayer.underline), { ...opts })
+        }
+      } catch (err) {
+        // Never leave a removed mark with no redraw (wavy used to throw on n=0).
+        console.warn('[Kaika] draw-annotation failed', type, err)
+        try { draw(withNoteMarker(Overlayer.underline), { ...opts }) } catch (_) {}
+      }
     })
 
     view.addEventListener('show-annotation', e => {
+      if (window.__kaikaIgnoreAnnotationClickUntil
+          && Date.now() < window.__kaikaIgnoreAnnotationClickUntil) {
+        return
+      }
+      // Menu already open: this click is a dismiss (often the just-drawn mark),
+      // never reopen ② on the same gesture.
+      if (window.__kaikaSelectionMenuOpen) {
+        window.__kaikaSelectionMenuOpen = false
+        window.__kaikaMenuCursorZone = null
+        window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 800
+        try { callFlutter('onSelectionMenuDismiss') } catch (_) {}
+        return
+      }
       const annotation = this.annotationsByValue.get(e.detail.value)
       const pos = getPosition(e.detail.range)
       if (window.getSelection()?.toString()) return
-      const contextText = buildRangeContextText(e.detail.range)
+      // Cheap quote for heal path — avoid buildRangeContextText on every tap.
+      let contextText = ''
+      try {
+        contextText = (e.detail.range?.toString?.() || '').trim()
+      } catch (_) {}
       onAnnotationClick({ annotation, pos, contextText })
     })
     view.addEventListener('external-link', e => {
@@ -1187,11 +1247,22 @@ class Reader {
 
   addAnnotation(annotation) {
     const { value } = annotation
-    const spineCode = (value.split('/')[2].split('!')[0] - 2) / 2
+    let spineCode = 0
+    try {
+      spineCode = (value.split('/')[2].split('!')[0] - 2) / 2
+      if (!Number.isFinite(spineCode) || spineCode < 0) spineCode = 0
+    } catch (e) {
+      console.warn('[Kaika] annotation spine parse failed', value, e)
+    }
 
     const list = this.annotations.get(spineCode)
-    if (list) list.push(annotation)
-    else this.annotations.set(spineCode, [annotation])
+    if (list) {
+      const existing = list.findIndex(
+        a => a.value === value || a.id === annotation.id,
+      )
+      if (existing !== -1) list.splice(existing, 1)
+      list.push(annotation)
+    } else this.annotations.set(spineCode, [annotation])
 
     this.annotationsByValue.set(value, annotation)
 
@@ -1207,7 +1278,6 @@ class Reader {
     } else {
       this.view.addAnnotation(annotation)
     }
-
   }
 
   #checkCurrentPageBookmark() {
@@ -1321,20 +1391,23 @@ class Reader {
   }
 
   #onClickView({ detail: { x, y } }) {
-    const selection = this.#doc?.getSelection?.()
-    if (selection && getSelectionRange(selection)) {
-      return
-    }
+    // Do not gate page-turns on __kaikaIgnoreAnnotationClickUntil — that flag
+    // only suppresses show-annotation / note double-open after menu dismiss.
+    const menuOpen = !!window.__kaikaSelectionMenuOpen || !!window.__kaikaMenuCursorZone
+    // Menu open: always forward to Flutter (dismiss). Do not bail on Range.
+    if (!menuOpen) {
+      const selection = this.#doc?.getSelection?.()
+      const range = selection && getSelectionRange(selection)
+      // Require real text — empty/phantom ranges must not block desktop chrome.
+      if (range && range.toString().trim()) {
+        return
+      }
 
-    if (this.#doc?.__anxSuppressClick) {
-      this.#doc.__anxSuppressClick = false;
-      return
-    }
-
-    // debounce for 200ms after selection cleared
-    const lastClearedAt = this.#doc?.__anxSelectionClearedAt ?? 0
-    if (lastClearedAt && Date.now() - lastClearedAt < 200) {
-      return
+      // One-shot: swallow the ghost click that collapses a user selection.
+      if (this.#doc?.__anxSuppressClick) {
+        this.#doc.__anxSuppressClick = false;
+        return
+      }
     }
 
     const coordinatesX = x / window.innerWidth
@@ -1777,7 +1850,122 @@ const onRelocated = (currentInfo) => {
 
 const onAnnotationClick = (annotation) => callFlutter('onAnnotationClick', annotation)
 
+const onAnnotationNoteClick = (payload) =>
+  callFlutter('onAnnotationNoteClick', payload)
+
 const onClickView = (x, y) => callFlutter('onClick', { x, y })
+
+/// Note marker in Overlayer SVG space (same rects as underline).
+/// Placed **above** the last glyph box so it does not cover text.
+const appendNoteMarker = (g, rects, annotation, range) => {
+  const note = (annotation?.note || '').trim()
+  if (!note || !rects?.length) return
+
+  const last = rects[rects.length - 1]
+  const size = 13
+  const gap = 3
+  let x = last.right - size
+  if (x < last.left - 2) x = last.left
+  // Prefer above the line; if clipped at the top, fall back below.
+  let y = last.top - size - gap
+  let tailDown = true
+  if (y < 2) {
+    y = last.bottom + gap
+    tailDown = false
+  }
+  const fill = annotation.color || '#FACC15'
+
+  const ns = 'http://www.w3.org/2000/svg'
+  const marker = document.createElementNS(ns, 'g')
+  marker.style.pointerEvents = 'auto'
+  marker.style.cursor = 'pointer'
+  marker.setAttribute('aria-label', '打开笔记')
+
+  // Larger invisible hit target (mobile thumbs) without covering glyphs.
+  const hit = document.createElementNS(ns, 'rect')
+  hit.setAttribute('x', x - 6)
+  hit.setAttribute('y', y - 6)
+  hit.setAttribute('width', size + 12)
+  hit.setAttribute('height', size + 12)
+  hit.setAttribute('fill', 'transparent')
+
+  const body = document.createElementNS(ns, 'rect')
+  body.setAttribute('x', x)
+  body.setAttribute('y', y)
+  body.setAttribute('width', size)
+  body.setAttribute('height', size * 0.78)
+  body.setAttribute('rx', 3)
+  body.setAttribute('ry', 3)
+  body.setAttribute('fill', fill)
+  body.setAttribute('stroke', '#ffffff')
+  body.setAttribute('stroke-width', '1.25')
+
+  const tail = document.createElementNS(ns, 'path')
+  if (tailDown) {
+    const tx = x + size * 0.35
+    const ty = y + size * 0.78
+    tail.setAttribute(
+      'd',
+      `M${tx} ${ty} l${size * 0.16} ${size * 0.2} l${size * 0.14} ${-size * 0.2} Z`,
+    )
+  } else {
+    const tx = x + size * 0.35
+    const ty = y
+    tail.setAttribute(
+      'd',
+      `M${tx} ${ty} l${size * 0.16} ${-size * 0.2} l${size * 0.14} ${size * 0.2} Z`,
+    )
+  }
+  tail.setAttribute('fill', fill)
+
+  const mkLine = (yOff, w) => {
+    const line = document.createElementNS(ns, 'rect')
+    line.setAttribute('x', x + 2.5)
+    line.setAttribute('y', y + yOff)
+    line.setAttribute('width', w)
+    line.setAttribute('height', 1.35)
+    line.setAttribute('rx', 0.6)
+    line.setAttribute('fill', 'rgba(28,28,30,.72)')
+    return line
+  }
+
+  marker.append(hit, body, tail, mkLine(3.2, size - 5), mkLine(5.8, size - 7))
+
+  let armed = false
+  const emit = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try { e.stopImmediatePropagation() } catch (_) {}
+    // Block the same gesture from opening markup ② / click-view.
+    window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 700
+    const cfi = annotation.value
+    const fresh = reader?.annotationsByValue?.get(cfi) || annotation
+    // Skip DOM probing (getPosition / context text) — that was a major lag source.
+    onAnnotationNoteClick({
+      annotation: fresh,
+      pos: { left: 0, top: 0, right: 0, bottom: 0 },
+      contextText: '',
+    })
+  }
+  marker.addEventListener('pointerdown', (e) => {
+    armed = true
+    window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 700
+    e.preventDefault()
+    e.stopPropagation()
+    try { e.stopImmediatePropagation() } catch (_) {}
+  }, true)
+  marker.addEventListener('pointerup', (e) => {
+    if (!armed) return
+    armed = false
+    emit(e)
+  }, true)
+  marker.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try { e.stopImmediatePropagation() } catch (_) {}
+  }, true)
+  g.append(marker)
+}
 
 const onExternalLink = (link) => callFlutter('onExternalLink', link)
 
@@ -1870,6 +2058,159 @@ window.changeStyle = (newStyle) => {
   }
 }
 
+/// Desktop Platform Views own the system cursor. While the Flutter selection
+/// menu is open, map a normalized hit zone so mousemove inside it shows a
+/// pointer and everywhere else a default arrow (never the text I-beam).
+window.setSelectionMenuOpen = (open) => {
+  const wasOpen = !!window.__kaikaSelectionMenuOpen
+  window.__kaikaSelectionMenuOpen = !!open
+  if (!open) {
+    // Only arm the annotation-click ignore when actually dismissing a menu.
+    // Calling setMenuOpen(false) while already closed must not deaden taps.
+    if (wasOpen) {
+      window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 800
+    }
+    window.setSelectionMenuCursorZone(null)
+    return
+  }
+  // Bind iframe dismiss listeners immediately (zone coords arrive next frame).
+  try {
+    const contents = reader?.view?.renderer?.getContents?.() || []
+    for (const content of contents) {
+      const doc = content.doc
+      if (!doc) continue
+      if (!doc.__kaikaMenuCursorBound) {
+        doc.__kaikaMenuCursorBound = true
+        doc.addEventListener('mousemove', window.__kaikaMenuCursorHitTest, true)
+      }
+      if (!doc.__kaikaMenuDismissBound) {
+        doc.__kaikaMenuDismissBound = true
+        doc.addEventListener(
+          'pointerdown',
+          window.__kaikaMenuOutsidePointerDown,
+          true,
+        )
+      }
+    }
+  } catch (_) {}
+}
+
+window.setSelectionMenuCursorZone = (zone) => {
+  window.__kaikaMenuCursorZone = zone && typeof zone === 'object' ? zone : null
+  if (window.__kaikaMenuCursorZone) {
+    window.__kaikaSelectionMenuOpen = true
+  }
+  const apply = (cursor) => {
+    const setDoc = (doc) => {
+      if (!doc) return
+      try {
+        if (doc.documentElement) doc.documentElement.style.cursor = cursor
+        if (doc.body) doc.body.style.cursor = cursor
+      } catch (_) {}
+    }
+    setDoc(document)
+    try {
+      const contents = reader?.view?.renderer?.getContents?.() || []
+      for (const content of contents) setDoc(content.doc)
+    } catch (_) {}
+  }
+  const bindIframes = () => {
+    try {
+      const contents = reader?.view?.renderer?.getContents?.() || []
+      for (const content of contents) {
+        const doc = content.doc
+        if (!doc) continue
+        if (!doc.__kaikaMenuCursorBound) {
+          doc.__kaikaMenuCursorBound = true
+          doc.addEventListener('mousemove', window.__kaikaMenuCursorHitTest, true)
+        }
+        if (!doc.__kaikaMenuDismissBound) {
+          doc.__kaikaMenuDismissBound = true
+          // pointerdown only — click races overlayer show-annotation.
+          doc.addEventListener(
+            'pointerdown',
+            window.__kaikaMenuOutsidePointerDown,
+            true,
+          )
+        }
+      }
+    } catch (_) {}
+  }
+  if (!window.__kaikaMenuCursorZone) {
+    apply('')
+    return
+  }
+  apply('default')
+  bindIframes()
+}
+
+if (!window.__kaikaMenuCursorListening) {
+  window.__kaikaMenuCursorListening = true
+  const clientPoint = (e) => {
+    let clientX = e.clientX
+    let clientY = e.clientY
+    try {
+      const frame = e.view?.frameElement
+      if (frame) {
+        const rect = frame.getBoundingClientRect()
+        clientX += rect.left
+        clientY += rect.top
+      }
+    } catch (_) {}
+    const w = window.innerWidth || 1
+    const h = window.innerHeight || 1
+    return { x: clientX / w, y: clientY / h }
+  }
+  const pointInZone = (zone, x, y) =>
+    x >= zone.left && x <= zone.right && y >= zone.top && y <= zone.bottom
+
+  window.__kaikaMenuCursorHitTest = (e) => {
+    const zone = window.__kaikaMenuCursorZone
+    if (!zone) return
+    const { x, y } = clientPoint(e)
+    const inside = pointInZone(zone, x, y)
+    const cursor = inside ? 'pointer' : 'default'
+    const setDoc = (doc) => {
+      if (!doc) return
+      try {
+        if (doc.documentElement) doc.documentElement.style.cursor = cursor
+        if (doc.body) doc.body.style.cursor = cursor
+      } catch (_) {}
+    }
+    setDoc(document)
+    try {
+      const contents = reader?.view?.renderer?.getContents?.() || []
+      for (const content of contents) setDoc(content.doc)
+    } catch (_) {}
+  }
+
+  window.__kaikaMenuOutsidePointerDown = (e) => {
+    if (!window.__kaikaSelectionMenuOpen) return
+    const zone = window.__kaikaMenuCursorZone
+    const { x, y } = clientPoint(e)
+    // Pass-through onto the bubble rect: ignore. Any other WebView press
+    // while the menu is open dismisses (selection may already be collapsed).
+    if (zone && typeof zone.left === 'number' && zone.left >= 0
+        && pointInZone(zone, x, y)) {
+      return
+    }
+    try {
+      // Sync flags before click/show-annotation on the same gesture.
+      window.__kaikaSelectionMenuOpen = false
+      window.__kaikaMenuCursorZone = null
+      window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 800
+      callFlutter('onSelectionMenuDismiss')
+    } catch (_) {}
+  }
+
+  window.addEventListener('mousemove', window.__kaikaMenuCursorHitTest, true)
+  window.addEventListener(
+    'pointerdown',
+    window.__kaikaMenuOutsidePointerDown,
+    true,
+  )
+}
+
 /// In-reader dimming overlay. Lives inside the WebView with pointer-events:none
 /// so Flutter desktop PlatformViews keep receiving clicks (a Flutter overlay
 /// above InAppWebView swallows mouse hit-testing on macOS/Windows).
@@ -1939,7 +2280,33 @@ window.showContextMenu = () => {
 
 window.getSelection = () => reader.getSelection()
 
-window.clearSelection = () => reader.view.deselect()
+window.getSelectedText = () => {
+  try {
+    const range = reader.getSelection()
+    const fromRange = range?.toString?.() ?? ''
+    if (fromRange) return fromRange
+    const contents = reader.view?.renderer?.getContents?.() || []
+    for (const content of contents) {
+      const text = content.doc?.getSelection?.()?.toString?.() ?? ''
+      if (text) return text
+    }
+  } catch (e) {
+    console.warn('[Kaika] getSelectedText failed', e)
+  }
+  return ''
+}
+
+window.clearSelection = () => {
+  window.__kaikaClearingForMenuDismiss = true
+  try {
+    reader.view.deselect()
+  } finally {
+    // selectionchange may arrive after this stack; keep flag briefly.
+    setTimeout(() => {
+      window.__kaikaClearingForMenuDismiss = false
+    }, 50)
+  }
+}
 
 window.addAnnotation = (annotation) => reader.addAnnotation(annotation)
 

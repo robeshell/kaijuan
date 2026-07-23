@@ -231,6 +231,9 @@ const indexChildNodes = (node, filter) => {
     return nodes
 }
 
+const isDomNode = (node) =>
+    !!node && (node.nodeType === 1 || node.nodeType === 3 || node.nodeType === 4)
+
 const partsToNode = (node, parts, filter) => {
     const { id } = parts[parts.length - 1]
     if (id) {
@@ -238,14 +241,18 @@ const partsToNode = (node, parts, filter) => {
         if (el) return { node: el, offset: 0 }
     }
     for (const { index } of parts) {
-        const newNode = node ? indexChildNodes(node, filter)[index] : null
+        if (!node) break
+        const newNode = indexChildNodes(node, filter)[index]
         // handle non-existent nodes
         if (newNode === 'first') return { node: node.firstChild ?? node }
         if (newNode === 'last') return { node: node.lastChild ?? node }
         if (newNode === 'before') return { node, before: true }
         if (newNode === 'after') return { node, after: true }
+        // Missing index (stale CFI / DOM drift) — stop at last valid node.
+        if (newNode == null) break
         node = newNode
     }
+    if (!node) return { node: null, offset: 0 }
     const { offset } = parts[parts.length - 1]
     if (!Array.isArray(node)) return { node, offset }
     // get underlying text node and offset from the chunk
@@ -255,6 +262,9 @@ const partsToNode = (node, parts, filter) => {
         if (sum + length >= offset) return { node: n, offset: offset - sum }
         sum += length
     }
+    // Offset past the chunk — clamp to the last text node.
+    const last = node[node.length - 1]
+    return { node: last, offset: last?.nodeValue?.length ?? 0 }
 }
 
 const nodeToParts = (node, offset, filter) => {
@@ -299,13 +309,24 @@ export const toRange = (doc, parts, filter) => {
 
     const range = doc.createRange()
 
+    if (!start || !isDomNode(start.node)) {
+        throw new Error('CFI start could not be resolved to a Node')
+    }
+
     if (start.before) range.setStartBefore(start.node)
     else if (start.after) range.setStartAfter(start.node)
-    else range.setStart(start.node, start.offset)
+    else range.setStart(start.node, start.offset ?? 0)
+
+    // Range CFIs from a visible page can have a stale end after layout/DOM
+    // drift. Collapse to start so progress restore still opens the book.
+    if (!end || !isDomNode(end.node)) {
+        range.collapse(true)
+        return range
+    }
 
     if (end.before) range.setEndBefore(end.node)
     else if (end.after) range.setEndAfter(end.node)
-    else range.setEnd(end.node, end.offset)
+    else range.setEnd(end.node, end.offset ?? 0)
     return range
 }
 

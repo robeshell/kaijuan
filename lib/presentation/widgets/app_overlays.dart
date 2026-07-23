@@ -197,27 +197,38 @@ class _AppTextPromptDialogState extends State<_AppTextPromptDialog> {
 }
 
 void showAppSnackBar(BuildContext context, String message) {
-  final semantics = Theme.of(context).extension<AppSemantics>()!;
+  final width = MediaQuery.sizeOf(context).width;
+  // Tight centered chip. Do not clamp side insets — that stretched the bar
+  // across the desktop window and looked like a system banner.
+  final toastWidth = width >= 420 ? 220.0 : (width - 56).clamp(140.0, 220.0);
+  final side = (width - toastWidth) / 2;
+
   ScaffoldMessenger.of(context)
     ..clearSnackBars()
     ..showSnackBar(
       SnackBar(
         content: Text(
           message,
-          style: TextStyle(
-            color: semantics.textPrimary,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFFF4F4F5),
             fontSize: 13,
             fontWeight: FontWeight.w500,
+            height: 1.3,
+            letterSpacing: 0.2,
           ),
         ),
         behavior: SnackBarBehavior.floating,
-        backgroundColor: semantics.surface,
-        elevation: 6,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.medium),
-          side: BorderSide(color: semantics.hairline),
-        ),
-        margin: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        // Quiet charcoal chip over reading canvas — not a white bordered slab.
+        backgroundColor: const Color(0xE62C2C2E),
+        elevation: 0,
+        duration: const Duration(milliseconds: 1400),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        shape: const StadiumBorder(),
+        margin: EdgeInsets.fromLTRB(side, 0, side, 36),
+        dismissDirection: DismissDirection.down,
       ),
     );
 }

@@ -140,11 +140,131 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       previousPage: _previousPage,
     );
     readerController.attachExternalSeek(_seekToFraction);
+    readerController.attachAnnotationBridge(
+      renderAll: _renderAnnotations,
+      add: _addAnnotation,
+      remove: _removeAnnotation,
+      clearSelection: _clearSelection,
+      getSelectedText: _getSelectedText,
+      setMenuCursorZone: _setMenuCursorZone,
+      setMenuOpen: _setMenuOpen,
+    );
     readerController.addListener(_onControllerChanged);
   }
 
   void _seekToFraction(double fraction) {
     unawaited(_evaluate('window.goToPercent(${jsonEncode(fraction)})'));
+  }
+
+  void _renderAnnotations(List<Map<String, Object?>> annotations) {
+    // Anx sets a global then calls renderAnnotations(); pass the list directly
+    // and also mirror the global for any in-book callers.
+    final encoded = jsonEncode(annotations);
+    unawaited(
+      _evaluate('''
+(function () {
+  try {
+    window.__kaikaAnnotations = $encoded;
+    window.renderAnnotations(window.__kaikaAnnotations);
+  } catch (e) {
+    console.error('[Kaika] renderAnnotations failed', e);
+  }
+})()
+'''),
+    );
+  }
+
+  void _addAnnotation(Map<String, Object?> annotation) {
+    final replace = annotation['replace'] == true;
+    final payload = Map<String, Object?>.from(annotation)..remove('replace');
+    final encoded = jsonEncode(payload);
+    unawaited(
+      _evaluate('''
+(function () {
+  try {
+    var a = $encoded;
+    if ($replace && typeof window.removeAnnotation === 'function') {
+      window.removeAnnotation(a.value);
+    }
+    window.addAnnotation(a);
+    // Anx does not clearSelection here — only on menu close.
+  } catch (e) {
+    console.error('[Kaika] addAnnotation failed', e, $encoded);
+  }
+})()
+'''),
+    );
+  }
+
+  void _removeAnnotation(String cfi) {
+    final encoded = jsonEncode(cfi);
+    unawaited(
+      _evaluate('''
+(function () {
+  try {
+    window.removeAnnotation($encoded);
+  } catch (e) {
+    console.error('[Kaika] removeAnnotation failed', e);
+  }
+})()
+'''),
+    );
+  }
+
+  void _clearSelection() {
+    unawaited(_evaluate('window.clearSelection()'));
+  }
+
+  Future<String> _getSelectedText() async {
+    final raw = await _evaluate('window.getSelectedText()');
+    if (raw is String) return raw;
+    return raw?.toString() ?? '';
+  }
+
+  void _setMenuCursorZone(Map<String, double>? zone) {
+    if (zone == null) {
+      unawaited(_evaluate('window.setSelectionMenuCursorZone(null)'));
+      return;
+    }
+    unawaited(
+      _evaluate('window.setSelectionMenuCursorZone(${jsonEncode(zone)})'),
+    );
+  }
+
+  void _setMenuOpen(bool open) {
+    unawaited(
+      _evaluate('window.setSelectionMenuOpen(${open ? 'true' : 'false'})'),
+    );
+  }
+
+  void _onSelectionEnd(List<dynamic> arguments) {
+    final selection = FoliateSelectionEnd.fromHandlerArguments(arguments);
+    if (selection == null) return;
+    readerController.reportSelectionEnd(selection);
+  }
+
+  void _onSelectionCleared() {
+    readerController.reportSelectionCleared();
+  }
+
+  void _onSelectionMenuDismiss() {
+    readerController.clearSelectionMenu();
+  }
+
+  void _onAnnotationClick(List<dynamic> arguments) {
+    final click = FoliateAnnotationClick.fromHandlerArguments(arguments);
+    if (click == null) return;
+    readerController.reportAnnotationClick(click);
+  }
+
+  void _onAnnotationNoteClick(List<dynamic> arguments) {
+    final click = FoliateAnnotationClick.fromHandlerArguments(arguments);
+    if (click == null) return;
+    readerController.reportAnnotationNoteClick(click);
+  }
+
+  void _onRenderAnnotationsRequest() {
+    readerController.requestAnnotationsRender();
   }
 
   Widget buildView(BuildContext context) {
@@ -240,6 +360,15 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     _metadataAttached = true;
     _session?.mark('renderer-load-end');
     debugPrint('[FoliateJs] onLoadEnd');
+    // Foliate view.init has painted — unlock cover reveal before TOC attach.
+    if (!_webReady) {
+      _webReady = true;
+      _session?.mark('reveal-unlocked');
+      _rememberPreferenceState();
+      _lastBrightness = null;
+      unawaited(_applyReaderBrightness());
+      notifyListeners();
+    }
     try {
       final raw = await _evaluateFor(lease, '''
         JSON.stringify({
@@ -277,15 +406,8 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       }
       if (_disposed) return;
 
-      _webReady = true;
       _session?.mark('publication-attached');
       debugPrint('[FoliateJs] reader ready');
-      // The complete style was already supplied in the initial URL. Priming
-      // the snapshot avoids an identical changeStyle() and a second reflow on
-      // the first visible frame.
-      _rememberPreferenceState();
-      _lastBrightness = null;
-      unawaited(_applyReaderBrightness());
       final pending = readerController.pendingJump;
       if (pending?.cfi == _initialCfi && _initialCfi.isNotEmpty) {
         readerController.clearPendingJump();
@@ -296,7 +418,9 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     } catch (error) {
       if (!lease.isCurrent || _disposed) return;
       _metadataAttached = false;
+      _webReady = false;
       readerController.engineFailed(error);
+      notifyListeners();
     }
   }
 
@@ -354,6 +478,10 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   }
 
   void _onClick(FoliateViewportClick click) {
+    if (readerController.selectionMenu != null) {
+      readerController.clearSelectionMenu();
+      return;
+    }
     if (readerController.readingMode == BookReadingMode.page) {
       if (click.x < 0.25) {
         _previousPage();
@@ -624,6 +752,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     readerController.removeListener(_onControllerChanged);
     readerController.detachExternalPageNavigation();
     readerController.detachExternalSeek();
+    readerController.detachAnnotationBridge();
     _session?.invalidateWebView(_webLease);
     _webLease = null;
     unawaited(_session?.close());
@@ -738,6 +867,8 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
         allowsInlineMediaPlayback: true,
         mediaPlaybackRequiresUserGesture: true,
         useHybridComposition: true,
+        // Suppress system Copy/Share selection chrome; Kaika owns the menu.
+        disableContextMenu: true,
         isInspectable: kDebugMode,
       ),
       onWebViewCreated: (controller) {
@@ -788,12 +919,56 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
             return null;
           },
         );
+        controller.addJavaScriptHandler(
+          handlerName: 'renderAnnotations',
+          callback: (_) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onRenderAnnotationsRequest();
+            return null;
+          },
+        );
+        controller.addJavaScriptHandler(
+          handlerName: 'onSelectionEnd',
+          callback: (arguments) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onSelectionEnd(arguments);
+            return null;
+          },
+        );
+        controller.addJavaScriptHandler(
+          handlerName: 'onSelectionCleared',
+          callback: (_) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onSelectionCleared();
+            return null;
+          },
+        );
+        controller.addJavaScriptHandler(
+          handlerName: 'onAnnotationClick',
+          callback: (arguments) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onAnnotationClick(arguments);
+            return null;
+          },
+        );
+        controller.addJavaScriptHandler(
+          handlerName: 'onAnnotationNoteClick',
+          callback: (arguments) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onAnnotationNoteClick(arguments);
+            return null;
+          },
+        );
+        controller.addJavaScriptHandler(
+          handlerName: 'onSelectionMenuDismiss',
+          callback: (_) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onSelectionMenuDismiss();
+            return null;
+          },
+        );
         for (final name in const [
-          'renderAnnotations',
           'onSetToc',
-          'onSelectionEnd',
-          'onSelectionCleared',
-          'onAnnotationClick',
           'onImageClick',
           'onFootnoteClose',
           'onPullUp',

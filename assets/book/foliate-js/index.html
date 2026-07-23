@@ -32,6 +32,7 @@
 
   body {
     user-select: none;
+    -webkit-touch-callout: none;
     margin: 0 !important;
     height: 100vh;
     background: #ffffff;
@@ -106,7 +107,7 @@
     (async () => {
       if (shouldUseModernBundle) {
         await loadScript('./src/vendor/pdfjs/pdf.js', { async: false, defer: false });
-        await loadScript('./src/book.js', { type: 'module' });
+        await loadScript('./src/book.js?v=20260723k', { type: 'module' });
         return;
       }
 

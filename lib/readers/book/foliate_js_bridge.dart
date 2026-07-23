@@ -214,6 +214,121 @@ class FoliateViewportClick {
   }
 }
 
+class FoliateNormalizedBox {
+  const FoliateNormalizedBox({
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+  });
+
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+
+  static FoliateNormalizedBox? tryParse(Object? value) {
+    if (value is! Map) return null;
+    return FoliateNormalizedBox(
+      left: FoliateViewportClick._coordinate(value['left'], fallback: 0.5),
+      top: FoliateViewportClick._coordinate(value['top'], fallback: 0.5),
+      right: FoliateViewportClick._coordinate(value['right'], fallback: 0.5),
+      bottom: FoliateViewportClick._coordinate(value['bottom'], fallback: 0.5),
+    );
+  }
+}
+
+/// Payload from Foliate `onSelectionEnd`.
+class FoliateSelectionEnd {
+  const FoliateSelectionEnd({
+    required this.cfi,
+    required this.text,
+    required this.pos,
+    this.footnote = false,
+    this.sectionIndex,
+  });
+
+  final String cfi;
+  final String text;
+  final FoliateNormalizedBox pos;
+  final bool footnote;
+  final int? sectionIndex;
+
+  static FoliateSelectionEnd? fromHandlerArguments(List<dynamic> arguments) {
+    final payload = _firstMap(arguments);
+    if (payload == null) return null;
+    final cfi = payload['cfi']?.toString() ?? '';
+    if (cfi.isEmpty) return null;
+    final pos = FoliateNormalizedBox.tryParse(payload['pos']);
+    if (pos == null) return null;
+    final text = payload['text']?.toString() ?? '';
+    final footnote = payload['footnote'] == true;
+    final index = switch (payload['index']) {
+      int number => number,
+      num number => number.toInt(),
+      String text => int.tryParse(text),
+      _ => null,
+    };
+    return FoliateSelectionEnd(
+      cfi: cfi,
+      text: text,
+      pos: pos,
+      footnote: footnote,
+      sectionIndex: index,
+    );
+  }
+}
+
+/// Payload from Foliate `onAnnotationClick`.
+class FoliateAnnotationClick {
+  const FoliateAnnotationClick({
+    required this.cfi,
+    required this.type,
+    required this.color,
+    required this.pos,
+    this.id,
+    this.note,
+    this.contextText,
+  });
+
+  final int? id;
+  final String cfi;
+  final String type;
+  final String color;
+  final FoliateNormalizedBox pos;
+  final String? note;
+  final String? contextText;
+
+  static FoliateAnnotationClick? fromHandlerArguments(List<dynamic> arguments) {
+    final payload = _firstMap(arguments);
+    if (payload == null) return null;
+    final annotation = payload['annotation'];
+    if (annotation is! Map) return null;
+    final cfi =
+        (annotation['value'] ?? annotation['cfi'])?.toString() ?? '';
+    if (cfi.isEmpty) return null;
+    final pos = FoliateNormalizedBox.tryParse(payload['pos']);
+    if (pos == null) return null;
+    final id = switch (annotation['id']) {
+      int number => number,
+      num number => number.toInt(),
+      String text => int.tryParse(text),
+      _ => null,
+    };
+    final note = annotation['note']?.toString();
+    final context = payload['contextText']?.toString();
+    return FoliateAnnotationClick(
+      id: id,
+      cfi: cfi,
+      type: annotation['type']?.toString() ?? 'highlight',
+      color: annotation['color']?.toString() ?? '#FACC15',
+      pos: pos,
+      note: (note == null || note.isEmpty) ? null : note,
+      contextText: (context == null || context.isEmpty) ? null : context,
+    );
+  }
+}
+
 Map<dynamic, dynamic>? _firstMap(List<dynamic> arguments) {
   if (arguments.isEmpty || arguments.first is! Map) return null;
   return arguments.first as Map<dynamic, dynamic>;

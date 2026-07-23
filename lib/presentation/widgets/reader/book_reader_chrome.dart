@@ -5,7 +5,6 @@ import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import 'book_reader_tool_strip.dart';
 import 'glass_bar.dart';
-import 'reader_bookmarks_sheet.dart';
 
 /// Top + bottom glass chrome for the reflow book reader.
 ///
@@ -99,22 +98,6 @@ class BookReaderChrome extends StatelessWidget {
                           controller.isCurrentPositionBookmarked
                               ? Icons.bookmark
                               : Icons.bookmark_border_outlined,
-                          color: fg,
-                          weight: 300,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: '书签列表',
-                        onPressed: () => showReaderBookmarksSheet(
-                          context,
-                          listenable: controller,
-                          bookmarks: () => controller.bookmarks,
-                          labelFor: controller.bookmarkLabel,
-                          onOpen: controller.goToBookmark,
-                          onRemove: controller.removeBookmark,
-                        ),
-                        icon: Icon(
-                          Icons.bookmarks_outlined,
                           color: fg,
                           weight: 300,
                         ),

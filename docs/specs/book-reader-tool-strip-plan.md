@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | 实现中 · 刀 A–F 已落地壳与面板 |
+| **状态** | **已完成**（刀 A–F 已落地；后续见 [book-reader-next-plan.md](./book-reader-next-plan.md)） |
 | **日期** | 2026-07-22 |
 | **PRODUCT** | [§4.6](../PRODUCT.md) |
 | **相关** | [reader-chrome.md](./reader-chrome.md)、[book-reader.md](./book-reader.md) |

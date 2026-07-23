@@ -4,7 +4,7 @@
 
 ## 0. 当前结论
 
-KaikaNext 图书 reflow 主链已切到 Anx Reader 的 `foliate-js + flutter_inappwebview`，`epub_pro` 已移除。Android EPUB 导入 P0、真机打开回归、工程卫生（可导出 timing / 超时 staging 清扫）与外链系统打开均已落地。选区/标注仍按需。
+KaikaNext 图书 reflow 主链已切到 Anx Reader 的 `foliate-js + flutter_inappwebview`。选区两段式菜单 + 划线/高亮/笔记已可用（写改存 note；目录抽屉「目录|书签|笔记」）；规范见 [book-reader.md](./specs/book-reader.md)。默认下一功能刀仍为 ③ 书内搜索。
 
 ## 1. 本轮已完成的改造
 

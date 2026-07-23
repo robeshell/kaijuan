@@ -78,6 +78,16 @@ class BookLocator {
       spineVersion: spineVersionCurrent,
     );
   }
+
+  /// Foliate EPUB CFI spine index: `epubcfi(/6/(2n+2)!…)` → n.
+  static int? sectionIndexFromCfi(String cfi) {
+    final match = RegExp(r'epubcfi\(\s*/\d+/(\d+)').firstMatch(cfi.trim());
+    if (match == null) return null;
+    final raw = int.tryParse(match.group(1)!);
+    if (raw == null || raw < 2) return null;
+    final index = (raw - 2) ~/ 2;
+    return index < 0 ? null : index;
+  }
 }
 
 /// Paragraph index boundaries for a reflow engine that thinks in flat

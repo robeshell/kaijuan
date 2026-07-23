@@ -6,13 +6,17 @@ import 'package:flutter/services.dart';
 
 import '../../app/book_reading_preferences.dart';
 import '../../core/theme.dart';
+import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
 import '../controllers/book_reader_controller.dart';
+import '../widgets/reader/book_annotation_note_sheet.dart';
+import '../widgets/reader/book_nav_drawer.dart';
 import '../widgets/reader/book_page_meta_overlay.dart';
 import '../widgets/reader/book_reader_chrome.dart';
+import '../widgets/reader/book_selection_menu_overlay.dart';
 
 /// Full-screen reflow book reader.
 ///
@@ -87,12 +91,13 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       );
     }
     _engine = FoliateJsBookEngineAdapter(readerController: _controller);
+    _controller.onOpenNoteEditor = _presentNoteEditor;
     _focusNode = FocusNode();
     // Phase A (~first half): cover dissolves into reading backdrop.
     // Phase B (~second half): backdrop eases away into the text.
     _reveal = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 720),
+      duration: const Duration(milliseconds: 420),
     );
     _reveal.addStatusListener((status) {
       if (status == AnimationStatus.completed && mounted) {
@@ -116,10 +121,37 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   void _openToc() => _scaffoldKey.currentState?.openDrawer();
 
+  void _presentNoteEditor(BookAnnotation note) {
+    if (!mounted) return;
+    // Open immediately — post-frame deferral felt like lag on mobile taps.
+    unawaited(
+      showBookAnnotationNoteSheet(
+        context,
+        controller: _controller,
+        cfi: note.cfi,
+        selectedText: note.selectedText ?? '',
+        initialNote: note.note ?? '',
+        type: note.type,
+        colorCss: note.colorCss,
+        // Autofocus pulls the keyboard and resizes the WebView (jitter).
+        autofocus: false,
+      ),
+    );
+  }
+
+  void _openNoteFromDrawer(BookAnnotation note) {
+    _controller.goToAnnotation(note);
+    _presentNoteEditor(note);
+  }
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_controller.selectionMenu != null) {
+        _controller.clearSelectionMenu();
+        return KeyEventResult.handled;
+      }
       if (_controller.chromeVisible) {
         _controller.hideChrome();
       } else {
@@ -195,7 +227,9 @@ class _BookReaderScreenState extends State<BookReaderScreen>
               );
             }
 
-            final contentReady = _controller.isReady && _engine.rendererReady;
+            // Reveal as soon as Foliate has painted; chrome still waits on
+            // controller attach (TOC / bookmarks / scrub).
+            final contentReady = _engine.rendererReady;
             if (contentReady && !_revealStarted && _showReveal) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 _maybeStartReveal(true);
@@ -204,12 +238,19 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
             return Focus(
               focusNode: _focusNode,
-              autofocus: contentReady && !_showReveal,
+              autofocus: _controller.isReady && !_showReveal,
               onKeyEvent: _handleKeyEvent,
               child: Scaffold(
                 key: _scaffoldKey,
+                resizeToAvoidBottomInset: false,
                 drawerEnableOpenDragGesture: false,
-                drawer: _controller.isReady ? _buildTocDrawer() : null,
+                drawer: _controller.isReady
+                    ? BookNavDrawer(
+                        controller: _controller,
+                        onOpenTocEntry: _engine.openTocEntry,
+                        onOpenNote: _openNoteFromDrawer,
+                      )
+                    : null,
                 backgroundColor: bg,
                 body: Stack(
                   fit: StackFit.expand,
@@ -259,6 +300,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                       ),
                     if (_controller.isReady && !_showReveal) ...[
                       BookPageMetaOverlay(controller: _controller),
+                      BookSelectionMenuOverlay(controller: _controller),
                       IgnorePointer(
                         ignoring: !_controller.chromeVisible,
                         child: AnimatedOpacity(
@@ -283,72 +325,9 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     );
   }
 
-  Widget _buildTocDrawer() {
-    final entries = _controller.tocEntries;
-    final currentIndex = _controller.sectionIndex;
-    final accent = Theme.of(context).colorScheme.primary;
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-
-    return Drawer(
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
-              child: Text(
-                '目录',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: semantics.textPrimary,
-                ),
-              ),
-            ),
-            Divider(height: 1, color: semantics.hairline),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: entries.length,
-                itemBuilder: (_, i) {
-                  final entry = entries[i];
-                  final active = entry.sectionIndex == currentIndex;
-                  final indent = (entry.depth * 12.0).clamp(0.0, 48.0);
-                  return ListTile(
-                    contentPadding: EdgeInsets.only(
-                      left: 16 + indent,
-                      right: 16,
-                    ),
-                    title: Text(
-                      entry.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                        color: active ? accent : semantics.textPrimary,
-                      ),
-                    ),
-                    selected: active,
-                    enabled: entry.sectionIndex != null,
-                    dense: true,
-                    onTap: entry.sectionIndex == null
-                        ? null
-                        : () {
-                            Navigator.of(context).pop();
-                            _engine.openTocEntry(entry);
-                          },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
+    _controller.onOpenNoteEditor = null;
     _reveal.dispose();
     _focusNode.dispose();
     _engine.dispose();

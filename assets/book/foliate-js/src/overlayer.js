@@ -148,31 +148,51 @@ export class Overlayer {
         }
         return g
     }
+    // Wavy underline. Keep the path *inside* the client rect — drawing below
+    // `bottom` gets clipped by paginator overflow and looks like "no line".
     static squiggly(rects, options = {}) {
-        const { color = 'red', width: strokeWidth = 2, padding = 0, writingMode } = options
+        const { color = 'red', width: strokeWidth = 2, writingMode } = options
         const g = createSVGElement('g')
         g.setAttribute('fill', 'none')
         g.setAttribute('stroke', color)
         g.setAttribute('stroke-width', strokeWidth)
-        const block = strokeWidth * 1.5
-        if (writingMode === 'vertical-rl' || writingMode === 'vertical-lr')
-            for (const { right, top, height } of rects) {
+        g.setAttribute('stroke-linecap', 'round')
+        g.setAttribute('stroke-linejoin', 'round')
+        const amp = Math.max(2, strokeWidth)
+        const period = Math.max(6, strokeWidth * 3)
+        if (writingMode === 'vertical-rl' || writingMode === 'vertical-lr') {
+            for (const { right, top, height, left } of rects) {
                 const el = createSVGElement('path')
-                const n = Math.round(height / block / 1.5)
-                const inline = height / n
-                const ls = Array.from({ length: n },
-                    (_, i) => `l${i % 2 ? -block : block} ${inline}`).join('')
-                el.setAttribute('d', `M${right - strokeWidth / 2 + padding} ${top}${ls}`)
+                const x = (right + left) / 2
+                const n = Math.max(1, Math.ceil(height / period))
+                const step = height / n
+                let d = `M${x} ${top}`
+                for (let i = 0; i < n; i++) {
+                    const y1 = top + (i + 0.5) * step
+                    const y2 = top + (i + 1) * step
+                    const dir = i % 2 === 0 ? -amp : amp
+                    d += ` Q${x + dir} ${y1} ${x} ${y2}`
+                }
+                el.setAttribute('d', d)
                 g.append(el)
             }
-        else for (const { left, bottom, width } of rects) {
-            const el = createSVGElement('path')
-            const n = Math.round(width / block / 1.5)
-            const inline = width / n
-            const ls = Array.from({ length: n },
-                (_, i) => `l${inline} ${i % 2 ? block : -block}`).join('')
-            el.setAttribute('d', `M${left} ${bottom + strokeWidth / 2 + padding}${ls}`)
-            g.append(el)
+        } else {
+            for (const { left, bottom, width, top } of rects) {
+                const el = createSVGElement('path')
+                // Sit near the baseline, still within the glyph box.
+                const y = Math.min(bottom - strokeWidth, top + (bottom - top) * 0.92)
+                const n = Math.max(1, Math.ceil(width / period))
+                const step = width / n
+                let d = `M${left} ${y}`
+                for (let i = 0; i < n; i++) {
+                    const x1 = left + (i + 0.5) * step
+                    const x2 = left + (i + 1) * step
+                    const dir = i % 2 === 0 ? -amp : amp
+                    d += ` Q${x1} ${y + dir} ${x2} ${y}`
+                }
+                el.setAttribute('d', d)
+                g.append(el)
+            }
         }
         return g
     }

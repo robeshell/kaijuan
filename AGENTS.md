@@ -64,7 +64,7 @@ lib/
 - **已有（book spike）**：reflow EPUB 导入（`kind=book`）；`BookReaderScreen` 分节滚动/目录/字号/主题；`BookLocator` 进度恢复。  
 - **已有（合并）**：单入口/单库混排；类型筛选（全部/漫画/图书）；EPUB 自动探测；两组阅读默认并排。  
 - **整理三概念**：**我的书架** · **书单** · **合集**（书库最前）。  
-- **下一刀**：book reflow 版式加深（HTML/CSS）；书签 UI；合集/书单体验打磨。
+- **下一刀**：打开书加速 → 选区弹出菜单/划线 → 书内搜索（见 `docs/specs/book-reader-next-plan.md`）。仿真翻页搁置。
 
 全表以 **PRODUCT.md** 为准。
 
