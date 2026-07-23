@@ -14,6 +14,7 @@
 | 某屏交互 | [specs/](./specs/) |
 | 图书工具条大改计划 | [specs/book-reader-tool-strip-plan.md](./specs/book-reader-tool-strip-plan.md)（底栏已落地，可归档） |
 | 图书阅读下一程 | [specs/book-reader-next-plan.md](./specs/book-reader-next-plan.md) |
+| 图书听书（TTS）方案 | [specs/book-tts.md](./specs/book-tts.md)（方案；不接云端 AI） |
 | 给 Open Design | [opendesign/HANDOFF.md](./opendesign/HANDOFF.md) |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
 | 会话交接（易过期） | [dev-handoff.md](./dev-handoff.md) |
@@ -36,6 +37,7 @@ docs/
     library.md / shelf.md / search.md / lists.md / collections.md
     reader-chrome.md / book-reader.md
     book-reader-tool-strip-plan.md   ← 图书底栏工具条大改（计划）
+    book-tts.md                      ← 听书方案（系统 TTS，不接 AI）
   opendesign/
     HANDOFF.md / CONTEXT.md / DESIGN.md / BRIEFS.md
 ```
@@ -84,7 +86,8 @@ docs/
 | lists | **书单**（长清单） |
 | collections | **合集**（拼贴盒） |
 | reader-chrome | 共享 chrome 语言 |
-| book-reader | book reflow（spike 已落地） |
+| book-reader | book reflow（主链已落地） |
+| book-tts | 听书方案（未实现；Foliate 切句 + 系统 TTS） |
 | settings / mobile / overlay | **待写** |
 
 整理三概念权威表见 [PRODUCT.md §4.4a](./PRODUCT.md)。

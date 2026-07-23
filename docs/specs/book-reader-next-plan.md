@@ -2,10 +2,10 @@
 
 | | |
 |--|--|
-| **状态** | 刀 ①②③④ + 书摘金句卡已落地 · 词典/翻译另案 |
+| **状态** | 刀 ①②③④ + 书摘已落地 · 听书有方案 · 词典/翻译另案 |
 | **日期** | 2026-07-23 |
 | **PRODUCT** | [§4.6](../PRODUCT.md) · [§7 阶段](../PRODUCT.md) |
-| **相关** | [book-reader.md](./book-reader.md)（**选区菜单规范**）、[reader-chrome.md](./reader-chrome.md)、[book-reader-tool-strip-plan.md](./book-reader-tool-strip-plan.md) |
+| **相关** | [book-reader.md](./book-reader.md)、[book-tts.md](./book-tts.md)、[reader-chrome.md](./reader-chrome.md)、[book-reader-tool-strip-plan.md](./book-reader-tool-strip-plan.md) |
 | **前提** | Foliate 主链 + 微信式底栏工具条已落地；仿真翻页 **搁置** |
 
 > 落地后把结论回写 `PRODUCT.md` / `book-reader.md`；本页可标「已完成」或拆并。
@@ -29,7 +29,8 @@
 | **P2b** | 看大图 | **已有** |
 | **P3** | 目录 · 书签 · 笔记合一 | **已有** |
 | **P4** | 书摘金句卡 | **已有** |
-| **P5+** | TTS；词典/翻译 | 另案 |
+| **P5** | 听书 TTS | **方案** → [book-tts.md](./book-tts.md)；不接云端 AI |
+| **P6+** | 词典/翻译 | 另案（或需 AI 底层，暂缓） |
 | **搁置** | 仿真翻页 `curl` | — |
 
 ---
@@ -73,11 +74,11 @@
 
 | 能力 | 现状 | 与菜单 |
 |------|------|--------|
-| TTS | stub / 底栏听书占位 | 接通后可开「朗读」槽 |
-| `onImageClick` | **本刀接看大图** | — |
+| TTS | **方案** → [book-tts.md](./book-tts.md) | 接通后可开「朗读」槽 |
+| `onImageClick` | **已有**（看大图） | — |
 | 脚注关闭 | stub | — |
 | 字体导入 | 占位 | — |
-| 词典 / 翻译 | 选区占位 | **另案**（系统优先 / 离线词库等） |
+| 词典 / 翻译 | 选区占位 | **另案**（暂缓；或先 AI 底层） |
 
 ---
 
