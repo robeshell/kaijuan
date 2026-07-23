@@ -164,7 +164,7 @@ App 仍是三 Tab（宽屏 Rail / 窄屏 BottomBar）：
 | 书内搜索 | **已有** | 顶栏/选区入口；Foliate search → 结果跳 CFI |
 | 看大图 | **已有** | 点正文图全屏缩放 |
 | 书摘金句卡 | **已有** | 选区 → 排版/配色预览；保存·系统分享·复制图片 |
-| 听书（TTS） | **方案** | Foliate 切句 + 系统 TTS；见 [book-tts.md](./specs/book-tts.md)；**不接云端 AI** |
+| 听书（TTS） | **已有（MVP）** | Foliate 切句 + 系统 TTS；底栏控制；见 [book-tts.md](./specs/book-tts.md) |
 | 仿真翻页 | **搁置** | `curl` 占位回退 slide |
 
 ### 4.7 设置

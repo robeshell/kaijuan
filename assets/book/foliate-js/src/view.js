@@ -3,9 +3,11 @@ import { TOCProgress, SectionProgress } from './progress.js'
 import { Overlayer } from './overlayer.js'
 import { textWalker } from './text-walker.js'
 import { Translator, TranslationMode } from './translator.js'
-const { TTS } = await import('./tts.js')
+const { TTS } = await import('./tts.js?v=20260723o')
 
 const SEARCH_PREFIX = 'foliate-search:'
+/** TTS follow-highlight keys — must not collide with real annotations or steal clicks. */
+const TTS_HIGHLIGHT_PREFIX = 'foliate-tts:'
 
 class History extends EventTarget {
   #arr = []
@@ -402,7 +404,9 @@ export class View extends HTMLElement {
     const overlayer = new Overlayer(doc)
     doc.addEventListener('click', e => {
       const [value, range] = overlayer.hitTest(e)
-      if (value && !value.startsWith(SEARCH_PREFIX)) {
+      if (value
+          && !value.startsWith(SEARCH_PREFIX)
+          && !value.startsWith(TTS_HIGHLIGHT_PREFIX)) {
         // Ignore window: do not steal the gesture — let click-view page-turn.
         if (window.__kaikaIgnoreAnnotationClickUntil
             && Date.now() < window.__kaikaIgnoreAnnotationClickUntil) {
@@ -606,7 +610,7 @@ export class View extends HTMLElement {
           if (this.oldValue) {
             overlayer.remove(this.oldValue);
           }
-          value = this.getCFI(this.#index, range);
+          value = TTS_HIGHLIGHT_PREFIX + this.getCFI(this.#index, range);
           overlayer.add(value, range, Overlayer.highlight, { color: '#39c5bc83' });
           this.oldValue = value;
         }

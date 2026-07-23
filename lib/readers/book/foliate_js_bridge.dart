@@ -329,10 +329,35 @@ class FoliateAnnotationClick {
   }
 }
 
-Map<dynamic, dynamic>? _firstMap(List<dynamic> arguments) {
-  if (arguments.isEmpty || arguments.first is! Map) return null;
-  return arguments.first as Map<dynamic, dynamic>;
+/// Foliate TTS utterance (text and optional CFI).
+class FoliateTtsUtterance {
+  const FoliateTtsUtterance({required this.text, this.cfi});
+
+  final String text;
+  final String? cfi;
+
+  static FoliateTtsUtterance? tryParse(Object? value) {
+    if (value == null) return null;
+    if (value is String) {
+      final text = value.trim();
+      if (text.isEmpty) return null;
+      return FoliateTtsUtterance(text: text);
+    }
+    if (value is Map) {
+      final text = value['text']?.toString().trim() ?? '';
+      if (text.isEmpty) return null;
+      final cfi = value['cfi']?.toString().trim();
+      return FoliateTtsUtterance(
+        text: text,
+        cfi: (cfi == null || cfi.isEmpty) ? null : cfi,
+      );
+    }
+    final text = value.toString().trim();
+    if (text.isEmpty || text == 'null' || text == 'undefined') return null;
+    return FoliateTtsUtterance(text: text);
+  }
 }
+
 
 /// External `http(s)` / `mailto` link emitted by Foliate's view click handler.
 class FoliateExternalLink {
@@ -495,4 +520,9 @@ class FoliateImageClick {
       return null;
     }
   }
+}
+
+Map<dynamic, dynamic>? _firstMap(List<dynamic> arguments) {
+  if (arguments.isEmpty || arguments.first is! Map) return null;
+  return arguments.first as Map<dynamic, dynamic>;
 }

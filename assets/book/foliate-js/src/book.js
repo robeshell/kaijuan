@@ -1,7 +1,7 @@
 console.log('book.js')
 console.log('AnxUA', navigator.userAgent)
 
-import './view.js?v=20260723k'
+import './view.js?v=20260723o'
 import { FootnoteHandler } from './footnotes.js'
 import { Overlayer } from './overlayer.js?v=20260723k'
 import { collapse, compare, fromRange, toRange } from './epubcfi.js?v=20260723k'
@@ -2323,8 +2323,25 @@ window.initTts = () => reader.view.initTTS()
 window.ttsStop = () => reader.view.initTTS(true)
 
 window.ttsHere = () => {
-  initTts()
-  return reader.view.tts.from(reader.view.lastLocation.range)
+  try {
+    initTts()
+    if (!reader.view.tts) return null
+    const range = reader.view.lastLocation?.range
+    if (range) {
+      const text = reader.view.tts.from(range)
+      if (text) return text
+    }
+    // No viewport range (or empty block at cursor) → start of current section.
+    return reader.view.tts.start()
+  } catch (e) {
+    console.error('[Kaika] ttsHere failed', e)
+    try {
+      initTts()
+      return reader.view.tts?.start() ?? null
+    } catch (_) {
+      return null
+    }
+  }
 }
 
 window.ttsFromCfi = async (cfi) => {

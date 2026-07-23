@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | **方案**（未实现） |
+| **状态** | **T1 MVP 已接线**（系统 TTS；云端 AI 音色仍不做） |
 | **日期** | 2026-07-23 |
 | **PRODUCT** | [§4.6](../PRODUCT.md) · [§7](../PRODUCT.md) |
 | **相关** | [book-reader.md](./book-reader.md)、[book-reader-next-plan.md](./book-reader-next-plan.md)、[book-reader-tool-strip-plan.md](./book-reader-tool-strip-plan.md) |
@@ -33,7 +33,7 @@
 ### 做（v1）
 
 - 底栏「听书」接通：从**当前阅读位置**开始连续朗读。
-- 句级高亮跟随（复用 Foliate Overlayer）。
+- 句级高亮跟随（复用 Foliate Overlayer；对齐 Anx：`awaitSpeakCompletion` 后 `ttsNext` 换句）。
 - 播放 / 暂停；上一句 / 下一句；语速（系统能力范围内）。
 - 跨 spine 节自动续读（Foliate `ttsNext` / `ttsNextSection`）。
 - 退出阅读器、关书、dispose 时停止并清高亮。
@@ -86,8 +86,9 @@ BookReaderController（播放状态、语速、生命周期）
         │
         ├─ FoliateJs bridge：window.tts* → { text, cfi }
         │
-        └─ 系统 TTS（flutter_tts 或平台原生）
-              onComplete → ttsNext() → speak(下一句)
+        └─ 系统 TTS（flutter_tts）— 对齐 Anx SystemTts
+              speak →（仍 playing）→ ttsNext → speak
+              门闩仅在 setStartHandler 后 arm（防 stop 迟到 cancel）
 ```
 
 原则：
@@ -95,6 +96,7 @@ BookReaderController（播放状态、语速、生命周期）
 - **表现层只认 controller**；不直连 WebView / TTS 插件。
 - JS 只产出文本与定位；**发声全在 Dart**。
 - 进度仍以 CFI / relocation 为准；听书不另建进度表（跟随阅读位置即可）。
+- 换句门槛对齐 Anx：`speak` 结束后仅当 `status == playing` 且同 generation 才 `ttsNext`。
 
 ---
 
@@ -104,30 +106,33 @@ BookReaderController（播放状态、语速、生命周期）
 
 | 入口 | 行为 |
 |------|------|
-| 底栏「听书」 | 未播 → `ttsHere` + 开始；已播 → 展开迷你控制 / 切换暂停 |
+| 底栏「听书」 | 展开听书面板（不自动开播）；面板内点播放才 `ttsHere` + speak |
 | 选区「朗读」 | **中**：关菜单 → `ttsFromCfi` + 开始 |
 
 ### 迷你控制（建议）
 
 - 位置：底栏听书键上方面板，或底部轻量条（不永久改 pageSize）。
 - 控件：暂停/继续 · 上一句 · 下一句 · 语速（如 0.8 / 1.0 / 1.25 / 1.5）。
+- 语速：对齐 Anx `restart()`——停当前 utterance，**保留当前句文本**用新语速从头重读（不 `ttsHere`/`ttsNext`，高亮不跳句）。
+- 暂停/继续：停音频；继续从**当前句开头**重读（Anx Apple 同款，不做句内 offset）。
 - 再点听书或空白策略：与现有 chrome 显隐一致即可，避免抢翻页。
 
-### 状态机
+### 状态机（Dart）
 
 ```text
-idle
-  ├─ start(here|cfi) ──► playing
+idle ──start(ttsHere)──► playing
 playing
-  ├─ pause ──► paused
-  ├─ next/prev ──► playing（换句）
-  ├─ stop / 退出阅读器 ──► idle（ttsStop）
+  ├─ 本句念完 + status==playing + 同 generation ──ttsNext──► playing
+  ├─ pause（bump generation，停音频，保留句）──► paused
+  ├─ setRate（bump generation，停音频，同句重读）──► playing
+  ├─ skip（bump generation，再 ttsNext/Prev）──► playing
+  └─ stop / 退出 ──ttsStop──► idle
 paused
-  ├─ resume ──► playing
+  ├─ resume（同句从头重读）──► playing
   └─ stop ──► idle
 ```
 
-句末：TTS `onComplete` → `ttsNext()`；若返回空且已到书末 → `idle` + 轻提示「已读完」。
+硬规则：**只有本句正常念完且仍在 playing 才 `ttsNext`**。暂停 / 改速不得推动 Foliate 游标。
 
 ---
 
@@ -137,9 +142,9 @@ paused
 |-----------|------|
 | `foliate_js_bridge.dart` | `FoliateTtsUtterance { text, cfi }` 解析 |
 | `foliate_js_engine_adapter.dart` | `evaluate` 封装 `tts*` |
-| `book_reader_controller.dart` | 播放状态、语速偏好、启停与 completion 串联 |
+| `book_reader_controller.dart` | 播放状态、语速、generation + armed 换句门槛 |
 | `BookReadingPreferences` | 持久化语速（可选音色 id） |
-| UI | 工具条听书键去占位；迷你控制面板 |
+| UI | 工具条听书键；迷你控制面板 |
 | `pubspec` | `flutter_tts`（或等价）；**不**引入云 TTS SDK |
 
 桌面（macOS / Windows）：系统 TTS 可用则开；若某平台插件弱，可先 **移动端优先**，桌面保留占位并写进验收例外。

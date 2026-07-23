@@ -9,7 +9,7 @@ import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
 
-enum BookToolStripPanel { brightness, typography, readingMode }
+enum BookToolStripPanel { brightness, typography, readingMode, tts }
 
 /// WeChat-style bottom tool strip: progress scrubber + five keys + expandable
 /// panels. Uses Kaika tokens — no Material Slider / SegmentedButton defaults.
@@ -53,8 +53,9 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
     setState(() => _panel = _panel == panel ? null : panel);
   }
 
-  void _onListenPlaceholder() {
-    showAppSnackBar(context, '听书即将推出');
+  void _onListenTap() {
+    // 只展开面板；真正开播由面板内播放键触发。
+    _togglePanel(BookToolStripPanel.tts);
   }
 
   @override
@@ -141,12 +142,17 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                     onTap: widget.onOpenToc,
                   ),
                   _ToolKey(
-                    tooltip: '听书',
-                    icon: Icons.headphones_outlined,
-                    fg: widget.fgMuted,
+                    tooltip: controller.ttsPlaying
+                        ? '听书中'
+                        : (controller.ttsPaused ? '听书已暂停' : '听书'),
+                    icon: controller.ttsActive
+                        ? Icons.headphones
+                        : Icons.headphones_outlined,
+                    fg: widget.fg,
                     accent: widget.accent,
-                    selected: false,
-                    onTap: _onListenPlaceholder,
+                    selected: _panel == BookToolStripPanel.tts ||
+                        controller.ttsActive,
+                    onTap: _onListenTap,
                   ),
                   _ToolKey(
                     tooltip: '亮度',
@@ -201,7 +207,184 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
         fgMuted: widget.fgMuted,
         accent: widget.accent,
       ),
+      BookToolStripPanel.tts => _TtsPanel(
+        controller: controller,
+        fg: widget.fg,
+        fgMuted: widget.fgMuted,
+        accent: widget.accent,
+      ),
     };
+  }
+}
+
+class _TtsPanel extends StatelessWidget {
+  const _TtsPanel({
+    required this.controller,
+    required this.fg,
+    required this.fgMuted,
+    required this.accent,
+  });
+
+  final BookReaderController controller;
+  final Color fg;
+  final Color fgMuted;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final playing = controller.ttsPlaying;
+    final active = controller.ttsActive;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          active ? (playing ? '正在朗读' : '已暂停') : '听书',
+          style: TextStyle(
+            color: fg,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _TtsIconButton(
+              icon: Icons.skip_previous_rounded,
+              label: '上一句',
+              fg: fg,
+              enabled: active,
+              onPressed: () => unawaited(controller.ttsSkipPrevious()),
+            ),
+            _TtsIconButton(
+              icon: playing
+                  ? Icons.pause_circle_filled_rounded
+                  : Icons.play_circle_filled_rounded,
+              label: playing ? '暂停' : (active ? '继续' : '开始'),
+              fg: accent,
+              enabled: true,
+              large: true,
+              onPressed: () => unawaited(controller.toggleTtsPlayPause()),
+            ),
+            _TtsIconButton(
+              icon: Icons.skip_next_rounded,
+              label: '下一句',
+              fg: fg,
+              enabled: active,
+              onPressed: () => unawaited(controller.ttsSkipNext()),
+            ),
+            _TtsIconButton(
+              icon: Icons.stop_circle_outlined,
+              label: '停止',
+              fg: fg,
+              enabled: active,
+              onPressed: () => unawaited(controller.stopTts()),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Text(
+          '语速',
+          style: TextStyle(color: fgMuted, fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final rate in BookReaderController.ttsRatePresets)
+              _TtsRateChip(
+                label: rate == 1.0 ? '1.0x' : '${rate}x',
+                selected: (controller.ttsRate - rate).abs() < 0.01,
+                accent: accent,
+                fg: fg,
+                onTap: () => unawaited(controller.setTtsRate(rate)),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _TtsIconButton extends StatelessWidget {
+  const _TtsIconButton({
+    required this.icon,
+    required this.label,
+    required this.fg,
+    required this.enabled,
+    required this.onPressed,
+    this.large = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color fg;
+  final bool enabled;
+  final VoidCallback onPressed;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: enabled ? 1 : 0.35,
+      child: InkWell(
+        onTap: enabled ? onPressed : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: large ? 36 : 26, color: fg, weight: 300),
+              const SizedBox(height: 4),
+              Text(label, style: TextStyle(color: fg, fontSize: 11)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TtsRateChip extends StatelessWidget {
+  const _TtsRateChip({
+    required this.label,
+    required this.selected,
+    required this.accent,
+    required this.fg,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Color accent;
+  final Color fg;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected
+          ? accent.withValues(alpha: 0.16)
+          : fg.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? accent : fg,
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

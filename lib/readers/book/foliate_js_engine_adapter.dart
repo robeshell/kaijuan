@@ -26,6 +26,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
 
   BookRenditionSession? _session;
   BookRenditionWebLease? _webLease;
+  InAppWebViewController? _webController;
   List<String> _sectionHrefs = const [];
   String _initialCfi = '';
   bool _disposed = false;
@@ -101,6 +102,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       _sectionHrefs = const [];
       _session?.invalidateWebView(_webLease);
       _webLease = null;
+      _webController = null;
       final previous = _session;
       _session = null;
       // Locator DB read and loopback mount run together so the first reader
@@ -153,7 +155,71 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       search: _runSearch,
       clearSearch: _clearEngineSearch,
     );
+    readerController.attachTtsBridge(
+      here: _ttsHere,
+      next: _ttsNext,
+      prev: _ttsPrev,
+      stop: _ttsStopEngine,
+    );
     readerController.addListener(_onControllerChanged);
+  }
+
+  Future<String?> _ttsHere() => _ttsEvalSync('window.ttsHere()');
+
+  Future<String?> _ttsNext() => _ttsEvalAsync('return await window.ttsNext()');
+
+  Future<String?> _ttsPrev() =>
+      _ttsEvalAsync('return await Promise.resolve(window.ttsPrev())');
+
+  Future<void> _ttsStopEngine() async {
+    await _evaluate('window.ttsStop()');
+  }
+
+  /// Sync TTS helpers (`ttsHere`). Must not wrap in an async IIFE —
+  /// `evaluateJavascript` does not await Promises on WebKit.
+  Future<String?> _ttsEvalSync(String expression) async {
+    if (!_webReady) return null;
+    final raw = await _evaluate('''
+(() => {
+  try {
+    const r = $expression;
+    if (r == null) return null;
+    if (typeof r === 'string') return r;
+    if (typeof r === 'object' && r.text != null) return String(r.text);
+    return String(r);
+  } catch (e) {
+    console.error('[Kaika] tts eval failed', e);
+    return null;
+  }
+})()
+''');
+    return FoliateTtsUtterance.tryParse(raw)?.text;
+  }
+
+  /// Async TTS helpers (`ttsNext` / `ttsPrev` / section hops).
+  Future<String?> _ttsEvalAsync(String functionBody) async {
+    if (!_webReady) return null;
+    final controller = _webController;
+    final lease = _webLease;
+    if (controller == null || lease == null) return null;
+    final session = _session;
+    if (session == null || !session.isCurrent(lease)) return null;
+    try {
+      final result = await controller.callAsyncJavaScript(
+        functionBody: '''
+try {
+  $functionBody;
+} catch (e) {
+  console.error('[Kaika] tts async eval failed', e);
+  return null;
+}
+''',
+      );
+      return FoliateTtsUtterance.tryParse(result?.value)?.text;
+    } catch (error) {
+      debugPrint('[Kaika] tts async eval failed: $error');
+      return null;
+    }
   }
 
   void _runSearch(String query) {
@@ -615,6 +681,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     _session?.mark('renderer-gone');
     _session?.invalidateWebView(lease);
     _webLease = null;
+    _webController = null;
     _webReady = false;
     _metadataAttached = false;
     notifyListeners();
@@ -782,8 +849,10 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     readerController.detachExternalSeek();
     readerController.detachAnnotationBridge();
     readerController.detachSearchBridge();
+    readerController.detachTtsBridge();
     _session?.invalidateWebView(_webLease);
     _webLease = null;
+    _webController = null;
     unawaited(_session?.close());
     _session = null;
     super.dispose();
@@ -819,6 +888,7 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
     widget.adapter._session?.invalidateWebView(_lease);
     if (identical(widget.adapter._webLease, _lease)) {
       widget.adapter._webLease = null;
+      widget.adapter._webController = null;
     }
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -903,6 +973,7 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
       onWebViewCreated: (controller) {
         final session = widget.adapter._session;
         if (session == null || session.isClosed) return;
+        widget.adapter._webController = controller;
         final lease = session.attachWebView(
           (source) => controller.evaluateJavascript(source: source),
         );

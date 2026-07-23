@@ -12,6 +12,7 @@ import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
 import '../controllers/book_reader_controller.dart';
+import '../widgets/app_overlays.dart';
 import '../widgets/reader/book_annotation_note_sheet.dart';
 import '../widgets/reader/book_image_viewer.dart';
 import '../widgets/reader/book_nav_drawer.dart';
@@ -117,6 +118,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
   }
 
   void _exit() {
+    unawaited(_controller.stopTts());
     if (_controller.chromeVisible) _controller.hideChrome();
     Navigator.of(context, rootNavigator: true).pop();
   }
@@ -225,6 +227,15 @@ class _BookReaderScreenState extends State<BookReaderScreen>
           builder: (context, _) {
             final theme = _controller.readingTheme;
             final bg = Color(theme.backgroundArgb);
+
+            final ttsMessage = _controller.ttsUserMessage;
+            if (ttsMessage != null && ttsMessage.isNotEmpty) {
+              _controller.ttsUserMessage = null;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!context.mounted) return;
+                showAppSnackBar(context, ttsMessage);
+              });
+            }
 
             if (_controller.openError != null) {
               return Scaffold(
