@@ -18,7 +18,7 @@
 ## 3. 开场粘贴
 
 ```text
-Read attached KaikaNext docs. Authority: PRODUCT.md > DESIGN_FOUNDATION.md > specs > DESIGN.md.
+Read attached kaijuan docs. Authority: PRODUCT.md > DESIGN_FOUNDATION.md > specs > DESIGN.md.
 
 Product model:
 - TWO separate branded apps (comic + book), NOT one app with 漫画|图书 tabs.
