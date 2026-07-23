@@ -1,5 +1,9 @@
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
+// Android WebView iframes sometimes report screenX/Y as 0; client* is reliable.
+const touchPointX = (t) => (t && (t.clientX ?? t.screenX)) || 0
+const touchPointY = (t) => (t && (t.clientY ?? t.screenY)) || 0
+
 const lerp = (min, max, x) => x * (max - min) + min
 const easeOutSine = x => Math.sin((x * Math.PI) / 2)
 // const easeOutSine = x => 1 - (1 - x) * (1 - x);
@@ -502,6 +506,7 @@ export class Paginator extends HTMLElement {
             overflow-x: auto;
             overflow-y: hidden;
             -webkit-overflow-scrolling: touch;
+            touch-action: pan-x;
             -ms-overflow-style: none;  /* Internet Explorer 10+ */
             scrollbar-width: none;  /* Firefox */
         }
@@ -512,6 +517,7 @@ export class Paginator extends HTMLElement {
             grid-column: 1 / -1;
             grid-row: 2;
             overflow: auto;
+            touch-action: pan-y;
         }
         #header {
             grid-column: 3 / 4;
@@ -781,7 +787,7 @@ export class Paginator extends HTMLElement {
   }
   snap(vx, vy, touchState) {
     if (this.#isSnapping) return
-    
+
     const state = touchState ?? this.#touchState
     const velocity = this.#vertical ? vy : vx
     const { pages, size } = this
@@ -790,71 +796,83 @@ export class Paginator extends HTMLElement {
     const element = this.#container
     const { scrollProp } = this
     const isHorizontal = scrollProp === 'scrollLeft'
-    
+
     // Stop native momentum scrolling immediately
     const currentScrollPos = element[scrollProp]
     const overflowProp = isHorizontal ? 'overflowX' : 'overflowY'
     const prevOverflow = element.style[overflowProp]
     element.style[overflowProp] = 'hidden'
     element[scrollProp] = currentScrollPos
-    
-    // Calculate current position and target page
+
     const currentOffset = Math.abs(currentScrollPos)
-    const currentPage = Math.round(currentOffset / size)
-    
-    // Determine target page based on velocity
-    const velocityThreshold = 0.3  // Higher threshold to reduce accidental triggers
-    let targetPage = currentPage
+    const startOffset = Math.abs(state?.startScroll ?? currentScrollPos)
+    const originPage = state?.startPage ?? Math.round(startOffset / size)
+    // How far this gesture moved the scroller (not "nearest page", which
+    // needs ~50% and feels like 滑很远才翻页).
+    const scrolled = (currentOffset - startOffset) / size
+    const dx = state?.delta?.x ?? 0
+    const finger = (this.#rtl ? dx : -dx) / size
+    // Prefer whichever signal is stronger for this gesture.
+    const progress = Math.abs(scrolled) >= Math.abs(finger) ? scrolled : finger
+
+    const velocityThreshold = 0.12
+    const turnThreshold = 0.05
+    let targetPage = originPage
     if (Math.abs(velocity) > velocityThreshold) {
       targetPage += velocity > 0 ? 1 : -1
+    } else if (Math.abs(progress) >= turnThreshold) {
+      targetPage += progress > 0 ? 1 : -1
     }
-    
-    // Single page limit (keep existing feature)
-    const originPage = state?.startPage ?? currentPage
+
     if (!this.scrolled) {
       const delta = targetPage - originPage
       if (delta > 1) targetPage = originPage + 1
       else if (delta < -1) targetPage = originPage - 1
     }
-    
-    // Boundary limits
+
     targetPage = Math.max(0, Math.min(pages - 1, targetPage))
-    
-    // Calculate animation duration based on distance
+
     const targetOffset = targetPage * size
     const distance = Math.abs(targetOffset - currentOffset)
     const duration = Math.max(200, Math.min(300, 250 * (distance / (size || 1))))
 
     const pageArg = this.#rtl ? -targetPage : targetPage
     this.#isSnapping = true
-    
+
     return this.#scrollToPage(pageArg, 'snap', { animate: true, duration })
       .then(() => {
-        // Handle chapter boundaries (keep existing feature)
-        const dir = targetPage <= 0 ? -1 : targetPage >= pages - 1 ? 1 : null
-        if (dir) return this.#goTo({
-          index: this.#adjacentIndex(dir),
-          anchor: dir < 0 ? () => 1 : () => 0,
-        })
+        if (targetPage <= 0 && originPage <= 0) {
+          return this.#goTo({
+            index: this.#adjacentIndex(-1),
+            anchor: () => 1,
+          })
+        }
+        if (targetPage >= pages - 1 && originPage >= pages - 1) {
+          return this.#goTo({
+            index: this.#adjacentIndex(1),
+            anchor: () => 0,
+          })
+        }
       })
       .finally(() => {
         this.#isSnapping = false
-        // Restore overflow after snap is complete
         element.style[overflowProp] = prevOverflow
       })
   }
   #onTouchStart(e) {
     const touch = e.changedTouches[0]
     const scrollProp = this.scrollProp
+    const x = touchPointX(touch)
+    const y = touchPointY(touch)
     this.#touchState = {
-      x: touch?.screenX, y: touch?.screenY,
+      x, y,
       t: e.timeStamp,
       vx: 0, vy: 0,
       pinched: false,
       direction: 'none',
       startTouch: {
-        x: e.touches[0].screenX,
-        y: e.touches[0].screenY,
+        x: touchPointX(e.touches[0]),
+        y: touchPointY(e.touches[0]),
       },
       delta: { x: 0, y: 0 },
       startScroll: this.#container[scrollProp],
@@ -878,24 +896,24 @@ export class Paginator extends HTMLElement {
     const state = this.#touchState
     if (!state) return
 
-    const deltaX = touch.screenX - state.startTouch.x
-    const deltaY = touch.screenY - state.startTouch.y
+    const touchX = touchPointX(touch)
+    const touchY = touchPointY(touch)
+    const deltaX = touchX - state.startTouch.x
+    const deltaY = touchY - state.startTouch.y
 
-    const absDeltaX = Math.abs(deltaX);
-    const absDeltaY = Math.abs(deltaY);
+    const absDeltaX = Math.abs(deltaX)
+    const absDeltaY = Math.abs(deltaY)
 
     state.delta.x = deltaX
     state.delta.y = deltaY
 
-
-
     const threshold = 5
 
-    const notHorizontal = state.direction === 'horizontal' && absDeltaY > absDeltaX;
-    const notVertical = state.direction === 'vertical' && absDeltaX > absDeltaY;
+    const notHorizontal = state.direction === 'horizontal' && absDeltaY > absDeltaX
+    const notVertical = state.direction === 'vertical' && absDeltaX > absDeltaY
 
     if (state.direction !== 'none' || (notHorizontal && notVertical)) {
-      if (absDeltaX < threshold && absDeltaY < threshold) return;
+      if (absDeltaX < threshold && absDeltaY < threshold) return
     }
 
     if ((absDeltaX > threshold || absDeltaY > threshold) && state.direction === 'none') {
@@ -936,10 +954,10 @@ export class Paginator extends HTMLElement {
     }
 
     const dt = e.timeStamp - state.t || 16.7
-    const stepX = state.x - touch.screenX
-    const stepY = state.y - touch.screenY
-    state.x = touch.screenX
-    state.y = touch.screenY
+    const stepX = state.x - touchX
+    const stepY = state.y - touchY
+    state.x = touchX
+    state.y = touchY
     state.t = e.timeStamp
     state.vx = stepX / dt
     state.vy = stepY / dt
@@ -948,7 +966,6 @@ export class Paginator extends HTMLElement {
 
     if (verticalDrag && horizontalAxis) {
       e.preventDefault()
-      // Lock horizontal position during vertical drag (direction locking)
       if (state.lockedOffset == null)
         state.lockedOffset = state.startScroll ?? this.#container.scrollLeft
       this.#container.scrollLeft = state.lockedOffset
@@ -961,8 +978,9 @@ export class Paginator extends HTMLElement {
     }
 
     if (horizontalDrag && horizontalAxis) {
+      // Same as Anx: do NOT preventDefault — let #container native-scroll.
+      // Writing scrollLeft + preventDefault froze Android (no follow, no snap).
       this.#touchScrolled = true
-      // rely on native scrolling for horizontal paging
     }
   }
   #onTouchEnd(e) {
@@ -977,9 +995,17 @@ export class Paginator extends HTMLElement {
     }))
 
     this.#touchScrolled = false
+
     if (this.scrolled) {
       this.#touchState = null
       return
+    }
+
+    // If move events were sparse, still classify a clear horizontal swipe.
+    if (state && state.direction === 'none') {
+      const absX = Math.abs(state.delta?.x ?? 0)
+      const absY = Math.abs(state.delta?.y ?? 0)
+      if (absX > 8 && absX >= absY) state.direction = 'horizontal'
     }
 
     const verticalLocked = state?.direction === 'vertical'
@@ -987,7 +1013,6 @@ export class Paginator extends HTMLElement {
       && state.lockedOffset != null
 
     if (verticalLocked) {
-      // Restore original horizontal position and skip snapping to avoid accidental page turns
       this.#container.scrollLeft = state.lockedOffset
       this.#touchState = null
       if (this.#pendingRelocate) {
@@ -998,10 +1023,39 @@ export class Paginator extends HTMLElement {
       return
     }
 
+    const pageSize = this.size || 1
+    const dx = state?.delta?.x ?? 0
+    const turnPx = Math.max(14, pageSize * 0.05)
 
-    // XXX: Firefox seems to report scale as 1... sometimes...?
-    // at this point I'm basically throwing `requestAnimationFrame` at
-    // anything that doesn't work
+    // noAnimation: discrete turn; restore any native nudge first.
+    if (!this.hasAttribute('animated') && state?.direction === 'horizontal') {
+      this.#container[this.scrollProp] = state.startScroll ?? 0
+      this.#touchState = null
+      if (Math.abs(dx) < turnPx && Math.abs(state.vx ?? 0) < 0.12) return
+      const goNext = this.#rtl ? dx > 0 : dx < 0
+      void (goNext ? this.next() : this.prev())
+      return
+    }
+
+    // slide + Android: scroller often never moves under an iframe touch.
+    // Short finger travel → one animated page via next/prev (not 50% snap).
+    if (state?.direction === 'horizontal') {
+      const startScroll = state.startScroll ?? 0
+      const scrollMoved = Math.abs(
+        (this.#container[this.scrollProp] ?? 0) - startScroll,
+      )
+      if (scrollMoved < turnPx && (Math.abs(dx) >= turnPx || Math.abs(state.vx ?? 0) > 0.12)) {
+        this.#container[this.scrollProp] = startScroll
+        this.#touchState = null
+        const goNext = Math.abs(dx) >= 1
+          ? (this.#rtl ? dx > 0 : dx < 0)
+          : (this.#rtl ? (state.vx ?? 0) < 0 : (state.vx ?? 0) > 0)
+        void (goNext ? this.next() : this.prev())
+        return
+      }
+    }
+
+    // slide with real scroller travel: settle via snap (5% gesture progress).
     requestAnimationFrame(() => {
       if (globalThis.visualViewport.scale === 1 && state)
         Promise.resolve(this.snap(state.vx, state.vy, state))

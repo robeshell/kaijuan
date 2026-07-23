@@ -45,10 +45,14 @@ class BookLoopbackServer {
 
   final HttpServer _server;
   final Map<String, File> _mounts = {};
+  final Map<String, File> _fontMounts = {};
   final Map<String, Uint8List> _assetCache = {};
   int _nextMountId = 0;
 
   int get port => _server.port;
+
+  /// Currently running shared server, if any.
+  static BookLoopbackServer? get sharedOrNull => _shared;
 
   Uri get indexUri =>
       Uri.parse('http://127.0.0.1:$port/foliate-js/index.html');
@@ -58,6 +62,13 @@ class BookLoopbackServer {
 
   Uri bookUriFor(String mountId) =>
       Uri.parse('http://127.0.0.1:$port/books/$mountId.epub');
+
+  Uri fontUriFor(String fontId, String fileName) {
+    final ext = fileName.contains('.')
+        ? fileName.substring(fileName.lastIndexOf('.') + 1)
+        : 'ttf';
+    return Uri.parse('http://127.0.0.1:$port/fonts/$fontId.$ext');
+  }
 
   /// Seeds the preferred bind port from the app support directory.
   ///
@@ -139,6 +150,14 @@ class BookLoopbackServer {
     _mounts.remove(mountId);
   }
 
+  void mountFont(String fontId, File fontFile) {
+    _fontMounts[fontId] = fontFile;
+  }
+
+  void unmountFont(String fontId) {
+    _fontMounts.remove(fontId);
+  }
+
   /// Prefetch hot Foliate assets into [_assetCache] (idempotent).
   Future<void> warmAssets() async {
     await Future.wait(
@@ -212,6 +231,21 @@ class BookLoopbackServer {
             await response.addStream(bookFile.openRead());
           }
         }
+      } else if (_isFontPath(request.uri.path)) {
+        final fontId = _fontIdFromPath(request.uri.path);
+        final fontFile = fontId == null ? null : _fontMounts[fontId];
+        if (fontFile == null || !await fontFile.exists()) {
+          response.statusCode = HttpStatus.notFound;
+        } else {
+          response.headers.contentType = ContentType.parse(
+            _contentTypeFor(fontFile.path),
+          );
+          response.headers.set('Cache-Control', 'public, max-age=31536000');
+          response.contentLength = await fontFile.length();
+          if (request.method == 'GET') {
+            await response.addStream(fontFile.openRead());
+          }
+        }
       } else if (request.uri.path.startsWith('/foliate-js/')) {
         final relative = request.uri.path.substring('/foliate-js/'.length);
         if (!_isSafeAssetPath(relative)) {
@@ -251,6 +285,19 @@ class BookLoopbackServer {
     return match?.group(1);
   }
 
+  static bool _isFontPath(String path) {
+    return RegExp(r'^/fonts/[^/]+\.(ttf|otf|woff2?)$', caseSensitive: false)
+        .hasMatch(path);
+  }
+
+  static String? _fontIdFromPath(String path) {
+    final match = RegExp(
+      r'^/fonts/([^/]+)\.(ttf|otf|woff2?)$',
+      caseSensitive: false,
+    ).firstMatch(path);
+    return match?.group(1);
+  }
+
   static bool _isSafeAssetPath(String relative) {
     if (relative.isEmpty || relative.startsWith('/')) return false;
     final segments = relative.replaceAll('\\', '/').split('/');
@@ -271,6 +318,8 @@ class BookLoopbackServer {
       'jpg' || 'jpeg' => 'image/jpeg',
       'woff' => 'font/woff',
       'woff2' => 'font/woff2',
+      'ttf' => 'font/ttf',
+      'otf' => 'font/otf',
       _ => 'application/octet-stream',
     };
   }
@@ -283,6 +332,7 @@ class BookLoopbackServer {
     _starting = null;
     if (shared == null) return;
     shared._mounts.clear();
+    shared._fontMounts.clear();
     shared._assetCache.clear();
     await shared._server.close(force: true);
   }

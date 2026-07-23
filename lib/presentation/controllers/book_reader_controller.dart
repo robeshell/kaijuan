@@ -44,8 +44,8 @@ class BookReaderController extends ChangeNotifier {
        _brightness =
            readingPreferences?.brightness ??
            BookReadingPreferences.defaultBrightness,
-       _bodyFont =
-           readingPreferences?.bodyFont ?? BookReadingPreferences.defaultBodyFont,
+       _fontSelection = readingPreferences?.fontSelection ??
+           BookReadingPreferences.defaultFontSelection,
        _letterSpacing =
            readingPreferences?.letterSpacing ??
            BookReadingPreferences.defaultLetterSpacing,
@@ -67,7 +67,14 @@ class BookReaderController extends ChangeNotifier {
            : BookReadingMode.page,
        _pageTurnEffect =
            readingPreferences?.pageTurnEffect ??
-           BookReadingPreferences.defaultPageTurnEffect;
+           BookReadingPreferences.defaultPageTurnEffect {
+    readingPreferences?.fontStore.addListener(_onFontStoreChanged);
+  }
+
+  void _onFontStoreChanged() {
+    if (_disposed) return;
+    notifyListeners();
+  }
 
   final AppDatabase database;
   final ReadingItem item;
@@ -92,7 +99,7 @@ class BookReaderController extends ChangeNotifier {
   double _verticalMargin;
   bool _bold;
   double _brightness;
-  BookBodyFont _bodyFont;
+  BookFontSelection _fontSelection;
   double _letterSpacing;
   double _paragraphSpacing;
   BookTextAlign _textAlign;
@@ -187,7 +194,19 @@ class BookReaderController extends ChangeNotifier {
   double get verticalMargin => _verticalMargin;
   bool get bold => _bold;
   double get brightness => _brightness;
-  BookBodyFont get bodyFont => _bodyFont;
+  BookFontSelection get fontSelection => _fontSelection;
+  BookFontStore? get fontStore => _prefs?.fontStore;
+  String get fontLabel {
+    switch (_fontSelection.kind) {
+      case BookFontKind.book:
+        return '图书自带';
+      case BookFontKind.system:
+        return BookSystemFont.byId(_fontSelection.systemId!)?.label ?? '默认字体';
+      case BookFontKind.user:
+        return fontStore?.byId(_fontSelection.userFontId!)?.displayName ??
+            '用户字体';
+    }
+  }
   double get letterSpacing => _letterSpacing;
   double get paragraphSpacing => _paragraphSpacing;
   BookTextAlign get textAlign => _textAlign;
@@ -1323,11 +1342,54 @@ class BookReaderController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setBodyFont(BookBodyFont font) async {
-    if (font == _bodyFont) return;
-    _bodyFont = font;
+  Future<void> setFontSelection(BookFontSelection selection) async {
+    if (selection == _fontSelection) return;
+    if (selection.kind == BookFontKind.user) {
+      final id = selection.userFontId;
+      if (id == null || fontStore?.byId(id) == null) return;
+    }
+    _fontSelection = selection;
     notifyListeners();
-    await _prefs?.setBodyFont(font);
+    await _prefs?.setFontSelection(selection);
+  }
+
+  Future<String?> downloadCatalogFont(BookCatalogFont catalog) async {
+    final store = fontStore;
+    if (store == null) return '字体存储未就绪';
+    try {
+      final font = await store.downloadCatalogFont(catalog);
+      await setFontSelection(BookFontSelection.user(font.id));
+      return null;
+    } catch (error) {
+      debugPrint('[Font] download failed: $error');
+      return '字体下载失败';
+    }
+  }
+
+  Future<String?> importFontFile(String path) async {
+    final store = fontStore;
+    if (store == null) return '字体存储未就绪';
+    try {
+      final font = await store.importFontFile(path);
+      await setFontSelection(BookFontSelection.user(font.id));
+      return null;
+    } catch (error) {
+      debugPrint('[Font] import failed: $error');
+      return '字体导入失败';
+    }
+  }
+
+  Future<void> deleteUserFont(String id) async {
+    final store = fontStore;
+    if (store == null) return;
+    final wasSelected = _fontSelection.kind == BookFontKind.user &&
+        _fontSelection.userFontId == id;
+    await store.deleteUserFont(id);
+    if (wasSelected) {
+      await setFontSelection(BookReadingPreferences.defaultFontSelection);
+    } else {
+      notifyListeners();
+    }
   }
 
   Future<void> setLetterSpacing(double spacing) async {
@@ -1418,6 +1480,7 @@ class BookReaderController extends ChangeNotifier {
     _disposed = true;
     _attachGeneration++;
     _ttsGeneration++;
+    _prefs?.fontStore.removeListener(_onFontStoreChanged);
     _saveDebounce?.cancel();
     _selectionClearLockTimer?.cancel();
     unawaited(_tearDownTts());

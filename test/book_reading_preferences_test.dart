@@ -26,7 +26,10 @@ void main() {
     expect(prefs.verticalMargin, 26.0);
     expect(prefs.bold, isFalse);
     expect(prefs.brightness, 1.0);
-    expect(prefs.bodyFont, BookBodyFont.defaultFont);
+    expect(
+      prefs.fontSelection,
+      BookFontSelection.system(BookSystemFont.defaultId),
+    );
     expect(prefs.letterSpacing, 0.0);
     expect(prefs.paragraphSpacing, 0.35);
     expect(prefs.textAlign, BookTextAlign.justify);
@@ -45,7 +48,9 @@ void main() {
     await prefs.setVerticalMargin(12);
     await prefs.setBold(true);
     await prefs.setBrightness(0.6);
-    await prefs.setBodyFont(BookBodyFont.georgia);
+    await prefs.setFontSelection(
+      BookFontSelection.system(BookSystemFont.songtiId),
+    );
     await prefs.setLetterSpacing(-0.1);
     await prefs.setParagraphSpacing(0.7);
     await prefs.setTextAlign(BookTextAlign.start);
@@ -64,7 +69,10 @@ void main() {
     expect(reloaded.verticalMargin, 12.0);
     expect(reloaded.bold, isTrue);
     expect(reloaded.brightness, 0.6);
-    expect(reloaded.bodyFont, BookBodyFont.georgia);
+    expect(
+      reloaded.fontSelection,
+      BookFontSelection.system(BookSystemFont.songtiId),
+    );
     expect(reloaded.letterSpacing, -0.1);
     expect(reloaded.paragraphSpacing, 0.7);
     expect(reloaded.textAlign, BookTextAlign.start);
@@ -102,9 +110,25 @@ void main() {
     expect(prefs.margin, 24.0);
     expect(prefs.verticalMargin, 26.0);
     expect(prefs.bold, isFalse);
-    expect(prefs.bodyFont, BookBodyFont.defaultFont);
+    expect(
+      prefs.fontSelection,
+      BookFontSelection.system(BookSystemFont.defaultId),
+    );
     expect(prefs.readingMode, BookReadingMode.page);
     expect(prefs.pageTurnEffect, BookPageTurnEffect.slide);
+  });
+
+  test('migrates legacy bodyFont string', () async {
+    final file = File('${tempDir.path}/book_reading.json');
+    await file.writeAsString(
+      '{"bodyFont":"georgia","fontSize":18}',
+      flush: true,
+    );
+    final prefs = await BookReadingPreferences.load(supportDirectory: tempDir);
+    expect(
+      prefs.fontSelection,
+      BookFontSelection.system(BookSystemFont.songtiId),
+    );
   });
 
   test('curl resolves to slide until curl renderer ships', () {

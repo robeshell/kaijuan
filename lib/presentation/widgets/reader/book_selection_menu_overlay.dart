@@ -8,6 +8,7 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../../../app/book_reading_preferences.dart';
 import '../../../domain/reader_models.dart';
+import '../../../readers/book/book_reader_capabilities.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
 import 'book_annotation_note_sheet.dart';
@@ -200,9 +201,9 @@ class BookSelectionMenuOverlay extends StatelessWidget {
               // Same tap: if in page-turn zone, flip immediately (mobile barrier
               // otherwise eats the gesture and the next tap felt "dead").
               if (controller.readingMode == BookReadingMode.page) {
-                if (x < 0.25) {
+                if (x < BookReaderCapabilities.pageTurnEdgeFraction) {
                   controller.goPreviousPage();
-                } else if (x > 0.75) {
+                } else if (x > 1 - BookReaderCapabilities.pageTurnEdgeFraction) {
                   controller.goNextPage();
                 }
               }

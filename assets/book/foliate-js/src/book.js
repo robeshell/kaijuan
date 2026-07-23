@@ -1,7 +1,7 @@
 console.log('book.js')
 console.log('AnxUA', navigator.userAgent)
 
-import './view.js?v=20260723o'
+import './view.js?v=20260723w'
 import { FootnoteHandler } from './footnotes.js'
 import { Overlayer } from './overlayer.js?v=20260723k'
 import { collapse, compare, fromRange, toRange } from './epubcfi.js?v=20260723k'
@@ -1354,6 +1354,9 @@ class Reader {
     this.#doc = doc
     this.#index = index
     setSelectionHandler(this.view, doc, index)
+    try {
+      doc.addEventListener('keydown', handleReaderKeydown, true)
+    } catch (_) {}
 
     // if (!this.#originalContent) {
     // console.log('Saving original content', doc);
@@ -1712,6 +1715,43 @@ const open = async (file, cfi) => {
   }
   else { getMetadata() }
 }
+
+/// Desktop Platform View often focuses the WebView; Flutter Focus then never
+/// sees ArrowLeft/Right. Prevent native line-scroll and turn a full page.
+const handleReaderKeydown = (e) => {
+  if (!globalThis.reader?.view) return
+  if (e.defaultPrevented || e.isComposing) return
+  const target = e.target
+  if (target) {
+    const tag = target.tagName
+    if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      return
+    }
+  }
+  if (globalThis.reader.view.renderer?.getAttribute?.('flow') === 'scrolled') {
+    return
+  }
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'PageDown':
+    case ' ':
+    case 'Spacebar':
+      e.preventDefault()
+      e.stopPropagation()
+      void globalThis.reader.view.goRight()
+      break
+    case 'ArrowLeft':
+    case 'PageUp':
+      e.preventDefault()
+      e.stopPropagation()
+      void globalThis.reader.view.goLeft()
+      break
+    default:
+      break
+  }
+}
+
+window.addEventListener('keydown', handleReaderKeydown, true)
 
 
 const callFlutter = (name, data) => {
@@ -2243,6 +2283,10 @@ window.goToPercent = percent => reader.view.goToFraction(percent)
 window.nextPage = () => reader.view.next()
 
 window.prevPage = () => reader.view.prev()
+
+window.setChromeVisible = (visible) => {
+  window.__kaikaChromeVisible = !!visible
+}
 
 window.setScroll = () => {
   style.scroll = true

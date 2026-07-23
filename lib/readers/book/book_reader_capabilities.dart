@@ -25,4 +25,12 @@ abstract final class BookReaderCapabilities {
 
   static double get pageVerticalInsetOnCurrentPlatform =>
       pageVerticalInset(defaultTargetPlatform);
+
+  /// Horizontal fraction of each screen edge reserved for page turns in
+  /// paginated mode. The middle band toggles reader chrome.
+  static const double pageTurnEdgeFraction = 0.28;
+
+  static bool isPageTurnEdge(double normalizedX) =>
+      normalizedX < pageTurnEdgeFraction ||
+      normalizedX > 1 - pageTurnEdgeFraction;
 }

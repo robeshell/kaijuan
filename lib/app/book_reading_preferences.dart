@@ -5,7 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../readers/book/book_font_models.dart';
+import '../readers/book/book_font_store.dart';
 import '../readers/book/book_theme.dart';
+
+export '../readers/book/book_font_models.dart';
+export '../readers/book/book_font_store.dart';
 
 /// Book reflow reading mode.
 enum BookReadingMode {
@@ -68,80 +73,6 @@ enum BookTextAlign {
   String get storageValue => name;
 }
 
-/// Built-in reading faces. Specialty names use CSS stacks with system fallbacks
-/// (no bundled font files in v1); [system] is Foliate's `system-ui` token.
-enum BookBodyFont {
-  defaultFont,
-  system,
-  crimsonPro,
-  georgia,
-  lexend,
-  libreBaskerville,
-  lora,
-  notoSerif,
-  nunito,
-  ptSans,
-  ptSerif,
-  publicSans;
-
-  static BookBodyFont fromStorage(String? value) {
-    for (final font in values) {
-      if (font.storageValue == value) return font;
-    }
-    return defaultFont;
-  }
-
-  String get storageValue => name;
-
-  String get label => switch (this) {
-    defaultFont => '默认字体',
-    system => '系统字体',
-    crimsonPro => 'CrimsonPro',
-    georgia => 'Georgia',
-    lexend => 'Lexend',
-    libreBaskerville => 'LibreBaskerville',
-    lora => 'Lora',
-    notoSerif => 'NotoSerif',
-    nunito => 'Nunito',
-    ptSans => 'PT Sans',
-    ptSerif => 'PT Serif',
-    publicSans => 'Public Sans',
-  };
-
-  /// Value for Foliate `fontName` (CSS list, or `system` token).
-  String get cssFontName => switch (this) {
-    defaultFont => BookReadingTheme.cssReadingFontFamily,
-    system => 'system',
-    crimsonPro =>
-      '"Crimson Pro", "CrimsonPro", Georgia, "Songti SC", "Noto Serif SC", serif',
-    georgia => '"Georgia", "Times New Roman", "Songti SC", serif',
-    lexend => '"Lexend", "PingFang SC", "Noto Sans SC", sans-serif',
-    libreBaskerville =>
-      '"Libre Baskerville", Georgia, "Songti SC", "Noto Serif SC", serif',
-    lora => '"Lora", Georgia, "Songti SC", "Noto Serif SC", serif',
-    notoSerif => '"Noto Serif", "Noto Serif SC", "Songti SC", Georgia, serif',
-    nunito => '"Nunito", "PingFang SC", "Noto Sans SC", sans-serif',
-    ptSans => '"PT Sans", "PingFang SC", "Noto Sans SC", sans-serif',
-    ptSerif => '"PT Serif", Georgia, "Songti SC", "Noto Serif SC", serif',
-    publicSans => '"Public Sans", "PingFang SC", "Noto Sans SC", sans-serif',
-  };
-
-  /// Optional Flutter preview family (may fall back if not installed).
-  String? get previewFamily => switch (this) {
-    defaultFont || system => null,
-    crimsonPro => 'Crimson Pro',
-    georgia => 'Georgia',
-    lexend => 'Lexend',
-    libreBaskerville => 'Libre Baskerville',
-    lora => 'Lora',
-    notoSerif => 'Noto Serif',
-    nunito => 'Nunito',
-    ptSans => 'PT Sans',
-    ptSerif => 'PT Serif',
-    publicSans => 'Public Sans',
-  };
-}
-
 /// Book reflow defaults (typography + reading mode / page-turn effect).
 class BookReadingPreferences extends ChangeNotifier {
   static const double defaultFontSize = 18.0;
@@ -163,7 +94,8 @@ class BookReadingPreferences extends ChangeNotifier {
   static const double maxVerticalMargin = 48.0;
 
   static const bool defaultBold = false;
-  static const BookBodyFont defaultBodyFont = BookBodyFont.defaultFont;
+  static final BookFontSelection defaultFontSelection =
+      BookFontSelection.defaultSelection;
 
   /// In-reader dimming (1 = none). Does not change system screen brightness.
   static const double defaultBrightness = 1.0;
@@ -189,6 +121,7 @@ class BookReadingPreferences extends ChangeNotifier {
 
   BookReadingPreferences._(
     this._file,
+    this._fontStore,
     this._fontSize,
     this._lineHeight,
     this._readingTheme,
@@ -196,7 +129,7 @@ class BookReadingPreferences extends ChangeNotifier {
     this._verticalMargin,
     this._bold,
     this._brightness,
-    this._bodyFont,
+    this._fontSelection,
     this._letterSpacing,
     this._paragraphSpacing,
     this._textAlign,
@@ -204,9 +137,12 @@ class BookReadingPreferences extends ChangeNotifier {
     this._hyphenate,
     this._readingMode,
     this._pageTurnEffect,
-  );
+  ) {
+    _fontStore.addListener(notifyListeners);
+  }
 
   final File _file;
+  final BookFontStore _fontStore;
   double _fontSize;
   double _lineHeight;
   BookReadingTheme _readingTheme;
@@ -214,7 +150,7 @@ class BookReadingPreferences extends ChangeNotifier {
   double _verticalMargin;
   bool _bold;
   double _brightness;
-  BookBodyFont _bodyFont;
+  BookFontSelection _fontSelection;
   double _letterSpacing;
   double _paragraphSpacing;
   BookTextAlign _textAlign;
@@ -223,6 +159,7 @@ class BookReadingPreferences extends ChangeNotifier {
   BookReadingMode _readingMode;
   BookPageTurnEffect _pageTurnEffect;
 
+  BookFontStore get fontStore => _fontStore;
   double get fontSize => _fontSize;
   double get lineHeight => _lineHeight;
   BookReadingTheme get readingTheme => _readingTheme;
@@ -230,7 +167,7 @@ class BookReadingPreferences extends ChangeNotifier {
   double get verticalMargin => _verticalMargin;
   bool get bold => _bold;
   double get brightness => _brightness;
-  BookBodyFont get bodyFont => _bodyFont;
+  BookFontSelection get fontSelection => _fontSelection;
   double get letterSpacing => _letterSpacing;
   double get paragraphSpacing => _paragraphSpacing;
   BookTextAlign get textAlign => _textAlign;
@@ -245,6 +182,7 @@ class BookReadingPreferences extends ChangeNotifier {
   }) async {
     final dir = supportDirectory ?? await getApplicationSupportDirectory();
     final file = File(p.join(dir.path, 'book_reading.json'));
+    final fontStore = await BookFontStore.load(dir);
     final fallbackTheme = defaultReadingTheme ?? BookReadingTheme.paper;
     try {
       if (await file.exists()) {
@@ -252,6 +190,7 @@ class BookReadingPreferences extends ChangeNotifier {
             jsonDecode(await file.readAsString()) as Map<String, dynamic>;
         return BookReadingPreferences._(
           file,
+          fontStore,
           (json['fontSize'] as num?)?.toDouble() ?? defaultFontSize,
           (json['lineHeight'] as num?)?.toDouble() ?? defaultLineHeight,
           BookReadingTheme.fromStorage(json['readingTheme'] as String?),
@@ -259,7 +198,7 @@ class BookReadingPreferences extends ChangeNotifier {
           (json['verticalMargin'] as num?)?.toDouble() ?? defaultVerticalMargin,
           json['bold'] as bool? ?? defaultBold,
           (json['brightness'] as num?)?.toDouble() ?? defaultBrightness,
-          BookBodyFont.fromStorage(json['bodyFont'] as String?),
+          _parseFontSelection(json),
           (json['letterSpacing'] as num?)?.toDouble() ?? defaultLetterSpacing,
           (json['paragraphSpacing'] as num?)?.toDouble() ??
               defaultParagraphSpacing,
@@ -273,6 +212,7 @@ class BookReadingPreferences extends ChangeNotifier {
     } catch (_) {}
     return BookReadingPreferences._(
       file,
+      fontStore,
       defaultFontSize,
       defaultLineHeight,
       fallbackTheme,
@@ -280,7 +220,7 @@ class BookReadingPreferences extends ChangeNotifier {
       defaultVerticalMargin,
       defaultBold,
       defaultBrightness,
-      defaultBodyFont,
+      defaultFontSelection,
       defaultLetterSpacing,
       defaultParagraphSpacing,
       defaultTextAlign,
@@ -289,6 +229,14 @@ class BookReadingPreferences extends ChangeNotifier {
       defaultReadingMode,
       defaultPageTurnEffect,
     );
+  }
+
+  static BookFontSelection _parseFontSelection(Map<String, dynamic> json) {
+    final raw = json['fontSelection'];
+    if (raw is Map<String, dynamic>) {
+      return BookFontSelection.fromJson(raw);
+    }
+    return BookFontSelection.fromLegacyBodyFont(json['bodyFont'] as String?);
   }
 
   Future<void> setFontSize(double size) async {
@@ -345,9 +293,9 @@ class BookReadingPreferences extends ChangeNotifier {
     await _save();
   }
 
-  Future<void> setBodyFont(BookBodyFont font) async {
-    if (font == _bodyFont) return;
-    _bodyFont = font;
+  Future<void> setFontSelection(BookFontSelection selection) async {
+    if (selection == _fontSelection) return;
+    _fontSelection = selection;
     notifyListeners();
     await _save();
   }
@@ -414,7 +362,7 @@ class BookReadingPreferences extends ChangeNotifier {
         'verticalMargin': _verticalMargin,
         'bold': _bold,
         'brightness': _brightness,
-        'bodyFont': _bodyFont.storageValue,
+        'fontSelection': _fontSelection.toJson(),
         'letterSpacing': _letterSpacing,
         'paragraphSpacing': _paragraphSpacing,
         'textAlign': _textAlign.storageValue,
@@ -425,5 +373,11 @@ class BookReadingPreferences extends ChangeNotifier {
       }),
       flush: true,
     );
+  }
+
+  @override
+  void dispose() {
+    _fontStore.removeListener(notifyListeners);
+    super.dispose();
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/book_reading_preferences.dart';
@@ -1065,7 +1066,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           children: [
             Expanded(
               child: _TypographyActionRow(
-                label: controller.bodyFont.label,
+                label: controller.fontLabel,
                 fg: widget.fg,
                 fgMuted: widget.fgMuted,
                 onTap: () => setState(() => _sub = _TypographySub.font),
@@ -1149,10 +1150,27 @@ class _FontPickerPanel extends StatelessWidget {
   final Color accent;
   final VoidCallback onClose;
 
-  static const _grid = BookBodyFont.values;
+  Future<void> _import(BuildContext context) async {
+    final files = await openFiles(
+      acceptedTypeGroups: [
+        const XTypeGroup(
+          label: '字体',
+          extensions: ['ttf', 'otf', 'woff', 'woff2'],
+        ),
+      ],
+    );
+    if (files.isEmpty) return;
+    final error = await controller.importFontFile(files.first.path);
+    if (!context.mounted) return;
+    if (error != null) showAppSnackBar(context, error);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final selection = controller.fontSelection;
+    final store = controller.fontStore;
+    final userFonts = store?.fonts ?? const <BookUserFont>[];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1162,7 +1180,7 @@ class _FontPickerPanel extends StatelessWidget {
           fgMuted: fgMuted,
           onClose: onClose,
           leadingAction: GestureDetector(
-            onTap: () => showAppSnackBar(context, '导入字体即将推出'),
+            onTap: () => unawaited(_import(context)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1181,6 +1199,21 @@ class _FontPickerPanel extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.x3),
+        _FontSectionTitle(label: '图书', fg: fgMuted),
+        const SizedBox(height: AppSpacing.x2),
+        _FontChoiceTile(
+          label: '图书自带',
+          selected: selection.kind == BookFontKind.book,
+          accent: accent,
+          fg: fg,
+          fgMuted: fgMuted,
+          onTap: () => unawaited(
+            controller.setFontSelection(const BookFontSelection.book()),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.x3),
+        _FontSectionTitle(label: '系统字体', fg: fgMuted),
+        const SizedBox(height: AppSpacing.x2),
         LayoutBuilder(
           builder: (context, constraints) {
             final tileW = (constraints.maxWidth - AppSpacing.x2) / 2;
@@ -1188,16 +1221,22 @@ class _FontPickerPanel extends StatelessWidget {
               spacing: AppSpacing.x2,
               runSpacing: AppSpacing.x2,
               children: [
-                for (final font in _grid)
+                for (final font in BookSystemFont.all)
                   SizedBox(
                     width: tileW,
-                    child: _FontTile(
-                      font: font,
-                      selected: controller.bodyFont == font,
+                    child: _FontChoiceTile(
+                      label: font.label,
+                      previewFamily: font.previewFamily,
+                      selected: selection.kind == BookFontKind.system &&
+                          selection.systemId == font.id,
                       accent: accent,
                       fg: fg,
                       fgMuted: fgMuted,
-                      onTap: () => unawaited(controller.setBodyFont(font)),
+                      onTap: () => unawaited(
+                        controller.setFontSelection(
+                          BookFontSelection.system(font.id),
+                        ),
+                      ),
                     ),
                   ),
               ],
@@ -1205,44 +1244,95 @@ class _FontPickerPanel extends StatelessWidget {
           },
         ),
         const SizedBox(height: AppSpacing.x3),
-        Center(
-          child: GestureDetector(
-            onTap: () => showAppSnackBar(context, '补充字体即将推出'),
-            child: Text(
-              '补充字体 >',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: fgMuted,
-              ),
+        _FontSectionTitle(label: '推荐下载（OFL）', fg: fgMuted),
+        const SizedBox(height: AppSpacing.x2),
+        for (final catalog in BookCatalogFont.all) ...[
+          _CatalogFontTile(
+            catalog: catalog,
+            store: store,
+            selection: selection,
+            accent: accent,
+            fg: fg,
+            fgMuted: fgMuted,
+            onDownload: () async {
+              final error = await controller.downloadCatalogFont(catalog);
+              if (!context.mounted) return;
+              if (error != null) showAppSnackBar(context, error);
+            },
+            onSelect: (userFont) => unawaited(
+              controller.setFontSelection(BookFontSelection.user(userFont.id)),
             ),
           ),
-        ),
+          const SizedBox(height: AppSpacing.x2),
+        ],
+        if (userFonts.any((f) => f.source == BookUserFontSource.import)) ...[
+          const SizedBox(height: AppSpacing.x2),
+          _FontSectionTitle(label: '我的导入', fg: fgMuted),
+          const SizedBox(height: AppSpacing.x2),
+          for (final font in userFonts.where(
+            (f) => f.source == BookUserFontSource.import,
+          )) ...[
+            _UserFontTile(
+              font: font,
+              selected: selection.kind == BookFontKind.user &&
+                  selection.userFontId == font.id,
+              accent: accent,
+              fg: fg,
+              fgMuted: fgMuted,
+              onTap: () => unawaited(
+                controller.setFontSelection(BookFontSelection.user(font.id)),
+              ),
+              onDelete: () => unawaited(controller.deleteUserFont(font.id)),
+            ),
+            const SizedBox(height: AppSpacing.x2),
+          ],
+        ],
       ],
     );
   }
 }
 
-class _FontTile extends StatelessWidget {
-  const _FontTile({
-    required this.font,
+class _FontSectionTitle extends StatelessWidget {
+  const _FontSectionTitle({required this.label, required this.fg});
+
+  final String label;
+  final Color fg;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: fg,
+        letterSpacing: 0.2,
+      ),
+    );
+  }
+}
+
+class _FontChoiceTile extends StatelessWidget {
+  const _FontChoiceTile({
+    required this.label,
     required this.selected,
     required this.accent,
     required this.fg,
     required this.fgMuted,
     required this.onTap,
+    this.previewFamily,
   });
 
-  final BookBodyFont font;
+  final String label;
   final bool selected;
   final Color accent;
   final Color fg;
   final Color fgMuted;
   final VoidCallback onTap;
+  final String? previewFamily;
 
   @override
   Widget build(BuildContext context) {
-    final isSystem = font == BookBodyFont.system;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -1257,23 +1347,176 @@ class _FontTile extends StatelessWidget {
             width: selected ? 1.5 : 1,
           ),
         ),
+        alignment: Alignment.centerLeft,
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: fg,
+            fontFamily: previewFamily,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CatalogFontTile extends StatelessWidget {
+  const _CatalogFontTile({
+    required this.catalog,
+    required this.store,
+    required this.selection,
+    required this.accent,
+    required this.fg,
+    required this.fgMuted,
+    required this.onDownload,
+    required this.onSelect,
+  });
+
+  final BookCatalogFont catalog;
+  final BookFontStore? store;
+  final BookFontSelection selection;
+  final Color accent;
+  final Color fg;
+  final Color fgMuted;
+  final VoidCallback onDownload;
+  final void Function(BookUserFont font) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final installed = store?.byCatalogId(catalog.id);
+    final downloading = store?.isDownloading(catalog.id) ?? false;
+    final progress = store?.downloadProgress(catalog.id);
+    final selected = installed != null &&
+        selection.kind == BookFontKind.user &&
+        selection.userFontId == installed.id;
+
+    return GestureDetector(
+      onTap: () {
+        if (downloading) return;
+        if (installed != null) {
+          onSelect(installed);
+        } else {
+          onDownload();
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x3),
+        decoration: BoxDecoration(
+          color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadii.medium),
+          border: Border.all(
+            color: selected ? accent : fgMuted.withValues(alpha: 0.22),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    catalog.displayName,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.w500,
+                      color: fg,
+                    ),
+                  ),
+                  Text(
+                    downloading
+                        ? '下载中 ${((progress ?? 0) * 100).round()}%'
+                        : installed != null
+                            ? catalog.license
+                            : '${catalog.license} · ${catalog.sizeLabel}',
+                    style: TextStyle(fontSize: 11, color: fgMuted),
+                  ),
+                ],
+              ),
+            ),
+            if (downloading)
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  value: progress,
+                  color: accent,
+                ),
+              )
+            else if (installed == null)
+              Icon(Icons.download_outlined, size: 18, color: accent)
+            else if (selected)
+              Icon(Icons.check, size: 18, color: accent),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UserFontTile extends StatelessWidget {
+  const _UserFontTile({
+    required this.font,
+    required this.selected,
+    required this.accent,
+    required this.fg,
+    required this.fgMuted,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final BookUserFont font;
+  final bool selected;
+  final Color accent;
+  final Color fg;
+  final Color fgMuted;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        height: 44,
+        padding: const EdgeInsets.only(left: AppSpacing.x3, right: AppSpacing.x1),
+        decoration: BoxDecoration(
+          color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadii.medium),
+          border: Border.all(
+            color: selected ? accent : fgMuted.withValues(alpha: 0.22),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
         child: Row(
           children: [
             Expanded(
               child: Text(
-                font.label,
+                font.displayName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   color: fg,
-                  fontFamily: font.previewFamily,
                 ),
               ),
             ),
-            if (isSystem)
-              Icon(Icons.chevron_right, size: 18, color: fgMuted),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: onDelete,
+              icon: Icon(Icons.delete_outline, size: 18, color: fgMuted),
+            ),
           ],
         ),
       ),

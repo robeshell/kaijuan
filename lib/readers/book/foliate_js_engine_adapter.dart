@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,6 +12,7 @@ import '../../app/book_reading_preferences.dart';
 import '../../presentation/controllers/book_reader_controller.dart';
 import 'book_rendition_session.dart';
 import 'book_models.dart';
+import 'book_reader_capabilities.dart';
 import 'book_theme.dart';
 import 'foliate_js_bridge.dart';
 
@@ -45,7 +47,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   double? _lastMargin;
   double? _lastVerticalMargin;
   bool? _lastBold;
-  BookBodyFont? _lastBodyFont;
+  BookFontSelection? _lastFontSelection;
   double? _lastLetterSpacing;
   double? _lastParagraphSpacing;
   BookTextAlign? _lastTextAlign;
@@ -55,6 +57,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   BookReadingMode? _lastMode;
   BookPageTurnEffect? _lastEffect;
   double? _lastBrightness;
+  bool? _lastChromeVisible;
   Timer? _prefsApplyTimer;
   /// Desktop PlatformView (WKWebView / WebView2) often keeps a stale surface
   /// until the next input; flip a sub-pixel translate to force a composite.
@@ -423,12 +426,21 @@ try {
 
   void _onControllerChanged() {
     if (!_webReady || _disposed) return;
+    unawaited(_syncChromeVisible());
     // Defer past the active pointer so evaluateJavascript is not swallowed
     // mid-gesture (mobile). Desktop also needs a post-apply surface nudge.
     _prefsApplyTimer?.cancel();
     _prefsApplyTimer = Timer(const Duration(milliseconds: 16), () {
       unawaited(_flushPreferences());
     });
+  }
+
+  Future<void> _syncChromeVisible() async {
+    if (!_webReady || _disposed) return;
+    final visible = readerController.chromeVisible;
+    if (visible == _lastChromeVisible) return;
+    _lastChromeVisible = visible;
+    await _evaluate('window.setChromeVisible(${visible ? 'true' : 'false'})');
   }
 
   Future<void> _flushPreferences() async {
@@ -460,7 +472,9 @@ try {
       _session?.mark('reveal-unlocked');
       _rememberPreferenceState();
       _lastBrightness = null;
+      _lastChromeVisible = null;
       unawaited(_applyReaderBrightness());
+      unawaited(_syncChromeVisible());
       notifyListeners();
     }
     try {
@@ -576,10 +590,14 @@ try {
       readerController.clearSelectionMenu();
       return;
     }
+    if (readerController.chromeVisible) {
+      readerController.hideChrome();
+      return;
+    }
     if (readerController.readingMode == BookReadingMode.page) {
-      if (click.x < 0.25) {
+      if (click.x < BookReaderCapabilities.pageTurnEdgeFraction) {
         _previousPage();
-      } else if (click.x > 0.75) {
+      } else if (click.x > 1 - BookReaderCapabilities.pageTurnEdgeFraction) {
         _nextPage();
       } else {
         readerController.toggleChrome();
@@ -612,7 +630,7 @@ try {
     final margin = readerController.margin;
     final verticalMargin = readerController.verticalMargin;
     final bold = readerController.bold;
-    final bodyFont = readerController.bodyFont;
+    final fontSelection = readerController.fontSelection;
     final letterSpacing = readerController.letterSpacing;
     final paragraphSpacing = readerController.paragraphSpacing;
     final textAlign = readerController.textAlign;
@@ -627,7 +645,7 @@ try {
         margin == _lastMargin &&
         verticalMargin == _lastVerticalMargin &&
         bold == _lastBold &&
-        bodyFont == _lastBodyFont &&
+        fontSelection == _lastFontSelection &&
         letterSpacing == _lastLetterSpacing &&
         paragraphSpacing == _lastParagraphSpacing &&
         textAlign == _lastTextAlign &&
@@ -655,7 +673,7 @@ try {
     _lastMargin = readerController.margin;
     _lastVerticalMargin = readerController.verticalMargin;
     _lastBold = readerController.bold;
-    _lastBodyFont = readerController.bodyFont;
+    _lastFontSelection = readerController.fontSelection;
     _lastLetterSpacing = readerController.letterSpacing;
     _lastParagraphSpacing = readerController.paragraphSpacing;
     _lastTextAlign = readerController.textAlign;
@@ -741,10 +759,11 @@ try {
     final labelTop = mobile ? 24.0 : 26.0;
     final labelBottom = mobile ? 24.0 : 6.0;
     final vExtra = readerController.verticalMargin;
+    readerController.fontStore?.attachLoopback();
     return {
       'fontSize': readerController.fontSize / 16,
-      'fontName': readerController.bodyFont.cssFontName,
-      'fontPath': '',
+      'fontName': _styleFontName(),
+      'fontPath': _styleFontPath(),
       'fontWeight': readerController.bold ? 700 : 400,
       'letterSpacing': readerController.letterSpacing,
       'spacing': readerController.lineHeight,
@@ -789,6 +808,30 @@ try {
       },
       'codeHighlightTheme': 'off',
     };
+  }
+
+  String _styleFontName() {
+    final selection = readerController.fontSelection;
+    switch (selection.kind) {
+      case BookFontKind.book:
+        return 'book';
+      case BookFontKind.system:
+        return BookSystemFont.byId(selection.systemId!)?.cssFontName ??
+            BookSystemFont.byId(BookSystemFont.defaultId)!.cssFontName;
+      case BookFontKind.user:
+        final font = readerController.fontStore?.byId(selection.userFontId!);
+        return font?.cssFamilyName ??
+            BookSystemFont.byId(BookSystemFont.defaultId)!.cssFontName;
+    }
+  }
+
+  String _styleFontPath() {
+    final selection = readerController.fontSelection;
+    if (selection.kind != BookFontKind.user) return '';
+    final store = readerController.fontStore;
+    final font = store?.byId(selection.userFontId!);
+    if (store == null || font == null) return '';
+    return store.loopbackUrlFor(font) ?? '';
   }
 
   String _cssColor(Color color) {
@@ -961,8 +1004,6 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
         javaScriptEnabled: true,
         transparentBackground: true,
         supportZoom: false,
-        verticalScrollBarEnabled: false,
-        horizontalScrollBarEnabled: false,
         allowsInlineMediaPlayback: true,
         mediaPlaybackRequiresUserGesture: true,
         useHybridComposition: true,
@@ -970,6 +1011,11 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
         disableContextMenu: true,
         isInspectable: kDebugMode,
       ),
+      // Let the WebView win against parent Flutter gesture arenas (drawer /
+      // stack), matching how Anx's bare InAppWebView receives horizontal pans.
+      gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+        Factory<EagerGestureRecognizer>(EagerGestureRecognizer.new),
+      },
       onWebViewCreated: (controller) {
         final session = widget.adapter._session;
         if (session == null || session.isClosed) return;
