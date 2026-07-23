@@ -43,9 +43,9 @@
 
 ## 外观分层
 
-- **主题模式**：浅 / 深 / 跟随（每 App 独立存）。  
-- **强调色**：预设表可自定。  
-- **阅读主题**：内容区独立；漫画默认深灰、图书默认纸白。  
+- **皮肤预设**：跟随系统 / 默认 / 纯净 / 深夜（每 App 独立存）。皮肤自带明暗与整套表面色板（canvas / surface / elevated / overlay）+ 玻璃 token + 动效 token；「跟随系统」按平台亮度在默认与深夜之间切换。  
+- **强调色**：预设表（默认暖橙 ember）；与皮肤正交组合（皮肤 × 强调色）。  
+- **阅读主题**：内容层独立（漫画默认深灰、图书默认纸白），与皮肤无关；阅读器 chrome 的颜色取自阅读主题以保证书页上的可读性。  
 业务不写死随意色；**引擎差异通过各自偏好配置注入**，不复制两套无关组件树。
 
 ## 核心屏幕原则（每 App）
@@ -62,8 +62,23 @@
 ## 间距与形状（共享刻度）
 
 - 间距：4 / 8 / 12 / 16 / 24 / 32  
-- 圆角：8 / 12 / 16 / 20  
-- 分隔 hairline；阴影低位柔和  
+- 圆角：10 控件 / 14 卡片 / 12 菜单 / 18 面板(sheet) / 20 对话框 / 999 胶囊  
+- 分隔 hairline；阴影来自玻璃 token（`appGlass.shadow` × `effects.shadowScale`），不用 Material elevation
+
+## 排版（壳层）
+
+- 字族：系统字体（`.SF Pro Text`，回退 PingFang SC / Microsoft YaHei / Noto Sans CJK SC / Roboto）。  
+- 层级靠**字重驱动**（w600 → w700 → w800）+ 颜色（primary → secondary → muted），不靠字号堆叠。  
+- 大标题负字距（页标题 26/28 w800、letterSpacing −0.55）。  
+- 阅读器正文排版独立（字体栈 / 字号 / 行高属阅读偏好，不受壳层排版影响）。
+
+## Token 架构（三层）
+
+1. **基础 token**：间距 / 圆角 / 强调色预设 / 皮肤色板（`lib/core/theme/tokens.dart`、`skins.dart`）。  
+2. **语义 token**：`AppGlassTheme` + `AppSkinEffects` + `ColorScheme`，业务经 `context.appGlass`、`context.appPrimaryText` 等 context getter 读取（`lib/core/theme/context.dart`）。  
+3. **组件层**：`AppGlassSurface` 原语 + 共享 kit（`lib/presentation/widgets/app_components.dart`、`app_overlays.dart`、`settings_components.dart`）。  
+
+业务 UI 只引用语义层；玻璃模糊**按面选用**——浮面（对话框 / 菜单 / 底栏）模糊，重复的行 / 卡片不模糊（`blur: false`）。  
 
 ## 扩展
 
