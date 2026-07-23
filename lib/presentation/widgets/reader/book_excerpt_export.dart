@@ -11,9 +11,11 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../brand/brand_config.dart';
+
 /// Capture and export helpers for [BookExcerptCard] via [RepaintBoundary].
 abstract final class BookExcerptExport {
-  static const _clipboardChannel = MethodChannel('com.kaika.reader/clipboard');
+  static const _clipboardChannel = MethodChannel('com.kaijuan.reader/clipboard');
 
   static Future<Uint8List?> capturePng(
     GlobalKey boundaryKey, {
@@ -51,13 +53,13 @@ abstract final class BookExcerptExport {
           throw StateError('未获得相册权限');
         }
       }
-      await Gal.putImageBytes(bytes, name: 'Kaika摘录');
+      await Gal.putImageBytes(bytes, name: '${BrandConfig.app.displayName}摘录');
       return '已保存到相册';
     }
 
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final location = await getSaveLocation(
-      suggestedName: 'Kaika摘录-$stamp.png',
+      suggestedName: '${BrandConfig.app.displayName}摘录-$stamp.png',
       acceptedTypeGroups: const [
         XTypeGroup(label: 'PNG', extensions: ['png']),
       ],

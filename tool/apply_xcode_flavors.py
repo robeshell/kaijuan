@@ -51,7 +51,7 @@ def duplicate_configs(pbx: str, platform: str) -> str:
             if platform == "ios":
                 new_body = re.sub(
                     r"PRODUCT_BUNDLE_IDENTIFIER = [^;]+;",
-                    f"PRODUCT_BUNDLE_IDENTIFIER = com.kaika.{flavor};",
+                    f"PRODUCT_BUNDLE_IDENTIFIER = com.kaijuan.{flavor};",
                     new_body,
                 )
                 # Prefer flavored xcconfig when a baseConfigurationReference exists
@@ -65,7 +65,7 @@ def duplicate_configs(pbx: str, platform: str) -> str:
                     brand_ref = f"Brand-{flavor}.xcconfig"
                     # Keep AppInfo for comic if Brand not wired; inject overrides
                     new_body += (
-                        f"\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.kaika.{flavor};"
+                        f"\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.kaijuan.{flavor};"
                         f"\n\t\t\t\tPRODUCT_NAME = Kaika\\ {flavor.capitalize()};"
                     )
                     # Fix PRODUCT_NAME spacing - use proper names
@@ -93,7 +93,7 @@ def duplicate_configs(pbx: str, platform: str) -> str:
                 )
                 display = "Kaika Comic" if flavor == "comic" else "Kaika Book"
                 new_body += (
-                    f"\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.kaika.{flavor};"
+                    f"\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.kaijuan.{flavor};"
                     f'\n\t\t\t\tPRODUCT_NAME = "{display}";'
                 )
 
@@ -191,7 +191,7 @@ def duplicate_configs_v2(pbx: str, platform: str) -> str:
             clone_id = new_id()
             new_body = body
             display = "Kaika Comic" if flavor == "comic" else "Kaika Book"
-            bundle = f"com.kaika.{flavor}"
+            bundle = f"com.kaijuan.{flavor}"
 
             # Inject brand keys *inside* buildSettings (before its closing);}
             def inject_settings(body: str, extra: dict[str, str]) -> str:

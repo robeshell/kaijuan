@@ -169,6 +169,14 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
       children: [
         ColoredBox(color: bg),
         ComicReaderBody(controller: _controller),
+        if (_controller.brightness < 0.999)
+          IgnorePointer(
+            child: ColoredBox(
+              color: Colors.black.withValues(
+                alpha: (1.0 - _controller.brightness).clamp(0.0, 1.0),
+              ),
+            ),
+          ),
         IgnorePointer(
           ignoring: !_controller.chromeVisible,
           child: AnimatedOpacity(

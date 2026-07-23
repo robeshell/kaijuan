@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/readers/book/foliate_js_bridge.dart';
+import 'package:kaijuan/readers/book/foliate_js_bridge.dart';
 
 void main() {
   test('import snapshot parses Foliate metadata and cover data URL', () {

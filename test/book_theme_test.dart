@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/readers/book/book_theme.dart';
+import 'package:kaijuan/readers/book/book_theme.dart';
 
 void main() {
   group('BookReadingTheme tokens', () {

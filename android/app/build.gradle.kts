@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.kaika.reader"
+    namespace = "com.kaijuan.reader"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,7 +15,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.kaika.reader"
+        applicationId = "com.kaijuan.reader"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

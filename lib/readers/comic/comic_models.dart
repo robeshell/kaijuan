@@ -14,6 +14,7 @@ enum ComicReaderMode {
   vertical,
 
   /// Two pages side-by-side when width allows; otherwise single page.
+  /// Paired pages are laid out edge-to-edge (no gutter gap).
   spread;
 
   String get storageValue => name;
@@ -85,6 +86,12 @@ enum ComicReadingTheme {
 
   bool get isDark =>
       this == ComicReadingTheme.dark || this == ComicReadingTheme.pureBlack;
+
+  /// Chrome / control foreground on top of [backgroundArgb].
+  int get foregroundArgb => isDark ? 0xFFF2F2F4 : 0xFF1C1C1E;
+
+  /// Secondary chrome text (page label, captions).
+  int get metaColorArgb => isDark ? 0x99F2F2F4 : 0x991C1C1E;
 
   String get label => switch (this) {
         ComicReadingTheme.paper => '纸白',

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'cover_card_ink.dart';
 
 /// Collage cover for a 合集 card (≈ single book cover size, up to 4 thumbs).
 class CollectionCover extends StatelessWidget {
@@ -20,8 +21,9 @@ class CollectionCover extends StatelessWidget {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
     final paths = coverPaths.take(4).toList();
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
+    return SoftCoverFrame(
+      key: ValueKey(paths.join('|')),
+      radius: borderRadius,
       child: ColoredBox(
         color: semantics.canvas == Colors.white
             ? AppColors.lightWash
@@ -79,6 +81,7 @@ class CollectionCover extends StatelessWidget {
   Widget _thumb(String path, AppSemantics semantics) {
     return Image.file(
       File(path),
+      key: ValueKey(path),
       fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,

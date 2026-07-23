@@ -1,4 +1,4 @@
-package com.kaika.reader
+package com.kaijuan.reader
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -26,7 +26,7 @@ class MainActivity : FlutterActivity() {
         return@setMethodCallHandler
       }
       try {
-        val file = File(cacheDir, "kaika-clipboard.png")
+        val file = File(cacheDir, "kaijuan-clipboard.png")
         file.writeBytes(bytes)
         val uri = FileProvider.getUriForFile(
           this,
@@ -44,6 +44,6 @@ class MainActivity : FlutterActivity() {
   }
 
   companion object {
-    private const val CHANNEL = "com.kaika.reader/clipboard"
+    private const val CHANNEL = "com.kaijuan.reader/clipboard"
   }
 }

@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/readers/book/book_loopback_server.dart';
-import 'package:kaika/readers/book/book_rendition_session.dart';
+import 'package:kaijuan/readers/book/book_loopback_server.dart';
+import 'package:kaijuan/readers/book/book_rendition_session.dart';
 
 void main() {
   _NetworkTestBinding();

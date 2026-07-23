@@ -4,9 +4,9 @@ Release builds for Windows produce up to three artifacts in `dist/`:
 
 | Artifact | Format | Notes |
 |----------|--------|--------|
-| `kaika-x.y.z-windows.zip` | Portable | Unzip and run `kaika.exe` |
-| `kaika-x.y.z-windows.msix` | MSIX | Modern installer; self-signed for sideload |
-| `kaika-x.y.z-windows-setup.exe` | Inno Setup | Classic wizard installer |
+| `kaijuan-x.y.z-windows.zip` | Portable | Unzip and run `kaijuan.exe` |
+| `kaijuan-x.y.z-windows.msix` | MSIX | Modern installer; self-signed for sideload |
+| `kaijuan-x.y.z-windows-setup.exe` | Inno Setup | Classic wizard installer |
 
 ## Build
 
@@ -50,4 +50,4 @@ Partner Center identity values.
 
 - MSIX logo: `macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png`
 - Optional installer icon: add `windows/runner/resources/app_icon.ico` and set
-  `SetupIconFile` in `kaika.iss` if you want a custom Setup wizard icon.
+  `SetupIconFile` in `kaijuan.iss` if you want a custom Setup wizard icon.

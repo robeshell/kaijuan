@@ -4,12 +4,12 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/domain/reader_models.dart';
-import 'package:kaika/library/import/book_import_service.dart';
-import 'package:kaika/library/import/comic_archive.dart';
-import 'package:kaika/library/import/comic_import_service.dart';
-import 'package:kaika/library/persistence/app_database.dart';
-import 'package:kaika/presentation/controllers/library_controller.dart';
+import 'package:kaijuan/domain/reader_models.dart';
+import 'package:kaijuan/library/import/book_import_service.dart';
+import 'package:kaijuan/library/import/comic_archive.dart';
+import 'package:kaijuan/library/import/comic_import_service.dart';
+import 'package:kaijuan/library/persistence/app_database.dart';
+import 'package:kaijuan/presentation/controllers/library_controller.dart';
 import 'package:path/path.dart' as p;
 
 import 'support/fake_epub_import_probe.dart';

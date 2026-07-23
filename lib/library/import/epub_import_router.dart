@@ -4,19 +4,17 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../domain/reader_models.dart';
-import '../../readers/book/foliate_import_probe.dart';
-import '../../readers/book/foliate_js_bridge.dart';
-import 'comic_archive.dart';
 import 'comic_import_service.dart';
 import 'book_import_service.dart';
+import 'epub_kind_probe.dart';
 import 'import_models.dart';
 
 /// Decides whether an EPUB should be treated as a reflow book or a page-image
 /// comic, then imports it through the right service.
 ///
 /// Detection rule:
-/// 1. Probe the package through file-backed readers; never materialize the
-///    complete EPUB as a Dart byte array.
+/// 1. Probe the package through file-backed Dart ZIP/OPF sampling; never open
+///    a WebView and never materialize the complete EPUB as one Dart byte array.
 /// 2. A parsed EPUB defaults to book. Cover art and occasional illustrations
 ///    are valid book resources and must not route it to the comic engine.
 /// 3. It becomes comic only when at least 80% of sampled spine sections are
@@ -38,13 +36,10 @@ class EpubImportRouter {
   /// Returns an [ImportResult] representing exactly one file (added/updated
   /// will be at most 1).
   Future<ImportResult> importOne(String path) async {
-    final detection = await _detectKind(
-      path,
-      probe: bookImport.probe,
-      onTiming: onTiming,
-    );
-    if (detection.kind == ReaderKind.book) {
-      return bookImport.importOne(path, snapshot: detection.snapshot);
+    final kind = await detectKind(path, onTiming: onTiming);
+    if (kind == ReaderKind.book) {
+      // Metadata/cover still use Foliate for book imports only.
+      return bookImport.importOne(path);
     }
     return comicImport.importPaths([path]);
   }
@@ -76,25 +71,13 @@ class EpubImportRouter {
   static const _maxTextPerSectionForComic = 80;
   static const _minimumImageOnlySampleRatio = 0.8;
 
-  /// Inspects the EPUB through bounded, file-backed probes.
+  /// Inspects the EPUB through bounded, file-backed Dart probes (no WebView).
   static Future<ReaderKind> detectKind(
     String path, {
-    EpubImportProbe? probe,
-    ImportTimingListener? onTiming,
-  }) async => (await _detectKind(
-    path,
-    probe: probe ?? const FoliateJsImportProbe(),
-    onTiming: onTiming,
-  )).kind;
-
-  static Future<({ReaderKind kind, FoliateImportSnapshot? snapshot})>
-  _detectKind(
-    String path, {
-    required EpubImportProbe probe,
     ImportTimingListener? onTiming,
   }) async {
     final trace = ImportPipelineTrace(
-      pipeline: 'foliate-probe',
+      pipeline: 'epub-kind-probe',
       sourcePath: path,
       onTiming: onTiming,
     );
@@ -104,47 +87,30 @@ class EpubImportRouter {
     }
     trace.mark('validated');
 
-    FoliateImportSnapshot? snapshot;
-    Object? probeError;
-    try {
-      snapshot = await probe.inspect(path);
-    } catch (error) {
-      probeError = error;
-      // Not a readable reflow EPUB; continue to page-image detection.
-    }
-    trace.mark('text-sampled');
+    final probe = await EpubKindProbe.inspect(path);
+    trace.mark('spine-sampled');
 
-    // --- Image listing -------------------------------------------------
-    final listing = await ComicArchive.listPagesDetailed(path);
-    final imageCount = listing.pageNames.length;
-    trace.mark('images-listed');
-
-    // --- Decision ------------------------------------------------------
-    final sectionCount = snapshot?.sectionCount ?? 0;
-    final sampledSectionCount = snapshot?.sampledSections ?? 0;
-    final sampledImageOnlySectionCount =
-        snapshot?.sampledImageOnlySections ?? 0;
-    final totalBookText = snapshot?.totalTextLength ?? 0;
-    final avgTextPerSection = sampledSectionCount > 0
-        ? totalBookText / sampledSectionCount
+    final avgTextPerSection = probe.sampledSectionCount > 0
+        ? probe.totalTextLength / probe.sampledSectionCount
         : 0.0;
 
     if (kDebugMode) {
       debugPrint(
         '[EpubImportRouter] ${p.basename(path)}\n'
-        '  book sections=$sectionCount sampled=$sampledSectionCount '
-        'imageOnly=$sampledImageOnlySectionCount totalText=$totalBookText'
+        '  sections=${probe.sectionCount} sampled=${probe.sampledSectionCount} '
+        'imageOnly=${probe.sampledImageOnlySections} '
+        'totalText=${probe.totalTextLength}'
         ' avgText=${avgTextPerSection.toStringAsFixed(0)}\n'
-        '  images=$imageCount',
+        '  images=${probe.imageCount}',
       );
     }
 
     final kind = classifyMetrics(
-      sectionCount: sectionCount,
-      sampledSectionCount: sampledSectionCount,
-      sampledImageOnlySectionCount: sampledImageOnlySectionCount,
-      totalBookText: totalBookText,
-      imageCount: imageCount,
+      sectionCount: probe.sectionCount,
+      sampledSectionCount: probe.sampledSectionCount,
+      sampledImageOnlySectionCount: probe.sampledImageOnlySections,
+      totalBookText: probe.totalTextLength,
+      imageCount: probe.imageCount,
     );
     if (kind != null) {
       if (kDebugMode) {
@@ -155,13 +121,10 @@ class EpubImportRouter {
         );
       }
       trace.mark('classified');
-      return (kind: kind, snapshot: snapshot);
+      return kind;
     }
 
     trace.mark('unrecognized');
-    if (probeError is FoliateImportException) {
-      throw ImportException('无法识别 EPUB：${probeError.message}');
-    }
     throw const ImportException('无法识别：页图请用 CBZ/ZIP 等图包格式，正文 EPUB 需含可读章节');
   }
 

@@ -585,7 +585,7 @@ class AppDatabase extends _$AppDatabase {
 
   // --- Collections (合集) ---------------------------------------------------
 
-  Stream<List<CollectionSummary>> watchCollections({bool? onShelfOnly}) {
+  Stream<List<CollectionSummary>> watchCollections({bool? onShelfOnly}) async* {
     final query = select(collections)
       ..orderBy([
         (t) => OrderingTerm.asc(t.sortOrder),
@@ -594,13 +594,15 @@ class AppDatabase extends _$AppDatabase {
     if (onShelfOnly == true) {
       query.where((t) => t.onShelf.equals(true));
     }
-    return query.watch().asyncMap((rows) async {
+    // await-for (not asyncMap): process each table tick fully before the next
+    // so rapid member removals cannot emit a stale coverPaths after a newer one.
+    await for (final rows in query.watch()) {
       final out = <CollectionSummary>[];
       for (final c in rows) {
         out.add(await _collectionSummary(c));
       }
-      return out;
-    });
+      yield out;
+    }
   }
 
   /// Shelf strip: on-shelf collections (non-empty preferred first via sort).
@@ -729,6 +731,22 @@ class AppDatabase extends _$AppDatabase {
   }) async {
     await (delete(collectionMembers)..where(
           (t) => t.collectionId.equals(collectionId) & t.itemId.equals(itemId),
+        ))
+        .go();
+    await (update(collections)..where((t) => t.id.equals(collectionId))).write(
+      CollectionsCompanion(updatedAt: Value(DateTime.now())),
+    );
+  }
+
+  Future<void> removeItemsFromCollection({
+    required String collectionId,
+    required Iterable<String> itemIds,
+  }) async {
+    final ids = itemIds.toList();
+    if (ids.isEmpty) return;
+    await (delete(collectionMembers)..where(
+          (t) =>
+              t.collectionId.equals(collectionId) & t.itemId.isIn(ids),
         ))
         .go();
     await (update(collections)..where((t) => t.id.equals(collectionId))).write(

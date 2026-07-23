@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/readers/comic/comic_session.dart';
+import 'package:kaijuan/readers/comic/comic_session.dart';
 import 'package:path/path.dart' as p;
 
 final _pngBytes = Uint8List.fromList(<int>[

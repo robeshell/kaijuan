@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:kaika/readers/book/foliate_import_probe.dart';
-import 'package:kaika/readers/book/foliate_js_bridge.dart';
+import 'package:kaijuan/readers/book/foliate_import_probe.dart';
+import 'package:kaijuan/readers/book/foliate_js_bridge.dart';
 
 class FakeEpubImportProbe implements EpubImportProbe {
   FakeEpubImportProbe(this.handler);

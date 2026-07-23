@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Design tokens for KaikaNext, following docs/DESIGN_FOUNDATION.md.
+/// Design tokens for kaijuan, following docs/DESIGN_FOUNDATION.md.
 ///
 /// Three layers: primitive tokens (this file's constants) → semantic tokens
 /// ([AppSemantics]) → theme assembly ([AppTheme]). Business UI must only

@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Channel name must match Windows runner (`flutter_window.cpp`).
-const _channel = MethodChannel('com.kaika.kaika/window');
+const _channel = MethodChannel('com.kaijuan.reader/window');
 
 StreamController<bool>? _maximizedController;
 bool _windowEventHandlerInstalled = false;

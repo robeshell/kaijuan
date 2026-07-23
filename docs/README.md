@@ -1,6 +1,6 @@
-# KaikaNext 文档索引
+# kaijuan 文档索引
 
-仓库实现 **一个本地阅读 App**（Kaika），内建漫画页图引擎 + 图书 reflow 引擎。  
+仓库实现 **一个本地阅读 App**（开卷），内建漫画页图引擎 + 图书 reflow 引擎。  
 权威与扩展方法以本页为准。
 
 ## 读哪份
@@ -35,7 +35,7 @@ docs/
   specs/
     _TEMPLATE.md
     library.md / shelf.md / search.md / lists.md / collections.md
-    reader-chrome.md / book-reader.md
+    reader-chrome.md / comic-reader.md / book-reader.md
     book-reader-tool-strip-plan.md   ← 图书底栏工具条大改（计划）
     book-tts.md                      ← 听书方案（系统 TTS，不接 AI）
   opendesign/

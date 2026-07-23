@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/library/import/import_staging.dart';
+import 'package:kaijuan/library/import/import_staging.dart';
 
 void main() {
   late Directory supportDirectory;

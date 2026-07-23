@@ -25,7 +25,9 @@ class ComicReaderController extends ChangeNotifier {
       _mode = readingPreferences?.mode ?? ComicReaderMode.slide,
       _direction = readingPreferences?.direction ?? ComicReadDirection.ltr,
       _readingTheme =
-          readingPreferences?.readingTheme ?? ComicReadingTheme.comicDefault;
+          readingPreferences?.readingTheme ?? ComicReadingTheme.comicDefault,
+      _brightness = readingPreferences?.brightness ??
+          ComicReadingPreferences.defaultBrightness;
 
   final AppDatabase _database;
   final ReadingItem item;
@@ -40,6 +42,7 @@ class ComicReaderController extends ChangeNotifier {
   ComicReaderMode _mode;
   ComicReadDirection _direction;
   ComicReadingTheme _readingTheme;
+  double _brightness;
   bool _ready = false;
   bool _disposed = false;
   List<ReaderBookmark> _bookmarks = const [];
@@ -58,6 +61,7 @@ class ComicReaderController extends ChangeNotifier {
   ComicReaderMode get mode => _mode;
   ComicReadDirection get direction => _direction;
   ComicReadingTheme get readingTheme => _readingTheme;
+  double get brightness => _brightness;
   int get displayPage => _sliderPreview ?? _pageIndex;
   List<ReaderBookmark> get bookmarks => _bookmarks;
 
@@ -212,6 +216,35 @@ class ComicReaderController extends ChangeNotifier {
     unawaited(_readingPreferences?.setReadingTheme(theme));
   }
 
+  Future<void> setBrightness(double value) async {
+    final next = value
+        .clamp(
+          ComicReadingPreferences.minBrightness,
+          ComicReadingPreferences.maxBrightness,
+        )
+        .toDouble();
+    if (next == _brightness) {
+      await _readingPreferences?.setBrightness(next);
+      return;
+    }
+    _brightness = next;
+    notifyListeners();
+    await _readingPreferences?.setBrightness(next);
+  }
+
+  /// Live dimming while dragging; persist with [setBrightness] on drag end.
+  void previewBrightness(double value) {
+    final next = value
+        .clamp(
+          ComicReadingPreferences.minBrightness,
+          ComicReadingPreferences.maxBrightness,
+        )
+        .toDouble();
+    if (next == _brightness) return;
+    _brightness = next;
+    notifyListeners();
+  }
+
   /// Semantic "next" — toward the end of the book.
   /// In spread mode, advances by one spread (two pages).
   void goForward() {
@@ -261,6 +294,32 @@ class ComicReaderController extends ChangeNotifier {
     final target = value.round().clamp(0, total - 1);
     _sliderPreview = null;
     jumpTo(target);
+  }
+
+  /// Seek by 0…1 fraction of the book (tool-strip scrubber).
+  void seekToFraction(double fraction) {
+    final total = pageCount;
+    if (total <= 0) return;
+    if (total == 1) {
+      jumpTo(0);
+      return;
+    }
+    final target = (fraction.clamp(0.0, 1.0) * (total - 1)).round();
+    _sliderPreview = null;
+    jumpTo(target);
+  }
+
+  void previewFraction(double fraction) {
+    final total = pageCount;
+    if (total <= 0) return;
+    if (total == 1) {
+      _sliderPreview = 0;
+      notifyListeners();
+      return;
+    }
+    _sliderPreview =
+        (fraction.clamp(0.0, 1.0) * (total - 1)).round().clamp(0, total - 1);
+    notifyListeners();
   }
 
   /// Spread layout for [anchor] (primary page index).

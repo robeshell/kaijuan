@@ -1,7 +1,7 @@
-name: kaika
-description: "Kaika — a local reader for page-image and reflow content."
+name: kaijuan
+description: "开卷 — a local reader for page-image and reflow content."
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.1.1+2
 
 environment:
   sdk: ^3.12.2
@@ -22,6 +22,7 @@ dependencies:
 
   # Import & identity
   file_selector: ^1.1.0
+  file_picker: ^12.0.0-beta.7
   crypto: ^3.0.7
   archive: ^4.0.7
 
@@ -46,10 +47,10 @@ dev_dependencies:
 # Windows MSIX packaging (used by `dart run tool/release.dart windows`).
 # Version is overridden at release time from the pubspec version field.
 msix_config:
-  display_name: Kaika
-  publisher_display_name: com.kaika.reader
-  identity_name: com.kaika.reader
-  publisher: CN=com.kaika.reader
+  display_name: 开卷
+  publisher_display_name: com.kaijuan.reader
+  identity_name: com.kaijuan.reader
+  publisher: CN=com.kaijuan.reader
   msix_version: 0.1.0.1
   logo_path: macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
   capabilities: internetClient, privateNetworkClientServer

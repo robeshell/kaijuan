@@ -3,12 +3,10 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../readers/comic/comic_models.dart';
 
-/// Single-app product configuration for Kaika.
+/// Single-app product configuration for 开卷 (`kaijuan`).
 ///
-/// The previous dual-brand (page-image / reflow) split has been collapsed into
-/// one local reader App with two reader engines. Existing installs keep their
-/// data because [databaseName] and [storageNamespace] still point at the legacy
-/// layout (`app_library` in the support root).
+/// Dual engines (comic page-image + book reflow) share one install, one
+/// [applicationId], and one library database (`app_library`).
 class BrandConfig {
   const BrandConfig({
     required this.displayName,
@@ -43,8 +41,8 @@ class BrandConfig {
 
   /// The only supported app configuration.
   static const app = BrandConfig(
-    displayName: 'Kaika',
-    applicationId: 'com.kaika.reader',
+    displayName: '开卷',
+    applicationId: 'com.kaijuan.reader',
     databaseName: 'app_library',
     storageNamespace: '',
     defaultAccent: AccentPreset(

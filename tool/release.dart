@@ -1,19 +1,20 @@
 import 'dart:io';
 
 const _knownPlatforms = {'android', 'ios', 'macos', 'windows'};
-const _artifactPrefix = 'kaika';
+const _artifactPrefix = 'kaijuan';
 const _macosAppCandidates = [
+  'build/macos/Build/Products/Release/开卷.app',
   'build/macos/Build/Products/Release/Kaika.app',
-  'build/macos/Build/Products/Release/kaika.app',
+  'build/macos/Build/Products/Release/kaijuan.app',
 ];
-const _windowsIss = 'packaging/windows/kaika.iss';
-const _publisher = 'com.kaika.reader';
+const _windowsIss = 'packaging/windows/kaijuan.iss';
+const _publisher = 'com.kaijuan.reader';
 
 Future<void> main(List<String> arguments) async {
   final options = _ReleaseOptions.parse(arguments);
   final pubspec = File('pubspec.yaml');
   if (!pubspec.existsSync()) {
-    stderr.writeln('Run this command from the Kaika repository root.');
+    stderr.writeln('Run this command from the kaijuan repository root.');
     exitCode = 64;
     return;
   }
@@ -27,7 +28,7 @@ Future<void> main(List<String> arguments) async {
   _validatePlatforms(platforms);
 
   stdout.writeln(
-    'Kaika ${current.name} → ${release.name} '
+    '开卷 ${current.name} → ${release.name} '
     '(internal build ${release.buildNumber})',
   );
   stdout.writeln('Platforms: ${platforms.join(', ')}');
@@ -95,9 +96,9 @@ class _ReleaseOptions {
             '  --skip-codegen  Skip drift build_runner (if lib is already generated).\n'
             '\n'
             'Windows artifacts (when tools are available):\n'
-            '  dist/kaika-x.y.z-windows.zip         portable\n'
-            '  dist/kaika-x.y.z-windows.msix        MSIX installer\n'
-            '  dist/kaika-x.y.z-windows-setup.exe   classic Setup.exe\n',
+            '  dist/kaijuan-x.y.z-windows.zip         portable\n'
+            '  dist/kaijuan-x.y.z-windows.msix        MSIX installer\n'
+            '  dist/kaijuan-x.y.z-windows-setup.exe   classic Setup.exe\n',
           );
           exit(0);
         case 'all':

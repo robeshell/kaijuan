@@ -3,12 +3,12 @@ import 'dart:io';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/app/book_reading_preferences.dart';
-import 'package:kaika/domain/reader_models.dart';
-import 'package:kaika/library/persistence/app_database.dart';
-import 'package:kaika/presentation/controllers/book_reader_controller.dart';
-import 'package:kaika/readers/book/book_models.dart';
-import 'package:kaika/readers/book/book_theme.dart';
+import 'package:kaijuan/app/book_reading_preferences.dart';
+import 'package:kaijuan/domain/reader_models.dart';
+import 'package:kaijuan/library/persistence/app_database.dart';
+import 'package:kaijuan/presentation/controllers/book_reader_controller.dart';
+import 'package:kaijuan/readers/book/book_models.dart';
+import 'package:kaijuan/readers/book/book_theme.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -76,21 +76,69 @@ class ListsScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _listMenu(BuildContext context, ReadingListSummary s) async {
+    await showAppSheet<void>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppSheetTile(
+                icon: Icons.edit_outlined,
+                title: '重命名',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final name = await _promptName(
+                    context,
+                    title: '重命名书单',
+                    initial: s.list.name,
+                  );
+                  if (name == null || name.isEmpty) return;
+                  await controller.renameReadingList(s.list.id, name);
+                },
+              ),
+              AppSheetTile(
+                icon: Icons.delete_outline,
+                title: '删除书单',
+                destructive: true,
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final ok = await showAppConfirmDialog(
+                    context,
+                    title: '删除书单？',
+                    message: '删除「${s.list.name}」不会删除书库里的条目。',
+                    confirmLabel: '删除',
+                    destructive: true,
+                  );
+                  if (ok == true) {
+                    await controller.deleteReadingList(s.list.id);
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
+    final wide = MediaQuery.sizeOf(context).width >= 720;
+    final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
       backgroundColor: semantics.canvas,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Top inset via app-level [DesktopTitleBarMediaQuery] + SafeArea.
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
+              padding: EdgeInsets.fromLTRB(4, wide ? 12 : 8, 8, 4),
               child: Row(
                 children: [
                   IconButton(
@@ -111,15 +159,13 @@ class ListsScreen extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  TextButton.icon(
+                  IconButton(
+                    tooltip: '新建书单',
                     onPressed: () => _create(context),
-                    icon: Icon(Icons.add, size: 18, weight: 300, color: accent),
-                    label: Text(
-                      '新建',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: accent,
-                      ),
+                    icon: Icon(
+                      Icons.add,
+                      weight: 300,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ],
@@ -141,33 +187,41 @@ class ListsScreen extends StatelessWidget {
                 final lists = snapshot.data ?? const <ReadingListSummary>[];
                 if (lists.isEmpty) {
                   return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '还没有书单',
-                          style: TextStyle(color: semantics.textSecondary),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '创建后可在条目详情或书库多选里加入',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: semantics.textSecondary,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '还没有书单',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: semantics.textSecondary,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: () => _create(context),
-                          icon: const Icon(Icons.add, weight: 300),
-                          label: const Text('新建书单'),
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          Text(
+                            '在书库多选里加入即可',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: semantics.textSecondary.withValues(
+                                alpha: 0.85,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          TextButton(
+                            onPressed: () => _create(context),
+                            child: const Text('新建书单'),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 }
                 return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
                   itemCount: lists.length,
                   separatorBuilder: (_, _) =>
                       Divider(height: 1, color: semantics.hairline),
@@ -175,52 +229,24 @@ class ListsScreen extends StatelessWidget {
                     final s = lists[i];
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
+                        horizontal: 4,
+                        vertical: 6,
                       ),
                       leading: Icon(
                         Icons.playlist_play_outlined,
-                        color: accent,
+                        color: semantics.textSecondary,
                         weight: 300,
                       ),
                       title: Text(
                         s.list.name,
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
-                      subtitle: Text('${s.memberCount} 本'),
-                      trailing: PopupMenuButton<String>(
-                        tooltip: '',
-                        onSelected: (value) async {
-                          switch (value) {
-                            case 'rename':
-                              final name = await _promptName(
-                                context,
-                                title: '重命名书单',
-                                initial: s.list.name,
-                              );
-                              if (name == null || name.isEmpty) return;
-                              await controller.renameReadingList(
-                                s.list.id,
-                                name,
-                              );
-                            case 'delete':
-                              final ok = await showAppConfirmDialog(
-                                context,
-                                title: '删除书单？',
-                                message:
-                                    '删除「${s.list.name}」不会删除书库里的条目。',
-                                confirmLabel: '删除',
-                                destructive: true,
-                              );
-                              if (ok == true) {
-                                await controller.deleteReadingList(s.list.id);
-                              }
-                          }
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'rename', child: Text('重命名')),
-                          PopupMenuItem(value: 'delete', child: Text('删除')),
-                        ],
+                      subtitle: Text(
+                        '${s.memberCount} 本',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: semantics.textSecondary,
+                        ),
                       ),
                       onTap: () {
                         Navigator.of(context).push(
@@ -236,6 +262,7 @@ class ListsScreen extends StatelessWidget {
                           ),
                         );
                       },
+                      onLongPress: () => _listMenu(context, s),
                     );
                   },
                 );
@@ -268,97 +295,125 @@ class _ListDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
+    final wide = MediaQuery.sizeOf(context).width >= 720;
+    final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
       backgroundColor: semantics.canvas,
-      appBar: AppBar(
-        title: Text(list.name),
-        backgroundColor: semantics.canvas,
-        surfaceTintColor: Colors.transparent,
-        // Respects app-level desktop title-bar MediaQuery padding.
-        primary: true,
-      ),
-      body: StreamBuilder<List<ReadingItem>>(
-        stream: controller.watchListMembers(list.id),
-        builder: (context, snapshot) {
-          final items = snapshot.data ?? const <ReadingItem>[];
-          if (items.isEmpty) {
-            return Center(
-              child: Text(
-                '书单为空\n在书库条目详情里加入',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: semantics.textSecondary,
-                  height: 1.5,
-                ),
-              ),
-            );
-          }
-          return GridView.builder(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 160,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 16,
-              childAspectRatio: 0.58,
-            ),
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final item = items[i];
-              return InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => openItem(context, item),
-                onLongPress: () async {
-                  final ok = await showAppConfirmDialog(
-                    context,
-                    title: '移出书单？',
-                    message: '从「${list.name}」移除「${item.title}」',
-                    confirmLabel: '移出',
-                  );
-                  if (ok == true) {
-                    await controller.removeItemFromList(
-                      listId: list.id,
-                      itemId: item.id,
-                    );
-                  }
-                },
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: item.coverPath != null
-                            ? Image.file(
-                                File(item.coverPath!),
-                                fit: BoxFit.cover,
-                                width: double.infinity,
-                                errorBuilder: (_, _, _) =>
-                                    ColoredBox(color: semantics.canvas),
-                              )
-                            : ColoredBox(color: semantics.canvas),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(4, wide ? 12 : 8, 8, 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '返回',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: Icon(
+                      Icons.arrow_back_outlined,
+                      weight: 300,
+                      color: semantics.textPrimary,
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      list.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.3,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 16,
-                      child: Text(
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<ReadingItem>>(
+              stream: controller.watchListMembers(list.id),
+              builder: (context, snapshot) {
+                final items = snapshot.data ?? const <ReadingItem>[];
+                if (items.isEmpty) {
+                  return Center(
+                    child: Text(
+                      '书单为空\n在书库多选里加入',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: semantics.textSecondary,
+                        height: 1.5,
+                      ),
+                    ),
+                  );
+                }
+                // Spec: 书单内容 = 竖向长列表（小封面 + 标题）.
+                return ListView.separated(
+                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) =>
+                      Divider(height: 1, color: semantics.hairline),
+                  itemBuilder: (context, i) {
+                    final item = items[i];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 8,
+                      ),
+                      leading: SizedBox(
+                        width: 40,
+                        height: 56,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: item.coverPath != null
+                              ? Image.file(
+                                  File(item.coverPath!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      ColoredBox(color: semantics.canvas),
+                                )
+                              : ColoredBox(color: AppColors.lightWash),
+                        ),
+                      ),
+                      title: Text(
                         item.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          height: 1.2,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        item.format.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: semantics.textSecondary,
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          );
-        },
+                      onTap: () => openItem(context, item),
+                      onLongPress: () async {
+                        final ok = await showAppConfirmDialog(
+                          context,
+                          title: '移出书单？',
+                          message: '从「${list.name}」移除「${item.title}」',
+                          confirmLabel: '移出',
+                        );
+                        if (ok == true) {
+                          await controller.removeItemFromList(
+                            listId: list.id,
+                            itemId: item.id,
+                          );
+                        }
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -4,14 +4,14 @@
 
 ## 0. 当前结论
 
-KaikaNext 图书 reflow 主链已切到 Anx Reader 的 `foliate-js + flutter_inappwebview`。选区两段式菜单 + 划线/高亮/笔记已可用（写改存 note；目录抽屉「目录|书签|笔记」）；规范见 [book-reader.md](./specs/book-reader.md)。本刀已落地：③ 书内搜索 + 看大图；书摘金句卡。听书见 [specs/book-tts.md](./specs/book-tts.md)（方案）。词典/翻译暂缓。
+kaijuan 图书 reflow 主链已切到 Anx Reader 的 `foliate-js + flutter_inappwebview`。选区两段式菜单 + 划线/高亮/笔记已可用（写改存 note；目录抽屉「目录|书签|笔记」）；规范见 [book-reader.md](./specs/book-reader.md)。本刀已落地：③ 书内搜索 + 看大图；书摘金句卡。听书见 [specs/book-tts.md](./specs/book-tts.md)（方案）。词典/翻译暂缓。
 
 ## 1. 本轮已完成的改造
 
 ### App 与产品入口
 
 - 单 App、单入口 `lib/main.dart`、单数据库 `app_library`、漫画/图书双引擎按 `ReadingItem.kind` 路由。
-- Android product flavor 已移除，普通 `flutter run` / `assembleDebug` 可构建；applicationId/namespace 收口到 `com.kaika.reader`。
+- Android product flavor 已移除，普通 `flutter run` / `assembleDebug` 可构建；applicationId/namespace 收口到 `com.kaijuan.reader`。
 - App 设置页中的阅读设置已移除；漫画和图书设置只保留在各自阅读器内。
 - 桌面图书阅读器只开放翻页模式，移动端保留翻页/滚动；能力判断集中在 `BookReaderCapabilities`，controller 也做二次约束。
 - 书库窄屏批量选择栏改为菜单，修掉 Android `RenderFlex overflow` 黄黑条。

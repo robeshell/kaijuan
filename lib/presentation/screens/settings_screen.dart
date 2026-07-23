@@ -22,16 +22,16 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
+    final wide = MediaQuery.sizeOf(context).width >= 720;
+    final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
       backgroundColor: semantics.canvas,
       body: ListenableBuilder(
         listenable: themePreferences,
         builder: (context, _) {
-          // Parent shell SafeArea already applies desktop top inset; keep
-          // bottom/start padding only. Nested SafeArea would zero out top.
           return ListView(
-            padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
+            padding: EdgeInsets.fromLTRB(hPad, wide ? 24 : 16, hPad, 40),
             children: [
               const Text(
                 '设置',
@@ -41,66 +41,79 @@ class SettingsScreen extends StatelessWidget {
                   letterSpacing: -0.4,
                 ),
               ),
-              const SizedBox(height: 24),
-              const Text(
-                '外观',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<ThemeMode>(
-                segments: const [
-                  ButtonSegment(value: ThemeMode.system, label: Text('跟随系统')),
-                  ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
-                  ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
-                ],
-                selected: {themePreferences.themeMode},
-                onSelectionChanged: (s) =>
-                    themePreferences.setThemeMode(s.first),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                '强调色',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-              ),
+              const SizedBox(height: 28),
+              _SectionLabel('外观'),
+              const SizedBox(height: 4),
+              for (final mode in const [
+                (ThemeMode.system, '跟随系统'),
+                (ThemeMode.light, '浅色'),
+                (ThemeMode.dark, '深色'),
+              ])
+                _ChoiceRow(
+                  label: mode.$2,
+                  selected: themePreferences.themeMode == mode.$1,
+                  onTap: () => themePreferences.setThemeMode(mode.$1),
+                ),
+              const SizedBox(height: 20),
+              _SectionLabel('强调色'),
               const SizedBox(height: 12),
               Wrap(
-                spacing: 12,
-                runSpacing: 12,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
                   for (final preset in AppColors.accentPresets)
-                    GestureDetector(
-                      onTap: () => themePreferences.setAccent(preset),
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: preset.color,
-                          shape: BoxShape.circle,
-                          border: preset.id == themePreferences.accent.id
-                              ? Border.all(
-                                  color: semantics.textPrimary,
-                                  width: 3,
-                                )
-                              : null,
+                    Tooltip(
+                      message: preset.label,
+                      child: GestureDetector(
+                        onTap: () => themePreferences.setAccent(preset),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: preset.color,
+                            border: Border.all(
+                              color: preset.id == themePreferences.accent.id
+                                  ? semantics.textPrimary
+                                  : Colors.transparent,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: preset.id == themePreferences.accent.id
+                                ? const Icon(
+                                    Icons.circle,
+                                    size: 8,
+                                    color: Colors.white,
+                                  )
+                                : null,
+                          ),
                         ),
-                        child: preset.id == themePreferences.accent.id
-                            ? const Icon(
-                                Icons.check,
-                                color: Colors.white,
-                                size: 18,
-                              )
-                            : null,
                       ),
                     ),
                 ],
               ),
               const SizedBox(height: 32),
-              const Text(
-                '关于',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              _SectionLabel('关于'),
+              const SizedBox(height: 8),
+              Text(
+                brand.displayName,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '本机阅读 · 不上传',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: semantics.textSecondary,
+                ),
               ),
               const SizedBox(height: 12),
-              _AboutCard(brand: brand),
+              Divider(height: 1, color: semantics.hairline),
+              _AboutBlock(brand: brand),
             ],
           );
         },
@@ -109,131 +122,127 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-class _AboutCard extends StatefulWidget {
-  const _AboutCard({required this.brand});
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
 
-  final BrandConfig brand;
-
-  @override
-  State<_AboutCard> createState() => _AboutCardState();
-}
-
-class _AboutCardState extends State<_AboutCard> {
-  late final Future<PackageInfo> _infoFuture = PackageInfo.fromPlatform();
-
-  String get _tagline => '本地漫画与图书阅读 · CBZ / ZIP / EPUB';
-
-  String get _blurb => '文件与进度保存在本机，不上传、不刮削云端。EPUB 按内容自动进入页图或正文阅读器。';
-
-  String get _formatsLabel =>
-      widget.brand.importExtensions.map((e) => e.toUpperCase()).join(' · ');
+  final String text;
 
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: semantics.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: semantics.hairline),
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.2,
+        color: semantics.textSecondary,
       ),
-      child: FutureBuilder<PackageInfo>(
-        future: _infoFuture,
-        builder: (context, snapshot) {
-          final info = snapshot.data;
-          final version = info == null
-              ? '…'
-              : '${info.version} (${info.buildNumber})';
+    );
+  }
+}
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.auto_stories_outlined,
-                      color: accent,
-                      size: 26,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.brand.displayName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _tagline,
-                          style: TextStyle(
-                            color: semantics.textSecondary,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                _blurb,
+class _ChoiceRow extends StatelessWidget {
+  const _ChoiceRow({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final semantics = Theme.of(context).extension<AppSemantics>()!;
+    return InkWell(
+      onTap: onTap,
+      splashFactory: NoSplash.splashFactory,
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
                 style: TextStyle(
-                  color: semantics.textSecondary,
-                  fontSize: 13,
-                  height: 1.45,
+                  fontSize: 15,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: semantics.textPrimary,
                 ),
               ),
-              const SizedBox(height: 16),
-              Divider(height: 1, color: semantics.hairline),
-              const SizedBox(height: 8),
-              _AboutRow(
-                label: '版本',
-                value: version,
-                onCopy: info == null
-                    ? null
-                    : () => _copy(context, version, '已复制版本号'),
+            ),
+            if (selected)
+              Icon(
+                Icons.check,
+                size: 18,
+                weight: 300,
+                color: Theme.of(context).colorScheme.primary,
               ),
-              _AboutRow(
-                label: '包名',
-                value: widget.brand.applicationId,
-                onCopy: () =>
-                    _copy(context, widget.brand.applicationId, '已复制包名'),
-              ),
-              _AboutRow(label: '支持格式', value: _formatsLabel),
-              if (!kIsWeb)
-                _AboutRow(label: '平台', value: defaultTargetPlatform.name),
-              _AboutRow(
-                label: '诊断',
-                value: '导入 / 打开耗时',
-                onCopy: () => _copy(
-                  context,
-                  PipelineDiagnostics.instance.exportText(),
-                  '已复制导入 / 打开诊断',
-                ),
-              ),
-            ],
-          );
-        },
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _AboutBlock extends StatefulWidget {
+  const _AboutBlock({required this.brand});
+
+  final BrandConfig brand;
+
+  @override
+  State<_AboutBlock> createState() => _AboutBlockState();
+}
+
+class _AboutBlockState extends State<_AboutBlock> {
+  late final Future<PackageInfo> _infoFuture = PackageInfo.fromPlatform();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<PackageInfo>(
+      future: _infoFuture,
+      builder: (context, snapshot) {
+        final info = snapshot.data;
+        final version = info == null
+            ? '…'
+            : '${info.version} (${info.buildNumber})';
+        final formats = widget.brand.importExtensions
+            .map((e) => e.toUpperCase())
+            .join(' · ');
+
+        return Column(
+          children: [
+            _AboutRow(
+              label: '版本',
+              value: version,
+              onCopy: info == null
+                  ? null
+                  : () => _copy(context, version, '已复制版本号'),
+            ),
+            _AboutRow(
+              label: '包名',
+              value: widget.brand.applicationId,
+              onCopy: () =>
+                  _copy(context, widget.brand.applicationId, '已复制包名'),
+            ),
+            _AboutRow(label: '格式', value: formats),
+            if (!kIsWeb)
+              _AboutRow(label: '平台', value: defaultTargetPlatform.name),
+            _AboutRow(
+              label: '诊断',
+              value: '导入 / 打开耗时',
+              onCopy: () => _copy(
+                context,
+                PipelineDiagnostics.instance.exportText(),
+                '已复制诊断',
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -255,12 +264,12 @@ class _AboutRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 72,
+            width: 56,
             child: Text(
               label,
               style: TextStyle(fontSize: 13, color: semantics.textSecondary),
@@ -281,6 +290,7 @@ class _AboutRow extends StatelessWidget {
               icon: Icon(
                 Icons.copy_outlined,
                 size: 16,
+                weight: 300,
                 color: semantics.textSecondary,
               ),
               onPressed: onCopy,

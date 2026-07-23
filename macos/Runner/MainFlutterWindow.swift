@@ -43,7 +43,7 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     let channel = FlutterMethodChannel(
-      name: "com.kaika.reader/clipboard",
+      name: "com.kaijuan.reader/clipboard",
       binaryMessenger: flutterViewController.engine.binaryMessenger)
     channel.setMethodCallHandler { call, result in
       guard call.method == "copyImagePng" else {

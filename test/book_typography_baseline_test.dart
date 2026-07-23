@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/app/book_reading_preferences.dart';
-import 'package:kaika/readers/book/book_theme.dart';
-import 'package:kaika/readers/book/foliate_js_bridge.dart';
+import 'package:kaijuan/app/book_reading_preferences.dart';
+import 'package:kaijuan/readers/book/book_theme.dart';
+import 'package:kaijuan/readers/book/foliate_js_bridge.dart';
 
 void main() {
   test('Kaika reading face is WeChat-like sans, not system-ui alone', () {

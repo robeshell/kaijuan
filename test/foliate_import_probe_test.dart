@@ -4,13 +4,13 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/domain/reader_models.dart';
-import 'package:kaika/library/import/comic_archive.dart';
-import 'package:kaika/library/import/epub_import_router.dart';
-import 'package:kaika/readers/book/book_loopback_server.dart';
-import 'package:kaika/readers/book/book_rendition_session.dart';
-import 'package:kaika/readers/book/foliate_import_probe.dart';
-import 'package:kaika/readers/book/foliate_js_bridge.dart';
+import 'package:kaijuan/domain/reader_models.dart';
+import 'package:kaijuan/library/import/comic_archive.dart';
+import 'package:kaijuan/library/import/epub_import_router.dart';
+import 'package:kaijuan/readers/book/book_loopback_server.dart';
+import 'package:kaijuan/readers/book/book_rendition_session.dart';
+import 'package:kaijuan/readers/book/foliate_import_probe.dart';
+import 'package:kaijuan/readers/book/foliate_js_bridge.dart';
 import 'package:path/path.dart' as p;
 
 final _pngBytes = Uint8List.fromList(<int>[

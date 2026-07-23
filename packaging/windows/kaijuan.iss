@@ -1,23 +1,23 @@
-; Inno Setup 6 script for Kaika (Windows desktop).
+; Inno Setup 6 script for 开卷 (Windows desktop).
 ; Compiled by tool/release.dart via ISCC with /DMyAppVersion=x.y.z etc.
 ;
 ; Install Inno Setup 6: https://jrsoftware.org/isinfo.php
 ;   winget install --id JRSoftware.InnoSetup -e
 
 #ifndef MyAppName
-  #define MyAppName "Kaika"
+  #define MyAppName "开卷"
 #endif
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
 #endif
 #ifndef MyAppPublisher
-  #define MyAppPublisher "com.kaika.reader"
+  #define MyAppPublisher "com.kaijuan.reader"
 #endif
 #ifndef MyAppURL
-  #define MyAppURL "https://github.com/kaika/kaika"
+  #define MyAppURL "https://github.com/robeshell/kaijuan"
 #endif
 #ifndef MyAppExeName
-  #define MyAppExeName "kaika.exe"
+  #define MyAppExeName "kaijuan.exe"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\..\build\windows\x64\runner\Release"
@@ -26,7 +26,7 @@
   #define OutputDir "..\..\dist"
 #endif
 #ifndef OutputBaseFilename
-  #define OutputBaseFilename "kaika-" + MyAppVersion + "-windows-setup"
+  #define OutputBaseFilename "kaijuan-" + MyAppVersion + "-windows-setup"
 #endif
 
 [Setup]

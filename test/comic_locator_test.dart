@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/domain/reader_models.dart';
-import 'package:kaika/readers/comic/comic_models.dart';
+import 'package:kaijuan/domain/reader_models.dart';
+import 'package:kaijuan/readers/comic/comic_models.dart';
 
 void main() {
   group('ComicLocator', () {

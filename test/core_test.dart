@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/core/theme.dart';
-import 'package:kaika/domain/reader_models.dart';
-import 'package:kaika/library/import/comic_archive.dart';
+import 'package:kaijuan/core/theme.dart';
+import 'package:kaijuan/domain/reader_models.dart';
+import 'package:kaijuan/library/import/comic_archive.dart';
 
 void main() {
   group('AppColors.presetById', () {

@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.kaika" "\0"
-            VALUE "FileDescription", "kaika" "\0"
+            VALUE "CompanyName", "com.kaijuan" "\0"
+            VALUE "FileDescription", "开卷" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "kaika" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.kaika. All rights reserved." "\0"
-            VALUE "OriginalFilename", "kaika.exe" "\0"
-            VALUE "ProductName", "kaika" "\0"
+            VALUE "InternalName", "kaijuan" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.kaijuan. All rights reserved." "\0"
+            VALUE "OriginalFilename", "kaijuan.exe" "\0"
+            VALUE "ProductName", "开卷" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

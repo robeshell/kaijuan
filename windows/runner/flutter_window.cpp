@@ -10,7 +10,7 @@
 
 namespace {
 
-constexpr char kWindowChannelName[] = "com.kaika.kaika/window";
+constexpr char kWindowChannelName[] = "com.kaijuan.reader/window";
 
 }  // namespace
 

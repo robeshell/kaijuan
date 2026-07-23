@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/core/pipeline_diagnostics.dart';
-import 'package:kaika/library/import/import_models.dart';
-import 'package:kaika/readers/book/foliate_js_bridge.dart';
+import 'package:kaijuan/core/pipeline_diagnostics.dart';
+import 'package:kaijuan/library/import/import_models.dart';
+import 'package:kaijuan/readers/book/foliate_js_bridge.dart';
 
 void main() {
   setUp(() {

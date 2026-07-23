@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/app/comic_reading_preferences.dart';
-import 'package:kaika/readers/comic/comic_models.dart';
+import 'package:kaijuan/app/comic_reading_preferences.dart';
+import 'package:kaijuan/readers/comic/comic_models.dart';
 
 void main() {
   late Directory tempDir;
@@ -22,19 +22,22 @@ void main() {
     expect(prefs.mode, ComicReaderMode.slide);
     expect(prefs.direction, ComicReadDirection.ltr);
     expect(prefs.readingTheme, ComicReadingTheme.comicDefault);
+    expect(prefs.brightness, ComicReadingPreferences.defaultBrightness);
   });
 
-  test('persists mode direction and reading theme', () async {
+  test('persists mode direction reading theme and brightness', () async {
     final prefs = await ComicReadingPreferences.load(supportDirectory: tempDir);
     await prefs.setMode(ComicReaderMode.vertical);
     await prefs.setDirection(ComicReadDirection.rtl);
     await prefs.setReadingTheme(ComicReadingTheme.paper);
+    await prefs.setBrightness(0.4);
 
     final reloaded =
         await ComicReadingPreferences.load(supportDirectory: tempDir);
     expect(reloaded.mode, ComicReaderMode.vertical);
     expect(reloaded.direction, ComicReadDirection.rtl);
     expect(reloaded.readingTheme, ComicReadingTheme.paper);
+    expect(reloaded.brightness, 0.4);
   });
 
   test('corrupted file falls back to defaults', () async {

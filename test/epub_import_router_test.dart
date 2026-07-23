@@ -5,12 +5,12 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/domain/reader_models.dart';
-import 'package:kaika/library/import/book_import_service.dart';
-import 'package:kaika/library/import/comic_import_service.dart';
-import 'package:kaika/library/import/epub_import_router.dart';
-import 'package:kaika/library/persistence/app_database.dart';
-import 'package:kaika/readers/book/foliate_import_probe.dart';
+import 'package:kaijuan/domain/reader_models.dart';
+import 'package:kaijuan/library/import/book_import_service.dart';
+import 'package:kaijuan/library/import/comic_import_service.dart';
+import 'package:kaijuan/library/import/epub_import_router.dart';
+import 'package:kaijuan/library/persistence/app_database.dart';
+import 'package:kaijuan/readers/book/foliate_import_probe.dart';
 import 'package:path/path.dart' as p;
 
 import 'support/fake_epub_import_probe.dart';
@@ -170,6 +170,43 @@ Future<File> _writeImageOnlyEpub(Directory dir, String name) async {
   return file;
 }
 
+Future<File> _writeImageWrapperEpub(Directory dir, String name) async {
+  final archive = Archive();
+  void addText(String path, String content) {
+    final bytes = utf8.encode(content);
+    archive.addFile(ArchiveFile(path, bytes.length, bytes));
+  }
+
+  addText('META-INF/container.xml', '''<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>''');
+  addText('OEBPS/content.opf', '''<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Manga Wrapper</dc:title>
+  </metadata>
+  <manifest>
+    <item id="p1" href="p1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="img1" href="p1.png" media-type="image/png"/>
+  </manifest>
+  <spine>
+    <itemref idref="p1"/>
+  </spine>
+</package>''');
+  addText('OEBPS/p1.xhtml', '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>1</title></head>
+<body><img src="p1.png" alt=""/></body>
+</html>''');
+  archive.addFile(ArchiveFile('OEBPS/p1.png', _pngBytes.length, _pngBytes));
+  final file = File(p.join(dir.path, name));
+  await file.writeAsBytes(ZipEncoder().encode(archive), flush: true);
+  return file;
+}
+
 Future<File> _writeUnrecognizableEpub(Directory dir, String name) async {
   final archive = Archive();
   void addText(String path, String content) {
@@ -211,10 +248,10 @@ void main() {
     tempRoot = await Directory.systemTemp.createTemp('kaika_epub_router_');
     database = AppDatabase(NativeDatabase.memory());
     probe = FakeEpubImportProbe((path) {
+      // Book import probes the staged copy (hash-named), not the source basename.
       final name = p.basename(path);
-      if (name == 'novel.epub') return reflowSnapshot(title: '小说');
       if (name == 'manga.epub') return imageSnapshot();
-      throw const FoliateImportException('无法读取 EPUB');
+      return reflowSnapshot(title: '小说');
     });
     router = EpubImportRouter(
       comicImport: ComicImportService(
@@ -238,18 +275,17 @@ void main() {
 
   test('detects reflow EPUB as book', () async {
     final file = await _writeReflowEpub(tempRoot, 'novel.epub');
-    expect(
-      await EpubImportRouter.detectKind(file.path, probe: probe),
-      ReaderKind.book,
-    );
+    expect(await EpubImportRouter.detectKind(file.path), ReaderKind.book);
   });
 
   test('detects image-only EPUB as comic', () async {
     final file = await _writeImageOnlyEpub(tempRoot, 'manga.epub');
-    expect(
-      await EpubImportRouter.detectKind(file.path, probe: probe),
-      ReaderKind.comic,
-    );
+    expect(await EpubImportRouter.detectKind(file.path), ReaderKind.comic);
+  });
+
+  test('detects XHTML image-wrapper EPUB as comic', () async {
+    final file = await _writeImageWrapperEpub(tempRoot, 'wrapper.epub');
+    expect(await EpubImportRouter.detectKind(file.path), ReaderKind.comic);
   });
 
   test('classifies illustrated boxed set by sampled section count', () {
@@ -327,7 +363,11 @@ void main() {
     expect(items, hasLength(1));
     expect(items.single.kind, ReaderKind.book.storageValue);
     expect(items.single.title, '小说');
-    expect(probe.callCount, 1, reason: 'route result must be reused by import');
+    expect(
+      probe.callCount,
+      1,
+      reason: 'kind uses Dart; Foliate runs once for book metadata',
+    );
   });
 
   test('imports image-only EPUB as kind=comic', () async {
@@ -339,6 +379,7 @@ void main() {
     final items = await database.select(database.readingItems).get();
     expect(items, hasLength(1));
     expect(items.single.kind, ReaderKind.comic.storageValue);
+    expect(probe.callCount, 0, reason: 'comic path must not open Foliate');
   });
 
   test('fails unrecognizable EPUB with friendly reason', () async {
@@ -349,7 +390,7 @@ void main() {
     expect(result.failures.single.reason, contains('无法识别'));
   });
 
-  test('probe failure with images fails import instead of comic route', () async {
+  test('book Foliate failure does not fall back to comic', () async {
     final file = await _writeReflowEpub(tempRoot, 'probe-fail.epub');
     final failingProbe = FakeEpubImportProbe(
       (_) => throw const FoliateImportException('Foliate 解析失败：allowScript'),
@@ -369,7 +410,6 @@ void main() {
     final result = await failingRouter.importPaths([file.path]);
     expect(result.added, 0);
     expect(result.failures, hasLength(1));
-    expect(result.failures.single.reason, contains('无法识别 EPUB'));
     expect(result.failures.single.reason, contains('allowScript'));
 
     final items = await database.select(database.readingItems).get();

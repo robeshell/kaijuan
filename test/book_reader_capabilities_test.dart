@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kaika/readers/book/book_reader_capabilities.dart';
+import 'package:kaijuan/readers/book/book_reader_capabilities.dart';
 
 void main() {
   test('desktop platforms expose page mode only', () {

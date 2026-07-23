@@ -1,4 +1,4 @@
 // Brand: comic — included by Debug-comic / Release-comic / Profile-comic
-PRODUCT_BUNDLE_IDENTIFIER=com.kaika.reader
-PRODUCT_DISPLAY_NAME=Kaika
+PRODUCT_BUNDLE_IDENTIFIER=com.kaijuan.reader
+PRODUCT_DISPLAY_NAME=开卷
 FLUTTER_TARGET=lib/main_comic.dart

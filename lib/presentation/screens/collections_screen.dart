@@ -11,6 +11,8 @@ import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
+import '../widgets/cover_card_ink.dart';
+import '../widgets/selection_action_sheet.dart';
 
 /// 合集 directory (book-cover-sized collage cards).
 class CollectionsScreen extends StatelessWidget {
@@ -62,7 +64,8 @@ class CollectionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
+    final wide = MediaQuery.sizeOf(context).width >= 720;
+    final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
       backgroundColor: semantics.canvas,
@@ -72,7 +75,7 @@ class CollectionsScreen extends StatelessWidget {
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
+              padding: EdgeInsets.fromLTRB(4, wide ? 12 : 8, 8, 4),
               child: Row(
                 children: [
                   IconButton(
@@ -93,15 +96,13 @@ class CollectionsScreen extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  TextButton.icon(
+                  IconButton(
+                    tooltip: '新建合集',
                     onPressed: () => _create(context),
-                    icon: Icon(Icons.add, size: 18, weight: 300, color: accent),
-                    label: Text(
-                      '新建',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: accent,
-                      ),
+                    icon: Icon(
+                      Icons.add,
+                      weight: 300,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ],
@@ -123,35 +124,42 @@ class CollectionsScreen extends StatelessWidget {
                 final list = snapshot.data ?? const <CollectionSummary>[];
                 if (list.isEmpty) {
                   return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '还没有合集',
-                          style: TextStyle(color: semantics.textSecondary),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '把系列收成一盒，会出现在书库最前',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: semantics.textSecondary,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '还没有合集',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: semantics.textSecondary,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: () => _create(context),
-                          icon: const Icon(Icons.add, weight: 300),
-                          label: const Text('新建合集'),
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          Text(
+                            '把系列收成一盒，会出现在书库最前',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: semantics.textSecondary.withValues(
+                                alpha: 0.85,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          TextButton(
+                            onPressed: () => _create(context),
+                            child: const Text('新建合集'),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 }
                 return GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(32, 8, 32, 40),
-                  gridDelegate:
-                      const SliverGridDelegateWithMaxCrossAxisExtent(
+                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 160,
                     mainAxisSpacing: 16,
                     crossAxisSpacing: 16,
@@ -170,7 +178,7 @@ class CollectionsScreen extends StatelessWidget {
                         readingPreferences: readingPreferences,
                         bookReadingPreferences: bookReadingPreferences,
                       ),
-                      onMenu: () => _menu(context, s),
+                      onLongPress: () => _menu(context, s),
                     );
                   },
                 );
@@ -249,54 +257,24 @@ class _CollectionGridCard extends StatelessWidget {
   const _CollectionGridCard({
     required this.summary,
     required this.onTap,
-    required this.onMenu,
+    required this.onLongPress,
   });
 
   final CollectionSummary summary;
   final VoidCallback onTap;
-  final VoidCallback onMenu;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    return InkWell(
+    return CoverCardInk(
       onTap: onTap,
-      onLongPress: onMenu,
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                CollectionCover(coverPaths: summary.coverPaths),
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: IconButton(
-                      tooltip: '更多',
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 32,
-                        minHeight: 32,
-                      ),
-                      icon: Icon(
-                        Icons.more_horiz_outlined,
-                        size: 18,
-                        weight: 300,
-                        color: semantics.textSecondary,
-                      ),
-                      onPressed: onMenu,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          Expanded(child: CollectionCover(coverPaths: summary.coverPaths)),
           const SizedBox(height: 8),
           SizedBox(
             height: 34,
@@ -447,12 +425,10 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       confirmLabel: '移出',
     );
     if (ok != true || !mounted) return;
-    for (final id in _selected) {
-      await widget.controller.removeItemFromCollection(
-        collectionId: widget.collection.id,
-        itemId: id,
-      );
-    }
+    await widget.controller.removeItemsFromCollection(
+      collectionId: widget.collection.id,
+      itemIds: _selected,
+    );
     if (!mounted) return;
     _exitSelecting();
     showAppSnackBar(context, '已移出 $n 本');
@@ -663,241 +639,207 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
+    final wide = MediaQuery.sizeOf(context).width >= 720;
+    final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
       backgroundColor: semantics.canvas,
-      appBar: AppBar(
-        title: Text(
-          _selecting ? '已选 ${_selected.length}' : widget.collection.name,
-        ),
-        backgroundColor: semantics.canvas,
-        surfaceTintColor: Colors.transparent,
-        primary: true,
-        leading: _selecting
-            ? IconButton(
-                tooltip: '取消选择',
-                onPressed: _exitSelecting,
-                icon: const Icon(Icons.close, weight: 300),
-              )
-            : null,
-        actions: [
-          if (!_selecting)
-            IconButton(
-              tooltip: '多选',
-              onPressed: () => _enterSelecting(),
-              icon: Icon(Icons.checklist_outlined, color: accent, weight: 300),
-            ),
-        ],
-      ),
-      body: StreamBuilder<List<ReadingItem>>(
-        stream: widget.controller.watchCollectionMembers(widget.collection.id),
-        builder: (context, snapshot) {
-          final items = snapshot.data ?? const <ReadingItem>[];
-          if (items.isEmpty) {
-            return Center(
-              child: Text(
-                '合集为空\n在书库详情或多选里加入',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: semantics.textSecondary,
-                  height: 1.5,
-                ),
-              ),
-            );
-          }
-          return Column(
-            children: [
-              Expanded(
-                child: GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
-                  gridDelegate:
-                      const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 160,
-                    mainAxisSpacing: 16,
-                    crossAxisSpacing: 16,
-                    childAspectRatio: 0.58,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(4, wide ? 12 : 8, 8, 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: _selecting ? '取消选择' : '返回',
+                    onPressed: _selecting
+                        ? _exitSelecting
+                        : () => Navigator.of(context).maybePop(),
+                    icon: Icon(
+                      _selecting
+                          ? Icons.close
+                          : Icons.arrow_back_outlined,
+                      weight: 300,
+                      color: semantics.textPrimary,
+                    ),
                   ),
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final item = items[i];
-                    final isSelected = _selected.contains(item.id);
-                    return InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => _onTap(item),
-                      onLongPress: () => _onLongPress(item),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: item.coverPath != null
-                                      ? Image.file(
-                                          File(item.coverPath!),
-                                          fit: BoxFit.cover,
-                                          width: double.infinity,
-                                          errorBuilder: (_, _, _) => ColoredBox(
-                                            color: semantics.canvas,
-                                          ),
-                                        )
-                                      : ColoredBox(color: semantics.canvas),
-                                ),
-                                if (_selecting)
-                                  Positioned(
-                                    top: 6,
-                                    right: 6,
-                                    child: Icon(
-                                      isSelected
-                                          ? Icons.check_circle_outline
-                                          : Icons.circle_outlined,
-                                      color: isSelected
-                                          ? accent
-                                          : Colors.white,
-                                      weight: 300,
-                                      shadows: const [
-                                        Shadow(
-                                          blurRadius: 6,
-                                          color: Colors.black54,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                if (isSelected)
-                                  Positioned.fill(
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: accent,
-                                          width: 2.5,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 16,
-                            child: Text(
-                              item.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                height: 1.2,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-              if (_selecting)
-                Material(
-                  color: semantics.surface,
-                  elevation: 8,
-                  child: SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 10, 8, 12),
-                      child: Row(
-                        children: [
-                          TextButton(
-                            onPressed: () => _selectAll(items),
-                            child: Text(
-                              _selected.length == items.length
-                                  ? '取消全选'
-                                  : '全选',
-                            ),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            tooltip: '移出合集',
-                            onPressed: _selected.isEmpty
-                                ? null
-                                : _batchRemoveFromCollection,
-                            icon: Icon(
-                              Icons.folder_off_outlined,
-                              color: accent,
-                              weight: 300,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '移到其他合集',
-                            onPressed: _selected.isEmpty
-                                ? null
-                                : _batchMoveToCollection,
-                            icon: Icon(
-                              Icons.drive_file_move_outline,
-                              color: accent,
-                              weight: 300,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '加入书架',
-                            onPressed: _selected.isEmpty
-                                ? null
-                                : () => _batchShelf(onShelf: true),
-                            icon: Icon(
-                              Icons.bookmark_add_outlined,
-                              color: accent,
-                              weight: 300,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '移出书架',
-                            onPressed: _selected.isEmpty
-                                ? null
-                                : () => _batchShelf(onShelf: false),
-                            icon: Icon(
-                              Icons.bookmark_remove_outlined,
-                              color: accent,
-                              weight: 300,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '加入书单',
-                            onPressed:
-                                _selected.isEmpty ? null : _batchAddToList,
-                            icon: Icon(
-                              Icons.playlist_add_outlined,
-                              color: accent,
-                              weight: 300,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '删除',
-                            onPressed:
-                                _selected.isEmpty ? null : _batchDelete,
-                            icon: Icon(
-                              Icons.delete_outline,
-                              weight: 300,
-                              color: _selected.isEmpty
-                                  ? semantics.textSecondary
-                                  : Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: _exitSelecting,
-                            child: const Text('完成'),
-                          ),
-                        ],
+                  Expanded(
+                    child: Text(
+                      _selecting
+                          ? '已选 ${_selected.length}'
+                          : widget.collection.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.3,
                       ),
                     ),
                   ),
-                ),
-            ],
-          );
-        },
+                  if (!_selecting)
+                    IconButton(
+                      tooltip: '多选',
+                      onPressed: () => _enterSelecting(),
+                      icon: Icon(
+                        Icons.checklist_outlined,
+                        weight: 300,
+                        color: semantics.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<ReadingItem>>(
+              stream: widget.controller
+                  .watchCollectionMembers(widget.collection.id),
+              builder: (context, snapshot) {
+                final items = snapshot.data ?? const <ReadingItem>[];
+                if (items.isEmpty) {
+                  return Center(
+                    child: Text(
+                      '合集为空\n在书库多选里加入',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: semantics.textSecondary,
+                        height: 1.5,
+                      ),
+                    ),
+                  );
+                }
+                return Column(
+                  children: [
+                    Expanded(
+                      child: GridView.builder(
+                        padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
+                        gridDelegate:
+                            const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 160,
+                          mainAxisSpacing: 16,
+                          crossAxisSpacing: 16,
+                          childAspectRatio: 0.58,
+                        ),
+                        itemCount: items.length,
+                        itemBuilder: (context, i) {
+                          final item = items[i];
+                          final isSelected = _selected.contains(item.id);
+                          return CoverCardInk(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => _onTap(item),
+                            onLongPress: () => _onLongPress(item),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: SoftCoverFrame(
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        item.coverPath != null
+                                            ? Image.file(
+                                                File(item.coverPath!),
+                                                fit: BoxFit.cover,
+                                                width: double.infinity,
+                                                errorBuilder: (_, _, _) =>
+                                                    ColoredBox(
+                                                  color: semantics.canvas,
+                                                ),
+                                              )
+                                            : ColoredBox(
+                                                color: semantics.canvas,
+                                              ),
+                                        if (_selecting)
+                                          Positioned(
+                                            right: 6,
+                                            bottom: 6,
+                                            child: CoverSelectBadge(
+                                              selected: isSelected,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  height: 16,
+                                  child: Text(
+                                    item.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    if (_selecting)
+                      SelectionActionSheet(
+                        selectedCount: _selected.length,
+                        totalVisible: items.length,
+                        onSelectAll: () => _selectAll(items),
+                        onDone: _exitSelecting,
+                        actions: [
+                          SelectionActionItem(
+                            icon: Icons.folder_off_outlined,
+                            label: '移出合集',
+                            onTap: _selected.isEmpty
+                                ? null
+                                : _batchRemoveFromCollection,
+                          ),
+                          SelectionActionItem(
+                            icon: Icons.drive_file_move_outline,
+                            label: '移到合集',
+                            onTap: _selected.isEmpty
+                                ? null
+                                : _batchMoveToCollection,
+                          ),
+                          SelectionActionItem(
+                            icon: Icons.bookmark_add_outlined,
+                            label: '加入书架',
+                            onTap: _selected.isEmpty
+                                ? null
+                                : () => _batchShelf(onShelf: true),
+                          ),
+                          SelectionActionItem(
+                            icon: Icons.bookmark_remove_outlined,
+                            label: '移出书架',
+                            destructive: true,
+                            onTap: _selected.isEmpty
+                                ? null
+                                : () => _batchShelf(onShelf: false),
+                          ),
+                          SelectionActionItem(
+                            icon: Icons.playlist_add_outlined,
+                            label: '加入书单',
+                            onTap: _selected.isEmpty ? null : _batchAddToList,
+                          ),
+                          SelectionActionItem(
+                            icon: Icons.delete_outline,
+                            label: '删除',
+                            destructive: true,
+                            onTap: _selected.isEmpty ? null : _batchDelete,
+                          ),
+                        ],
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

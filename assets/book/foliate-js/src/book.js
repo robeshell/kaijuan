@@ -1009,14 +1009,41 @@ const readingFeaturesDocHandler = (doc) => {
 
 const footnoteDialog = document.getElementById('footnote-dialog')
 footnoteDialog.style.display = 'none'
-footnoteDialog.addEventListener('click', () => {
+const hideFootnoteDialog = () => {
   footnoteDialog.style.display = 'none'
+  footnoteDialog.style.visibility = ''
   callFlutter('onFootnoteClose')
-})
+}
+footnoteDialog.addEventListener('click', hideFootnoteDialog)
+
+/** Strip leading indent spaces (incl. ideographic) from footnote blocks. */
+const stripFootnoteLeadingIndent = (doc) => {
+  if (!doc?.body) return
+  const blocks = doc.body.querySelectorAll(
+    'p, li, div, aside, section, blockquote, dd, h1, h2, h3, h4, h5, h6',
+  )
+  const targets = blocks.length ? blocks : [doc.body]
+  for (const el of targets) {
+    const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    let node = walker.nextNode()
+    while (node && !/\S/u.test(node.textContent || '')) {
+      node = walker.nextNode()
+    }
+    if (!node) continue
+    node.textContent = (node.textContent || '').replace(
+      /^[\s\u00A0\u3000\u2002\u2003\u2007\u2008\u2009\u200A\u202F\u205F]+/u,
+      '',
+    )
+  }
+}
 
 const replaceFootnote = (view) => {
   clearSelection()
   footnoteDialog.querySelector('main').replaceChildren(view)
+  // Size the popup before first paginator layout so text wraps to real width
+  // (display:none → 0×0 measure caused edge clipping).
+  footnoteDialog.style.visibility = 'hidden'
+  footnoteDialog.style.display = 'block'
 
   view.addEventListener('load', (e) => {
     const { doc, index } = e.detail
@@ -1025,18 +1052,47 @@ const replaceFootnote = (view) => {
     // convertChineseHandler(convertChineseMode, doc)
     readingFeaturesDocHandler(doc)
     doc.__isFootNote = true
+    // Chinese EPUBs often indent notes with U+3000 / nbsp instead of CSS.
+    stripFootnoteLeadingIndent(doc)
 
-    setTimeout(() => {
-      const dialog = document.getElementById('footnote-dialog')
-      dialog.style.display = 'block'
-    }, 0)
+    requestAnimationFrame(() => {
+      try { view.renderer?.render?.() } catch (_) {}
+      footnoteDialog.style.visibility = 'visible'
+    })
   })
 
   const { renderer } = view
   renderer.setAttribute('flow', 'scrolled')
-  renderer.setAttribute('gap', '5%')
+  // Popup already has main padding; reading-page gap becomes L/R padding in scrolled.
+  renderer.setAttribute('gap', '0%')
+  // Keep body max-width near popup width (scrolled mode uses max-inline-size
+  // as columnWidth; 2000px made glyphs feel flush/clipped in the small box).
+  renderer.setAttribute('max-inline-size', '360px')
   renderer.setAttribute('top-margin', '0px')
   renderer.setAttribute('bottom-margin', '0px')
+  // Author EPUB CSS / 全角段首空格 often keep a body-like left gutter in the
+  // tiny popup; force a flush content box (dialog main still has padding).
+  const footnoteCompactCSS = `
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      max-width: none !important;
+      max-inline-size: none !important;
+      overflow-wrap: anywhere !important;
+      word-break: break-word !important;
+    }
+    body, p, li, blockquote, dd, div, aside, section, article, header, footer, h1, h2, h3, h4, h5, h6, font {
+      text-indent: 0 !important;
+      margin-inline: 0 !important;
+      padding-inline: 0 !important;
+      text-align: start !important;
+    }
+    ul, ol {
+      list-style: none !important;
+      margin-inline: 0 !important;
+      padding-inline: 0 !important;
+    }
+  `
   const footNoteStyle = {
     fontSize: style.fontSize,
     fontName: style.fontName,
@@ -1044,16 +1100,16 @@ const replaceFootnote = (view) => {
     letterSpacing: style.letterSpacing,
     spacing: style.spacing,
     paragraphSpacing: style.paragraphSpacing,
-    textIndent: style.textIndent,
+    textIndent: 0,
     fontColor: style.fontColor,
     backgroundColor: 'transparent',
     linkColor: style.linkColor,
     headingColor: style.headingColor,
-    justify: true,
-    textAlign: style.textAlign,
+    justify: false,
+    textAlign: 'start',
     hyphenate: true,
-    customCSS: style.customCSS,
-    customCSSEnabled: style.customCSSEnabled,
+    customCSS: `${style.customCSSEnabled && style.customCSS ? style.customCSS : ''}\n${footnoteCompactCSS}`,
+    customCSSEnabled: true,
     writingMode: style.writingMode,
     useBookStyles: style.useBookStyles,
     headingFontSize: style.headingFontSize,
@@ -1061,7 +1117,8 @@ const replaceFootnote = (view) => {
     headingMargins: style.headingMargins,
   }
   renderer.setStyles(getCSS(footNoteStyle))
-  footnoteDialog.style.backgroundColor = style.backgroundColor.slice(0, 7) + '33'
+  // Solid surface (no frosted glass); match current reading theme.
+  footnoteDialog.style.backgroundColor = style.backgroundColor.slice(0, 7)
 }
 footnoteDialog.addEventListener('click', e =>
   e.target === footnoteDialog ? footnoteDialog.close?.() : null)
@@ -2494,6 +2551,7 @@ window.isFootNoteOpen = () => footnoteDialog.getAttribute('style').includes('dis
 
 window.closeFootNote = () => {
   footnoteDialog.style.display = 'none'
+  footnoteDialog.style.visibility = ''
   callFlutter('onFootnoteClose')
 }
 

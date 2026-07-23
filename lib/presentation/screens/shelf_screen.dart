@@ -10,6 +10,7 @@ import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
 import '../widgets/app_overlays.dart';
+import '../widgets/cover_card_ink.dart';
 
 /// Shelf: 继续阅读 + 最近 + 我的书架（仅单本钉选；合集在书库展示）.
 class ShelfScreen extends StatelessWidget {
@@ -175,23 +176,6 @@ class ShelfScreen extends StatelessWidget {
                             onTap: () => _openReal(context, item),
                             onLongPress: () =>
                                 _showShelfItemMenu(context, item),
-                            trailing: IconButton(
-                              tooltip: '移出书架',
-                              visualDensity: VisualDensity.compact,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 28,
-                                minHeight: 28,
-                              ),
-                              icon: const Icon(
-                                Icons.bookmark_remove_outlined,
-                                size: 18,
-                                weight: 300,
-                                color: Colors.white,
-                              ),
-                              onPressed: () =>
-                                  _removeFromShelf(context, item),
-                            ),
                           );
                         },
                       ),
@@ -333,7 +317,6 @@ class _CoverCard extends StatelessWidget {
     required this.hairline,
     required this.onTap,
     this.onLongPress,
-    this.trailing,
     this.progress,
   });
 
@@ -344,13 +327,12 @@ class _CoverCard extends StatelessWidget {
   final Color hairline;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: 112,
-      child: InkWell(
+      child: CoverCardInk(
         onTap: onTap,
         onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(12),
@@ -360,34 +342,7 @@ class _CoverCard extends StatelessWidget {
             SizedBox(
               width: 112,
               height: 150,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: cover,
-                  ),
-                  if (trailing != null)
-                    Positioned(
-                      top: 2,
-                      right: 2,
-                      child: Material(
-                        color: Colors.black.withValues(alpha: 0.4),
-                        borderRadius: BorderRadius.circular(8),
-                        child: trailing,
-                      ),
-                    ),
-                ],
-              ),
+              child: SoftCoverFrame(child: cover),
             ),
             const SizedBox(height: 8),
             SizedBox(

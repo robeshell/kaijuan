@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -235,16 +236,46 @@ class LibraryController extends ChangeNotifier {
 
   /// Opens the system file picker. Returns null when the user cancels.
   Future<ImportResult?> pickAndImport() async {
-    // Several Android document providers don't register application/epub+zip,
-    // so extension -> MIME conversion hides valid EPUBs as "not an archive".
-    // Let SAF browse all files there; [importPaths] remains the source of truth
-    // and rejects every unsupported extension after selection.
-    final typeGroup = defaultTargetPlatform == TargetPlatform.android
-        ? const XTypeGroup(label: '图书与漫画')
-        : XTypeGroup(label: '图书与漫画', extensions: importExtensions);
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return _pickAndImportAndroid();
+    }
+    // Desktop / iOS: file_selector is fine (paths, no whole-file byte[]).
+    final typeGroup = XTypeGroup(
+      label: '图书与漫画',
+      extensions: importExtensions,
+    );
     final files = await openFiles(acceptedTypeGroups: [typeGroup]);
     if (files.isEmpty) return null;
     return importPaths([for (final f in files) f.path]);
+  }
+
+  /// Android SAF via [FilePicker] without loading whole-file bytes.
+  ///
+  /// Upstream [file_selector] Android impl allocates `byte[size]` for every
+  /// pick and OOMs on large CBZ/EPUB (flutter/flutter#141002). We only need a
+  /// filesystem path for staging; [importPaths] still rejects bad extensions.
+  Future<ImportResult?> _pickAndImportAndroid() async {
+    // Several document providers omit application/epub+zip, so do not filter
+    // by MIME/extension in the picker — reject after selection instead.
+    final result = await FilePicker.pickFiles(
+      type: FileType.any,
+    );
+    if (result == null || result.files.isEmpty) return null;
+    final paths = <String>[
+      for (final f in result.files)
+        if (f.path != null && f.path!.isNotEmpty) f.path!,
+    ];
+    if (paths.isEmpty) {
+      return const ImportResult(
+        failures: [
+          ImportFailure(
+            path: '',
+            reason: '无法读取所选文件路径，请换一本或换一个文件管理器再试',
+          ),
+        ],
+      );
+    }
+    return importPaths(paths);
   }
 
   /// Import entry point used by tests and by [pickAndImport].
@@ -419,6 +450,14 @@ class LibraryController extends ChangeNotifier {
   }) => database.removeItemFromCollection(
     collectionId: collectionId,
     itemId: itemId,
+  );
+
+  Future<void> removeItemsFromCollection({
+    required String collectionId,
+    required Iterable<String> itemIds,
+  }) => database.removeItemsFromCollection(
+    collectionId: collectionId,
+    itemIds: itemIds,
   );
 
   Future<List<Collection>> collectionsSnapshot() =>
