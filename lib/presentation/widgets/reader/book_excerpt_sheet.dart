@@ -133,9 +133,8 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final fg = semantics.textPrimary;
-    final muted = semantics.textSecondary;
+    final fg = context.appPrimaryText;
+    final muted = context.appSecondaryText;
     final accent = Theme.of(context).colorScheme.primary;
     final viewInsets = MediaQuery.viewInsetsOf(context);
     final cardWidth =
@@ -378,11 +377,10 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     return TextButton(
       onPressed: enabled ? onPressed : null,
       style: TextButton.styleFrom(
-        foregroundColor: semantics.textPrimary,
+        foregroundColor: context.appPrimaryText,
         padding: const EdgeInsets.symmetric(vertical: 10),
       ),
       child: Column(

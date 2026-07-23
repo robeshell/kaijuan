@@ -18,39 +18,37 @@ class CollectionCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final paths = coverPaths.take(4).toList();
+    final light = Theme.of(context).brightness == Brightness.light;
 
     return SoftCoverFrame(
       key: ValueKey(paths.join('|')),
       radius: borderRadius,
       child: ColoredBox(
-        color: semantics.canvas == Colors.white
-            ? AppColors.lightWash
-            : semantics.surface,
+        color: light ? AppColors.lightWash : context.appColors.surface,
         child: paths.isEmpty
             ? Center(
                 child: Icon(
                   Icons.collections_bookmark_outlined,
                   weight: 300,
                   size: 28,
-                  color: semantics.textSecondary.withValues(alpha: 0.5),
+                  color: context.appSecondaryText.withValues(alpha: 0.5),
                 ),
               )
             : paths.length == 1
-                ? _thumb(paths[0], semantics)
-                : _grid(paths, semantics),
+                ? _thumb(context, paths[0])
+                : _grid(context, paths),
       ),
     );
   }
 
-  Widget _grid(List<String> paths, AppSemantics semantics) {
+  Widget _grid(BuildContext context, List<String> paths) {
     // 2×2 cells; missing slots stay wash.
     Widget cell(int i) {
       if (i >= paths.length) {
         return ColoredBox(color: AppColors.lightWash.withValues(alpha: 0.5));
       }
-      return _thumb(paths[i], semantics);
+      return _thumb(context, paths[i]);
     }
 
     return Column(
@@ -78,14 +76,15 @@ class CollectionCover extends StatelessWidget {
     );
   }
 
-  Widget _thumb(String path, AppSemantics semantics) {
+  Widget _thumb(BuildContext context, String path) {
     return Image.file(
       File(path),
       key: ValueKey(path),
       fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,
-      errorBuilder: (_, _, _) => ColoredBox(color: semantics.canvas),
+      errorBuilder: (_, _, _) =>
+          ColoredBox(color: Theme.of(context).scaffoldBackgroundColor),
     );
   }
 }

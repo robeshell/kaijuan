@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'app_components.dart';
 
 /// One cell in [SelectionActionSheet]'s icon grid.
 class SelectionActionItem {
@@ -42,7 +43,6 @@ class SelectionActionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final rows = <List<SelectionActionItem?>>[];
     for (var i = 0; i < actions.length; i += _columns) {
       final end = (i + _columns).clamp(0, actions.length);
@@ -55,18 +55,12 @@ class SelectionActionSheet extends StatelessWidget {
       rows.add(slice);
     }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: semantics.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        border: Border(top: BorderSide(color: semantics.hairline)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.07),
-            blurRadius: 14,
-            offset: const Offset(0, -4),
-          ),
-        ],
+    return AppGlassSurface(
+      strong: true,
+      shadowOffset: const Offset(0, -8),
+      shadowBlur: 28,
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(AppRadii.sheet),
       ),
       child: Material(
         color: Colors.transparent,
@@ -79,12 +73,14 @@ class SelectionActionSheet extends StatelessWidget {
               children: [
                 Center(
                   child: Container(
-                    width: 36,
+                    width: 38,
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 2),
                     decoration: BoxDecoration(
-                      color: semantics.hairline,
-                      borderRadius: BorderRadius.circular(2),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.38),
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
                     ),
                   ),
                 ),
@@ -107,7 +103,7 @@ class SelectionActionSheet extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13,
-                          color: semantics.textSecondary,
+                          color: context.appSecondaryText,
                         ),
                       ),
                     ),
@@ -153,25 +149,24 @@ class _ActionCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final scheme = Theme.of(context).colorScheme;
     final enabled = action.onTap != null;
     final Color color;
     if (!enabled) {
-      color = semantics.textSecondary.withValues(alpha: 0.4);
+      color = context.appSecondaryText.withValues(alpha: 0.4);
     } else if (action.destructive) {
       color = scheme.error;
     } else {
-      color = semantics.textPrimary;
+      color = context.appPrimaryText;
     }
 
     return InkWell(
       onTap: action.onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadii.menu),
       splashFactory: NoSplash.splashFactory,
       overlayColor: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.pressed)) {
-          return semantics.hairline;
+          return context.appDivider;
         }
         return Colors.transparent;
       }),

@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'app_components.dart';
 
 /// Shared overlay language: dialogs, sheets, snackbars.
 /// Quiet surfaces, Chinese copy, light outlined icons — both brands.
+///
+/// Public APIs in this file are stable; internals are built on the shared
+/// component kit (app_components.dart) and the semantic tokens.
 
 /// Preferred outlined icons for chrome (not heavy rounded fills).
 abstract final class AppIcons {
@@ -57,19 +61,24 @@ class AppIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
+    final secondary = context.appSecondaryText;
     final button = IconButton(
       onPressed: onPressed,
       visualDensity: visualDensity,
       style: IconButton.styleFrom(
-        foregroundColor: color ?? semantics.textSecondary,
-        disabledForegroundColor: semantics.textSecondary.withValues(alpha: 0.35),
+        foregroundColor: color ?? secondary,
+        disabledForegroundColor: secondary.withValues(alpha: 0.35),
       ),
       icon: Icon(icon, size: size, weight: AppIcons.weight),
     );
     if (tooltip == null || tooltip!.isEmpty) return button;
     return AppTooltip(message: tooltip!, child: button);
   }
+}
+
+Color _dialogBarrier(BuildContext context) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  return Colors.black.withValues(alpha: dark ? 0.62 : 0.38);
 }
 
 /// Confirm / alert dialog with quiet surface (not default M3 sheet gray).
@@ -83,7 +92,7 @@ Future<bool?> showAppConfirmDialog(
 }) {
   return showDialog<bool>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.28),
+    barrierColor: _dialogBarrier(context),
     builder: (ctx) => AppAlertDialog(
       title: title,
       content: Text(message),
@@ -113,7 +122,7 @@ Future<String?> showAppTextPrompt(
 }) {
   return showDialog<String>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.28),
+    barrierColor: _dialogBarrier(context),
     builder: (ctx) => _AppTextPromptDialog(
       title: title,
       hint: hint,
@@ -165,20 +174,7 @@ class _AppTextPromptDialogState extends State<_AppTextPromptDialog> {
         controller: _controller,
         autofocus: true,
         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-        decoration: InputDecoration(
-          hintText: widget.hint,
-          isDense: true,
-          filled: true,
-          fillColor: AppColors.lightWash,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 12,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.medium),
-            borderSide: BorderSide.none,
-          ),
-        ),
+        decoration: InputDecoration(hintText: widget.hint),
         onSubmitted: (_) => _submit(),
       ),
       actions: [
@@ -212,21 +208,9 @@ void showAppSnackBar(BuildContext context, String message) {
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Color(0xFFF4F4F5),
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            height: 1.3,
-            letterSpacing: 0.2,
-          ),
         ),
-        behavior: SnackBarBehavior.floating,
-        // Quiet charcoal chip over reading canvas — not a white bordered slab.
-        backgroundColor: const Color(0xE62C2C2E),
-        elevation: 0,
         duration: const Duration(milliseconds: 1400),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape: const StadiumBorder(),
         margin: EdgeInsets.fromLTRB(side, 0, side, 36),
         dismissDirection: DismissDirection.down,
       ),
@@ -238,19 +222,10 @@ Future<T?> showAppSheet<T>({
   required WidgetBuilder builder,
   bool isScrollControlled = false,
 }) {
-  final semantics = Theme.of(context).extension<AppSemantics>()!;
-  return showModalBottomSheet<T>(
-    context: context,
-    isScrollControlled: isScrollControlled,
-    showDragHandle: true,
-    backgroundColor: semantics.surface,
-    barrierColor: Colors.black.withValues(alpha: 0.28),
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(AppRadii.panel),
-      ),
-    ),
+  return showAppBottomSheet<T>(
+    context,
     builder: builder,
+    isScrollControlled: isScrollControlled,
   );
 }
 
@@ -273,36 +248,22 @@ class AppSheetTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
-    final color = destructive
-        ? Theme.of(context).colorScheme.error
-        : semantics.textPrimary;
-    final iconColor = destructive
-        ? Theme.of(context).colorScheme.error
-        : accent.withValues(alpha: 0.9);
+    final accent = context.appColors.primary;
+    final error = context.appColors.error;
+    final color = destructive ? error : context.appPrimaryText;
+    final iconColor = destructive ? error : accent.withValues(alpha: 0.9);
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-      leading: Icon(icon, size: AppIcons.size, weight: AppIcons.weight, color: iconColor),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-          color: color,
-        ),
-      ),
-      subtitle: subtitle == null
-          ? null
-          : Text(
-              subtitle!,
-              style: TextStyle(
-                fontSize: 12,
-                color: semantics.textSecondary,
-              ),
-            ),
+    return AppListRow(
       onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      leading: Icon(
+        icon,
+        size: AppIcons.size,
+        weight: AppIcons.weight,
+        color: iconColor,
+      ),
+      title: Text(title, style: TextStyle(color: color, fontSize: 15)),
+      subtitle: subtitle == null ? null : Text(subtitle!),
     );
   }
 }
@@ -321,57 +282,11 @@ class AppAlertDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    return Dialog(
-      backgroundColor: semantics.surface,
-      surfaceTintColor: Colors.transparent,
-      elevation: 8,
-      shadowColor: Colors.black.withValues(alpha: 0.12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.panel),
-        side: BorderSide(color: semantics.hairline),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 20, 22, 14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                  color: semantics.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 12),
-              DefaultTextStyle(
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.45,
-                  color: semantics.textSecondary,
-                  fontWeight: FontWeight.w400,
-                ),
-                child: content,
-              ),
-              const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  for (var i = 0; i < actions.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 8),
-                    actions[i],
-                  ],
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+    return AppDialog(
+      maxWidth: 400,
+      title: Text(title),
+      content: content,
+      actions: actions,
     );
   }
 }
@@ -392,73 +307,16 @@ class AppDialogAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
-    final error = Theme.of(context).colorScheme.error;
-
-    if (primary) {
+    if (destructive) {
       return FilledButton(
         onPressed: onPressed,
-        style: FilledButton.styleFrom(
-          backgroundColor: destructive ? error : accent,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.medium),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        style: context.appDestructiveButtonStyle,
         child: Text(label),
       );
     }
-
-    return TextButton(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: semantics.textSecondary,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        textStyle: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-      child: Text(label),
-    );
+    if (primary) {
+      return FilledButton(onPressed: onPressed, child: Text(label));
+    }
+    return TextButton(onPressed: onPressed, child: Text(label));
   }
-}
-
-/// Popup menu themed for Chinese chrome; always pass [tooltip] in Chinese.
-PopupMenuItem<T> appPopupItem<T>({
-  required T value,
-  required String label,
-  IconData? icon,
-  bool checked = false,
-}) {
-  return PopupMenuItem<T>(
-    value: value,
-    height: 40,
-    child: Row(
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: AppIcons.sizeSm, weight: AppIcons.weight),
-          const SizedBox(width: 10),
-        ],
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: checked ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-        ),
-        if (checked)
-          const Icon(Icons.check, size: 16, weight: AppIcons.weight),
-      ],
-    ),
-  );
 }

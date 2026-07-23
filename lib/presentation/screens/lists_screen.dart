@@ -126,12 +126,11 @@ class ListsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: semantics.canvas,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -147,7 +146,7 @@ class ListsScreen extends StatelessWidget {
                     icon: Icon(
                       Icons.arrow_back_outlined,
                       weight: 300,
-                      color: semantics.textPrimary,
+                      color: context.appPrimaryText,
                     ),
                   ),
                   const Text(
@@ -180,7 +179,7 @@ class ListsScreen extends StatelessWidget {
                   return Center(
                     child: Text(
                       '加载失败：${snapshot.error}',
-                      style: TextStyle(color: semantics.textSecondary),
+                      style: TextStyle(color: context.appSecondaryText),
                     ),
                   );
                 }
@@ -196,7 +195,7 @@ class ListsScreen extends StatelessWidget {
                             '还没有书单',
                             style: TextStyle(
                               fontSize: 15,
-                              color: semantics.textSecondary,
+                              color: context.appSecondaryText,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -205,7 +204,7 @@ class ListsScreen extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 13,
-                              color: semantics.textSecondary.withValues(
+                              color: context.appSecondaryText.withValues(
                                 alpha: 0.85,
                               ),
                             ),
@@ -224,7 +223,7 @@ class ListsScreen extends StatelessWidget {
                   padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
                   itemCount: lists.length,
                   separatorBuilder: (_, _) =>
-                      Divider(height: 1, color: semantics.hairline),
+                      Divider(height: 1, color: context.appDivider),
                   itemBuilder: (context, i) {
                     final s = lists[i];
                     return ListTile(
@@ -234,7 +233,7 @@ class ListsScreen extends StatelessWidget {
                       ),
                       leading: Icon(
                         Icons.playlist_play_outlined,
-                        color: semantics.textSecondary,
+                        color: context.appSecondaryText,
                         weight: 300,
                       ),
                       title: Text(
@@ -245,7 +244,7 @@ class ListsScreen extends StatelessWidget {
                         '${s.memberCount} 本',
                         style: TextStyle(
                           fontSize: 12,
-                          color: semantics.textSecondary,
+                          color: context.appSecondaryText,
                         ),
                       ),
                       onTap: () {
@@ -294,12 +293,11 @@ class _ListDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: semantics.canvas,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -315,7 +313,7 @@ class _ListDetailScreen extends StatelessWidget {
                     icon: Icon(
                       Icons.arrow_back_outlined,
                       weight: 300,
-                      color: semantics.textPrimary,
+                      color: context.appPrimaryText,
                     ),
                   ),
                   Expanded(
@@ -345,7 +343,7 @@ class _ListDetailScreen extends StatelessWidget {
                       '书单为空\n在书库多选里加入',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: semantics.textSecondary,
+                        color: context.appSecondaryText,
                         height: 1.5,
                       ),
                     ),
@@ -356,7 +354,7 @@ class _ListDetailScreen extends StatelessWidget {
                   padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
                   itemCount: items.length,
                   separatorBuilder: (_, _) =>
-                      Divider(height: 1, color: semantics.hairline),
+                      Divider(height: 1, color: context.appDivider),
                   itemBuilder: (context, i) {
                     final item = items[i];
                     return ListTile(
@@ -373,8 +371,10 @@ class _ListDetailScreen extends StatelessWidget {
                               ? Image.file(
                                   File(item.coverPath!),
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
-                                      ColoredBox(color: semantics.canvas),
+                                  errorBuilder: (_, _, _) => ColoredBox(
+                                    color: Theme.of(context)
+                                        .scaffoldBackgroundColor,
+                                  ),
                                 )
                               : ColoredBox(color: AppColors.lightWash),
                         ),
@@ -389,7 +389,7 @@ class _ListDetailScreen extends StatelessWidget {
                         item.format.toUpperCase(),
                         style: TextStyle(
                           fontSize: 12,
-                          color: semantics.textSecondary,
+                          color: context.appSecondaryText,
                         ),
                       ),
                       onTap: () => openItem(context, item),

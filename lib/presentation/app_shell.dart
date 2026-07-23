@@ -13,6 +13,7 @@ import 'controllers/library_controller.dart';
 import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shelf_screen.dart';
+import 'widgets/app_components.dart';
 import 'widgets/desktop_title_bar.dart';
 
 class AppShell extends StatefulWidget {
@@ -46,6 +47,24 @@ class _AppShellState extends State<AppShell> {
 
   static const Size desktopMinSize = Size(1024, 700);
 
+  static const _destinations = [
+    AppNavigationItem(
+      icon: Icons.menu_book_outlined,
+      selectedIcon: Icons.menu_book_outlined,
+      label: '书架',
+    ),
+    AppNavigationItem(
+      icon: Icons.grid_view_outlined,
+      selectedIcon: Icons.grid_view_outlined,
+      label: '书库',
+    ),
+    AppNavigationItem(
+      icon: Icons.settings_outlined,
+      selectedIcon: Icons.settings_outlined,
+      label: '设置',
+    ),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -71,7 +90,6 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final body = IndexedStack(index: _index, children: _screens);
     final useSideRail =
         _isDesktopHost ||
@@ -83,7 +101,6 @@ class _AppShellState extends State<AppShell> {
       // Reverie layout: full-height side rail under a transparent overlay
       // title bar (traffic lights / custom window controls sit on top).
       return Scaffold(
-        backgroundColor: semantics.canvas,
         body: Stack(
           children: [
             Positioned.fill(
@@ -118,11 +135,11 @@ class _AppShellState extends State<AppShell> {
     }
 
     return Scaffold(
-      backgroundColor: semantics.canvas,
       body: SafeArea(child: body),
-      bottomNavigationBar: _CompactBottomBar(
-        index: _index,
-        onSelect: (i) => setState(() => _index = i),
+      bottomNavigationBar: AppNavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: _destinations,
       ),
     );
   }
@@ -150,15 +167,14 @@ class _SideRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final accent = Theme.of(context).colorScheme.primary;
 
     // Surface runs full height (under title bar); content clears via SafeArea.
     return Container(
       width: _desktopSidebarWidth,
       decoration: BoxDecoration(
-        color: semantics.surface,
-        border: Border(right: BorderSide(color: semantics.hairline)),
+        color: context.appChromeSurface,
+        border: Border(right: BorderSide(color: context.appDivider)),
       ),
       child: SafeArea(
         left: false,
@@ -176,7 +192,7 @@ class _SideRail extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: semantics.textPrimary,
+                    color: context.appPrimaryText,
                     fontSize: 17,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.35,
@@ -220,11 +236,10 @@ class _SidebarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final color = selected ? accent : semantics.textSecondary;
+    final color = selected ? accent : context.appSecondaryText;
     final labelColor = selected
-        ? semantics.textPrimary
-        : semantics.textSecondary;
+        ? context.appPrimaryText
+        : context.appSecondaryText;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
@@ -232,8 +247,8 @@ class _SidebarRow extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          hoverColor: semantics.hairline,
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          hoverColor: context.appTint(0.045),
           splashColor: Colors.transparent,
           highlightColor: Colors.transparent,
           child: AnimatedContainer(
@@ -245,7 +260,7 @@ class _SidebarRow extends StatelessWidget {
               color: selected
                   ? accent.withValues(alpha: 0.10)
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppRadii.control),
             ),
             child: Row(
               children: [
@@ -266,108 +281,6 @@ class _SidebarRow extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CompactBottomBar extends StatelessWidget {
-  const _CompactBottomBar({required this.index, required this.onSelect});
-
-  final int index;
-  final ValueChanged<int> onSelect;
-
-  static const _items = [
-    (Icons.menu_book_outlined, Icons.menu_book_outlined, '书架'),
-    (Icons.grid_view_outlined, Icons.grid_view_outlined, '书库'),
-    (Icons.settings_outlined, Icons.settings_outlined, '设置'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    final accent = Theme.of(context).colorScheme.primary;
-
-    return Material(
-      color: semantics.surface,
-      elevation: 0,
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: semantics.hairline)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SizedBox(
-            height: 56,
-            child: Row(
-              children: [
-                for (var i = 0; i < _items.length; i++)
-                  Expanded(
-                    child: _NavButton(
-                      selected: index == i,
-                      icon: _items[i].$1,
-                      selectedIcon: _items[i].$2,
-                      label: _items[i].$3,
-                      accent: accent,
-                      muted: semantics.textSecondary,
-                      onTap: () => onSelect(i),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Compact icon-over-label control for the mobile bottom bar only.
-class _NavButton extends StatelessWidget {
-  const _NavButton({
-    required this.selected,
-    required this.icon,
-    required this.selectedIcon,
-    required this.label,
-    required this.accent,
-    required this.muted,
-    required this.onTap,
-  });
-
-  final bool selected;
-  final IconData icon;
-  final IconData selectedIcon;
-  final String label;
-  final Color accent;
-  final Color muted;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? accent : muted;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        height: 56,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(selected ? selectedIcon : icon, size: 22, color: color),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: color,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
           ),
         ),
       ),

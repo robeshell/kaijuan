@@ -416,7 +416,7 @@ class _ToolKey extends StatelessWidget {
           color: Colors.transparent,
           child: InkWell(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(AppRadii.medium),
+            borderRadius: BorderRadius.circular(AppRadii.menu),
             child: SizedBox(
               height: 48,
               child: Icon(icon, color: color, size: 22, weight: 300),
@@ -494,7 +494,7 @@ class _StepButton extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.small),
+        borderRadius: BorderRadius.circular(AppRadii.control),
         child: SizedBox(
           width: 36,
           height: 28,
@@ -629,7 +629,7 @@ class _SegmentedChoices<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.medium),
+        borderRadius: BorderRadius.circular(AppRadii.menu),
         border: Border.all(color: fgMuted.withValues(alpha: 0.22)),
       ),
       child: Row(
@@ -1341,7 +1341,7 @@ class _FontChoiceTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x3),
         decoration: BoxDecoration(
           color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadii.medium),
+          borderRadius: BorderRadius.circular(AppRadii.menu),
           border: Border.all(
             color: selected ? accent : fgMuted.withValues(alpha: 0.22),
             width: selected ? 1.5 : 1,
@@ -1409,7 +1409,7 @@ class _CatalogFontTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x3),
         decoration: BoxDecoration(
           color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadii.medium),
+          borderRadius: BorderRadius.circular(AppRadii.menu),
           border: Border.all(
             color: selected ? accent : fgMuted.withValues(alpha: 0.22),
             width: selected ? 1.5 : 1,
@@ -1492,7 +1492,7 @@ class _UserFontTile extends StatelessWidget {
         padding: const EdgeInsets.only(left: AppSpacing.x3, right: AppSpacing.x1),
         decoration: BoxDecoration(
           color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadii.medium),
+          borderRadius: BorderRadius.circular(AppRadii.menu),
           border: Border.all(
             color: selected ? accent : fgMuted.withValues(alpha: 0.22),
             width: selected ? 1.5 : 1,
@@ -1770,7 +1770,7 @@ class _AlignChip extends StatelessWidget {
         height: 36,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.small),
+          borderRadius: BorderRadius.circular(AppRadii.control),
           border: Border.all(
             color: selected ? accent : fgMuted.withValues(alpha: 0.22),
           ),
@@ -1819,7 +1819,7 @@ class _PrefToggleRow extends StatelessWidget {
             height: 28,
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadii.small),
+              borderRadius: BorderRadius.circular(AppRadii.control),
               color: value ? accent : fg.withValues(alpha: 0.18),
             ),
             alignment: value ? Alignment.centerRight : Alignment.centerLeft,
@@ -1900,7 +1900,7 @@ class _ThemePresetCard extends StatelessWidget {
         height: 64,
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(AppRadii.medium),
+          borderRadius: BorderRadius.circular(AppRadii.menu),
           border: Border.all(
             color: selected ? accent : fg.withValues(alpha: 0.12),
             width: selected ? 2 : 1,
@@ -2036,7 +2036,7 @@ class _BoldToggle extends StatelessWidget {
         height: 32,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.small),
+          borderRadius: BorderRadius.circular(AppRadii.control),
           border: Border.all(
             color: selected ? accent : fg.withValues(alpha: 0.22),
             width: selected ? 1.5 : 1,
@@ -2077,7 +2077,7 @@ class _TypographyActionRow extends StatelessWidget {
         height: 44,
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x3),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.medium),
+          borderRadius: BorderRadius.circular(AppRadii.menu),
           border: Border.all(color: fgMuted.withValues(alpha: 0.22)),
         ),
         child: Row(

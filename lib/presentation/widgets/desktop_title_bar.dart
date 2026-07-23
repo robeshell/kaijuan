@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/platform_window.dart';
 import '../../core/theme.dart';
 
-/// In-content desktop title bar (MusicPlayerNext / Reverie pattern).
+/// In-content desktop title bar (kaiting / 开听 pattern).
 ///
 /// Overlaid on the shell — not a layout strip that pushes content down.
 ///
@@ -70,7 +70,6 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final height = platformTitleBarHeight;
     if (height <= 0) return const SizedBox.shrink();
 
@@ -99,7 +98,7 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: semantics.textSecondary,
+                          color: context.appSecondaryText,
                           letterSpacing: -0.1,
                         ),
                       ),
@@ -158,7 +157,6 @@ class _WindowControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -168,7 +166,7 @@ class _WindowControlButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           hoverColor: closeButton
               ? const Color(0xFFE81123).withValues(alpha: 0.9)
-              : semantics.hairline,
+              : context.appDivider,
           child: SizedBox(
             width: 40,
             height: 32,
@@ -176,7 +174,7 @@ class _WindowControlButton extends StatelessWidget {
               child: Icon(
                 icon,
                 size: 16,
-                color: semantics.textSecondary.withValues(alpha: 0.85),
+                color: context.appSecondaryText.withValues(alpha: 0.85),
               ),
             ),
           ),

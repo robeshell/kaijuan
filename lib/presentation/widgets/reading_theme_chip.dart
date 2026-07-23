@@ -21,7 +21,6 @@ class ReadingThemeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final accent = Theme.of(context).colorScheme.primary;
     final fg = isDark ? const Color(0xFFF2F2F4) : const Color(0xFF1C1C1E);
 
@@ -29,16 +28,16 @@ class ReadingThemeChip extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadii.menu),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           width: 88,
           padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
           decoration: BoxDecoration(
             color: background,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadii.menu),
             border: Border.all(
-              color: selected ? accent : semantics.hairline,
+              color: selected ? accent : context.appDivider,
               width: selected ? 2 : 1,
             ),
           ),

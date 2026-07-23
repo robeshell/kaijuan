@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../../../app/book_reading_preferences.dart';
+import '../../../core/theme.dart';
 import '../../../domain/reader_models.dart';
 import '../../../readers/book/book_reader_capabilities.dart';
 import '../../controllers/book_reader_controller.dart';
@@ -20,10 +21,6 @@ class BookSelectionMenuOverlay extends StatelessWidget {
 
   final BookReaderController controller;
 
-  static const _card = Color(0xFFFFFFF8);
-  static const _fg = Color(0xFF1C1C1E);
-  static const _fgMuted = Color(0xFF8E8E93);
-  static const _shadow = Color(0x28000000);
   static const _gap = 12.0;
 
   /// Preferred bubble widths — never stretch to full screen.
@@ -487,35 +484,45 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final glass = context.appGlass;
+    final surface = glass.strongSurface;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!placeAbove) _CaretSlot(caretX: caretX, pointDown: false),
+        if (!placeAbove)
+          _CaretSlot(caretX: caretX, pointDown: false, color: surface),
         DecoratedBox(
           decoration: BoxDecoration(
-            color: BookSelectionMenuOverlay._card,
+            color: surface,
             borderRadius: BorderRadius.circular(10),
-            boxShadow: const [
+            border: Border.all(color: glass.border),
+            boxShadow: [
               BoxShadow(
-                color: BookSelectionMenuOverlay._shadow,
-                blurRadius: 16,
-                offset: Offset(0, 6),
+                color: glass.shadow,
+                blurRadius: 16 * context.appSkinEffects.shadowScale,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           child: child,
         ),
-        if (placeAbove) _CaretSlot(caretX: caretX, pointDown: true),
+        if (placeAbove)
+          _CaretSlot(caretX: caretX, pointDown: true, color: surface),
       ],
     );
   }
 }
 
 class _CaretSlot extends StatelessWidget {
-  const _CaretSlot({required this.caretX, required this.pointDown});
+  const _CaretSlot({
+    required this.caretX,
+    required this.pointDown,
+    required this.color,
+  });
 
   final double caretX;
   final bool pointDown;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -531,7 +538,7 @@ class _CaretSlot extends StatelessWidget {
             child: CustomPaint(
               size: const Size(14, 7),
               painter: _CaretPainter(
-                color: BookSelectionMenuOverlay._card,
+                color: color,
                 pointDown: pointDown,
               ),
             ),
@@ -585,6 +592,7 @@ class _ActionItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final fg = context.appPrimaryText;
     return Expanded(
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
@@ -594,17 +602,17 @@ class _ActionItem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 20, color: BookSelectionMenuOverlay._fg),
+              Icon(icon, size: 20, color: fg),
               const SizedBox(height: 2),
               Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10,
                   height: 1.1,
-                  color: BookSelectionMenuOverlay._fg,
+                  color: fg,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -629,6 +637,7 @@ class _StyleChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = context.appColors.primary;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (_) => onPressed(),
@@ -638,17 +647,14 @@ class _StyleChip extends StatelessWidget {
         height: 32,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFFE8F5E9) : const Color(0xFFF2F2F7),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? const Color(0xFF34C759) : const Color(0x00000000),
-          ),
+          color: selected
+              ? accent.withValues(alpha: 0.09)
+              : context.appTint(0.025),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
         ),
         child: IconTheme(
           data: IconThemeData(
-            color: selected
-                ? const Color(0xFF34C759)
-                : BookSelectionMenuOverlay._fgMuted,
+            color: selected ? accent : context.appSecondaryText,
           ),
           child: child,
         ),
@@ -686,7 +692,7 @@ class _ColorDot extends StatelessWidget {
               color: color,
               border: Border.all(
                 color: selected
-                    ? BookSelectionMenuOverlay._fg
+                    ? context.appPrimaryText
                     : const Color(0x22000000),
                 width: selected ? 2 : 1,
               ),

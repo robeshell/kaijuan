@@ -63,12 +63,11 @@ class CollectionsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: semantics.canvas,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -84,7 +83,7 @@ class CollectionsScreen extends StatelessWidget {
                     icon: Icon(
                       Icons.arrow_back_outlined,
                       weight: 300,
-                      color: semantics.textPrimary,
+                      color: context.appPrimaryText,
                     ),
                   ),
                   const Text(
@@ -117,7 +116,7 @@ class CollectionsScreen extends StatelessWidget {
                   return Center(
                     child: Text(
                       '加载失败：${snapshot.error}',
-                      style: TextStyle(color: semantics.textSecondary),
+                      style: TextStyle(color: context.appSecondaryText),
                     ),
                   );
                 }
@@ -133,7 +132,7 @@ class CollectionsScreen extends StatelessWidget {
                             '还没有合集',
                             style: TextStyle(
                               fontSize: 15,
-                              color: semantics.textSecondary,
+                              color: context.appSecondaryText,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -142,7 +141,7 @@ class CollectionsScreen extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 13,
-                              color: semantics.textSecondary.withValues(
+                              color: context.appSecondaryText.withValues(
                                 alpha: 0.85,
                               ),
                             ),
@@ -266,7 +265,6 @@ class _CollectionGridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     return CoverCardInk(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -299,7 +297,7 @@ class _CollectionGridCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     height: 1.2,
-                    color: semantics.textSecondary,
+                    color: context.appSecondaryText,
                   ),
                 ),
               ],
@@ -481,13 +479,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.28),
         builder: (ctx) {
-          final semantics = Theme.of(ctx).extension<AppSemantics>()!;
           return Dialog(
-            backgroundColor: semantics.surface,
+            backgroundColor: Theme.of(ctx).colorScheme.surface,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.panel),
-              side: BorderSide(color: semantics.hairline),
+              borderRadius: BorderRadius.circular(AppRadii.dialog),
+              side: BorderSide(color: ctx.appDivider),
             ),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 360),
@@ -505,7 +502,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w600,
-                            color: semantics.textPrimary,
+                            color: ctx.appPrimaryText,
                           ),
                         ),
                       ),
@@ -570,13 +567,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
         context: context,
         barrierColor: Colors.black.withValues(alpha: 0.28),
         builder: (ctx) {
-          final semantics = Theme.of(ctx).extension<AppSemantics>()!;
           return Dialog(
-            backgroundColor: semantics.surface,
+            backgroundColor: Theme.of(ctx).colorScheme.surface,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.panel),
-              side: BorderSide(color: semantics.hairline),
+              borderRadius: BorderRadius.circular(AppRadii.dialog),
+              side: BorderSide(color: ctx.appDivider),
             ),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 360),
@@ -594,7 +590,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w600,
-                            color: semantics.textPrimary,
+                            color: ctx.appPrimaryText,
                           ),
                         ),
                       ),
@@ -638,12 +634,11 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: semantics.canvas,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -663,7 +658,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                           ? Icons.close
                           : Icons.arrow_back_outlined,
                       weight: 300,
-                      color: semantics.textPrimary,
+                      color: context.appPrimaryText,
                     ),
                   ),
                   Expanded(
@@ -687,7 +682,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                       icon: Icon(
                         Icons.checklist_outlined,
                         weight: 300,
-                        color: semantics.textSecondary,
+                        color: context.appSecondaryText,
                       ),
                     ),
                 ],
@@ -706,7 +701,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                       '合集为空\n在书库多选里加入',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: semantics.textSecondary,
+                        color: context.appSecondaryText,
                         height: 1.5,
                       ),
                     ),
@@ -747,11 +742,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                                 width: double.infinity,
                                                 errorBuilder: (_, _, _) =>
                                                     ColoredBox(
-                                                  color: semantics.canvas,
+                                                  color: Theme.of(context)
+                                                      .scaffoldBackgroundColor,
                                                 ),
                                               )
                                             : ColoredBox(
-                                                color: semantics.canvas,
+                                                color: Theme.of(context)
+                                                    .scaffoldBackgroundColor,
                                               ),
                                         if (_selecting)
                                           Positioned(

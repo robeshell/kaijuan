@@ -56,7 +56,6 @@ class _BookNavDrawerState extends State<BookNavDrawer>
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final accent = Theme.of(context).colorScheme.primary;
 
     return Drawer(
@@ -73,11 +72,11 @@ class _BookNavDrawerState extends State<BookNavDrawer>
                   child: TabBar(
                     controller: _tabs,
                     labelColor: accent,
-                    unselectedLabelColor: semantics.textPrimary.withValues(
+                    unselectedLabelColor: context.appPrimaryText.withValues(
                       alpha: 0.55,
                     ),
                     indicatorColor: accent,
-                    dividerColor: semantics.hairline,
+                    dividerColor: context.appDivider,
                     labelStyle: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -108,7 +107,7 @@ class _BookNavDrawerState extends State<BookNavDrawer>
                         entries: _controller.tocEntries,
                         currentIndex: _controller.sectionIndex,
                         accent: accent,
-                        textPrimary: semantics.textPrimary,
+                        textPrimary: context.appPrimaryText,
                         onOpen: (entry) {
                           Navigator.of(context).pop();
                           widget.onOpenTocEntry(entry);

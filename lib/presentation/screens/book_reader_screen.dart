@@ -399,8 +399,7 @@ class _TitleFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>();
-    final fg = semantics?.textPrimary ?? const Color(0xFF1C1C1E);
+    final fg = context.appPrimaryText;
     return Text(
       title,
       textAlign: TextAlign.center,

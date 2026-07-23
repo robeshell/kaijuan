@@ -114,7 +114,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _showFailureDetails(List<ImportFailure> failures) async {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.28),
@@ -128,7 +127,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               shrinkWrap: true,
               itemCount: failures.length,
               separatorBuilder: (_, _) =>
-                  Divider(height: 1, color: semantics.hairline),
+                  Divider(height: 1, color: ctx.appDivider),
               itemBuilder: (_, i) {
                 final f = failures[i];
                 final name = f.path.isEmpty ? '（未知）' : f.fileName;
@@ -149,7 +148,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         f.reason,
                         style: TextStyle(
                           fontSize: 12,
-                          color: semantics.textSecondary,
+                          color: ctx.appSecondaryText,
                         ),
                       ),
                     ],
@@ -305,13 +304,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.28),
       builder: (ctx) {
-        final semantics = Theme.of(ctx).extension<AppSemantics>()!;
         return Dialog(
-          backgroundColor: semantics.surface,
+          backgroundColor: Theme.of(ctx).colorScheme.surface,
           surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.panel),
-            side: BorderSide(color: semantics.hairline),
+            borderRadius: BorderRadius.circular(AppRadii.dialog),
+            side: BorderSide(color: ctx.appDivider),
           ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 360),
@@ -328,7 +326,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w600,
-                        color: semantics.textPrimary,
+                        color: ctx.appPrimaryText,
                       ),
                     ),
                   ),
@@ -385,7 +383,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
 
-  Widget _searchField({required Color accent, required AppSemantics semantics}) {
+  Widget _searchField({required Color accent}) {
     return SizedBox(
       height: 40,
       child: TextField(
@@ -395,13 +393,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
           isDense: true,
           hintText: '搜索标题…',
           hintStyle: TextStyle(
-            color: semantics.textSecondary,
+            color: context.appSecondaryText,
             fontSize: 14,
           ),
           prefixIcon: Icon(
             Icons.search,
             size: 18,
-            color: semantics.textSecondary,
+            color: context.appSecondaryText,
           ),
           suffixIcon: _query.isEmpty
               ? null
@@ -442,10 +440,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     required bool wide,
     required bool importing,
     required Color accent,
-    required AppSemantics semantics,
   }) {
     final hPad = wide ? 32.0 : 16.0;
-    final muted = semantics.textSecondary;
+    final muted = context.appSecondaryText;
 
     Widget navLists() {
       if (wide) {
@@ -604,10 +601,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     tooltip: '导入（CBZ / ZIP / EPUB）',
                     onPressed: importing ? null : _import,
                     icon: importing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                        ? const Center(
+                            child: SizedBox.square(
+                              dimension: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           )
                         : Icon(Icons.add, weight: 300, color: accent),
                   ),
@@ -622,7 +620,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   constraints: BoxConstraints(
                     maxWidth: wide ? 420 : double.infinity,
                   ),
-                  child: _searchField(accent: accent, semantics: semantics),
+                  child: _searchField(accent: accent),
                 ),
               ),
               const SizedBox(height: 10),
@@ -696,12 +694,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final accent = Theme.of(context).colorScheme.primary;
 
     // Scaffold (not ColoredBox): ListTile ink needs a Material ancestor.
     return Scaffold(
-      backgroundColor: semantics.canvas,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {
@@ -718,7 +715,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 wide: wide,
                 importing: importing,
                 accent: accent,
-                semantics: semantics,
               ),
               if (!_selecting) _buildFilterRow(c, wide: wide),
               Expanded(
@@ -770,7 +766,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 Text(
                                   '导入 CBZ、ZIP 或 EPUB',
                                   style: TextStyle(
-                                    color: semantics.textSecondary,
+                                    color: context.appSecondaryText,
                                   ),
                                 ),
                                 const SizedBox(height: 12),
@@ -787,7 +783,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           return Center(
                             child: Text(
                               '没有匹配的书',
-                              style: TextStyle(color: semantics.textSecondary),
+                              style: TextStyle(color: context.appSecondaryText),
                             ),
                           );
                         }
@@ -976,12 +972,11 @@ class _ListBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final total = collections.length + entries.length;
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
       itemCount: total,
-      separatorBuilder: (_, _) => Divider(height: 1, color: semantics.hairline),
+      separatorBuilder: (_, _) => Divider(height: 1, color: context.appDivider),
       itemBuilder: (context, i) {
         if (i < collections.length) {
           final s = collections[i];
@@ -1003,7 +998,7 @@ class _ListBody extends StatelessWidget {
             ),
             subtitle: Text(
               '合集 · ${s.memberCount} 本',
-              style: TextStyle(fontSize: 12, color: semantics.textSecondary),
+              style: TextStyle(fontSize: 12, color: context.appSecondaryText),
             ),
             onTap: () => CollectionDetailScreen.open(
               context,
@@ -1035,10 +1030,13 @@ class _ListBody extends StatelessWidget {
                       ? Image.file(
                           File(item.coverPath!),
                           fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) =>
-                              ColoredBox(color: semantics.canvas),
+                          errorBuilder: (_, _, _) => ColoredBox(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                          ),
                         )
-                      : ColoredBox(color: semantics.canvas),
+                      : ColoredBox(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                        ),
                 ),
                 if (selecting)
                   Positioned(
@@ -1064,7 +1062,7 @@ class _ListBody extends StatelessWidget {
                 '${(entry.progressFraction! * 100).round()}%',
               if (item.onShelf) '已上架',
             ].join(' · '),
-            style: TextStyle(fontSize: 12, color: semantics.textSecondary),
+            style: TextStyle(fontSize: 12, color: context.appSecondaryText),
           ),
           onTap: () => onTap(entry),
           onLongPress: () => onLongPress(entry),
@@ -1082,7 +1080,6 @@ class _LibraryCollectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     return CoverCardInk(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -1114,7 +1111,7 @@ class _LibraryCollectionCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     height: 1.2,
-                    color: semantics.textSecondary,
+                    color: context.appSecondaryText,
                   ),
                 ),
               ],
@@ -1170,7 +1167,6 @@ class _FilterMenu<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final accent = Theme.of(context).colorScheme.primary;
     // GestureDetector only — no InkWell / tooltip hover chrome on the chip.
     return GestureDetector(
@@ -1182,7 +1178,7 @@ class _FilterMenu<T> extends StatelessWidget {
           color: active ? accent.withValues(alpha: 0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: active ? accent.withValues(alpha: 0.28) : semantics.hairline,
+            color: active ? accent.withValues(alpha: 0.28) : context.appDivider,
           ),
         ),
         child: Row(
@@ -1192,7 +1188,7 @@ class _FilterMenu<T> extends StatelessWidget {
               icon,
               size: 15,
               weight: 300,
-              color: active ? accent : semantics.textSecondary,
+              color: active ? accent : context.appSecondaryText,
             ),
             const SizedBox(width: 6),
             Text(
@@ -1200,7 +1196,7 @@ class _FilterMenu<T> extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                color: active ? accent : semantics.textSecondary,
+                color: active ? accent : context.appSecondaryText,
               ),
             ),
             const SizedBox(width: 2),
@@ -1208,7 +1204,7 @@ class _FilterMenu<T> extends StatelessWidget {
               Icons.arrow_drop_down,
               size: 16,
               weight: 300,
-              color: active ? accent : semantics.textSecondary,
+              color: active ? accent : context.appSecondaryText,
             ),
           ],
         ),
@@ -1234,7 +1230,6 @@ class _GridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final item = entry.item;
     return CoverCardInk(
       onTap: onTap,
@@ -1253,10 +1248,13 @@ class _GridCard extends StatelessWidget {
                           File(item.coverPath!),
                           fit: BoxFit.cover,
                           width: double.infinity,
-                          errorBuilder: (_, _, _) =>
-                              ColoredBox(color: semantics.canvas),
+                          errorBuilder: (_, _, _) => ColoredBox(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                          ),
                         )
-                      : ColoredBox(color: semantics.canvas),
+                      : ColoredBox(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                        ),
                   if (item.onShelf && !selecting)
                     Positioned(
                       top: 6,
@@ -1315,7 +1313,7 @@ class _GridCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     height: 1.2,
-                    color: semantics.textSecondary,
+                    color: context.appSecondaryText,
                   ),
                 ),
               ],

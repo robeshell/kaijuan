@@ -137,7 +137,12 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
               if (!snap.hasData) {
                 return const SizedBox(
                   height: 160,
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(
+                    child: SizedBox.square(
+                      dimension: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
                 );
               }
               final all = snap.data![0] as List<ReadingListSummary>;
@@ -308,7 +313,6 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final accent = Theme.of(context).colorScheme.primary;
     final progress = widget.progressFraction;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
@@ -334,10 +338,15 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                           ? Image.file(
                               File(_item.coverPath!),
                               fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  ColoredBox(color: semantics.canvas),
+                              errorBuilder: (_, _, _) => ColoredBox(
+                                color: Theme.of(
+                                  context,
+                                ).scaffoldBackgroundColor,
+                              ),
                             )
-                          : ColoredBox(color: semantics.canvas),
+                          : ColoredBox(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                            ),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -362,7 +371,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                           _item.format.toUpperCase(),
                           style: TextStyle(
                             fontSize: 12,
-                            color: semantics.textSecondary,
+                            color: context.appSecondaryText,
                           ),
                         ),
                         if (_item.pageCount > 0) ...[
@@ -371,7 +380,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                             '${_item.pageCount} 页',
                             style: TextStyle(
                               fontSize: 12,
-                              color: semantics.textSecondary,
+                              color: context.appSecondaryText,
                             ),
                           ),
                         ],
@@ -382,7 +391,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                             child: LinearProgressIndicator(
                               value: progress.clamp(0.0, 1.0),
                               minHeight: 3,
-                              backgroundColor: semantics.hairline,
+                              backgroundColor: context.appDivider,
                               color: accent,
                             ),
                           ),
@@ -391,7 +400,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                             '进度 ${(progress * 100).round()}%',
                             style: TextStyle(
                               fontSize: 12,
-                              color: semantics.textSecondary,
+                              color: context.appSecondaryText,
                             ),
                           ),
                         ],
@@ -406,10 +415,11 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                 child: TextButton.icon(
                   onPressed: _savingTitle ? null : _saveTitle,
                   icon: _savingTitle
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                      ? const Center(
+                          child: SizedBox.square(
+                            dimension: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
                         )
                       : const Icon(Icons.check_outlined, size: 18),
                   label: const Text('保存标题'),

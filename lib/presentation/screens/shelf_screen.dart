@@ -80,11 +80,10 @@ class ShelfScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final accent = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
-      backgroundColor: semantics.canvas,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: StreamBuilder<List<ContinueReadingEntry>>(
         stream: libraryController.watchContinueReading(),
         builder: (context, recentSnap) {
@@ -109,9 +108,9 @@ class ShelfScreen extends StatelessWidget {
                       title: recent.first.item.title,
                       progress: recent.first.progressFraction ?? 0,
                       accent: accent,
-                      surface: semantics.surface,
-                      hairline: semantics.hairline,
-                      muted: semantics.textSecondary,
+                      surface: Theme.of(context).colorScheme.surface,
+                      hairline: context.appDivider,
+                      muted: context.appSecondaryText,
                       cover: _FileOrFallbackCover(
                         itemId: recent.first.item.id,
                         path: recent.first.item.coverPath,
@@ -137,7 +136,7 @@ class ShelfScreen extends StatelessWidget {
                               title: e.item.title,
                               progress: e.progressFraction,
                               accent: accent,
-                              hairline: semantics.hairline,
+                              hairline: context.appDivider,
                               cover: _FileOrFallbackCover(
                                 itemId: e.item.id,
                                 path: e.item.coverPath,
@@ -167,7 +166,7 @@ class ShelfScreen extends StatelessWidget {
                             title: item.title,
                             progress: null,
                             accent: accent,
-                            hairline: semantics.hairline,
+                            hairline: context.appDivider,
                             cover: _FileOrFallbackCover(
                               itemId: item.id,
                               path: item.coverPath,
@@ -389,7 +388,7 @@ class _FileOrFallbackCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
+    final canvas = Theme.of(context).scaffoldBackgroundColor;
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: path != null
@@ -398,9 +397,9 @@ class _FileOrFallbackCover extends StatelessWidget {
               fit: BoxFit.cover,
               width: double.infinity,
               height: double.infinity,
-              errorBuilder: (_, _, _) => ColoredBox(color: semantics.canvas),
+              errorBuilder: (_, _, _) => ColoredBox(color: canvas),
             )
-          : ColoredBox(color: semantics.canvas),
+          : ColoredBox(color: canvas),
     );
   }
 }
@@ -410,13 +409,12 @@ class _EmptyShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     return Center(
       child: Text(
         '还没有阅读记录\n在书库打开一本后会出现在这里',
         textAlign: TextAlign.center,
         style: TextStyle(
-          color: semantics.textSecondary,
+          color: context.appSecondaryText,
           height: 1.5,
         ),
       ),

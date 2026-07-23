@@ -52,8 +52,7 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
     final fg = Color(theme.foregroundArgb);
     final muted = fg.withValues(alpha: 0.55);
     final accent = Theme.of(context).colorScheme.primary;
-    final hairline = Theme.of(context).extension<AppSemantics>()?.hairline ??
-        fg.withValues(alpha: 0.12);
+    final hairline = context.appDivider;
 
     return Material(
       color: bg,

@@ -7,7 +7,9 @@ import '../../app/theme_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/pipeline_diagnostics.dart';
 import '../../core/theme.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
+import '../widgets/settings_components.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -21,41 +23,41 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: semantics.canvas,
       body: ListenableBuilder(
         listenable: themePreferences,
         builder: (context, _) {
-          return ListView(
+          final skins = <(String, String, String?)>[
+            (AppSkins.systemId, '跟随系统', '按系统外观自动切换默认与深夜'),
+            for (final skin in AppSkins.presets)
+              (skin.id, skin.name, skin.description),
+          ];
+          return AppSettingsScrollView(
             padding: EdgeInsets.fromLTRB(hPad, wide ? 24 : 16, hPad, 40),
             children: [
-              const Text(
-                '设置',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 28),
-              _SectionLabel('外观'),
+              const AppSettingsPageHeader(title: '设置'),
+              const SizedBox(height: AppSettingsMetrics.sectionGap),
+              const _SectionLabel('外观'),
               const SizedBox(height: 4),
-              for (final mode in const [
-                (ThemeMode.system, '跟随系统'),
-                (ThemeMode.light, '浅色'),
-                (ThemeMode.dark, '深色'),
-              ])
-                _ChoiceRow(
-                  label: mode.$2,
-                  selected: themePreferences.themeMode == mode.$1,
-                  onTap: () => themePreferences.setThemeMode(mode.$1),
+              for (final option in skins)
+                AppListRow(
+                  title: Text(option.$2),
+                  subtitle: option.$3 == null ? null : Text(option.$3!),
+                  trailing: themePreferences.skinId == option.$1
+                      ? Icon(
+                          Icons.check_rounded,
+                          size: 18,
+                          color: context.appColors.primary,
+                        )
+                      : null,
+                  selected: themePreferences.skinId == option.$1,
+                  onTap: () => themePreferences.setSkinId(option.$1),
                 ),
-              const SizedBox(height: 20),
-              _SectionLabel('强调色'),
+              const SizedBox(height: AppSettingsMetrics.sectionGap),
+              const _SectionLabel('强调色'),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 10,
@@ -72,7 +74,7 @@ class SettingsScreen extends StatelessWidget {
                             color: preset.color,
                             border: Border.all(
                               color: preset.id == themePreferences.accent.id
-                                  ? semantics.textPrimary
+                                  ? context.appPrimaryText
                                   : Colors.transparent,
                               width: 1.5,
                             ),
@@ -93,8 +95,8 @@ class SettingsScreen extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 32),
-              _SectionLabel('关于'),
+              const SizedBox(height: AppSettingsMetrics.sectionGap),
+              const _SectionLabel('关于'),
               const SizedBox(height: 8),
               Text(
                 brand.displayName,
@@ -108,11 +110,11 @@ class SettingsScreen extends StatelessWidget {
                 '本机阅读 · 不上传',
                 style: TextStyle(
                   fontSize: 13,
-                  color: semantics.textSecondary,
+                  color: context.settingsSecondary,
                 ),
               ),
               const SizedBox(height: 12),
-              Divider(height: 1, color: semantics.hairline),
+              Divider(height: 1, color: context.settingsHairline),
               _AboutBlock(brand: brand),
             ],
           );
@@ -129,60 +131,13 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     return Text(
       text,
       style: TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.2,
-        color: semantics.textSecondary,
-      ),
-    );
-  }
-}
-
-class _ChoiceRow extends StatelessWidget {
-  const _ChoiceRow({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
-    return InkWell(
-      onTap: onTap,
-      splashFactory: NoSplash.splashFactory,
-      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  color: semantics.textPrimary,
-                ),
-              ),
-            ),
-            if (selected)
-              Icon(
-                Icons.check,
-                size: 18,
-                weight: 300,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-          ],
-        ),
+        color: context.settingsSecondary,
       ),
     );
   }
@@ -262,7 +217,6 @@ class _AboutRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final semantics = Theme.of(context).extension<AppSemantics>()!;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -272,7 +226,7 @@ class _AboutRow extends StatelessWidget {
             width: 56,
             child: Text(
               label,
-              style: TextStyle(fontSize: 13, color: semantics.textSecondary),
+              style: TextStyle(fontSize: 13, color: context.settingsSecondary),
             ),
           ),
           Expanded(
@@ -291,7 +245,7 @@ class _AboutRow extends StatelessWidget {
                 Icons.copy_outlined,
                 size: 16,
                 weight: 300,
-                color: semantics.textSecondary,
+                color: context.settingsSecondary,
               ),
               onPressed: onCopy,
             ),

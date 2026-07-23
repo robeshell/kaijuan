@@ -31,6 +31,14 @@ class App extends StatelessWidget {
     return ListenableBuilder(
       listenable: themePreferences,
       builder: (context, _) {
+        final accent = themePreferences.accent;
+        final skinId = themePreferences.skinId;
+        // "跟随系统" maps to the light/dark skins via Flutter's own
+        // ThemeMode.system, so OS brightness changes apply automatically.
+        final followSystem = skinId == AppSkins.systemId;
+        final skin = followSystem
+            ? AppSkins.standard
+            : AppSkins.byId(skinId);
         return MaterialApp(
           title: brand.displayName,
           debugShowCheckedModeBanner: false,
@@ -44,9 +52,16 @@ class App extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          theme: AppTheme.light(themePreferences.accent),
-          darkTheme: AppTheme.dark(themePreferences.accent),
-          themeMode: themePreferences.themeMode,
+          theme: AppTheme.forSkin(skin, accent),
+          darkTheme: AppTheme.forSkin(
+            followSystem ? AppSkins.deepNight : skin,
+            accent,
+          ),
+          themeMode: followSystem
+              ? ThemeMode.system
+              : (skin.brightness == Brightness.dark
+                    ? ThemeMode.dark
+                    : ThemeMode.light),
           builder: (context, child) {
             return DesktopTitleBarMediaQuery(
               child: child ?? const SizedBox.shrink(),

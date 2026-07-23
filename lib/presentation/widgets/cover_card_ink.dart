@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme.dart';
+
 /// Multi-select corner badge on a cover — filled check, no thick cover border.
 class CoverSelectBadge extends StatelessWidget {
   const CoverSelectBadge({
@@ -62,8 +64,8 @@ class SoftCoverFrame extends StatelessWidget {
         borderRadius: BorderRadius.circular(radius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
+            color: context.appGlass.shadow,
+            blurRadius: 10 * context.appSkinEffects.shadowScale,
             offset: const Offset(0, 3),
           ),
         ],

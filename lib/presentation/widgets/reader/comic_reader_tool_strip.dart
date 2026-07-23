@@ -237,7 +237,7 @@ class _ToolKey extends StatelessWidget {
           color: Colors.transparent,
           child: InkWell(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(AppRadii.medium),
+            borderRadius: BorderRadius.circular(AppRadii.menu),
             child: SizedBox(
               height: 48,
               child: Icon(icon, color: color, size: 22, weight: 300),
@@ -332,7 +332,7 @@ class _StepButton extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.small),
+        borderRadius: BorderRadius.circular(AppRadii.control),
         child: SizedBox(
           width: 36,
           height: 28,
@@ -479,7 +479,7 @@ class _SegmentedChoices<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.medium),
+        borderRadius: BorderRadius.circular(AppRadii.menu),
         border: Border.all(color: fgMuted.withValues(alpha: 0.22)),
       ),
       child: Row(
