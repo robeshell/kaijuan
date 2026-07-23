@@ -55,16 +55,16 @@ lib/
 - **ReaderLocator 不透明 JSON**（comic 页 / book 节+节内进度）。  
 - **漫画页序** `ComicPageOrder.version` + 导入 pageCount。  
 - **内容寻址导入**（同 hash 只存一份文件）。  
-- **表现层只认 controller**；ComicSession / BookEpub 按 kind 分流。  
+- **表现层只认 controller**；ComicSession / Foliate book 引擎按 kind 分流。  
 - 类型名不带应用名（`App*`）；包名 `com.kaika.reader`。
 
 ## 进度摘要
 
 - **已有（comic）**：导入 CBZ/ZIP/页图 EPUB；书库管理；合集/书单；四模式阅读；进度与书架；偏好；桌面壳。  
-- **已有（book spike）**：reflow EPUB 导入（`kind=book`）；`BookReaderScreen` 分节滚动/目录/字号/主题；`BookLocator` 进度恢复。  
-- **已有（合并）**：单入口/单库混排；类型筛选（全部/漫画/图书）；EPUB 自动探测；两组阅读默认并排。  
-- **整理三概念**：**我的书架** · **书单** · **合集**（书库最前）。  
-- **下一刀**：打开书加速 → 选区弹出菜单/划线 → 书内搜索（见 `docs/specs/book-reader-next-plan.md`）。仿真翻页搁置。
+- **已有（book）**：Foliate reflow 主链（CFI/目录/划线笔记/搜索/看大图/书摘/听书 T1/字体三源）；底栏工具条；桌面仅翻页。  
+- **已有（合并）**：单入口/单库混排；类型筛选；EPUB 自动探测；整理三概念（书架 · 书单 · 合集）。  
+- **结构债（已知）**：Book god-controller；readers→presentation 依赖；见 architecture review。  
+- **下一刀**：听书 T2 / 合集书单体验 / 结构债拆分（见 `docs/specs/book-reader-next-plan.md`）。仿真翻页搁置。
 
 全表以 **PRODUCT.md** 为准。
 

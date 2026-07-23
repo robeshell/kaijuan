@@ -6,12 +6,10 @@ import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
-import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
+import '../navigation/open_reading_item.dart';
 import '../widgets/app_overlays.dart';
-import 'book_reader_screen.dart';
-import 'comic_reader_screen.dart';
 
 /// Reading lists hub (书库二级).
 class ListsScreen extends StatelessWidget {
@@ -48,20 +46,12 @@ class ListsScreen extends StatelessWidget {
   }
 
   void _openItem(BuildContext context, ReadingItem item) {
-    if (item.kind == ReaderKind.book.storageValue) {
-      BookReaderScreen.open(
-        context,
-        database: controller.database,
-        item: item,
-        readingPreferences: bookReadingPreferences,
-      );
-      return;
-    }
-    ComicReaderScreen.open(
+    openReadingItem(
       context,
       database: controller.database,
       item: item,
-      readingPreferences: readingPreferences,
+      comicReadingPreferences: readingPreferences,
+      bookReadingPreferences: bookReadingPreferences,
     );
   }
 

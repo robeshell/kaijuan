@@ -6,12 +6,10 @@ import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
-import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
+import '../navigation/open_reading_item.dart';
 import '../widgets/app_overlays.dart';
-import 'book_reader_screen.dart';
-import 'comic_reader_screen.dart';
 
 /// Shelf: 继续阅读 + 最近 + 我的书架（仅单本钉选；合集在书库展示）.
 class ShelfScreen extends StatelessWidget {
@@ -29,20 +27,12 @@ class ShelfScreen extends StatelessWidget {
   final BookReadingPreferences? bookReadingPreferences;
 
   void _openReal(BuildContext context, ReadingItem item) {
-    if (item.kind == ReaderKind.book.storageValue) {
-      BookReaderScreen.open(
-        context,
-        database: libraryController.database,
-        item: item,
-        readingPreferences: bookReadingPreferences,
-      );
-      return;
-    }
-    ComicReaderScreen.open(
+    openReadingItem(
       context,
       database: libraryController.database,
       item: item,
-      readingPreferences: readingPreferences,
+      comicReadingPreferences: readingPreferences,
+      bookReadingPreferences: bookReadingPreferences,
     );
   }
 

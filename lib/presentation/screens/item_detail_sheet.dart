@@ -131,7 +131,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
           child: FutureBuilder(
             future: Future.wait([
               widget.controller.readingListsSnapshot(),
-              widget.controller.database.listIdsContainingItem(_item.id),
+              widget.controller.listIdsContainingItem(_item.id),
             ]),
             builder: (context, snap) {
               if (!snap.hasData) {

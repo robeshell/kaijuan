@@ -565,7 +565,7 @@ try {
   void _onRelocated(FoliateRelocation relocation) {
     if (_sectionHrefs.isEmpty || !_webReady || _relocationSuspended) return;
     final sectionIndex =
-        _sectionIndexFromCfi(relocation.cfi) ??
+        BookLocator.sectionIndexFromCfi(relocation.cfi) ??
         _sectionIndexFromHref(relocation.chapterHref) ??
         0;
     if (_awaitingRendererRecovery) {
@@ -858,14 +858,6 @@ try {
     } catch (_) {
       return path;
     }
-  }
-
-  int? _sectionIndexFromCfi(String cfi) {
-    final match = RegExp(r'^epubcfi\(/6/(\d+)').firstMatch(cfi);
-    final step = int.tryParse(match?.group(1) ?? '');
-    if (step == null || step < 2) return null;
-    final index = step ~/ 2 - 1;
-    return index >= 0 && index < _sectionHrefs.length ? index : null;
   }
 
   Future<dynamic> _evaluate(String source) async {

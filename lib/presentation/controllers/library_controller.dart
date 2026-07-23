@@ -261,7 +261,6 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
     try {
       final comicPaths = <String>[];
-      final bookPaths = <String>[];
       final epubPaths = <String>[];
       final failures = <ImportFailure>[];
 
@@ -284,13 +283,6 @@ class LibraryController extends ChangeNotifier {
         added += comicResult.added;
         updated += comicResult.updated;
         failures.addAll(comicResult.failures);
-      }
-
-      if (bookPaths.isNotEmpty) {
-        final bookResult = await _bookImport.importPaths(bookPaths);
-        added += bookResult.added;
-        updated += bookResult.updated;
-        failures.addAll(bookResult.failures);
       }
 
       if (epubPaths.isNotEmpty) {
@@ -375,6 +367,10 @@ class LibraryController extends ChangeNotifier {
   Future<List<ReadingListSummary>> readingListsSnapshot() async {
     return watchReadingLists().first;
   }
+
+  /// Reading-list ids that already contain [itemId].
+  Future<List<String>> listIdsContainingItem(String itemId) =>
+      database.listIdsContainingItem(itemId);
 
   // --- Collections (合集) ---------------------------------------------------
 

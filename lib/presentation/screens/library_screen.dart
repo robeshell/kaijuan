@@ -6,14 +6,12 @@ import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
-import '../../domain/reader_models.dart';
 import '../../library/import/import_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
+import '../navigation/open_reading_item.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
-import 'book_reader_screen.dart';
-import 'comic_reader_screen.dart';
 import 'collections_screen.dart';
 import 'item_detail_sheet.dart';
 import 'lists_screen.dart';
@@ -172,20 +170,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _openItem(ReadingItem item) {
-    if (item.kind == ReaderKind.book.storageValue) {
-      BookReaderScreen.open(
-        context,
-        database: widget.controller.database,
-        item: item,
-        readingPreferences: widget.bookReadingPreferences,
-      );
-      return;
-    }
-    ComicReaderScreen.open(
+    openReadingItem(
       context,
       database: widget.controller.database,
       item: item,
-      readingPreferences: widget.readingPreferences,
+      comicReadingPreferences: widget.readingPreferences,
+      bookReadingPreferences: widget.bookReadingPreferences,
     );
   }
 
