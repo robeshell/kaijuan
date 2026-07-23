@@ -11,6 +11,7 @@ import '../../../domain/reader_models.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
 import 'book_annotation_note_sheet.dart';
+import 'book_excerpt_sheet.dart';
 
 /// Two-phase selection menu (actions → markup) with edge-aware placement.
 class BookSelectionMenuOverlay extends StatelessWidget {
@@ -168,6 +169,13 @@ class BookSelectionMenuOverlay extends StatelessWidget {
                       onCopy: () => _copy(context, text),
                       onDict: () => _soon(context, '词典'),
                       onTranslate: () => _soon(context, '翻译'),
+                      onSearch: () {
+                        final q = text.trim();
+                        controller.clearSelectionMenu();
+                        controller.openSearch(
+                          initialQuery: q.isEmpty ? null : q,
+                        );
+                      },
                       onExcerpt: () => _excerpt(context, text),
                     ),
             ),
@@ -213,9 +221,23 @@ class BookSelectionMenuOverlay extends StatelessWidget {
   }
 
   Future<void> _excerpt(BuildContext context, String text) async {
-    final ok = await controller.copyExcerpt(textOverride: text);
+    final quote = text.trim();
+    if (quote.isEmpty) {
+      showAppSnackBar(context, '没有可摘录的文字');
+      return;
+    }
+    final title = controller.item.title;
+    final chapter = controller.currentChapterTitle;
+    final subtitle = controller.item.seriesName;
+    controller.clearSelectionMenu();
     if (!context.mounted) return;
-    showAppSnackBar(context, ok ? '已摘录到剪贴板' : '没有可摘录的文字');
+    await showBookExcerptSheet(
+      context,
+      quote: quote,
+      bookTitle: title,
+      chapterTitle: chapter,
+      subtitle: subtitle,
+    );
   }
 
   Future<void> _openNote(BuildContext context) async {
@@ -261,6 +283,7 @@ class _ActionsCard extends StatelessWidget {
     required this.onCopy,
     required this.onDict,
     required this.onTranslate,
+    required this.onSearch,
     required this.onExcerpt,
   });
 
@@ -271,6 +294,7 @@ class _ActionsCard extends StatelessWidget {
   final VoidCallback onCopy;
   final VoidCallback onDict;
   final VoidCallback onTranslate;
+  final VoidCallback onSearch;
   final VoidCallback onExcerpt;
 
   @override
@@ -303,6 +327,11 @@ class _ActionsCard extends StatelessWidget {
             icon: Icons.translate_rounded,
             label: '翻译',
             onPressed: onTranslate,
+          ),
+          _ActionItem(
+            icon: Icons.search_rounded,
+            label: '搜索',
+            onPressed: onSearch,
           ),
           _ActionItem(
             icon: Icons.format_quote_rounded,

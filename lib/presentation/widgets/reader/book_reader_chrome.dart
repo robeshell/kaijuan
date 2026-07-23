@@ -102,6 +102,15 @@ class BookReaderChrome extends StatelessWidget {
                           weight: 300,
                         ),
                       ),
+                      IconButton(
+                        tooltip: '搜索',
+                        onPressed: () => controller.openSearch(),
+                        icon: Icon(
+                          Icons.search,
+                          color: fg,
+                          weight: 300,
+                        ),
+                      ),
                       if (leadingClearance > 0)
                         SizedBox(width: leadingClearance - 8),
                     ],

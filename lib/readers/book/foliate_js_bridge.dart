@@ -359,3 +359,140 @@ class FoliateExternalLink {
     return null;
   }
 }
+
+/// One hit from Foliate `onSearch` (chapter group or single section result).
+class FoliateSearchHit {
+  const FoliateSearchHit({
+    required this.cfi,
+    required this.chapterLabel,
+    required this.excerptPre,
+    required this.excerptMatch,
+    required this.excerptPost,
+  });
+
+  final String cfi;
+  final String chapterLabel;
+  final String excerptPre;
+  final String excerptMatch;
+  final String excerptPost;
+
+  String get excerptLine {
+    final pre = excerptPre.trimRight();
+    final post = excerptPost.trimLeft();
+    return '$pre$excerptMatch$post';
+  }
+}
+
+/// Parsed Foliate `onSearch` payload: progress, done, or chapter hits.
+sealed class FoliateSearchEvent {
+  const FoliateSearchEvent();
+
+  static FoliateSearchEvent? fromHandlerArguments(List<dynamic> arguments) {
+    final payload = _firstMap(arguments);
+    if (payload == null) return null;
+
+    final process = payload['process'];
+    if (process != null) {
+      final value = switch (process) {
+        num number => number.toDouble(),
+        String text => double.tryParse(text) ?? 0,
+        _ => 0.0,
+      };
+      if (value >= 1.0) return const FoliateSearchDone();
+      return FoliateSearchProgress(value.clamp(0.0, 1.0));
+    }
+
+    final subitems = payload['subitems'];
+    if (subitems is List) {
+      final label = payload['label']?.toString().trim() ?? '';
+      final hits = <FoliateSearchHit>[];
+      for (final raw in subitems) {
+        final hit = _hitFromMap(raw, chapterLabel: label);
+        if (hit != null) hits.add(hit);
+      }
+      if (hits.isEmpty) return null;
+      return FoliateSearchChapterHits(label: label, hits: hits);
+    }
+
+    final single = _hitFromMap(payload, chapterLabel: '');
+    if (single != null) {
+      return FoliateSearchChapterHits(label: '', hits: [single]);
+    }
+    return null;
+  }
+
+  static FoliateSearchHit? _hitFromMap(
+    Object? value, {
+    required String chapterLabel,
+  }) {
+    if (value is! Map) return null;
+    final cfi = value['cfi']?.toString().trim() ?? '';
+    if (cfi.isEmpty) return null;
+    final excerpt = value['excerpt'];
+    var pre = '';
+    var match = '';
+    var post = '';
+    if (excerpt is Map) {
+      pre = excerpt['pre']?.toString() ?? '';
+      match = excerpt['match']?.toString() ?? '';
+      post = excerpt['post']?.toString() ?? '';
+    } else if (excerpt is String) {
+      match = excerpt;
+    }
+    return FoliateSearchHit(
+      cfi: cfi,
+      chapterLabel: chapterLabel,
+      excerptPre: pre,
+      excerptMatch: match,
+      excerptPost: post,
+    );
+  }
+}
+
+final class FoliateSearchProgress extends FoliateSearchEvent {
+  const FoliateSearchProgress(this.fraction);
+  final double fraction;
+}
+
+final class FoliateSearchDone extends FoliateSearchEvent {
+  const FoliateSearchDone();
+}
+
+final class FoliateSearchChapterHits extends FoliateSearchEvent {
+  const FoliateSearchChapterHits({
+    required this.label,
+    required this.hits,
+  });
+
+  final String label;
+  final List<FoliateSearchHit> hits;
+}
+
+/// Foliate `onImageClick` data URL (base64).
+class FoliateImageClick {
+  const FoliateImageClick({required this.dataUrl});
+
+  final String dataUrl;
+
+  static FoliateImageClick? fromHandlerArguments(List<dynamic> arguments) {
+    if (arguments.isEmpty) return null;
+    final raw = arguments.first;
+    final dataUrl = raw is String ? raw.trim() : raw?.toString().trim() ?? '';
+    if (!dataUrl.startsWith('data:')) return null;
+    return FoliateImageClick(dataUrl: dataUrl);
+  }
+
+  Uint8List? get bytes {
+    final comma = dataUrl.indexOf(',');
+    if (comma <= 5) return null;
+    final header = dataUrl.substring(5, comma);
+    try {
+      final body = dataUrl.substring(comma + 1);
+      return header.split(';').contains('base64')
+          ? base64Decode(body)
+          : Uint8List.fromList(utf8.encode(Uri.decodeComponent(body)));
+    } on FormatException {
+      return null;
+    }
+  }
+}

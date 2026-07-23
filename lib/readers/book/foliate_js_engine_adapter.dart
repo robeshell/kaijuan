@@ -149,7 +149,35 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       setMenuCursorZone: _setMenuCursorZone,
       setMenuOpen: _setMenuOpen,
     );
+    readerController.attachSearchBridge(
+      search: _runSearch,
+      clearSearch: _clearEngineSearch,
+    );
     readerController.addListener(_onControllerChanged);
+  }
+
+  void _runSearch(String query) {
+    if (!_webReady) return;
+    unawaited(
+      _evaluate('window.search(${jsonEncode(query)})'),
+    );
+  }
+
+  void _clearEngineSearch() {
+    if (!_webReady) return;
+    unawaited(_evaluate('window.clearSearch()'));
+  }
+
+  void _onSearch(List<dynamic> arguments) {
+    final event = FoliateSearchEvent.fromHandlerArguments(arguments);
+    if (event == null) return;
+    readerController.reportSearchEvent(event);
+  }
+
+  void _onImageClick(List<dynamic> arguments) {
+    final click = FoliateImageClick.fromHandlerArguments(arguments);
+    if (click == null) return;
+    readerController.openImageViewer(click.dataUrl);
   }
 
   void _seekToFraction(double fraction) {
@@ -753,6 +781,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     readerController.detachExternalPageNavigation();
     readerController.detachExternalSeek();
     readerController.detachAnnotationBridge();
+    readerController.detachSearchBridge();
     _session?.invalidateWebView(_webLease);
     _webLease = null;
     unawaited(_session?.close());
@@ -967,15 +996,29 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
             return null;
           },
         );
+        controller.addJavaScriptHandler(
+          handlerName: 'onSearch',
+          callback: (arguments) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onSearch(arguments);
+            return null;
+          },
+        );
+        controller.addJavaScriptHandler(
+          handlerName: 'onImageClick',
+          callback: (arguments) {
+            if (!lease.isCurrent) return null;
+            widget.adapter._onImageClick(arguments);
+            return null;
+          },
+        );
         for (final name in const [
           'onSetToc',
-          'onImageClick',
           'onFootnoteClose',
           'onPullUp',
           'handleBookmark',
           'translateText',
           'onPushState',
-          'onSearch',
           'onMetadata',
         ]) {
           controller.addJavaScriptHandler(

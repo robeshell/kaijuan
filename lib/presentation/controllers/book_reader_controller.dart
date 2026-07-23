@@ -115,6 +115,14 @@ class BookReaderController extends ChangeNotifier {
   /// Last tab in the nav drawer (目录 / 书签 / 笔记).
   int _navDrawerTabIndex = 0;
 
+  bool _searchOpen = false;
+  String _searchQuery = '';
+  bool _searchRunning = false;
+  double _searchProgress = 0;
+  List<FoliateSearchHit> _searchHits = const [];
+  int _searchGeneration = 0;
+  String? _imageViewerDataUrl;
+
   VoidCallback? _externalNextPage;
   VoidCallback? _externalPreviousPage;
   void Function(double fraction)? _externalSeek;
@@ -125,6 +133,8 @@ class BookReaderController extends ChangeNotifier {
   Future<String> Function()? _getSelectedText;
   void Function(Map<String, double>? zone)? _setMenuCursorZone;
   void Function(bool open)? _setMenuOpen;
+  void Function(String query)? _runSearch;
+  VoidCallback? _clearSearch;
   String? _renditionCfi;
   double? _renditionProgress;
   String? _chapterTitle;
@@ -167,6 +177,14 @@ class BookReaderController extends ChangeNotifier {
   List<BookAnnotation> get annotations => _annotations;
   BookSelectionMenu? get selectionMenu => _selectionMenu;
   int get navDrawerTabIndex => _navDrawerTabIndex;
+
+  bool get searchOpen => _searchOpen;
+  String get searchQuery => _searchQuery;
+  bool get searchRunning => _searchRunning;
+  double get searchProgress => _searchProgress;
+  List<FoliateSearchHit> get searchHits => _searchHits;
+  String? get imageViewerDataUrl => _imageViewerDataUrl;
+  bool get imageViewerOpen => _imageViewerDataUrl != null;
 
   /// Opens the note editor (list / note bubble). Set by [BookReaderScreen].
   void Function(BookAnnotation note)? onOpenNoteEditor;
@@ -333,6 +351,19 @@ class BookReaderController extends ChangeNotifier {
     _getSelectedText = getSelectedText;
     _setMenuCursorZone = setMenuCursorZone;
     _setMenuOpen = setMenuOpen;
+  }
+
+  void attachSearchBridge({
+    required void Function(String query) search,
+    required VoidCallback clearSearch,
+  }) {
+    _runSearch = search;
+    _clearSearch = clearSearch;
+  }
+
+  void detachSearchBridge() {
+    _runSearch = null;
+    _clearSearch = null;
   }
 
   void detachAnnotationBridge() {
@@ -783,7 +814,7 @@ class BookReaderController extends ChangeNotifier {
     return true;
   }
 
-  /// 「书摘」：摘录原文到剪贴板（与复制相同载荷，独立产品语义）。
+  /// Legacy clipboard excerpt helper (金句卡走 [showBookExcerptSheet]).
   Future<bool> copyExcerpt({String? textOverride}) =>
       copySelection(textOverride: textOverride);
 
@@ -931,6 +962,109 @@ class BookReaderController extends ChangeNotifier {
       progressInSection: _progressInSection,
       cfi: cfi,
     );
+    notifyListeners();
+  }
+
+  void openSearch({String? initialQuery}) {
+    clearSelectionMenu();
+    hideChrome();
+    final query = initialQuery?.trim() ?? '';
+    _searchOpen = true;
+    if (query.isNotEmpty) {
+      _searchQuery = query;
+      notifyListeners();
+      submitSearch(query);
+      return;
+    }
+    notifyListeners();
+  }
+
+  void closeSearch() {
+    if (!_searchOpen && !_searchRunning && _searchHits.isEmpty) return;
+    _searchGeneration++;
+    _searchOpen = false;
+    _searchRunning = false;
+    _searchProgress = 0;
+    _searchHits = const [];
+    _clearSearch?.call();
+    notifyListeners();
+  }
+
+  void submitSearch(String query) {
+    final trimmed = query.trim();
+    _searchQuery = trimmed;
+    if (trimmed.isEmpty) {
+      _searchGeneration++;
+      _searchRunning = false;
+      _searchProgress = 0;
+      _searchHits = const [];
+      _clearSearch?.call();
+      notifyListeners();
+      return;
+    }
+    final generation = ++_searchGeneration;
+    _searchRunning = true;
+    _searchProgress = 0;
+    _searchHits = const [];
+    notifyListeners();
+    _clearSearch?.call();
+    _runSearch?.call(trimmed);
+    // Stale generations are ignored in reportSearchEvent.
+    if (generation != _searchGeneration) return;
+  }
+
+  void reportSearchEvent(FoliateSearchEvent event) {
+    if (_disposed || !_searchOpen) return;
+    final generation = _searchGeneration;
+    switch (event) {
+      case FoliateSearchProgress(:final fraction):
+        if (generation != _searchGeneration) return;
+        _searchProgress = fraction;
+        notifyListeners();
+      case FoliateSearchDone():
+        if (generation != _searchGeneration) return;
+        _searchRunning = false;
+        _searchProgress = 1;
+        notifyListeners();
+      case FoliateSearchChapterHits(:final hits):
+        if (generation != _searchGeneration) return;
+        _searchHits = [..._searchHits, ...hits];
+        notifyListeners();
+    }
+  }
+
+  void goToSearchHit(FoliateSearchHit hit) {
+    final cfi = hit.cfi.trim();
+    if (cfi.isEmpty) return;
+    final fromCfi = BookLocator.sectionIndexFromCfi(cfi);
+    final sectionIndex = (fromCfi != null &&
+            (sectionCount <= 0 || fromCfi < sectionCount))
+        ? fromCfi
+        : _sectionIndex;
+    _sectionIndex = sectionIndex;
+    _pendingJumpLocator = BookLocator(
+      sectionIndex: sectionIndex,
+      progressInSection: _progressInSection,
+      cfi: cfi,
+    );
+    // 关掉面板看正文；引擎高亮保留到下次搜索或点关闭。
+    _searchOpen = false;
+    _searchRunning = false;
+    notifyListeners();
+  }
+
+  void openImageViewer(String dataUrl) {
+    final url = dataUrl.trim();
+    if (!url.startsWith('data:')) return;
+    clearSelectionMenu();
+    hideChrome();
+    _imageViewerDataUrl = url;
+    notifyListeners();
+  }
+
+  void closeImageViewer() {
+    if (_imageViewerDataUrl == null) return;
+    _imageViewerDataUrl = null;
     notifyListeners();
   }
 
@@ -1237,6 +1371,7 @@ class BookReaderController extends ChangeNotifier {
     _externalPreviousPage = null;
     _externalSeek = null;
     detachAnnotationBridge();
+    detachSearchBridge();
     unawaited(_bookmarksSubscription?.cancel());
     unawaited(_annotationsSubscription?.cancel());
     unawaited(_persist());

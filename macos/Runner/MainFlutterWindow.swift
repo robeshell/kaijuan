@@ -42,6 +42,25 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    let channel = FlutterMethodChannel(
+      name: "com.kaika.reader/clipboard",
+      binaryMessenger: flutterViewController.engine.binaryMessenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "copyImagePng" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let data = call.arguments as? FlutterStandardTypedData else {
+        result(
+          FlutterError(code: "bad_args", message: "missing png bytes", details: nil))
+        return
+      }
+      let pasteboard = NSPasteboard.general
+      pasteboard.clearContents()
+      let ok = pasteboard.setData(data.data, forType: .png)
+      result(ok)
+    }
+
     super.awakeFromNib()
   }
 }

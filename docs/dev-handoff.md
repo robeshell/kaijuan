@@ -4,7 +4,7 @@
 
 ## 0. 当前结论
 
-KaikaNext 图书 reflow 主链已切到 Anx Reader 的 `foliate-js + flutter_inappwebview`。选区两段式菜单 + 划线/高亮/笔记已可用（写改存 note；目录抽屉「目录|书签|笔记」）；规范见 [book-reader.md](./specs/book-reader.md)。默认下一功能刀仍为 ③ 书内搜索。
+KaikaNext 图书 reflow 主链已切到 Anx Reader 的 `foliate-js + flutter_inappwebview`。选区两段式菜单 + 划线/高亮/笔记已可用（写改存 note；目录抽屉「目录|书签|笔记」）；规范见 [book-reader.md](./specs/book-reader.md)。本刀已落地：③ 书内搜索 + 看大图；书摘金句卡。词典/翻译另案。
 
 ## 1. 本轮已完成的改造
 

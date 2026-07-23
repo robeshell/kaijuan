@@ -13,9 +13,11 @@ import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
 import '../controllers/book_reader_controller.dart';
 import '../widgets/reader/book_annotation_note_sheet.dart';
+import '../widgets/reader/book_image_viewer.dart';
 import '../widgets/reader/book_nav_drawer.dart';
 import '../widgets/reader/book_page_meta_overlay.dart';
 import '../widgets/reader/book_reader_chrome.dart';
+import '../widgets/reader/book_search_panel.dart';
 import '../widgets/reader/book_selection_menu_overlay.dart';
 
 /// Full-screen reflow book reader.
@@ -148,6 +150,14 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_controller.imageViewerOpen) {
+        _controller.closeImageViewer();
+        return KeyEventResult.handled;
+      }
+      if (_controller.searchOpen) {
+        _controller.closeSearch();
+        return KeyEventResult.handled;
+      }
       if (_controller.selectionMenu != null) {
         _controller.clearSelectionMenu();
         return KeyEventResult.handled;
@@ -314,6 +324,10 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                           ),
                         ),
                       ),
+                      if (_controller.searchOpen)
+                        BookSearchPanel(controller: _controller),
+                      if (_controller.imageViewerOpen)
+                        BookImageViewer(controller: _controller),
                     ],
                   ],
                 ),
