@@ -156,3 +156,50 @@ class AppSettingsInlinePanel extends StatelessWidget {
     );
   }
 }
+
+/// A grouped settings section: rounded surface card with hairline border and
+/// hairline separators between rows. Selection state should be communicated
+/// by checks / accent text inside the rows — never by full-bleed fill blocks.
+class AppSettingsGroup extends StatelessWidget {
+  const AppSettingsGroup({
+    required this.children,
+    this.padding = EdgeInsets.zero,
+    super.key,
+  });
+
+  final List<Widget> children;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(AppRadii.card);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: context.settingsInlineSurface,
+        borderRadius: radius,
+        border: Border.all(color: context.settingsHairline),
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: Padding(
+          padding: padding,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0)
+                  Divider(
+                    height: 1,
+                    indent: 14,
+                    color: context.settingsHairline,
+                  ),
+                children[i],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
