@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/comic_reading_preferences.dart';
+import '../../core/platform_window.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/comic/comic_models.dart';
 import '../controllers/comic_reader_controller.dart';
@@ -169,6 +170,12 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
       children: [
         ColoredBox(color: bg),
         ComicReaderBody(controller: _controller),
+        const Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: ReaderWindowDragHandle(),
+        ),
         if (_controller.brightness < 0.999)
           IgnorePointer(
             child: ColoredBox(

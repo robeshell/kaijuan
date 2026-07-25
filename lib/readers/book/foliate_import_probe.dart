@@ -118,7 +118,19 @@ class FoliateJsImportProbe implements EpubImportProbe {
     } catch (error) {
       throw FoliateImportException('无法读取 EPUB：$error');
     } finally {
-      await webView?.dispose();
+      // Skip HeadlessInAppWebView.dispose() on Windows: the C++ destructor
+      // in flutter_inappwebview_windows_plugin hits an access violation
+      // (0xc0000005) after VS 2026's experimental/coroutine removal changed
+      // object lifetimes. The 1×1 headless probe WebView is short-lived and
+      // tiny — letting it leak is safe; the shared loopback server unmounts
+      // the book independently below.
+      if (!Platform.isWindows) {
+        try {
+          await webView?.dispose();
+        } catch (_) {
+          // Native disposal may fail on other platforms too — best-effort.
+        }
+      }
       await session?.close();
     }
   }

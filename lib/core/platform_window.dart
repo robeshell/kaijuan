@@ -64,3 +64,27 @@ class DesktopTitleBarMediaQuery extends StatelessWidget {
     return MediaQuery(data: data, child: child);
   }
 }
+
+/// A thin, invisible drag handle positioned at the top of a full-screen
+/// reader so the window can be moved on Windows (custom chrome, no native
+/// caption). macOS uses `isMovableByWindowBackground` and does not need this.
+///
+/// Should be placed in a [Stack] at the very top, above all other content,
+/// with [Positioned] or similar.
+class ReaderWindowDragHandle extends StatelessWidget {
+  const ReaderWindowDragHandle({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!supportsCustomWindowChrome) return const SizedBox.shrink();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) {
+        // Fire-and-forget; user is already dragging.
+        startWindowDrag();
+      },
+      child: SizedBox(height: platformTitleBarHeight),
+    );
+  }
+}

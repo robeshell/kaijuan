@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/book_reading_preferences.dart';
+import '../../core/platform_window.dart';
 import '../../core/theme.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
@@ -277,6 +278,12 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                   fit: StackFit.expand,
                   children: [
                     _engine.buildView(context),
+                    const Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: ReaderWindowDragHandle(),
+                    ),
                     if (_showReveal)
                       IgnorePointer(
                         child: AnimatedBuilder(
