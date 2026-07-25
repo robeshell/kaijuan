@@ -8,7 +8,7 @@ import '../app/book_reading_preferences.dart';
 import '../app/comic_reading_preferences.dart';
 import '../app/theme_preferences.dart';
 import '../brand/brand_config.dart';
-import '../core/app_update_ui.dart';
+import '../app_update/app_update_ui.dart';
 import '../core/platform_window.dart';
 import '../core/theme.dart';
 import 'controllers/library_controller.dart';

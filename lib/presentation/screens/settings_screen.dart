@@ -7,8 +7,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../app/theme_preferences.dart';
 import '../../brand/brand_config.dart';
-import '../../core/app_update_service.dart';
-import '../../core/app_update_ui.dart';
+import '../../app_update/app_update_service.dart';
+import '../../app_update/app_update_ui.dart';
 import '../../core/pipeline_diagnostics.dart';
 import '../../core/theme.dart';
 import '../widgets/app_overlays.dart';
