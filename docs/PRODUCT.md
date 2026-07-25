@@ -180,6 +180,7 @@ App 仍是三 Tab（宽屏 Rail / 窄屏 BottomBar）：
 | 主题模式 + 强调色 | **已有** |
 | 漫画 / 图书阅读偏好 | **阅读器内设置** |
 | 关于 | **已有** |
+| 检查更新 | **已有** | 拉取 `https://dl.ainull.tech/kai-update/kaijuan/update.json`；设置手动检查 + 启动静默检查 |
 | 账号云 | **不做** |
 
 ---

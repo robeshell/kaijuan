@@ -27,6 +27,8 @@ dependencies:
   archive: ^4.0.7
 
   package_info_plus: ^10.2.1
+  http: ^1.6.0
+  open_filex: ^4.7.0
 
   # Book reader
   image: ^4.1.7

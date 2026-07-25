@@ -27,3 +27,13 @@ flutter run -d <device>
 ```
 
 详见 [docs/ENGINEERING.md](docs/ENGINEERING.md) §5。
+
+## 应用内更新
+
+客户端从固定 CDN 拉取：
+
+```text
+https://dl.ainull.tech/kai-update/kaijuan/update.json
+```
+
+设置 → 关于 →「检查更新」；启动后静默检查（有新版本才弹窗；`force` 不可关闭）。发布与 JSON 形状见 [kai-update](https://github.com/robeshell/kai-update)（或本地 `../kai-update`）。

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +7,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../app/theme_preferences.dart';
 import '../../brand/brand_config.dart';
+import '../../core/app_update_service.dart';
+import '../../core/app_update_ui.dart';
 import '../../core/pipeline_diagnostics.dart';
 import '../../core/theme.dart';
 import '../widgets/app_overlays.dart';
@@ -314,6 +318,7 @@ class _AboutBlock extends StatefulWidget {
 
 class _AboutBlockState extends State<_AboutBlock> {
   late final Future<PackageInfo> _infoFuture = PackageInfo.fromPlatform();
+  bool _checkingUpdate = false;
 
   @override
   Widget build(BuildContext context) {
@@ -367,10 +372,35 @@ class _AboutBlockState extends State<_AboutBlock> {
                 onCopy: rows[i].$3,
               ),
             ],
+            if (!kIsWeb) ...[
+              Divider(
+                height: 1,
+                indent: 14,
+                color: context.settingsHairline,
+              ),
+              _AboutRow(
+                label: '更新',
+                value: _checkingUpdate ? '检查中…' : '检查更新',
+                onTap: _checkingUpdate
+                    ? null
+                    : () => unawaited(_checkForUpdate(context)),
+              ),
+            ],
           ],
         );
       },
     );
+  }
+
+  Future<void> _checkForUpdate(BuildContext context) async {
+    setState(() => _checkingUpdate = true);
+    try {
+      final result = await AppUpdateService().checkForUpdate();
+      if (!context.mounted) return;
+      await showAppUpdateFlow(context, result: result);
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
   }
 
   Future<void> _copy(BuildContext context, String text, String toast) async {
@@ -381,15 +411,21 @@ class _AboutBlockState extends State<_AboutBlock> {
 }
 
 class _AboutRow extends StatelessWidget {
-  const _AboutRow({required this.label, required this.value, this.onCopy});
+  const _AboutRow({
+    required this.label,
+    required this.value,
+    this.onCopy,
+    this.onTap,
+  });
 
   final String label;
   final String value;
   final VoidCallback? onCopy;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
+    final row = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 46),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -406,13 +442,22 @@ class _AboutRow extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: SelectableText(
-                value,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              child: onTap == null
+                  ? SelectableText(
+                      value,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    )
+                  : Text(
+                      value,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
             ),
             if (onCopy != null) ...[
               const SizedBox(width: 8),
@@ -434,5 +479,7 @@ class _AboutRow extends StatelessWidget {
         ),
       ),
     );
+    if (onTap == null) return row;
+    return InkWell(onTap: onTap, child: row);
   }
 }
