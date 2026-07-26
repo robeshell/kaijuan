@@ -5,8 +5,8 @@ void main() {
   group('BookReadingTheme tokens', () {
     test('paper uses Readium-inspired light palette', () {
       const theme = BookReadingTheme.paper;
-      expect(theme.backgroundArgb, 0xFFFFFFFF);
-      expect(theme.foregroundArgb, 0xFF121212);
+      expect(theme.backgroundArgb, 0xFFF7F7F7);
+      expect(theme.foregroundArgb, 0xFF333333);
       expect(theme.linkColorArgb, 0xFF1A0DAB);
       expect(theme.headingColorArgb, 0xFF2A2A2A);
       expect(theme.isDark, isFalse);

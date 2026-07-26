@@ -16,6 +16,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Checkout Kai brand tokens
+        uses: actions/checkout@v6
+        with:
+          repository: robeshell/kai-brand-design
+          path: .kai-brand-design
+
+      - name: Verify generated brand tokens
+        run: |
+          python3 .kai-brand-design/tool/kai_design.py check --skip-viewer
+          cmp .kai-brand-design/dist/release/kai-design.lock.json kai-design.lock.json
+          cmp .kai-brand-design/dist/flutter/kaijuan/brand_tokens.g.dart lib/core/theme/brand_tokens.g.dart
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

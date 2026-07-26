@@ -90,8 +90,7 @@ class ShelfScreen extends StatelessWidget {
           return StreamBuilder<List<ReadingItem>>(
             stream: libraryController.watchOnShelf(),
             builder: (context, shelfSnap) {
-              final recent =
-                  recentSnap.data ?? const <ContinueReadingEntry>[];
+              final recent = recentSnap.data ?? const <ContinueReadingEntry>[];
               final onShelf = shelfSnap.data ?? const <ReadingItem>[];
 
               if (recent.isEmpty && onShelf.isEmpty) {
@@ -121,8 +120,7 @@ class ShelfScreen extends StatelessWidget {
                         path: recent.first.item.coverPath,
                         title: recent.first.item.title,
                       ),
-                      onTap: () =>
-                          _openReal(context, recent.first.item),
+                      onTap: () => _openReal(context, recent.first.item),
                     ),
                     if (recent.length > 1) ...[
                       const SizedBox(height: 32),
@@ -133,8 +131,7 @@ class ShelfScreen extends StatelessWidget {
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: recent.length - 1,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(width: 12),
+                          separatorBuilder: (_, _) => const SizedBox(width: 12),
                           itemBuilder: (context, i) {
                             final e = recent[i + 1];
                             return _CoverCard(
@@ -163,8 +160,7 @@ class ShelfScreen extends StatelessWidget {
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
                         itemCount: onShelf.length,
-                        separatorBuilder: (_, _) =>
-                            const SizedBox(width: 12),
+                        separatorBuilder: (_, _) => const SizedBox(width: 12),
                         itemBuilder: (context, i) {
                           final item = onShelf[i];
                           return _CoverCard(
@@ -339,7 +335,7 @@ class _CoverCard extends StatelessWidget {
       child: CoverCardInk(
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppProductRadii.cover),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -395,7 +391,7 @@ class _FileOrFallbackCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final canvas = Theme.of(context).scaffoldBackgroundColor;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppProductRadii.cover),
       child: path != null
           ? Image.file(
               File(path!),
@@ -418,10 +414,7 @@ class _EmptyShelf extends StatelessWidget {
       child: Text(
         '还没有阅读记录\n在书库打开一本后会出现在这里',
         textAlign: TextAlign.center,
-        style: TextStyle(
-          color: context.appSecondaryText,
-          height: 1.5,
-        ),
+        style: TextStyle(color: context.appSecondaryText, height: 1.5),
       ),
     );
   }

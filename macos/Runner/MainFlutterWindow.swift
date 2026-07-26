@@ -2,7 +2,7 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
-  /// Keep desktop layout (side rail). Matches Flutter `AppShell.desktopMinSize`.
+  /// Brand `layoutMetrics.desktopWindow` — keep side rail (medium min / wide default).
   private let minContentSize = NSSize(width: 1024, height: 700)
   private let defaultContentSize = NSSize(width: 1280, height: 800)
 

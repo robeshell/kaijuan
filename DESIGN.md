@@ -1,7 +1,7 @@
 ---
 version: "0.1.1"
 name: kaijuan
-description: "Kaijuan (开卷) — a quiet-study reader for books and comics (dual flavor). No solid background bars, covers are the protagonists; reading content rendering is independent, chrome recedes into glass. Brand-layer rules live in kai-brand-design; this file is the product overlay."
+description: "Kaijuan (开卷) — one quiet-study app with book and comic reading engines. No solid background bars, covers are the protagonists; reading content rendering is independent, chrome recedes into glass. Brand-layer rules live in kai-brand-design; this file is the product overlay."
 colors:
   accent: "#EA580C"
   accentPresets: ["#EA580C", "#0284C7", "#047857", "#BE123C", "#475569"]
@@ -11,12 +11,12 @@ typography:
   # 壳层继承品牌层（w800 封顶、负字距三档、0.5 字号网格）
   # 阅读内容排版（书页字体栈、字号）属内容层，本文件与品牌层均不约束
 rounded:
-  cover: 14
+  cover: 12
   # 继承品牌层 control 10 / menu 12 / card 14 / sheet 18 / dialog 20
 components:
   prefix: "App*"
   readerChrome: { barHeight: 56, trafficLightInset: 78, sliderTrack: 3, sliderThumbRadius: 6 }
-  flavors: ["main_book.dart", "main_comic.dart"]
+  compatibilityEntrypoints: ["main_book.dart", "main_comic.dart"]
 ---
 
 # Kaijuan (开卷) Design
@@ -28,8 +28,8 @@ components:
 **Key Characteristics:**
 
 - **事实源**：[`kai-brand-design`](https://github.com/robeshell/kai-brand-design) 品牌层 + `products/kaijuan/`。改设计先改规范仓库，再回本仓库落地；实现侧细节另见 `docs/DESIGN_FOUNDATION.md`。
-- **组件前缀 `App*`**：主题层 `lib/core/theme/`（tokens/glass/skins/app_theme/context），组件 kit `lib/presentation/widgets/app_components.dart`，设置 kit `widgets/settings_components.dart`。
-- **双 flavor**：`main_book.dart` / `main_comic.dart` 共享主题路径——任何主题/组件改动必须两端可编译可运行。
+- **组件前缀 `App*`**：`brand_tokens.g.dart` 由品牌 JSON 生成；主题层 `lib/core/theme/` 提供兼容语义 API，组件 kit 位于 `lib/presentation/widgets/app_components.dart`。
+- **单 App 双引擎**：`main.dart` 是唯一产品入口；`main_book.dart` / `main_comic.dart` 仅为兼容重定向。漫画与图书共享主题路径，任何主题/组件改动必须覆盖两类内容。
 
 ## Colors
 
@@ -55,7 +55,8 @@ components:
 
 ## Layout
 
-- 桌面壳：220px 列表轨 + 内容；移动壳：底栏 + 内容延伸玻璃下。窗口分级与壳切换继承品牌层，产品不自造断点。
+- 桌面壳：medium 216 / wide 236 侧栏 + 内容；移动壳：底栏 + 内容延伸玻璃下。窗口分级与壳切换继承品牌层，产品不自造断点。
+- 桌面主窗默认 1280×800、最小 1024×700（逻辑/content 像素），与品牌 0.2.8 和其它产品一致。
 - 阅读器 chrome：栏高 56；macOS 红绿灯避让 78。
 
 ## Elevation & Depth
@@ -65,7 +66,7 @@ components:
 
 ## Shapes
 
-- 继承品牌圆角阶梯：control 10 / menu 12 / card 14（封面同）/ sheet 18 / dialog 20 / pill 999；对话框 maxWidth 520；弹层 760（选项列表 560）。
+- 通用 UI 继承品牌圆角阶梯：control 10 / menu 12 / card 14 / sheet 18 / dialog 20 / pill 999；窄幅书籍 / 漫画封面使用产品 token r12；对话框 maxWidth 520，弹层 760（选项列表 560）。
 
 ## Components
 
@@ -79,12 +80,12 @@ components:
 
 ### Do
 
-- chrome 组件优先用 kit；新增通用组件回提品牌层，阅读器特有模式登记 `products/kaijuan/patterns/`（reader.md 待提炼）。
-- 主题改动后两端 flavor 各跑一遍；皮肤 × 全部强调色巡检。
+- chrome 组件优先用 kit；新增通用组件回提品牌层。阅读器与书架模式见规范仓库 `products/kaijuan/patterns/`。
+- 主题改动后漫画与图书两类内容各跑一遍；皮肤 × 全部强调色巡检。
 
 ### Don't
 
-- 不动 `lib/readers/**`、翻页机制、图像渲染、阅读色板、内容排版边界。
+- 不为 chrome 样式改动触碰 `lib/readers/**`、翻页机制、图像渲染、阅读色板和内容排版边界。
 - 不在 chrome 里硬编码颜色/圆角/alpha；不给展示文字染 accent。
 - 不让窗口临时变矮把桌面壳退化成手机导航（品牌层规则）。
 
@@ -96,17 +97,16 @@ components:
 ## Iteration Guide
 
 1. 样式改动先判归属：通用 → kai-brand-design 品牌层；开卷特有 → `products/kaijuan/`；然后再改代码。
-2. 阅读器模式规范（reader.md / bookshelf.md）随"回开卷"阶段从代码反向提炼——提炼前以现有实现为临时 ground truth，但不许扩散到其它页面。
-3. 已知分叉（书籍 chrome 取色自阅读主题、双 flavor 共享主题）登记在 `products/kaijuan/README.md` 待转 divergences.md。
+2. 阅读器与书架模式以规范仓库 `products/kaijuan/patterns/reader.md`、`bookshelf.md` 为准；实现出现新模式时先更新产品规范。
+3. 已知分叉统一登记在规范仓库 `products/kaijuan/divergences.md`，不得只留在代码注释或本文件。
 
 ## Known Gaps
 
-- `patterns/reader.md` / `patterns/bookshelf.md` / `divergences.md` 未提炼（规范仓库 products/kaijuan 0.0.1 为 skeleton）。
-- 书架网格 hover 反馈、合集封面规范未成文。
+- 书架网格 hover 的动效参数仍待定档。
 - 主题持久化迁移（旧 themeMode → 皮肤 id）规则在代码内，未进规范。
 
 ## Agent Prompt Guide
 
 - 改 UI 前读本文件 + kai-brand-design `DESIGN.md`；数值以 kai-brand-design `tokens/*.json` 为准。
-- 快速定位：主题 `lib/core/theme/`；组件 kit `lib/presentation/widgets/app_components.dart`；阅读器 chrome `lib/presentation/widgets/reader/`、`book_reader_tool_strip.dart`。
-- 验收：`flutter analyze` 零告警；`flutter test` 全绿（尤其 `book_theme_test.dart`、`book_typography_baseline_test.dart`）；双 flavor 均可启动。
+- 快速定位：生成 token `lib/core/theme/brand_tokens.g.dart`（禁止手改）；主题 `lib/core/theme/`；组件 kit `lib/presentation/widgets/app_components.dart`；阅读器 chrome `lib/presentation/widgets/reader/`。
+- 验收：`flutter analyze` 零告警；`flutter test` 全绿（尤其 `book_theme_test.dart`、`book_typography_baseline_test.dart`）；漫画与图书入口均可启动。

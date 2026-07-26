@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'brand_tokens.g.dart';
+
 /// Layer 2 semantic tokens: glass surfaces and skin motion/material effects.
 ///
 /// These are [ThemeExtension]s carried by the active skin preset (see
@@ -23,31 +25,31 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
   });
 
   static const light = AppGlassTheme(
-    canvasHighlight: Color(0xFFFBFBFC),
-    surface: Color(0xB8FFFFFF),
-    strongSurface: Color(0xDEFFFFFF),
-    border: Color(0x12000000),
-    innerHighlight: Color(0x8CFFFFFF),
-    shadow: Color(0x16000000),
-    primaryText: Color(0xFF1C1C22),
-    secondaryText: Color(0xFF5A5A62),
-    mutedText: Color(0xFF77747D),
-    blur: 20,
-    strongBlur: 28,
+    canvasHighlight: KaiBrandDefaultSkin.glassCanvasHighlight,
+    surface: KaiBrandDefaultSkin.glassSurface,
+    strongSurface: KaiBrandDefaultSkin.glassStrongSurface,
+    border: KaiBrandDefaultSkin.glassBorder,
+    innerHighlight: KaiBrandDefaultSkin.glassInnerHighlight,
+    shadow: KaiBrandDefaultSkin.glassShadow,
+    primaryText: KaiBrandDefaultSkin.glassPrimaryText,
+    secondaryText: KaiBrandDefaultSkin.glassSecondaryText,
+    mutedText: KaiBrandDefaultSkin.glassMutedText,
+    blur: KaiBrandDefaultSkin.glassBlur,
+    strongBlur: KaiBrandDefaultSkin.glassStrongBlur,
   );
 
   static const dark = AppGlassTheme(
-    canvasHighlight: Color(0xFF17171A),
-    surface: Color(0xB817171A),
-    strongSurface: Color(0xE6202024),
-    border: Color(0x1CFFFFFF),
-    innerHighlight: Color(0x1FFFFFFF),
-    shadow: Color(0x6B000000),
-    primaryText: Color(0xFFF7F3F4),
-    secondaryText: Color(0x99FFFFFF),
-    mutedText: Color(0xB3FFFFFF),
-    blur: 20,
-    strongBlur: 28,
+    canvasHighlight: KaiBrandDeepNightSkin.glassCanvasHighlight,
+    surface: KaiBrandDeepNightSkin.glassSurface,
+    strongSurface: KaiBrandDeepNightSkin.glassStrongSurface,
+    border: KaiBrandDeepNightSkin.glassBorder,
+    innerHighlight: KaiBrandDeepNightSkin.glassInnerHighlight,
+    shadow: KaiBrandDeepNightSkin.glassShadow,
+    primaryText: KaiBrandDeepNightSkin.glassPrimaryText,
+    secondaryText: KaiBrandDeepNightSkin.glassSecondaryText,
+    mutedText: KaiBrandDeepNightSkin.glassMutedText,
+    blur: KaiBrandDeepNightSkin.glassBlur,
+    strongBlur: KaiBrandDeepNightSkin.glassStrongBlur,
   );
 
   final Color canvasHighlight;
@@ -127,14 +129,18 @@ class AppSkinEffects extends ThemeExtension<AppSkinEffects> {
   });
 
   static const standard = AppSkinEffects(
-    motionDuration: Duration(seconds: 14),
-    paletteTransitionDuration: Duration(milliseconds: 420),
-    motionStrength: 1,
-    primaryGlowOpacity: 0.90,
-    secondaryGlowOpacity: 0.72,
-    lightVeilOpacity: 0.04,
-    darkVeilOpacity: 0.12,
-    shadowScale: 1,
+    motionDuration: Duration(
+      seconds: KaiBrandDefaultSkin.effectMotionDurationS,
+    ),
+    paletteTransitionDuration: Duration(
+      milliseconds: KaiBrandDefaultSkin.effectPaletteTransitionMs,
+    ),
+    motionStrength: KaiBrandDefaultSkin.effectMotionStrength,
+    primaryGlowOpacity: KaiBrandDefaultSkin.effectPrimaryGlowOpacity,
+    secondaryGlowOpacity: KaiBrandDefaultSkin.effectSecondaryGlowOpacity,
+    lightVeilOpacity: KaiBrandDefaultSkin.effectLightVeilOpacity,
+    darkVeilOpacity: KaiBrandDefaultSkin.effectDarkVeilOpacity,
+    shadowScale: KaiBrandDefaultSkin.effectShadowScale,
   );
 
   final Duration motionDuration;
@@ -163,8 +169,7 @@ class AppSkinEffects extends ThemeExtension<AppSkinEffects> {
           paletteTransitionDuration ?? this.paletteTransitionDuration,
       motionStrength: motionStrength ?? this.motionStrength,
       primaryGlowOpacity: primaryGlowOpacity ?? this.primaryGlowOpacity,
-      secondaryGlowOpacity:
-          secondaryGlowOpacity ?? this.secondaryGlowOpacity,
+      secondaryGlowOpacity: secondaryGlowOpacity ?? this.secondaryGlowOpacity,
       lightVeilOpacity: lightVeilOpacity ?? this.lightVeilOpacity,
       darkVeilOpacity: darkVeilOpacity ?? this.darkVeilOpacity,
       shadowScale: shadowScale ?? this.shadowScale,

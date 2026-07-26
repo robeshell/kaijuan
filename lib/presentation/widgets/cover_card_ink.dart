@@ -4,11 +4,7 @@ import '../../core/theme.dart';
 
 /// Multi-select corner badge on a cover — filled check, no thick cover border.
 class CoverSelectBadge extends StatelessWidget {
-  const CoverSelectBadge({
-    super.key,
-    required this.selected,
-    this.size = 22,
-  });
+  const CoverSelectBadge({super.key, required this.selected, this.size = 22});
 
   final bool selected;
   final double size;
@@ -51,7 +47,7 @@ class SoftCoverFrame extends StatelessWidget {
   const SoftCoverFrame({
     super.key,
     required this.child,
-    this.radius = 12,
+    this.radius = AppProductRadii.cover,
   });
 
   final Widget child;
@@ -85,7 +81,9 @@ class CoverCardInk extends StatelessWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.borderRadius = const BorderRadius.all(Radius.circular(12)),
+    this.borderRadius = const BorderRadius.all(
+      Radius.circular(AppProductRadii.cover),
+    ),
   });
 
   final Widget child;

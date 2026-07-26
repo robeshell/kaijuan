@@ -139,19 +139,20 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// Brand shell canvas: canvas → canvasHighlight → overlay (stops 0 / 0.46 / 1).
+/// All skins use their semantic canvas gradient.
 class _ShellCanvasGradient extends StatelessWidget {
   const _ShellCanvasGradient();
 
   @override
   Widget build(BuildContext context) {
+    final canvas = Theme.of(context).scaffoldBackgroundColor;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Theme.of(context).scaffoldBackgroundColor,
+            canvas,
             context.appGlass.canvasHighlight,
             context.appOverlay,
           ],

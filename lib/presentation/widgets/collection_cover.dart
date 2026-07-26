@@ -10,7 +10,7 @@ class CollectionCover extends StatelessWidget {
   const CollectionCover({
     super.key,
     required this.coverPaths,
-    this.borderRadius = 12,
+    this.borderRadius = AppProductRadii.cover,
   });
 
   final List<String> coverPaths;
@@ -36,8 +36,8 @@ class CollectionCover extends StatelessWidget {
                 ),
               )
             : paths.length == 1
-                ? _thumb(context, paths[0])
-                : _grid(context, paths),
+            ? _thumb(context, paths[0])
+            : _grid(context, paths),
       ),
     );
   }

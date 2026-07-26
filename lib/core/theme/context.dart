@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'brand_tokens.g.dart';
 import 'glass.dart';
 
 bool get appUsesDesktopPlatform =>
@@ -32,8 +33,9 @@ extension AppThemeContext on BuildContext {
 
   Color get appMutedText => appGlass.mutedText;
 
-  Color get appChromeSurface =>
-      appGlass.strongSurface.withValues(alpha: appChromeSurfaceOpacity);
+  Color get appChromeSurface {
+    return appGlass.strongSurface.withValues(alpha: appChromeSurfaceOpacity);
+  }
 
   /// Skin overlay ramp — theme maps it to [ColorScheme.surfaceContainerHigh].
   Color get appOverlay => appColors.surfaceContainerHigh;
@@ -45,12 +47,17 @@ extension AppThemeContext on BuildContext {
   AppWindowClass get appWindowClass {
     final size = MediaQuery.sizeOf(this);
     if (appUsesDesktopPlatform) {
-      return size.width < 1100 ? AppWindowClass.medium : AppWindowClass.wide;
+      return size.width < KaiBrandLayout.desktopBreakpoint
+          ? AppWindowClass.medium
+          : AppWindowClass.wide;
     }
-    if (size.width <= 600 || size.height < 600) {
+    if (size.width <= KaiBrandLayout.compactWidth ||
+        size.height < KaiBrandLayout.compactHeight) {
       return AppWindowClass.compact;
     }
-    if (size.width < 1000) return AppWindowClass.medium;
+    if (size.width < KaiBrandLayout.mobileWideBreakpoint) {
+      return AppWindowClass.medium;
+    }
     return AppWindowClass.wide;
   }
 
@@ -60,28 +67,34 @@ extension AppThemeContext on BuildContext {
   bool get appUsesMobileShell {
     if (appUsesDesktopPlatform) return false;
     final size = MediaQuery.sizeOf(this);
-    return size.width < 820 || size.height < 600;
+    return size.width < KaiBrandLayout.mobileShellWidth ||
+        size.height < KaiBrandLayout.compactHeight;
   }
 
   /// Persistent side rail: desktop always; mobile only when wide (≥1000).
   bool get appUsesSideRail =>
-      appUsesDesktopPlatform || MediaQuery.sizeOf(this).width >= 1000;
+      appUsesDesktopPlatform ||
+      MediaQuery.sizeOf(this).width >= KaiBrandLayout.mobileWideBreakpoint;
 
   double get appPageGutter => switch (appWindowClass) {
-    AppWindowClass.compact => 16,
-    AppWindowClass.medium => 24,
-    AppWindowClass.wide => 32,
+    AppWindowClass.compact => KaiBrandLayout.compactGutter,
+    AppWindowClass.medium => KaiBrandLayout.mediumGutter,
+    AppWindowClass.wide => KaiBrandLayout.wideGutter,
   };
 
-  double get appPageTitleSize => appIsCompact ? 26 : 28;
+  double get appPageTitleSize => appIsCompact
+      ? KaiBrandLayout.compactPageTitle
+      : KaiBrandLayout.regularPageTitle;
 
   /// Scroll padding so last rows clear the overlaid bottom bar (`extendBody`).
-  double get appContentBottomPadding => appUsesMobileShell ? 140 : 96;
+  double get appContentBottomPadding => appUsesMobileShell
+      ? KaiBrandLayout.mobileBottomPadding
+      : KaiBrandLayout.desktopBottomPadding;
 
   double get appSidebarWidth => switch (appWindowClass) {
     AppWindowClass.compact => 0,
-    AppWindowClass.medium => 216,
-    AppWindowClass.wide => 236,
+    AppWindowClass.medium => KaiBrandLayout.mediumSidebarWidth,
+    AppWindowClass.wide => KaiBrandLayout.wideSidebarWidth,
   };
 
   ButtonStyle get appDestructiveButtonStyle {

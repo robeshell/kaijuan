@@ -61,7 +61,7 @@ void main() {
       final controller = BookReaderController(database: database, item: item);
 
       expect(controller.fontSize, 18.0);
-      expect(controller.lineHeight, 1.6);
+      expect(controller.lineHeight, 1.7);
       expect(controller.readingTheme, BookReadingTheme.paper);
       expect(controller.margin, 24.0);
       expect(controller.readingMode, BookReadingMode.page);
