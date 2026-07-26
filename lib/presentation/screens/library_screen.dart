@@ -909,7 +909,7 @@ class _GridBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = collections.length + entries.length;
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(32, 8, 32, 40),
+      padding: EdgeInsets.fromLTRB(32, 8, 32, context.appContentBottomPadding),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 160,
         mainAxisSpacing: 16,
@@ -974,7 +974,7 @@ class _ListBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = collections.length + entries.length;
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+      padding: EdgeInsets.fromLTRB(24, 8, 24, context.appContentBottomPadding),
       itemCount: total,
       separatorBuilder: (_, _) => Divider(height: 1, color: context.appDivider),
       itemBuilder: (context, i) {

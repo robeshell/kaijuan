@@ -67,7 +67,7 @@ class CollectionsScreen extends StatelessWidget {
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -157,7 +157,7 @@ class CollectionsScreen extends StatelessWidget {
                   );
                 }
                 return GridView.builder(
-                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
+                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 160,
                     mainAxisSpacing: 16,
@@ -638,7 +638,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -711,7 +711,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                   children: [
                     Expanded(
                       child: GridView.builder(
-                        padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
+                        padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
                         gridDelegate:
                             const SliverGridDelegateWithMaxCrossAxisExtent(
                           maxCrossAxisExtent: 160,

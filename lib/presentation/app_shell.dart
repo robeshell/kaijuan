@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../app/book_reading_preferences.dart';
@@ -41,13 +39,6 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
   late final List<Widget> _screens;
-
-  static bool get _isDesktopHost {
-    if (kIsWeb) return false;
-    return Platform.isMacOS || Platform.isWindows || Platform.isLinux;
-  }
-
-  static const Size desktopMinSize = Size(1024, 700);
 
   static const _destinations = [
     AppNavigationItem(
@@ -97,9 +88,7 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final body = IndexedStack(index: _index, children: _screens);
-    final useSideRail =
-        _isDesktopHost ||
-        MediaQuery.sizeOf(context).width >= desktopMinSize.width;
+    final useSideRail = context.appUsesSideRail;
     // Title-bar metrics come from [DesktopTitleBarMediaQuery] (app builder).
     final titleInset = platformTitleBarHeight;
 
@@ -164,7 +153,7 @@ class _ShellCanvasGradient extends StatelessWidget {
           colors: [
             Theme.of(context).scaffoldBackgroundColor,
             context.appGlass.canvasHighlight,
-            Theme.of(context).colorScheme.surfaceContainerHigh,
+            context.appOverlay,
           ],
           stops: const [0, 0.46, 1],
         ),
@@ -173,9 +162,8 @@ class _ShellCanvasGradient extends StatelessWidget {
   }
 }
 
-/// Desktop sidebar width — brand tokens: 216 medium / 236 wide.
-double _sidebarWidthOf(BuildContext context) =>
-    MediaQuery.sizeOf(context).width < 1100 ? 216 : 236;
+/// Desktop sidebar width — brand tokens via [BuildContext.appSidebarWidth].
+double _sidebarWidthOf(BuildContext context) => context.appSidebarWidth;
 
 class _SideRail extends StatelessWidget {
   const _SideRail({
@@ -286,9 +274,9 @@ class _SidebarRow extends StatelessWidget {
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
+          duration: const Duration(milliseconds: 160),
           curve: Curves.easeOutCubic,
-          constraints: const BoxConstraints(minHeight: 38),
+          height: 38,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
           decoration: BoxDecoration(
             color: selected

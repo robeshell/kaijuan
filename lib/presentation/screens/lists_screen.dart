@@ -130,7 +130,7 @@ class ListsScreen extends StatelessWidget {
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -220,7 +220,7 @@ class ListsScreen extends StatelessWidget {
                   );
                 }
                 return ListView.separated(
-                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
+                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
                   itemCount: lists.length,
                   separatorBuilder: (_, _) =>
                       Divider(height: 1, color: context.appDivider),
@@ -297,7 +297,7 @@ class _ListDetailScreen extends StatelessWidget {
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -351,7 +351,7 @@ class _ListDetailScreen extends StatelessWidget {
                 }
                 // Spec: 书单内容 = 竖向长列表（小封面 + 标题）.
                 return ListView.separated(
-                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 40),
+                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
                   itemCount: items.length,
                   separatorBuilder: (_, _) =>
                       Divider(height: 1, color: context.appDivider),

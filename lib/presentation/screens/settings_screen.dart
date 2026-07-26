@@ -35,7 +35,7 @@ class SettingsScreen extends StatelessWidget {
         listenable: themePreferences,
         builder: (context, _) {
           return AppSettingsScrollView(
-            padding: EdgeInsets.fromLTRB(hPad, wide ? 24 : 16, hPad, 40),
+            padding: EdgeInsets.fromLTRB(hPad, wide ? 24 : 16, hPad, context.appContentBottomPadding),
             children: [
               const AppSettingsPageHeader(title: '设置'),
               const SizedBox(height: AppSettingsMetrics.sectionGap),
