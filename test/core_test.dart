@@ -15,6 +15,30 @@ void main() {
     });
   });
 
+  test('dialog barriers follow the light and dark overlay tokens', () {
+    final accent = AppColors.defaultAccent;
+
+    expect(
+      AppTheme.light(accent).dialogTheme.barrierColor?.a,
+      closeTo(0.38, 0.001),
+    );
+    expect(
+      AppTheme.dark(accent).dialogTheme.barrierColor?.a,
+      closeTo(0.62, 0.001),
+    );
+  });
+
+  test('system list tiles use the shared list-row metrics', () {
+    final listTile = AppTheme.light(AppColors.defaultAccent).listTileTheme;
+
+    expect(listTile.minTileHeight, 54);
+    expect(listTile.minVerticalPadding, 6);
+    expect(listTile.minLeadingWidth, 32);
+    expect(listTile.horizontalTitleGap, 10);
+    expect(listTile.titleTextStyle?.fontSize, 13.5);
+    expect(listTile.subtitleTextStyle?.fontSize, 11.5);
+  });
+
   group('ReaderFormat.fromExtension', () {
     test('parses known extensions case-insensitively', () {
       expect(ReaderFormat.fromExtension('epub'), ReaderFormat.epub);

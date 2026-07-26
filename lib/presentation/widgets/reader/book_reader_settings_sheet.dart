@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../app/book_reading_preferences.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
+import '../app_components.dart';
 import '../reading_theme_chip.dart';
 
 /// Opens the unified book typography / reading-mode panel from the reader.
@@ -13,14 +14,14 @@ void showBookReaderSettingsSheet(
   BookReaderController controller,
 ) {
   final theme = controller.readingTheme;
-  showModalBottomSheet<void>(
-    context: context,
+  showAppBottomSheet<void>(
+    context,
     useRootNavigator: true,
-    backgroundColor: Color(theme.backgroundArgb),
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    showHandle: false,
+    builder: (_) => ColoredBox(
+      color: Color(theme.backgroundArgb),
+      child: _BookReaderSettingsSheet(controller: controller),
     ),
-    builder: (_) => _BookReaderSettingsSheet(controller: controller),
   );
 }
 

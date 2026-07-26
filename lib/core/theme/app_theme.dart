@@ -147,6 +147,7 @@ abstract final class AppTheme {
       shadowColor: const WidgetStatePropertyAll(Colors.transparent),
       surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
       overlayColor: focusOverlay,
+      side: focusSide,
     );
     final pillBackground = WidgetStateProperty.resolveWith<Color>((states) {
       if (states.contains(WidgetState.disabled)) {
@@ -219,6 +220,7 @@ abstract final class AppTheme {
       dialogTheme: DialogThemeData(
         elevation: 0,
         backgroundColor: elevated,
+        barrierColor: Colors.black.withValues(alpha: dark ? 0.62 : 0.38),
         surfaceTintColor: Colors.transparent,
         shadowColor: Colors.black.withValues(alpha: dark ? 0.42 : 0.16),
         shape: RoundedRectangleBorder(
@@ -412,7 +414,11 @@ abstract final class AppTheme {
         style: standardButtonStyle.copyWith(
           backgroundColor: quietPillBackground,
           foregroundColor: pillForeground,
-          side: const WidgetStatePropertyAll(BorderSide.none),
+          side: WidgetStateProperty.resolveWith<BorderSide>((states) {
+            return states.contains(WidgetState.focused)
+                ? BorderSide(color: accent, width: 2)
+                : BorderSide.none;
+          }),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
@@ -469,10 +475,28 @@ abstract final class AppTheme {
         selectedColor: accent,
         selectedTileColor: accent.withValues(alpha: 0.035),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+        minTileHeight: 54,
+        minVerticalPadding: 6,
+        minLeadingWidth: 32,
+        horizontalTitleGap: 10,
+        titleTextStyle: textTheme.bodyMedium?.copyWith(
+          color: foreground,
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+        ),
+        subtitleTextStyle: textTheme.bodySmall?.copyWith(
+          color: secondary,
+          fontSize: 11.5,
+        ),
         shape: const RoundedRectangleBorder(),
       ),
       // Quiet chrome for icons (both brands): light-weight outlines.
-      iconTheme: IconThemeData(color: secondary, size: 20, weight: 300, fill: 0),
+      iconTheme: IconThemeData(
+        color: secondary,
+        size: 20,
+        weight: 300,
+        fill: 0,
+      ),
       primaryIconTheme: IconThemeData(
         color: accent,
         size: 20,

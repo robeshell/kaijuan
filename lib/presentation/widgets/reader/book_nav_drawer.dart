@@ -4,6 +4,7 @@ import '../../../core/theme.dart';
 import '../../../domain/reader_models.dart';
 import '../../../readers/book/book_models.dart';
 import '../../controllers/book_reader_controller.dart';
+import '../app_components.dart';
 
 /// Side drawer: 目录 | 书签 | 笔记 (刀④ + 笔记列表完善).
 class BookNavDrawer extends StatefulWidget {
@@ -88,9 +89,7 @@ class _BookNavDrawerState extends State<BookNavDrawer>
                     tabs: [
                       const Tab(text: '目录'),
                       const Tab(text: '书签'),
-                      Tab(
-                        text: noteCount > 0 ? '笔记 ($noteCount)' : '笔记',
-                      ),
+                      Tab(text: noteCount > 0 ? '笔记 ($noteCount)' : '笔记'),
                     ],
                   ),
                 );
@@ -162,7 +161,12 @@ class _TocList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
-      return const Center(child: Text('暂无目录'));
+      return const AppEmptyState(
+        icon: Icons.toc_outlined,
+        title: '这本书没有目录',
+        message: '可以继续阅读，或使用搜索定位内容。',
+        padding: EdgeInsets.all(20),
+      );
     }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -208,7 +212,12 @@ class _BookmarksList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (bookmarks.isEmpty) {
-      return const Center(child: Text('还没有书签'));
+      return const AppEmptyState(
+        icon: Icons.bookmark_border,
+        title: '还没有书签',
+        message: '阅读时添加的书签会显示在这里。',
+        padding: EdgeInsets.all(20),
+      );
     }
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 16),
@@ -249,7 +258,12 @@ class _NotesList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (notes.isEmpty) {
-      return const Center(child: Text('还没有笔记'));
+      return const AppEmptyState(
+        icon: Icons.edit_note_outlined,
+        title: '还没有笔记',
+        message: '选中文字并添加笔记后，会显示在这里。',
+        padding: EdgeInsets.all(20),
+      );
     }
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return ListView.separated(

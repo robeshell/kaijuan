@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 
 /// Reading lists hub (书库二级).
@@ -136,7 +137,12 @@ class ListsScreen extends StatelessWidget {
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(4, context.appIsCompact ? 8 : 12, 8, 4),
+              padding: EdgeInsets.fromLTRB(
+                4,
+                context.appIsCompact ? 8 : 12,
+                8,
+                4,
+              ),
               child: Row(
                 children: [
                   IconButton(
@@ -176,51 +182,31 @@ class ListsScreen extends StatelessWidget {
               stream: controller.watchReadingLists(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return Center(
-                    child: Text(
-                      '加载失败：${snapshot.error}',
-                      style: TextStyle(color: context.appSecondaryText),
-                    ),
+                  return AppEmptyState(
+                    icon: Icons.error_outline,
+                    title: '书单加载失败',
+                    message: '返回书库后再试一次。',
+                    actionLabel: '返回书库',
+                    onAction: () => Navigator.of(context).maybePop(),
                   );
                 }
                 final lists = snapshot.data ?? const <ReadingListSummary>[];
                 if (lists.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '还没有书单',
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: context.appSecondaryText,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '在书库多选里加入即可',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: context.appSecondaryText.withValues(
-                                alpha: 0.85,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          TextButton(
-                            onPressed: () => _create(context),
-                            child: const Text('新建书单'),
-                          ),
-                        ],
-                      ),
-                    ),
+                  return AppEmptyState(
+                    icon: Icons.playlist_add_outlined,
+                    title: '还没有书单',
+                    message: '新建书单后，可以从书库把书加入进来。',
+                    actionLabel: '新建书单',
+                    onAction: () => _create(context),
                   );
                 }
                 return ListView.separated(
-                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
+                  padding: EdgeInsets.fromLTRB(
+                    hPad,
+                    8,
+                    hPad,
+                    context.appContentBottomPadding,
+                  ),
                   itemCount: lists.length,
                   separatorBuilder: (_, _) =>
                       Divider(height: 1, color: context.appDivider),
@@ -303,7 +289,12 @@ class _ListDetailScreen extends StatelessWidget {
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(4, context.appIsCompact ? 8 : 12, 8, 4),
+              padding: EdgeInsets.fromLTRB(
+                4,
+                context.appIsCompact ? 8 : 12,
+                8,
+                4,
+              ),
               child: Row(
                 children: [
                   IconButton(
@@ -336,22 +327,33 @@ class _ListDetailScreen extends StatelessWidget {
             child: StreamBuilder<List<ReadingItem>>(
               stream: controller.watchListMembers(list.id),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return AppEmptyState(
+                    icon: Icons.error_outline,
+                    title: '书单内容加载失败',
+                    message: '返回书库后再试一次。',
+                    actionLabel: '返回书库',
+                    onAction: () => Navigator.of(context).maybePop(),
+                  );
+                }
                 final items = snapshot.data ?? const <ReadingItem>[];
                 if (items.isEmpty) {
-                  return Center(
-                    child: Text(
-                      '书单为空\n在书库多选里加入',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: context.appSecondaryText,
-                        height: 1.5,
-                      ),
-                    ),
+                  return AppEmptyState(
+                    icon: Icons.playlist_add_outlined,
+                    title: '书单里还没有书',
+                    message: '回到书库，多选书籍后加入这个书单。',
+                    actionLabel: '返回书库',
+                    onAction: () => Navigator.of(context).maybePop(),
                   );
                 }
                 // Spec: 书单内容 = 竖向长列表（小封面 + 标题）.
                 return ListView.separated(
-                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
+                  padding: EdgeInsets.fromLTRB(
+                    hPad,
+                    8,
+                    hPad,
+                    context.appContentBottomPadding,
+                  ),
                   itemCount: items.length,
                   separatorBuilder: (_, _) =>
                       Divider(height: 1, color: context.appDivider),
@@ -372,8 +374,9 @@ class _ListDetailScreen extends StatelessWidget {
                                   File(item.coverPath!),
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) => ColoredBox(
-                                    color: Theme.of(context)
-                                        .scaffoldBackgroundColor,
+                                    color: Theme.of(
+                                      context,
+                                    ).scaffoldBackgroundColor,
                                   ),
                                 )
                               : ColoredBox(color: AppColors.lightWash),

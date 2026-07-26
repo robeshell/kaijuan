@@ -269,6 +269,9 @@ class AppEmptyState extends StatelessWidget {
     required this.title,
     required this.message,
     this.loading = false,
+    this.actionLabel,
+    this.onAction,
+    this.padding,
     super.key,
   });
 
@@ -276,12 +279,22 @@ class AppEmptyState extends StatelessWidget {
   final String title;
   final String message;
   final bool loading;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final EdgeInsetsGeometry? padding;
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 30, 24, 96),
+        padding:
+            padding ??
+            EdgeInsets.fromLTRB(
+              context.appPageGutter,
+              30,
+              context.appPageGutter,
+              context.appContentBottomPadding,
+            ),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
           child: Column(
@@ -324,10 +337,30 @@ class AppEmptyState extends StatelessWidget {
                   height: 1.45,
                 ),
               ),
+              if (actionLabel != null && onAction != null) ...[
+                const SizedBox(height: 20),
+                FilledButton.tonalIcon(
+                  onPressed: onAction,
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 17),
+                  label: Text(actionLabel!),
+                ),
+              ],
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class AppLoadingIndicator extends StatelessWidget {
+  const AppLoadingIndicator({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox.square(
+      dimension: 24,
+      child: CircularProgressIndicator(strokeWidth: 2),
     );
   }
 }
@@ -444,11 +477,13 @@ Future<T?> showAppBottomSheet<T>(
   required WidgetBuilder builder,
   bool isScrollControlled = true,
   bool showHandle = true,
+  bool useRootNavigator = false,
   double maxWidth = 760,
 }) {
   final dark = Theme.of(context).brightness == Brightness.dark;
   return showModalBottomSheet<T>(
     context: context,
+    useRootNavigator: useRootNavigator,
     useSafeArea: true,
     isScrollControlled: isScrollControlled,
     backgroundColor: Colors.transparent,
@@ -461,7 +496,11 @@ Future<T?> showAppBottomSheet<T>(
 }
 
 class AppBottomSheet extends StatelessWidget {
-  const AppBottomSheet({required this.child, this.showHandle = true, super.key});
+  const AppBottomSheet({
+    required this.child,
+    this.showHandle = true,
+    super.key,
+  });
 
   final Widget child;
   final bool showHandle;
@@ -930,7 +969,10 @@ class AppListRow extends StatelessWidget {
               child: Row(
                 children: [
                   if (leading case final value?) ...[
-                    SizedBox(width: leadingWidth, child: Center(child: value)),
+                    SizedBox(
+                      width: leadingWidth,
+                      child: Center(child: value),
+                    ),
                     const SizedBox(width: 10),
                   ],
                   Expanded(

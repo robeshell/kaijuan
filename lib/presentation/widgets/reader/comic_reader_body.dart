@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../readers/comic/comic_models.dart';
 import '../../controllers/comic_reader_controller.dart';
+import '../app_components.dart';
 import 'comic_page_image.dart';
 import 'comic_zoom_host.dart';
 
@@ -104,11 +105,8 @@ class _SlideBodyState extends State<_SlideBody> {
     final reverse = c.direction == ComicReadDirection.rtl;
     return ComicZoomHost(
       resetToken: '${c.pageIndex}:${c.mode.name}',
-      onTapAt: (pos, width) => _handleTapZones(
-        controller: c,
-        localPosition: pos,
-        width: width,
-      ),
+      onTapAt: (pos, width) =>
+          _handleTapZones(controller: c, localPosition: pos, width: width),
       child: PageView.builder(
         controller: _pageController,
         reverse: reverse,
@@ -134,15 +132,9 @@ class _StaticBody extends StatelessWidget {
     final c = controller;
     return ComicZoomHost(
       resetToken: '${c.pageIndex}:${c.mode.name}',
-      onTapAt: (pos, width) => _handleTapZones(
-        controller: c,
-        localPosition: pos,
-        width: width,
-      ),
-      child: ComicPageImage(
-        controller: c,
-        pageIndex: c.pageIndex,
-      ),
+      onTapAt: (pos, width) =>
+          _handleTapZones(controller: c, localPosition: pos, width: width),
+      child: ComicPageImage(controller: c, pageIndex: c.pageIndex),
     );
   }
 }
@@ -242,8 +234,8 @@ class _VerticalBodyState extends State<_VerticalBody> {
           curve: Curves.easeOut,
         )
         .whenComplete(() {
-      _syncingFromController = false;
-    });
+          _syncingFromController = false;
+        });
   }
 
   void _ensureInitialOffset() {
@@ -338,7 +330,8 @@ class _SpreadBody extends StatelessWidget {
       builder: (context, constraints) {
         final spread = c.spreadFor(c.pageIndex);
         final rtl = c.direction == ComicReadDirection.rtl;
-        final wideEnough = constraints.maxWidth > 0 &&
+        final wideEnough =
+            constraints.maxWidth > 0 &&
             constraints.maxHeight > 0 &&
             constraints.maxWidth / constraints.maxHeight >=
                 _kMinSpreadViewportAspect;
@@ -352,10 +345,7 @@ class _SpreadBody extends StatelessWidget {
               localPosition: pos,
               width: width,
             ),
-            child: ComicPageImage(
-              controller: c,
-              pageIndex: c.pageIndex,
-            ),
+            child: ComicPageImage(controller: c, pageIndex: c.pageIndex),
           );
         }
 
@@ -364,11 +354,8 @@ class _SpreadBody extends StatelessWidget {
 
         return ComicZoomHost(
           resetToken: '${c.pageIndex}:${c.mode.name}:spread',
-          onTapAt: (pos, width) => _handleTapZones(
-            controller: c,
-            localPosition: pos,
-            width: width,
-          ),
+          onTapAt: (pos, width) =>
+              _handleTapZones(controller: c, localPosition: pos, width: width),
           child: _GluedSpread(
             controller: c,
             leftIndex: left,
@@ -468,8 +455,8 @@ class _GluedSpreadState extends State<_GluedSpread> {
     final left = _left;
     final right = _right;
     if (_loading || left == null || right == null) {
-      return const Center(
-        child: CircularProgressIndicator(strokeWidth: 2),
+      return Center(
+        child: Semantics(label: '正在加载跨页图片', child: const AppLoadingIndicator()),
       );
     }
 

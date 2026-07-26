@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
 import '../../controllers/comic_reader_controller.dart';
+import '../app_components.dart';
 import 'comic_page_image.dart';
 
 /// Grid thumbnail sheet for jumping to a comic page.
@@ -13,18 +14,16 @@ Future<void> showComicThumbnailsSheet(
   final bg = Color(theme.backgroundArgb);
   final fg = theme.isDark ? const Color(0xFFF2F2F4) : const Color(0xFF1C1C1E);
 
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: bg,
-    showDragHandle: true,
+  return showAppBottomSheet<void>(
+    context,
     builder: (context) {
       return ListenableBuilder(
         listenable: controller,
         builder: (context, _) {
           final count = controller.pageCount;
           final current = controller.pageIndex;
-          return SafeArea(
+          return ColoredBox(
+            color: bg,
             child: SizedBox(
               height: MediaQuery.sizeOf(context).height * 0.62,
               child: Column(
@@ -56,11 +55,11 @@ Future<void> showComicThumbnailsSheet(
                       ),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: AppSpacing.x2,
-                        crossAxisSpacing: AppSpacing.x2,
-                        childAspectRatio: 0.7,
-                      ),
+                            crossAxisCount: 3,
+                            mainAxisSpacing: AppSpacing.x2,
+                            crossAxisSpacing: AppSpacing.x2,
+                            childAspectRatio: 0.7,
+                          ),
                       itemCount: count,
                       itemBuilder: (context, index) {
                         final selected = index == current;

@@ -7,6 +7,7 @@ import '../../core/platform_window.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/comic/comic_models.dart';
 import '../controllers/comic_reader_controller.dart';
+import '../widgets/app_components.dart';
 import '../widgets/reader/comic_reader_body.dart';
 import '../widgets/reader/comic_reader_chrome.dart';
 
@@ -102,8 +103,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
       _handleDismiss();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.space ||
-        key == LogicalKeyboardKey.pageDown) {
+    if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.pageDown) {
       _turn(forward: true);
       return KeyEventResult.handled;
     }
@@ -145,10 +145,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
           // Do not set canPop:false while chrome is open — that made toolbar
           // [maybePop] / some back paths only hide chrome. Esc still dismisses
           // chrome first via [_handleDismiss].
-          return Scaffold(
-            backgroundColor: bg,
-            body: _buildBody(bg),
-          );
+          return Scaffold(backgroundColor: bg, body: _buildBody(bg));
         },
       ),
     );
@@ -162,7 +159,12 @@ class _ComicReaderScreenState extends State<ComicReaderScreen> {
       );
     }
     if (!_controller.isReady) {
-      return const Center(child: CircularProgressIndicator());
+      return const AppEmptyState(
+        icon: Icons.auto_stories_outlined,
+        title: '正在打开',
+        message: '正在准备阅读内容。',
+        loading: true,
+      );
     }
 
     return Stack(
@@ -209,8 +211,9 @@ class _ErrorBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final macLead =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS ? 78.0 : 0.0;
+    final macLead = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+        ? 78.0
+        : 0.0;
     // Top inset from app MediaQuery; left clears traffic lights on macOS.
     return SafeArea(
       minimum: EdgeInsets.only(left: macLead),

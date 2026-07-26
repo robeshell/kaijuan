@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
 import '../widgets/cover_card_ink.dart';
@@ -73,7 +74,12 @@ class CollectionsScreen extends StatelessWidget {
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(4, context.appIsCompact ? 8 : 12, 8, 4),
+              padding: EdgeInsets.fromLTRB(
+                4,
+                context.appIsCompact ? 8 : 12,
+                8,
+                4,
+              ),
               child: Row(
                 children: [
                   IconButton(
@@ -113,51 +119,31 @@ class CollectionsScreen extends StatelessWidget {
               stream: controller.watchCollections(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return Center(
-                    child: Text(
-                      '加载失败：${snapshot.error}',
-                      style: TextStyle(color: context.appSecondaryText),
-                    ),
+                  return AppEmptyState(
+                    icon: Icons.error_outline,
+                    title: '合集加载失败',
+                    message: '返回书库后再试一次。',
+                    actionLabel: '返回书库',
+                    onAction: () => Navigator.of(context).maybePop(),
                   );
                 }
                 final list = snapshot.data ?? const <CollectionSummary>[];
                 if (list.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '还没有合集',
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: context.appSecondaryText,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '把系列收成一盒，会出现在书库最前',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: context.appSecondaryText.withValues(
-                                alpha: 0.85,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          TextButton(
-                            onPressed: () => _create(context),
-                            child: const Text('新建合集'),
-                          ),
-                        ],
-                      ),
-                    ),
+                  return AppEmptyState(
+                    icon: Icons.collections_bookmark_outlined,
+                    title: '还没有合集',
+                    message: '新建合集后，可以从书库把书加入进来。',
+                    actionLabel: '新建合集',
+                    onAction: () => _create(context),
                   );
                 }
                 return GridView.builder(
-                  padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
+                  padding: EdgeInsets.fromLTRB(
+                    hPad,
+                    8,
+                    hPad,
+                    context.appContentBottomPadding,
+                  ),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 160,
                     mainAxisSpacing: 16,
@@ -233,8 +219,7 @@ class CollectionsScreen extends StatelessWidget {
                   final ok = await showAppConfirmDialog(
                     context,
                     title: '删除合集？',
-                    message:
-                        '删除「${s.collection.name}」不会删除书库里的条目。',
+                    message: '删除「${s.collection.name}」不会删除书库里的条目。',
                     confirmLabel: '删除',
                     destructive: true,
                   );
@@ -475,55 +460,22 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       if (name == null || name.isEmpty || !mounted) return;
       listId = await widget.controller.createReadingList(name);
     } else {
-      listId = await showDialog<String>(
-        context: context,
-        barrierColor: Colors.black.withValues(alpha: 0.28),
-        builder: (ctx) {
-          return Dialog(
-            backgroundColor: Theme.of(ctx).colorScheme.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.dialog),
-              side: BorderSide(color: ctx.appDivider),
+      listId = await showAppChoiceDialog<String>(
+        context,
+        title: '加入书单',
+        choices: [
+          for (final list in lists)
+            AppDialogChoice(
+              value: list.list.id,
+              label: list.list.name,
+              subtitle: '${list.memberCount} 本',
             ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 360),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 16, 8, 12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '加入书单',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                            color: ctx.appPrimaryText,
-                          ),
-                        ),
-                      ),
-                    ),
-                    for (final s in lists)
-                      ListTile(
-                        title: Text(s.list.name),
-                        subtitle: Text('${s.memberCount} 本'),
-                        onTap: () => Navigator.pop(ctx, s.list.id),
-                      ),
-                    ListTile(
-                      leading: const Icon(Icons.add, weight: 300),
-                      title: const Text('新建书单…'),
-                      onTap: () => Navigator.pop(ctx, '__new__'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
+          const AppDialogChoice(
+            value: '__new__',
+            label: '新建书单…',
+            icon: Icons.add,
+          ),
+        ],
       );
       if (!mounted) return;
       if (listId == '__new__') {
@@ -548,8 +500,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     if (_selected.isEmpty) return;
     final ids = Set<String>.of(_selected);
     final cols = await widget.controller.collectionsSnapshot();
-    final others =
-        cols.where((c) => c.id != widget.collection.id).toList();
+    final others = cols.where((c) => c.id != widget.collection.id).toList();
     if (!mounted) return;
 
     String? colId;
@@ -563,54 +514,18 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       if (name == null || name.isEmpty || !mounted) return;
       colId = await widget.controller.createCollection(name);
     } else {
-      colId = await showDialog<String>(
-        context: context,
-        barrierColor: Colors.black.withValues(alpha: 0.28),
-        builder: (ctx) {
-          return Dialog(
-            backgroundColor: Theme.of(ctx).colorScheme.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.dialog),
-              side: BorderSide(color: ctx.appDivider),
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 360),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 16, 8, 12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '移到其他合集',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                            color: ctx.appPrimaryText,
-                          ),
-                        ),
-                      ),
-                    ),
-                    for (final c in others)
-                      ListTile(
-                        title: Text(c.name),
-                        onTap: () => Navigator.pop(ctx, c.id),
-                      ),
-                    ListTile(
-                      leading: const Icon(Icons.add, weight: 300),
-                      title: const Text('新建合集…'),
-                      onTap: () => Navigator.pop(ctx, '__new__'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
+      colId = await showAppChoiceDialog<String>(
+        context,
+        title: '移到其他合集',
+        choices: [
+          for (final collection in others)
+            AppDialogChoice(value: collection.id, label: collection.name),
+          const AppDialogChoice(
+            value: '__new__',
+            label: '新建合集…',
+            icon: Icons.add,
+          ),
+        ],
       );
       if (!mounted) return;
       if (colId == '__new__') {
@@ -625,8 +540,10 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       }
     }
     if (colId == null || !mounted) return;
-    await widget.controller
-        .addItemsToCollection(collectionId: colId, itemIds: ids);
+    await widget.controller.addItemsToCollection(
+      collectionId: colId,
+      itemIds: ids,
+    );
     if (!mounted) return;
     _exitSelecting();
     showAppSnackBar(context, '已移动 ${ids.length} 本');
@@ -644,7 +561,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(4, context.appIsCompact ? 8 : 12, 8, 4),
+              padding: EdgeInsets.fromLTRB(
+                4,
+                context.appIsCompact ? 8 : 12,
+                8,
+                4,
+              ),
               child: Row(
                 children: [
                   IconButton(
@@ -653,9 +575,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                         ? _exitSelecting
                         : () => Navigator.of(context).maybePop(),
                     icon: Icon(
-                      _selecting
-                          ? Icons.close
-                          : Icons.arrow_back_outlined,
+                      _selecting ? Icons.close : Icons.arrow_back_outlined,
                       weight: 300,
                       color: context.appPrimaryText,
                     ),
@@ -691,34 +611,46 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           ),
           Expanded(
             child: StreamBuilder<List<ReadingItem>>(
-              stream: widget.controller
-                  .watchCollectionMembers(widget.collection.id),
+              stream: widget.controller.watchCollectionMembers(
+                widget.collection.id,
+              ),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return AppEmptyState(
+                    icon: Icons.error_outline,
+                    title: '合集内容加载失败',
+                    message: '返回书库后再试一次。',
+                    actionLabel: '返回书库',
+                    onAction: () => Navigator.of(context).maybePop(),
+                  );
+                }
                 final items = snapshot.data ?? const <ReadingItem>[];
                 if (items.isEmpty) {
-                  return Center(
-                    child: Text(
-                      '合集为空\n在书库多选里加入',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: context.appSecondaryText,
-                        height: 1.5,
-                      ),
-                    ),
+                  return AppEmptyState(
+                    icon: Icons.collections_bookmark_outlined,
+                    title: '合集里还没有书',
+                    message: '回到书库，多选书籍后加入这个合集。',
+                    actionLabel: '返回书库',
+                    onAction: () => Navigator.of(context).maybePop(),
                   );
                 }
                 return Column(
                   children: [
                     Expanded(
                       child: GridView.builder(
-                        padding: EdgeInsets.fromLTRB(hPad, 8, hPad, context.appContentBottomPadding),
+                        padding: EdgeInsets.fromLTRB(
+                          hPad,
+                          8,
+                          hPad,
+                          context.appContentBottomPadding,
+                        ),
                         gridDelegate:
                             const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 160,
-                          mainAxisSpacing: 16,
-                          crossAxisSpacing: 16,
-                          childAspectRatio: 0.58,
-                        ),
+                              maxCrossAxisExtent: 160,
+                              mainAxisSpacing: 16,
+                              crossAxisSpacing: 16,
+                              childAspectRatio: 0.58,
+                            ),
                         itemCount: items.length,
                         itemBuilder: (context, i) {
                           final item = items[i];
@@ -742,13 +674,15 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                                 width: double.infinity,
                                                 errorBuilder: (_, _, _) =>
                                                     ColoredBox(
-                                                  color: Theme.of(context)
-                                                      .scaffoldBackgroundColor,
-                                                ),
+                                                      color: Theme.of(
+                                                        context,
+                                                      ).scaffoldBackgroundColor,
+                                                    ),
                                               )
                                             : ColoredBox(
-                                                color: Theme.of(context)
-                                                    .scaffoldBackgroundColor,
+                                                color: Theme.of(
+                                                  context,
+                                                ).scaffoldBackgroundColor,
                                               ),
                                         if (_selecting)
                                           Positioned(

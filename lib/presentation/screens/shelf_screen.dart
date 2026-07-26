@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/cover_card_ink.dart';
 
@@ -237,69 +238,73 @@ class _HeroCard extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 560),
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(width: 96, height: 128, child: cover),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: SizedBox(
-                      height: 128,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.15,
-                              height: 1.25,
+        child: Semantics(
+          button: true,
+          label: '继续阅读$title',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(AppRadii.card),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 96, height: 128, child: cover),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: SizedBox(
+                        height: 128,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.15,
+                                height: 1.25,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '继续阅读',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: accent,
-                              letterSpacing: 0.2,
+                            const SizedBox(height: 6),
+                            Text(
+                              '继续阅读',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: accent,
+                                letterSpacing: 0.2,
+                              ),
                             ),
-                          ),
-                          const Spacer(),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(1),
-                            child: LinearProgressIndicator(
-                              value: p,
-                              minHeight: 2,
-                              backgroundColor: hairline,
-                              color: accent,
+                            const Spacer(),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(1),
+                              child: LinearProgressIndicator(
+                                value: p,
+                                minHeight: 2,
+                                backgroundColor: hairline,
+                                color: accent,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${(p * 100).round()}%',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: muted,
-                              letterSpacing: 0.2,
+                            const SizedBox(height: 4),
+                            Text(
+                              '${(p * 100).round()}%',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: muted,
+                                letterSpacing: 0.2,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -410,12 +415,10 @@ class _EmptyShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        '还没有阅读记录\n在书库打开一本后会出现在这里',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: context.appSecondaryText, height: 1.5),
-      ),
+    return const AppEmptyState(
+      icon: Icons.auto_stories_outlined,
+      title: '还没有阅读记录',
+      message: '从书库打开一本书后，会在这里继续阅读。',
     );
   }
 }

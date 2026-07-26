@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme.dart';
 import '../../../readers/book/foliate_js_bridge.dart';
 import '../../controllers/book_reader_controller.dart';
+import '../app_components.dart';
 
 /// Full-screen in-book search overlay (顶栏入口 / 选区「搜索」).
 class BookSearchPanel extends StatefulWidget {
@@ -120,7 +121,9 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
                 backgroundColor: hairline,
                 color: accent,
               ),
-            Expanded(child: _Results(controller: _controller, muted: muted, fg: fg)),
+            Expanded(
+              child: _Results(controller: _controller, muted: muted, fg: fg),
+            ),
           ],
         ),
       ),
@@ -146,18 +149,28 @@ class _Results extends StatelessWidget {
     final running = controller.searchRunning;
 
     if (query.isEmpty) {
-      return Center(
-        child: Text('输入关键词开始搜索', style: TextStyle(color: muted)),
+      return const AppEmptyState(
+        icon: Icons.search_outlined,
+        title: '搜索书内内容',
+        message: '输入关键词开始搜索。',
+        padding: EdgeInsets.all(20),
       );
     }
     if (!running && hits.isEmpty) {
-      return Center(
-        child: Text('未找到「$query」', style: TextStyle(color: muted)),
+      return AppEmptyState(
+        icon: Icons.search_off_outlined,
+        title: '没有找到结果',
+        message: '没有找到“$query”，换个关键词试试。',
+        padding: const EdgeInsets.all(20),
       );
     }
     if (running && hits.isEmpty) {
-      return Center(
-        child: Text('正在搜索…', style: TextStyle(color: muted)),
+      return const AppEmptyState(
+        icon: Icons.search_outlined,
+        title: '正在搜索',
+        message: '正在查找书内内容。',
+        loading: true,
+        padding: EdgeInsets.all(20),
       );
     }
 

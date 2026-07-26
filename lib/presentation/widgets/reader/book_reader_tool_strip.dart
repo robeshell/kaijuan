@@ -89,7 +89,11 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                     ),
             ),
             if (_panel != null)
-              Divider(height: 1, thickness: 1, color: widget.fgMuted.withValues(alpha: 0.18)),
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: widget.fgMuted.withValues(alpha: 0.18),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.x4,
@@ -124,7 +128,11 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                 },
               ),
             ),
-            Divider(height: 1, thickness: 1, color: widget.fgMuted.withValues(alpha: 0.18)),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: widget.fgMuted.withValues(alpha: 0.18),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.x2,
@@ -151,7 +159,8 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                         : Icons.headphones_outlined,
                     fg: widget.fg,
                     accent: widget.accent,
-                    selected: _panel == BookToolStripPanel.tts ||
+                    selected:
+                        _panel == BookToolStripPanel.tts ||
                         controller.ttsActive,
                     onTap: _onListenTap,
                   ),
@@ -287,7 +296,11 @@ class _TtsPanel extends StatelessWidget {
         const SizedBox(height: 14),
         Text(
           '语速',
-          style: TextStyle(color: fgMuted, fontSize: 12, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            color: fgMuted,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -455,7 +468,11 @@ class _ProgressScrubber extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _StepButton(icon: Icons.chevron_left, color: fgMuted, onTap: onStepBack),
+        _StepButton(
+          icon: Icons.chevron_left,
+          color: fgMuted,
+          onTap: onStepBack,
+        ),
         Expanded(
           child: _CustomFractionTrack(
             fraction: fraction,
@@ -636,7 +653,11 @@ class _SegmentedChoices<T> extends StatelessWidget {
         children: [
           for (var i = 0; i < values.length; i++) ...[
             if (i > 0)
-              Container(width: 1, height: 36, color: fgMuted.withValues(alpha: 0.18)),
+              Container(
+                width: 1,
+                height: 36,
+                color: fgMuted.withValues(alpha: 0.18),
+              ),
             Expanded(
               child: Material(
                 color: values[i] == selected
@@ -736,7 +757,8 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                 thumbColor: widget.accent,
                 onDragStart: (v) {
                   _dragging = true;
-                  final next = BookReadingPreferences.minBrightness +
+                  final next =
+                      BookReadingPreferences.minBrightness +
                       v *
                           (BookReadingPreferences.maxBrightness -
                               BookReadingPreferences.minBrightness);
@@ -744,7 +766,8 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                   widget.controller.previewBrightness(next);
                 },
                 onDragUpdate: (v) {
-                  final next = BookReadingPreferences.minBrightness +
+                  final next =
+                      BookReadingPreferences.minBrightness +
                       v *
                           (BookReadingPreferences.maxBrightness -
                               BookReadingPreferences.minBrightness);
@@ -965,11 +988,11 @@ class _TypographyPanelState extends State<_TypographyPanel> {
               child: _PrefScrubberRow(
                 title: '水平页边距',
                 icon: Icons.swap_horiz,
-                valueLabel: ((_previewMargin - BookReadingPreferences.minMargin) /
-                        8)
-                    .round()
-                    .clamp(0, 5)
-                    .toString(),
+                valueLabel:
+                    ((_previewMargin - BookReadingPreferences.minMargin) / 8)
+                        .round()
+                        .clamp(0, 5)
+                        .toString(),
                 fraction: _t(
                   _previewMargin,
                   BookReadingPreferences.minMargin,
@@ -1227,7 +1250,8 @@ class _FontPickerPanel extends StatelessWidget {
                     child: _FontChoiceTile(
                       label: font.label,
                       previewFamily: font.previewFamily,
-                      selected: selection.kind == BookFontKind.system &&
+                      selected:
+                          selection.kind == BookFontKind.system &&
                           selection.systemId == font.id,
                       accent: accent,
                       fg: fg,
@@ -1274,7 +1298,8 @@ class _FontPickerPanel extends StatelessWidget {
           )) ...[
             _UserFontTile(
               font: font,
-              selected: selection.kind == BookFontKind.user &&
+              selected:
+                  selection.kind == BookFontKind.user &&
                   selection.userFontId == font.id,
               accent: accent,
               fg: fg,
@@ -1390,7 +1415,8 @@ class _CatalogFontTile extends StatelessWidget {
     final installed = store?.byCatalogId(catalog.id);
     final downloading = store?.isDownloading(catalog.id) ?? false;
     final progress = store?.downloadProgress(catalog.id);
-    final selected = installed != null &&
+    final selected =
+        installed != null &&
         selection.kind == BookFontKind.user &&
         selection.userFontId == installed.id;
 
@@ -1426,8 +1452,7 @@ class _CatalogFontTile extends StatelessWidget {
                     catalog.displayName,
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                       color: fg,
                     ),
                   ),
@@ -1435,8 +1460,8 @@ class _CatalogFontTile extends StatelessWidget {
                     downloading
                         ? '下载中 ${((progress ?? 0) * 100).round()}%'
                         : installed != null
-                            ? catalog.license
-                            : '${catalog.license} · ${catalog.sizeLabel}',
+                        ? catalog.license
+                        : '${catalog.license} · ${catalog.sizeLabel}',
                     style: TextStyle(fontSize: 11, color: fgMuted),
                   ),
                 ],
@@ -1444,12 +1469,11 @@ class _CatalogFontTile extends StatelessWidget {
             ),
             if (downloading)
               SizedBox(
-                width: 18,
-                height: 18,
+                width: 24,
+                height: 24,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   value: progress,
-                  color: accent,
                 ),
               )
             else if (installed == null)
@@ -1489,7 +1513,10 @@ class _UserFontTile extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         height: 44,
-        padding: const EdgeInsets.only(left: AppSpacing.x3, right: AppSpacing.x1),
+        padding: const EdgeInsets.only(
+          left: AppSpacing.x3,
+          right: AppSpacing.x1,
+        ),
         decoration: BoxDecoration(
           color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadii.menu),

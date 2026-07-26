@@ -117,7 +117,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _showFailureDetails(List<ImportFailure> failures) async {
     await showDialog<void>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.28),
+      barrierColor: appDialogBarrierColor(context),
       builder: (ctx) {
         return AppAlertDialog(
           title: '失败 ${failures.length} 本',
@@ -301,53 +301,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     required List<(String id, String name, String subtitle)> entries,
     required String newLabel,
   }) {
-    return showDialog<String>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.28),
-      builder: (ctx) {
-        return Dialog(
-          backgroundColor: Theme.of(ctx).colorScheme.surface,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.dialog),
-            side: BorderSide(color: ctx.appDivider),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 16, 8, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: ctx.appPrimaryText,
-                      ),
-                    ),
-                  ),
-                  for (final e in entries)
-                    ListTile(
-                      title: Text(e.$2),
-                      subtitle: e.$3.isEmpty ? null : Text(e.$3),
-                      onTap: () => Navigator.pop(ctx, e.$1),
-                    ),
-                  ListTile(
-                    leading: const Icon(Icons.add, weight: 300),
-                    title: Text(newLabel),
-                    onTap: () => Navigator.pop(ctx, '__new__'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    return showAppChoiceDialog<String>(
+      context,
+      title: title,
+      choices: [
+        for (final entry in entries)
+          AppDialogChoice(value: entry.$1, label: entry.$2, subtitle: entry.$3),
+        AppDialogChoice(value: '__new__', label: newLabel, icon: Icons.add),
+      ],
     );
   }
 
@@ -393,10 +354,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         decoration: InputDecoration(
           isDense: true,
           hintText: '搜索标题…',
-          hintStyle: TextStyle(
-            color: context.appSecondaryText,
-            fontSize: 14,
-          ),
+          hintStyle: TextStyle(color: context.appSecondaryText, fontSize: 14),
           prefixIcon: Icon(
             Icons.search,
             size: 18,
@@ -538,12 +496,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          hPad,
-          wide ? 20 : 12,
-          hPad,
-          0,
-        ),
+        padding: EdgeInsets.fromLTRB(hPad, wide ? 20 : 12, hPad, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -575,19 +528,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ),
                   ),
                   if (wide) const SizedBox(width: 8),
-                  if (wide) ...[
-                    navLists(),
-                    navCollections(),
-                  ],
+                  if (wide) ...[navLists(), navCollections()],
                   const Spacer(),
-                  if (!wide) ...[
-                    navLists(),
-                    navCollections(),
-                  ],
+                  if (!wide) ...[navLists(), navCollections()],
                   IconButton(
-                    tooltip: _layout == _LibraryLayout.grid
-                        ? '列表视图'
-                        : '网格视图',
+                    tooltip: _layout == _LibraryLayout.grid ? '列表视图' : '网格视图',
                     onPressed: _toggleLayout,
                     icon: Icon(
                       _layout == _LibraryLayout.grid
@@ -640,10 +585,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Widget _buildFilterRow(
-    LibraryController c, {
-    required bool wide,
-  }) {
+  Widget _buildFilterRow(LibraryController c, {required bool wide}) {
     return Padding(
       padding: EdgeInsets.fromLTRB(wide ? 32 : 16, 0, wide ? 24 : 16, 8),
       child: Wrap(
@@ -692,10 +634,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             onSelected: (v) => c.setFormatFilter(v == 'all' ? null : v),
           ),
           if (c.hasActiveFilters)
-            TextButton(
-              onPressed: c.clearFilters,
-              child: const Text('清除筛选'),
-            ),
+            TextButton(onPressed: c.clearFilters, child: const Text('清除筛选')),
         ],
       ),
     );
@@ -768,32 +707,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               }).toList();
 
                         if (entries.isEmpty && allCollections.isEmpty) {
-                          return Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '导入 CBZ、ZIP 或 EPUB',
-                                  style: TextStyle(
-                                    color: context.appSecondaryText,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                FilledButton.icon(
-                                  onPressed: importing ? null : _import,
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('导入'),
-                                ),
-                              ],
-                            ),
+                          return AppEmptyState(
+                            icon: Icons.library_books_outlined,
+                            title: '书库还是空的',
+                            message: '导入 CBZ、ZIP 或 EPUB 后会显示在这里。',
+                            actionLabel: '导入',
+                            onAction: importing ? null : _import,
                           );
                         }
                         if (filtered.isEmpty && collections.isEmpty) {
-                          return Center(
-                            child: Text(
-                              '没有匹配的书',
-                              style: TextStyle(color: context.appSecondaryText),
-                            ),
+                          return AppEmptyState(
+                            icon: Icons.search_off_outlined,
+                            title: '没有匹配的书',
+                            message: '换个关键词，或者清除当前筛选。',
+                            actionLabel: '清除筛选',
+                            onAction: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
                           );
                         }
 
@@ -1143,38 +1074,22 @@ class _FilterMenu<T> extends StatelessWidget {
   final String Function(T) itemLabel;
   final ValueChanged<T> onSelected;
 
-  Future<void> _openMenu(BuildContext context) async {
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    final overlay =
-        Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
-    final topLeft = box.localToGlobal(Offset.zero, ancestor: overlay);
-    final rect = RelativeRect.fromRect(
-      Rect.fromLTWH(topLeft.dx, topLeft.dy, box.size.width, box.size.height),
-      Offset.zero & overlay.size,
-    );
-    final selected = await showMenu<T>(
-      context: context,
-      position: rect,
-      items: [
-        for (final item in items)
-          PopupMenuItem<T>(
-            value: item,
-            height: 40,
-            child: Text(itemLabel(item)),
-          ),
-      ],
-    );
-    if (selected != null) onSelected(selected);
-  }
-
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
-    // GestureDetector only — no InkWell / tooltip hover chrome on the chip.
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _openMenu(context),
+    return AppMenuButton<T>(
+      tooltip: label,
+      menuTitle: label,
+      actions: [
+        for (final item in items)
+          AppMenuAction(
+            value: item,
+            label: itemLabel(item),
+            icon: icon,
+            selected: itemLabel(item) == label,
+          ),
+      ],
+      onSelected: onSelected,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(

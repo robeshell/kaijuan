@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../controllers/comic_reader_controller.dart';
+import '../app_components.dart';
 
 /// Renders one comic page from the controller's page cache.
 ///
@@ -99,7 +100,9 @@ class _ComicPageImageState extends State<ComicPageImage> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _image == null) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+      return Center(
+        child: Semantics(label: '正在加载图片', child: const AppLoadingIndicator()),
+      );
     }
     final image = _image;
     if (image == null) {

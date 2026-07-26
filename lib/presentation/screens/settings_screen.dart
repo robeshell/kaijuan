@@ -114,7 +114,7 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              AppSettingsGroup(children: [_AboutBlock(brand: brand)]),
+              const AppSettingsGroup(children: [_AboutBlock()]),
             ],
           );
         },
@@ -288,23 +288,33 @@ class _AccentSwatch extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: preset.label,
-      child: GestureDetector(
-        onTap: onTap,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: preset.color,
-            border: Border.all(
-              color: selected ? context.appPrimaryText : Colors.transparent,
-              width: 1.5,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: preset.label,
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: preset.color,
+                border: Border.all(
+                  color: selected ? context.appPrimaryText : Colors.transparent,
+                  width: 1.5,
+                ),
+              ),
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: selected
+                    ? const Icon(Icons.circle, size: 8, color: Colors.white)
+                    : null,
+              ),
             ),
-          ),
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: selected
-                ? const Icon(Icons.circle, size: 8, color: Colors.white)
-                : null,
           ),
         ),
       ),
@@ -313,9 +323,7 @@ class _AccentSwatch extends StatelessWidget {
 }
 
 class _AboutBlock extends StatefulWidget {
-  const _AboutBlock({required this.brand});
-
-  final BrandConfig brand;
+  const _AboutBlock();
 
   @override
   State<_AboutBlock> createState() => _AboutBlockState();
@@ -334,23 +342,12 @@ class _AboutBlockState extends State<_AboutBlock> {
         final version = info == null
             ? '…'
             : '${info.version} (${info.buildNumber})';
-        final formats = widget.brand.importExtensions
-            .map((e) => e.toUpperCase())
-            .join(' · ');
-
         final rows = <(String, String, VoidCallback?)>[
           (
             '版本',
             version,
             info == null ? null : () => _copy(context, version, '已复制版本号'),
           ),
-          (
-            '包名',
-            widget.brand.applicationId,
-            () => _copy(context, widget.brand.applicationId, '已复制包名'),
-          ),
-          ('格式', formats, null),
-          if (!kIsWeb) ('平台', defaultTargetPlatform.name, null),
           (
             '诊断',
             '导入 / 打开耗时',
@@ -366,11 +363,7 @@ class _AboutBlockState extends State<_AboutBlock> {
           children: [
             for (var i = 0; i < rows.length; i++) ...[
               if (i > 0)
-                Divider(
-                  height: 1,
-                  indent: 14,
-                  color: context.settingsHairline,
-                ),
+                Divider(height: 1, indent: 14, color: context.settingsHairline),
               _AboutRow(
                 label: rows[i].$1,
                 value: rows[i].$2,
@@ -378,11 +371,7 @@ class _AboutBlockState extends State<_AboutBlock> {
               ),
             ],
             if (!kIsWeb) ...[
-              Divider(
-                height: 1,
-                indent: 14,
-                color: context.settingsHairline,
-              ),
+              Divider(height: 1, indent: 14, color: context.settingsHairline),
               _AboutRow(
                 label: '更新',
                 value: _checkingUpdate ? '检查中…' : '检查更新',

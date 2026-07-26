@@ -76,9 +76,11 @@ class AppIconButton extends StatelessWidget {
   }
 }
 
-Color _dialogBarrier(BuildContext context) {
-  final dark = Theme.of(context).brightness == Brightness.dark;
-  return Colors.black.withValues(alpha: dark ? 0.62 : 0.38);
+Color appDialogBarrierColor(BuildContext context) {
+  return DialogTheme.of(context).barrierColor ??
+      Colors.black.withValues(
+        alpha: Theme.of(context).brightness == Brightness.dark ? 0.62 : 0.38,
+      );
 }
 
 /// Confirm / alert dialog with quiet surface (not default M3 sheet gray).
@@ -92,7 +94,7 @@ Future<bool?> showAppConfirmDialog(
 }) {
   return showDialog<bool>(
     context: context,
-    barrierColor: _dialogBarrier(context),
+    barrierColor: appDialogBarrierColor(context),
     builder: (ctx) => AppAlertDialog(
       title: title,
       content: Text(message),
@@ -122,13 +124,59 @@ Future<String?> showAppTextPrompt(
 }) {
   return showDialog<String>(
     context: context,
-    barrierColor: _dialogBarrier(context),
+    barrierColor: appDialogBarrierColor(context),
     builder: (ctx) => _AppTextPromptDialog(
       title: title,
       hint: hint,
       initial: initial,
       cancelLabel: cancelLabel,
       confirmLabel: confirmLabel,
+    ),
+  );
+}
+
+class AppDialogChoice<T> {
+  const AppDialogChoice({
+    required this.value,
+    required this.label,
+    this.subtitle,
+    this.icon,
+  });
+
+  final T value;
+  final String label;
+  final String? subtitle;
+  final IconData? icon;
+}
+
+Future<T?> showAppChoiceDialog<T>(
+  BuildContext context, {
+  required String title,
+  required List<AppDialogChoice<T>> choices,
+}) {
+  return showDialog<T>(
+    context: context,
+    barrierColor: appDialogBarrierColor(context),
+    builder: (dialogContext) => AppDialog(
+      maxWidth: 360,
+      title: Text(title),
+      contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final choice in choices)
+            ListTile(
+              leading: choice.icon == null
+                  ? null
+                  : Icon(choice.icon, weight: 300),
+              title: Text(choice.label),
+              subtitle: choice.subtitle == null || choice.subtitle!.isEmpty
+                  ? null
+                  : Text(choice.subtitle!),
+              onTap: () => Navigator.pop(dialogContext, choice.value),
+            ),
+        ],
+      ),
     ),
   );
 }
@@ -155,8 +203,9 @@ class _AppTextPromptDialog extends StatefulWidget {
 }
 
 class _AppTextPromptDialogState extends State<_AppTextPromptDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initial);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial,
+  );
 
   @override
   void dispose() {
@@ -209,7 +258,7 @@ void showAppSnackBar(BuildContext context, String message) {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        duration: const Duration(milliseconds: 1400),
+        duration: const Duration(milliseconds: 2200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         margin: EdgeInsets.fromLTRB(side, 0, side, 36),
         dismissDirection: DismissDirection.down,
@@ -221,11 +270,13 @@ Future<T?> showAppSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   bool isScrollControlled = false,
+  bool useRootNavigator = false,
 }) {
   return showAppBottomSheet<T>(
     context,
     builder: builder,
     isScrollControlled: isScrollControlled,
+    useRootNavigator: useRootNavigator,
   );
 }
 
