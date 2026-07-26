@@ -83,7 +83,7 @@ class ShelfScreen extends StatelessWidget {
     final accent = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: StreamBuilder<List<ContinueReadingEntry>>(
         stream: libraryController.watchContinueReading(),
         builder: (context, recentSnap) {

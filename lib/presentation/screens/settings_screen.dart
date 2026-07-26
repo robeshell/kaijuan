@@ -30,6 +30,7 @@ class SettingsScreen extends StatelessWidget {
     final hPad = wide ? 32.0 : 16.0;
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: ListenableBuilder(
         listenable: themePreferences,
         builder: (context, _) {

@@ -103,56 +103,79 @@ class _AppShellState extends State<AppShell> {
     // Title-bar metrics come from [DesktopTitleBarMediaQuery] (app builder).
     final titleInset = platformTitleBarHeight;
 
-    if (useSideRail) {
-      // Reverie layout: full-height side rail under a transparent overlay
-      // title bar (traffic lights / custom window controls sit on top).
-      return Scaffold(
-        body: Stack(
-          children: [
-            Positioned.fill(
-              child: Row(
-                children: [
-                  _SideRail(
-                    index: _index,
-                    onSelect: (i) => setState(() => _index = i),
-                    brandName: widget.brand.displayName,
-                  ),
-                  Expanded(
-                    child: SafeArea(
-                      left: false,
-                      right: false,
-                      bottom: false,
-                      child: body,
-                    ),
-                  ),
-                ],
+    final content = useSideRail
+        ? Row(
+            children: [
+              _SideRail(
+                index: _index,
+                onSelect: (i) => setState(() => _index = i),
+                brandName: widget.brand.displayName,
               ),
-            ),
-            if (titleInset > 0)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: DesktopTitleBar(title: widget.brand.displayName),
+              Expanded(
+                child: SafeArea(
+                  left: false,
+                  right: false,
+                  bottom: false,
+                  child: body,
+                ),
               ),
-          ],
-        ),
-      );
-    }
+            ],
+          )
+        : SafeArea(bottom: false, child: body);
 
     return Scaffold(
-      body: SafeArea(child: body),
-      bottomNavigationBar: AppNavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: _destinations,
+      extendBody: true,
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          const Positioned.fill(child: _ShellCanvasGradient()),
+          Positioned.fill(child: content),
+          if (useSideRail && titleInset > 0)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: DesktopTitleBar(title: widget.brand.displayName),
+            ),
+        ],
+      ),
+      bottomNavigationBar: useSideRail
+          ? null
+          : AppNavigationBar(
+              selectedIndex: _index,
+              onDestinationSelected: (i) => setState(() => _index = i),
+              destinations: _destinations,
+            ),
+    );
+  }
+}
+
+/// Brand shell canvas: canvas → canvasHighlight → overlay (stops 0 / 0.46 / 1).
+class _ShellCanvasGradient extends StatelessWidget {
+  const _ShellCanvasGradient();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Theme.of(context).scaffoldBackgroundColor,
+            context.appGlass.canvasHighlight,
+            Theme.of(context).colorScheme.surfaceContainerHigh,
+          ],
+          stops: const [0, 0.46, 1],
+        ),
       ),
     );
   }
 }
 
-/// Desktop sidebar width (Reverie-style list rail, not icon-only strip).
-const double _desktopSidebarWidth = 220;
+/// Desktop sidebar width — brand tokens: 216 medium / 236 wide.
+double _sidebarWidthOf(BuildContext context) =>
+    MediaQuery.sizeOf(context).width < 1100 ? 216 : 236;
 
 class _SideRail extends StatelessWidget {
   const _SideRail({
@@ -175,46 +198,53 @@ class _SideRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
 
-    // Surface runs full height (under title bar); content clears via SafeArea.
-    return Container(
-      width: _desktopSidebarWidth,
-      decoration: BoxDecoration(
+    // Glass chrome full height (under title bar); content clears via SafeArea.
+    return SizedBox(
+      width: _sidebarWidthOf(context),
+      child: AppGlassSurface(
+        strong: true,
         color: context.appChromeSurface,
-        border: Border(right: BorderSide(color: context.appDivider)),
-      ),
-      child: SafeArea(
-        left: false,
-        right: false,
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 4, 10, 14),
-                child: Text(
-                  brandName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: context.appPrimaryText,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.35,
+        borderRadius: BorderRadius.zero,
+        shadowOffset: const Offset(1, 0),
+        shadowBlur: 6,
+        borderColor: context.appDivider,
+        child: Material(
+          color: Colors.transparent,
+          child: SafeArea(
+            left: false,
+            right: false,
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 2, 10, 12),
+                    child: Text(
+                      brandName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.appPrimaryText,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.35,
+                      ),
+                    ),
                   ),
-                ),
+                  for (var i = 0; i < _items.length; i++)
+                    _SidebarRow(
+                      selected: index == i,
+                      icon: _items[i].$1,
+                      selectedIcon: _items[i].$2,
+                      label: _items[i].$3,
+                      accent: accent,
+                      onTap: () => onSelect(i),
+                    ),
+                ],
               ),
-              for (var i = 0; i < _items.length; i++)
-                _SidebarRow(
-                  selected: index == i,
-                  icon: _items[i].$1,
-                  selectedIcon: _items[i].$2,
-                  label: _items[i].$3,
-                  accent: accent,
-                  onTap: () => onSelect(i),
-                ),
-            ],
+            ),
           ),
         ),
       ),
@@ -222,7 +252,7 @@ class _SideRail extends StatelessWidget {
   }
 }
 
-/// Horizontal icon + label row with soft selected pill (Image #2 / Reverie).
+/// Side-rail row — brand metrics: h38, pad 10h/2v, icon 18/slot 32, label 13.5.
 class _SidebarRow extends StatelessWidget {
   const _SidebarRow({
     required this.selected,
@@ -242,51 +272,56 @@ class _SidebarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? accent : context.appSecondaryText;
+    final iconColor = selected ? accent : context.appSecondaryText;
     final labelColor = selected
         ? context.appPrimaryText
         : context.appSecondaryText;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.control),
-          hoverColor: context.appTint(0.045),
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            curve: Curves.easeOutCubic,
-            constraints: const BoxConstraints(minHeight: 40),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: selected
-                  ? accent.withValues(alpha: 0.10)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppRadii.control),
-            ),
-            child: Row(
-              children: [
-                Icon(selected ? selectedIcon : icon, size: 20, color: color),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: labelColor,
-                      fontSize: 14,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      letterSpacing: -0.1,
-                    ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        hoverColor: context.appTint(0.045),
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          constraints: const BoxConstraints(minHeight: 38),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          decoration: BoxDecoration(
+            color: selected
+                ? accent.withValues(alpha: 0.10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadii.control),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 32,
+                child: Center(
+                  child: Icon(
+                    selected ? selectedIcon : icon,
+                    size: 18,
+                    color: iconColor,
                   ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: labelColor,
+                    fontSize: 13.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

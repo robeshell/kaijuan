@@ -698,7 +698,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     // Scaffold (not ColoredBox): ListTile ink needs a Material ancestor.
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {
