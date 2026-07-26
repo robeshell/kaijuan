@@ -10,6 +10,7 @@ import '../../library/import/import_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
 import '../widgets/cover_card_ink.dart';
@@ -441,7 +442,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     required bool importing,
     required Color accent,
   }) {
-    final hPad = wide ? 32.0 : 16.0;
+    final hPad = context.appPageGutter;
     final muted = context.appSecondaryText;
 
     Widget navLists() {
@@ -537,7 +538,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(hPad, wide ? 20 : 12, wide ? 24 : 16, 0),
+        padding: EdgeInsets.fromLTRB(
+          hPad,
+          wide ? 20 : 12,
+          hPad,
+          0,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -551,18 +557,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                   Text(
                     '已选 ${_selected.length}',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
+                    style: TextStyle(
+                      fontSize: context.appPageTitleSize,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.55,
+                      color: context.appPrimaryText,
                     ),
                   ),
                 ] else ...[
-                  const Text(
+                  Text(
                     '书库',
                     style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.4,
+                      fontSize: context.appPageTitleSize,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.55,
+                      color: context.appPrimaryText,
                     ),
                   ),
                   if (wide) const SizedBox(width: 8),
@@ -704,8 +713,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
         builder: (context, _) {
           final c = widget.controller;
           final importing = c.isImporting;
-          // Wide = text nav labels; both widths share title / search / filter rows.
-          final wide = MediaQuery.sizeOf(context).width >= 720;
+          // Wide chrome = text nav labels; gutters follow window class.
+          final wide = !context.appIsCompact;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -909,7 +918,12 @@ class _GridBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = collections.length + entries.length;
     return GridView.builder(
-      padding: EdgeInsets.fromLTRB(32, 8, 32, context.appContentBottomPadding),
+      padding: EdgeInsets.fromLTRB(
+        context.appPageGutter,
+        8,
+        context.appPageGutter,
+        context.appContentBottomPadding,
+      ),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 160,
         mainAxisSpacing: 16,
@@ -974,32 +988,28 @@ class _ListBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = collections.length + entries.length;
     return ListView.separated(
-      padding: EdgeInsets.fromLTRB(24, 8, 24, context.appContentBottomPadding),
+      padding: EdgeInsets.fromLTRB(
+        context.appPageGutter,
+        8,
+        context.appPageGutter,
+        context.appContentBottomPadding,
+      ),
       itemCount: total,
       separatorBuilder: (_, _) => Divider(height: 1, color: context.appDivider),
       itemBuilder: (context, i) {
         if (i < collections.length) {
           final s = collections[i];
-          return ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: 6,
-            ),
+          return AppListRow(
+            minHeight: 76,
+            leadingWidth: 48,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             leading: SizedBox(
               width: 48,
               height: 64,
               child: CollectionCover(coverPaths: s.coverPaths, borderRadius: 6),
             ),
-            title: Text(
-              s.collection.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-              '合集 · ${s.memberCount} 本',
-              style: TextStyle(fontSize: 12, color: context.appSecondaryText),
-            ),
+            title: Text(s.collection.name),
+            subtitle: Text('合集 · ${s.memberCount} 本'),
             onTap: () => CollectionDetailScreen.open(
               context,
               brand: brand,
@@ -1013,11 +1023,11 @@ class _ListBody extends StatelessWidget {
         final entry = entries[i - collections.length];
         final item = entry.item;
         final isSelected = selected.contains(item.id);
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 8,
-            vertical: 6,
-          ),
+        return AppListRow(
+          minHeight: 76,
+          leadingWidth: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          selected: selecting && isSelected,
           leading: SizedBox(
             width: 48,
             height: 64,
@@ -1047,13 +1057,7 @@ class _ListBody extends StatelessWidget {
               ],
             ),
           ),
-          title: Text(
-            item.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            softWrap: false,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
+          title: Text(item.title),
           subtitle: Text(
             [
               item.format.toUpperCase(),
@@ -1062,7 +1066,6 @@ class _ListBody extends StatelessWidget {
                 '${(entry.progressFraction! * 100).round()}%',
               if (item.onShelf) '已上架',
             ].join(' · '),
-            style: TextStyle(fontSize: 12, color: context.appSecondaryText),
           ),
           onTap: () => onTap(entry),
           onLongPress: () => onLongPress(entry),

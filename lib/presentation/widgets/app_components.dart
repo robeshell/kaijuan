@@ -27,6 +27,7 @@ class AppGlassSurface extends StatelessWidget {
     this.shadowBlur,
     this.color,
     this.borderColor,
+    this.border,
     super.key,
   });
 
@@ -41,6 +42,10 @@ class AppGlassSurface extends StatelessWidget {
   final Color? color;
   final Color? borderColor;
 
+  /// When set, replaces the default `Border.all`. Use for chrome
+  /// (side rail: right only; nav bar: top only).
+  final Border? border;
+
   @override
   Widget build(BuildContext context) {
     final glass = context.appGlass;
@@ -50,7 +55,7 @@ class AppGlassSurface extends StatelessWidget {
       decoration: BoxDecoration(
         color: color ?? (strong ? glass.strongSurface : glass.surface),
         borderRadius: borderRadius,
-        border: Border.all(color: borderColor ?? glass.border),
+        border: border ?? Border.all(color: borderColor ?? glass.border),
       ),
       child: Padding(padding: padding ?? EdgeInsets.zero, child: child),
     );
@@ -883,9 +888,11 @@ class AppListRow extends StatelessWidget {
     this.leading,
     this.trailing,
     this.onTap,
+    this.onLongPress,
     this.selected = false,
     this.enabled = true,
     this.minHeight = 54,
+    this.leadingWidth = 32,
     this.padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
     super.key,
   });
@@ -895,22 +902,24 @@ class AppListRow extends StatelessWidget {
   final Widget? leading;
   final Widget? trailing;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final bool selected;
   final bool enabled;
   final double minHeight;
+  final double leadingWidth;
   final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) {
-    final interactive = enabled && onTap != null;
     return Semantics(
-      button: onTap != null,
+      button: onTap != null || onLongPress != null,
       enabled: enabled,
       selected: selected,
       child: Material(
         color: selected ? context.appTint(0.05) : Colors.transparent,
         child: InkWell(
-          onTap: interactive ? onTap : null,
+          onTap: enabled ? onTap : null,
+          onLongPress: enabled ? onLongPress : null,
           hoverColor: context.appTint(0.035),
           focusColor: context.appTint(0.05),
           splashColor: Colors.transparent,
@@ -921,7 +930,7 @@ class AppListRow extends StatelessWidget {
               child: Row(
                 children: [
                   if (leading case final value?) ...[
-                    SizedBox(width: 32, child: Center(child: value)),
+                    SizedBox(width: leadingWidth, child: Center(child: value)),
                     const SizedBox(width: 10),
                   ],
                   Expanded(
@@ -1064,7 +1073,7 @@ class AppNavigationBar extends StatelessWidget {
       shadowOffset: const Offset(0, -6),
       shadowBlur: 18,
       borderRadius: BorderRadius.zero,
-      borderColor: theme.colorScheme.outlineVariant,
+      border: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
       child: content,
     );
   }

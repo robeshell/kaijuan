@@ -26,8 +26,7 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 720;
-    final hPad = wide ? 32.0 : 16.0;
+    final hPad = context.appPageGutter;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -35,7 +34,12 @@ class SettingsScreen extends StatelessWidget {
         listenable: themePreferences,
         builder: (context, _) {
           return AppSettingsScrollView(
-            padding: EdgeInsets.fromLTRB(hPad, wide ? 24 : 16, hPad, context.appContentBottomPadding),
+            padding: EdgeInsets.fromLTRB(
+              hPad,
+              context.appIsCompact ? 16 : 24,
+              hPad,
+              context.appContentBottomPadding,
+            ),
             children: [
               const AppSettingsPageHeader(title: '设置'),
               const SizedBox(height: AppSettingsMetrics.sectionGap),

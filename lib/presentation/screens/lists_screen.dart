@@ -126,8 +126,7 @@ class ListsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 720;
-    final hPad = wide ? 32.0 : 16.0;
+    final hPad = context.appPageGutter;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -137,7 +136,7 @@ class ListsScreen extends StatelessWidget {
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(4, wide ? 12 : 8, 8, 4),
+              padding: EdgeInsets.fromLTRB(4, context.appIsCompact ? 8 : 12, 8, 4),
               child: Row(
                 children: [
                   IconButton(
@@ -149,12 +148,13 @@ class ListsScreen extends StatelessWidget {
                       color: context.appPrimaryText,
                     ),
                   ),
-                  const Text(
+                  Text(
                     '书单',
                     style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.3,
+                      fontSize: context.appPageTitleSize,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.55,
+                      color: context.appPrimaryText,
                     ),
                   ),
                   const Spacer(),
@@ -293,8 +293,7 @@ class _ListDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 720;
-    final hPad = wide ? 32.0 : 16.0;
+    final hPad = context.appPageGutter;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -304,7 +303,7 @@ class _ListDetailScreen extends StatelessWidget {
           SafeArea(
             bottom: false,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(4, wide ? 12 : 8, 8, 4),
+              padding: EdgeInsets.fromLTRB(4, context.appIsCompact ? 8 : 12, 8, 4),
               child: Row(
                 children: [
                   IconButton(
@@ -321,10 +320,11 @@ class _ListDetailScreen extends StatelessWidget {
                       list.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: -0.3,
+                      style: TextStyle(
+                        fontSize: context.appPageTitleSize,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.55,
+                        color: context.appPrimaryText,
                       ),
                     ),
                   ),

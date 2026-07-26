@@ -99,7 +99,12 @@ class ShelfScreen extends StatelessWidget {
               }
 
               return ListView(
-                padding: EdgeInsets.fromLTRB(32, 24, 32, context.appContentBottomPadding),
+                padding: EdgeInsets.fromLTRB(
+                  context.appPageGutter,
+                  24,
+                  context.appPageGutter,
+                  context.appContentBottomPadding,
+                ),
                 children: [
                   if (recent.isNotEmpty) ...[
                     const _SectionTitle('继续阅读'),

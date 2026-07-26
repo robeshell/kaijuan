@@ -18,8 +18,7 @@ extension AppSettingsContext on BuildContext {
   Color get settingsInlineSurface =>
       appColors.surfaceContainerLow.withValues(alpha: 0.72);
 
-  double get settingsPageTitleSize =>
-      MediaQuery.sizeOf(this).width <= 600 ? 26 : 28;
+  double get settingsPageTitleSize => appPageTitleSize;
 }
 
 class AppSettingsContent extends StatelessWidget {

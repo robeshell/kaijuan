@@ -195,7 +195,7 @@ class _SideRail extends StatelessWidget {
         borderRadius: BorderRadius.zero,
         shadowOffset: const Offset(1, 0),
         shadowBlur: 6,
-        borderColor: context.appDivider,
+        border: Border(right: BorderSide(color: context.appDivider)),
         child: Material(
           color: Colors.transparent,
           child: SafeArea(
