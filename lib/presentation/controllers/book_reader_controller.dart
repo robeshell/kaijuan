@@ -797,8 +797,12 @@ class BookReaderController extends ChangeNotifier {
 
   /// Enter ②. Fresh selections immediately paint a default underline (Anx
   /// autoMarkSelection equivalent) so the range stays visible after the
-  /// native DOM selection collapses when the Flutter bubble takes focus
-  /// (macOS/Windows Platform Views; `pointer_interceptor` is iOS/web only).
+  /// native DOM selection collapses.
+  ///
+  /// Desktop Platform Views often collapse selection when the Flutter bubble
+  /// takes focus; mobile keeps selection handles. Always clear the web
+  /// selection after the mark is drawn so both feel the same: 划线 → paint →
+  /// 取消选中, menu stays on ② for style/color.
   Future<void> openMarkupPhase() async {
     final menu = _selectionMenu;
     if (menu == null) return;
@@ -820,6 +824,10 @@ class BookReaderController extends ChangeNotifier {
       color: BookHighlightColor.yellow,
       dismissMenu: false,
     );
+    if (_disposed) return;
+    // Hold the lock so the deselect's onSelectionCleared does not tear down ②.
+    retainSelectionMenuForInteraction();
+    _clearWebSelection?.call();
   }
 
   void clearSelectionMenu({bool clearWebSelection = true}) {

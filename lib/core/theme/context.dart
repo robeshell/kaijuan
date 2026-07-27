@@ -63,6 +63,22 @@ extension AppThemeContext on BuildContext {
 
   bool get appIsCompact => appWindowClass == AppWindowClass.compact;
 
+  /// Landscape aspect (width > height). Used with [appIsShortViewport] for
+  /// phone landscape chrome compression — orientation is never locked.
+  bool get appIsLandscape {
+    final size = MediaQuery.sizeOf(this);
+    return size.width > size.height;
+  }
+
+  /// Short usable height (phone landscape, split-screen, small fold).
+  /// Chrome / bottom bar / tool panels should compress.
+  bool get appIsShortViewport {
+    final size = MediaQuery.sizeOf(this);
+    final padding = MediaQuery.paddingOf(this);
+    final usable = size.height - padding.vertical;
+    return usable < 480;
+  }
+
   /// Touch-first navigation (bottom bar). Desktop never uses mobile shell.
   bool get appUsesMobileShell {
     if (appUsesDesktopPlatform) return false;
@@ -87,9 +103,16 @@ extension AppThemeContext on BuildContext {
       : KaiBrandLayout.regularPageTitle;
 
   /// Scroll padding so last rows clear the overlaid bottom bar (`extendBody`).
-  double get appContentBottomPadding => appUsesMobileShell
-      ? KaiBrandLayout.mobileBottomPadding
-      : KaiBrandLayout.desktopBottomPadding;
+  double get appContentBottomPadding {
+    if (!appUsesMobileShell) return KaiBrandLayout.desktopBottomPadding;
+    // Short landscape: bar is thinner and often icon-only.
+    if (appIsShortViewport) return 88;
+    return KaiBrandLayout.mobileBottomPadding;
+  }
+
+  /// Max fraction of viewport height for reader tool-strip expand panels.
+  double get appReaderToolPanelMaxHeightFraction =>
+      appIsShortViewport ? 0.38 : 0.48;
 
   double get appSidebarWidth => switch (appWindowClass) {
     AppWindowClass.compact => 0,

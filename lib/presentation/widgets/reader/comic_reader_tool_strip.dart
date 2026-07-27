@@ -72,13 +72,23 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
               child: _panel == null
                   ? const SizedBox(width: double.infinity)
                   : Padding(
-                      padding: const EdgeInsets.fromLTRB(
+                      padding: EdgeInsets.fromLTRB(
                         AppSpacing.x4,
-                        AppSpacing.x3,
+                        context.appIsShortViewport
+                            ? AppSpacing.x2
+                            : AppSpacing.x3,
                         AppSpacing.x4,
                         AppSpacing.x2,
                       ),
-                      child: _buildPanel(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.sizeOf(context).height *
+                              context.appReaderToolPanelMaxHeightFraction,
+                        ),
+                        child: SingleChildScrollView(
+                          child: _buildPanel(),
+                        ),
+                      ),
                     ),
             ),
             if (_panel != null)

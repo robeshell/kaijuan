@@ -1089,11 +1089,19 @@ class AppNavigationBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Phone landscape / short split: icon-only bar frees vertical space.
+    final short = !embedded && context.appIsShortViewport;
+    final barHeight = embedded ? 46.0 : (short ? 44.0 : 56.0);
     final content = SafeArea(
       top: false,
-      minimum: EdgeInsets.fromLTRB(10, embedded ? 3 : 7, 10, embedded ? 4 : 6),
+      minimum: EdgeInsets.fromLTRB(
+        10,
+        embedded ? 3 : (short ? 4 : 7),
+        10,
+        embedded ? 4 : (short ? 4 : 6),
+      ),
       child: SizedBox(
-        height: embedded ? 46 : 56,
+        height: barHeight,
         child: Row(
           children: [
             for (var index = 0; index < destinations.length; index++)
@@ -1102,6 +1110,7 @@ class AppNavigationBar extends StatelessWidget {
                   item: destinations[index],
                   selected: index == selectedIndex,
                   onTap: () => onDestinationSelected(index),
+                  iconOnly: short,
                 ),
               ),
           ],
@@ -1126,11 +1135,13 @@ class _AppNavigationButton extends StatelessWidget {
     required this.item,
     required this.selected,
     required this.onTap,
+    this.iconOnly = false,
   });
 
   final AppNavigationItem item;
   final bool selected;
   final VoidCallback onTap;
+  final bool iconOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -1149,26 +1160,35 @@ class _AppNavigationButton extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(AppRadii.control),
-            child: AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOutCubic,
-              style: TextStyle(
-                color: foreground,
-                fontSize: 10.5,
-                height: 1,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    selected ? item.selectedIcon : item.icon,
-                    size: 21,
-                    color: foreground,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(item.label, maxLines: 1, overflow: TextOverflow.fade),
-                ],
+            child: Tooltip(
+              message: item.label,
+              child: AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 10.5,
+                  height: 1,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      selected ? item.selectedIcon : item.icon,
+                      size: iconOnly ? 24 : 21,
+                      color: foreground,
+                    ),
+                    if (!iconOnly) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        item.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),

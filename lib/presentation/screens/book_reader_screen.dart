@@ -1,12 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
-import '../../core/theme.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/book/book_reader_capabilities.dart';
@@ -21,6 +19,7 @@ import '../widgets/reader/book_page_meta_overlay.dart';
 import '../widgets/reader/book_reader_chrome.dart';
 import '../widgets/reader/book_search_panel.dart';
 import '../widgets/reader/book_selection_menu_overlay.dart';
+import '../widgets/reader/reader_waiting_cover.dart';
 
 /// Full-screen reflow book reader.
 ///
@@ -315,7 +314,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                                   child: Transform.scale(
                                     scale: 1 + 0.1 * coverT,
                                     filterQuality: FilterQuality.low,
-                                    child: _WaitingCover(
+                                    child: ReaderWaitingCover(
                                       coverPath: widget.item.coverPath,
                                       title: widget.item.title,
                                     ),
@@ -365,60 +364,6 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     _engine.dispose();
     _controller.dispose();
     super.dispose();
-  }
-}
-
-/// Window-fitted cover art only — backdrop is painted by the reveal layer.
-class _WaitingCover extends StatelessWidget {
-  const _WaitingCover({
-    required this.coverPath,
-    required this.title,
-  });
-
-  final String? coverPath;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final path = coverPath;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 48),
-        child: Center(
-          child: path != null && path.isNotEmpty
-              ? Image.file(
-                  File(path),
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                  errorBuilder: (_, _, _) => _TitleFallback(title: title),
-                )
-              : _TitleFallback(title: title),
-        ),
-      ),
-    );
-  }
-}
-
-class _TitleFallback extends StatelessWidget {
-  const _TitleFallback({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = context.appPrimaryText;
-    return Text(
-      title,
-      textAlign: TextAlign.center,
-      maxLines: 6,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        color: fg.withValues(alpha: 0.72),
-        fontSize: 28,
-        fontWeight: FontWeight.w600,
-        height: 1.25,
-      ),
-    );
   }
 }
 

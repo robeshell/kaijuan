@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../controllers/book_reader_controller.dart';
 
 /// Always-on WeChat Reading–style page meta: chapter (top-left) and whole-book
@@ -15,6 +16,9 @@ class BookPageMetaOverlay extends StatelessWidget {
     final theme = controller.readingTheme;
     final meta = Color(theme.metaColorArgb);
     final visible = !controller.chromeVisible;
+    final short = context.appIsShortViewport;
+    final edge = short ? 12.0 : 20.0;
+    final vPad = short ? 6.0 : 10.0;
 
     return IgnorePointer(
       child: AnimatedOpacity(
@@ -23,7 +27,7 @@ class BookPageMetaOverlay extends StatelessWidget {
         curve: Curves.easeOut,
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+            padding: EdgeInsets.fromLTRB(edge, vPad, edge, vPad),
             child: Stack(
               fit: StackFit.expand,
               children: [

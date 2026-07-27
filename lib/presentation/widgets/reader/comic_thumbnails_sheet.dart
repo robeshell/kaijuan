@@ -22,10 +22,13 @@ Future<void> showComicThumbnailsSheet(
         builder: (context, _) {
           final count = controller.pageCount;
           final current = controller.pageIndex;
+          // Landscape / short: leave more room to see the page behind the sheet.
+          final sheetH = MediaQuery.sizeOf(context).height *
+              (context.appIsShortViewport ? 0.78 : 0.62);
           return ColoredBox(
             color: bg,
             child: SizedBox(
-              height: MediaQuery.sizeOf(context).height * 0.62,
+              height: sheetH,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

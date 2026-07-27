@@ -27,8 +27,11 @@ class BookSelectionMenuOverlay extends StatelessWidget {
   static const _actionsPreferred = 304.0;
   static const _markupPreferred = 288.0;
   static const _widthCap = 340.0;
-  static const _actionsHeight = 64.0;
-  static const _markupHeight = 148.0;
+
+  /// Paint-approximate heights (card + caret). Used for above/below decision
+  /// and clamps only — vertical gap is pinned to the selection edge.
+  static const _actionsHeightEstimate = 52.0;
+  static const _markupHeightEstimate = 112.0;
 
   static const _markupColors = <BookHighlightColor>[
     BookHighlightColor.pink,
@@ -82,9 +85,9 @@ class BookSelectionMenuOverlay extends StatelessWidget {
           : _actionsPreferred,
       safeSpan: safeSpan,
     );
-    final menuH = phase == BookSelectionMenuPhase.markup
-        ? _markupHeight
-        : _actionsHeight;
+    final menuHEstimate = phase == BookSelectionMenuPhase.markup
+        ? _markupHeightEstimate
+        : _actionsHeightEstimate;
 
     final anchorLeft = menu.left.clamp(0.0, 1.0) * size.width;
     final anchorRight = menu.right.clamp(0.0, 1.0) * size.width;
@@ -92,17 +95,55 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     final anchorBottom = menu.bottom.clamp(0.0, 1.0) * size.height;
     final anchorMidX = (anchorLeft + anchorRight) / 2;
 
+    // Full selection box: above first line / below last line — never cover
+    // mid-lines of a multi-line mark (focus-line anchoring caused that).
     final spaceAbove = anchorTop - safeTop;
     final spaceBelow = safeBottom - anchorBottom;
-    final placeAbove =
-        spaceAbove >= menuH + _gap || spaceAbove >= spaceBelow;
+    var placeAbove =
+        spaceAbove >= menuHEstimate + _gap || spaceAbove >= spaceBelow;
+    if (placeAbove &&
+        spaceAbove < menuHEstimate + _gap &&
+        spaceBelow >= menuHEstimate + _gap) {
+      placeAbove = false;
+    } else if (!placeAbove &&
+        spaceBelow < menuHEstimate + _gap &&
+        spaceAbove >= menuHEstimate + _gap) {
+      placeAbove = true;
+    }
 
     final maxLeft = math.max(safeLeft, safeRight - menuW);
     var left = anchorMidX - menuW / 2;
     left = left.clamp(safeLeft, maxLeft);
-    final top = placeAbove
-        ? (anchorTop - menuH - _gap).clamp(safeTop, safeBottom - menuH)
-        : (anchorBottom + _gap).clamp(safeTop, safeBottom - menuH);
+
+    // Pin near edge with fixed gap. placeAbove uses a top→anchor slot +
+    // Align(bottom) so real paint height does not inflate the gap (old bug:
+    // top = anchor - estimatedH - gap sat too far when estimate was high).
+    // Never use Positioned(bottom-only) — expands the child mid-screen.
+    final double posTop;
+    final double? slotHeight;
+    final double zoneTop;
+    final double zoneBottom;
+    if (placeAbove) {
+      final edge = anchorTop - _gap;
+      final available = edge - safeTop;
+      if (available >= menuHEstimate * 0.5) {
+        posTop = safeTop;
+        slotHeight = available;
+        zoneTop = math.max(safeTop, edge - menuHEstimate);
+        zoneBottom = edge;
+      } else {
+        posTop = safeTop;
+        slotHeight = null;
+        zoneTop = safeTop;
+        zoneBottom = safeTop + menuHEstimate;
+      }
+    } else {
+      posTop =
+          (anchorBottom + _gap).clamp(safeTop, safeBottom - menuHEstimate);
+      slotHeight = null;
+      zoneTop = posTop;
+      zoneBottom = posTop + menuHEstimate;
+    }
 
     final caretX = (anchorMidX - left).clamp(16.0, menuW - 16.0);
 
@@ -111,75 +152,85 @@ class BookSelectionMenuOverlay extends StatelessWidget {
       if (!_needsMenuCursorZone) return;
       controller.setMenuCursorZone(
         left: left / size.width,
-        top: top / size.height,
+        top: zoneTop.clamp(0.0, size.height) / size.height,
         right: (left + menuW) / size.width,
-        bottom: (top + menuH) / size.height,
+        bottom: zoneBottom.clamp(0.0, size.height) / size.height,
       );
     });
 
     final cfi = menu.cfi;
     final text = menu.text;
 
-    final bubble = Positioned(
-      left: left,
-      top: top,
-      width: menuW,
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: (_) =>
-            controller.retainSelectionMenuForInteraction(),
-        child: PointerInterceptor(
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: Material(
-              color: Colors.transparent,
-              child: phase == BookSelectionMenuPhase.markup
-                  ? _MarkupCard(
-                      menu: menu,
-                      placeAbove: placeAbove,
-                      caretX: caretX,
-                      onStyle: (type, color) {
-                        unawaited(
-                          controller.applyAnnotationStyle(
-                            type: type,
-                            color: color,
-                            cfiOverride: cfi,
-                            textOverride: text,
-                            dismissMenu: false,
-                          ),
-                        );
-                      },
-                      onClear: () {
-                        unawaited(controller.removeActiveAnnotation());
-                      },
-                      onCopy: () => _copy(context, text),
-                      onExcerpt: () => _excerpt(context, text),
-                      onNote: () => unawaited(_openNote(context)),
-                      onDict: () => _soon(context, '词典'),
-                      onTranslate: () => _soon(context, '翻译'),
-                    )
-                  : _ActionsCard(
-                      placeAbove: placeAbove,
-                      caretX: caretX,
-                      onUnderline: () =>
-                          unawaited(controller.openMarkupPhase()),
-                      onNote: () => unawaited(_openNote(context)),
-                      onCopy: () => _copy(context, text),
-                      onDict: () => _soon(context, '词典'),
-                      onTranslate: () => _soon(context, '翻译'),
-                      onSearch: () {
-                        final q = text.trim();
-                        controller.clearSelectionMenu();
-                        controller.openSearch(
-                          initialQuery: q.isEmpty ? null : q,
-                        );
-                      },
-                      onExcerpt: () => _excerpt(context, text),
-                    ),
-            ),
+    final card = phase == BookSelectionMenuPhase.markup
+        ? _MarkupCard(
+            menu: menu,
+            placeAbove: placeAbove,
+            caretX: caretX,
+            onStyle: (type, color) {
+              unawaited(
+                controller.applyAnnotationStyle(
+                  type: type,
+                  color: color,
+                  cfiOverride: cfi,
+                  textOverride: text,
+                  dismissMenu: false,
+                ),
+              );
+            },
+            onClear: () {
+              unawaited(controller.removeActiveAnnotation());
+            },
+            onCopy: () => _copy(context, text),
+            onExcerpt: () => _excerpt(context, text),
+            onNote: () => unawaited(_openNote(context)),
+            onDict: () => _soon(context, '词典'),
+            onTranslate: () => _soon(context, '翻译'),
+          )
+        : _ActionsCard(
+            placeAbove: placeAbove,
+            caretX: caretX,
+            onUnderline: () => unawaited(controller.openMarkupPhase()),
+            onNote: () => unawaited(_openNote(context)),
+            onCopy: () => _copy(context, text),
+            onDict: () => _soon(context, '词典'),
+            onTranslate: () => _soon(context, '翻译'),
+            onSearch: () {
+              final q = text.trim();
+              controller.clearSelectionMenu();
+              controller.openSearch(
+                initialQuery: q.isEmpty ? null : q,
+              );
+            },
+            onExcerpt: () => _excerpt(context, text),
+          );
+
+    final interactive = Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (_) => controller.retainSelectionMenuForInteraction(),
+      child: PointerInterceptor(
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Material(
+            color: Colors.transparent,
+            child: card,
           ),
         ),
       ),
+    );
+
+    final bubble = Positioned(
+      left: left,
+      top: posTop,
+      width: menuW,
+      child: slotHeight != null
+          ? SizedBox(
+              height: slotHeight,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: interactive,
+              ),
+            )
+          : interactive,
     );
 
     // Mobile: Flutter barrier. Desktop: JS outside-pointer only (see above).

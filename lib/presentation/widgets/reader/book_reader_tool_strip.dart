@@ -79,13 +79,23 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
               child: _panel == null
                   ? const SizedBox(width: double.infinity)
                   : Padding(
-                      padding: const EdgeInsets.fromLTRB(
+                      padding: EdgeInsets.fromLTRB(
                         AppSpacing.x4,
-                        AppSpacing.x3,
+                        context.appIsShortViewport
+                            ? AppSpacing.x2
+                            : AppSpacing.x3,
                         AppSpacing.x4,
                         AppSpacing.x2,
                       ),
-                      child: _buildPanel(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.sizeOf(context).height *
+                              context.appReaderToolPanelMaxHeightFraction,
+                        ),
+                        child: SingleChildScrollView(
+                          child: _buildPanel(),
+                        ),
+                      ),
                     ),
             ),
             if (_panel != null)
@@ -849,7 +859,8 @@ class _TypographyPanelState extends State<_TypographyPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final maxH = MediaQuery.sizeOf(context).height * 0.48;
+    final maxH = MediaQuery.sizeOf(context).height *
+        context.appReaderToolPanelMaxHeightFraction;
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxH),
       child: SingleChildScrollView(

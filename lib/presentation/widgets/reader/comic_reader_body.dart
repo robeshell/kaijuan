@@ -315,9 +315,6 @@ class _VerticalBodyState extends State<_VerticalBody> {
   }
 }
 
-/// Minimum width/height ratio to show a glued two-page spread.
-const _kMinSpreadViewportAspect = 1.05;
-
 class _SpreadBody extends StatelessWidget {
   const _SpreadBody({required this.controller});
 
@@ -326,43 +323,35 @@ class _SpreadBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final spread = c.spreadFor(c.pageIndex);
-        final rtl = c.direction == ComicReadDirection.rtl;
-        final wideEnough =
-            constraints.maxWidth > 0 &&
-            constraints.maxHeight > 0 &&
-            constraints.maxWidth / constraints.maxHeight >=
-                _kMinSpreadViewportAspect;
-        final useSpread = spread.usesSpreadLayout && wideEnough;
+    final spread = c.spreadFor(c.pageIndex);
+    final rtl = c.direction == ComicReadDirection.rtl;
 
-        if (!useSpread) {
-          return ComicZoomHost(
-            resetToken: '${c.pageIndex}:${c.mode.name}:single',
-            onTapAt: (pos, width) => _handleTapZones(
-              controller: c,
-              localPosition: pos,
-              width: width,
-            ),
-            child: ComicPageImage(controller: c, pageIndex: c.pageIndex),
-          );
-        }
+    // Only fall back to single page when there is no pair (e.g. final odd
+    // page). Viewport aspect is not gated — user chose spread, always glue.
+    if (!spread.usesSpreadLayout) {
+      return ComicZoomHost(
+        resetToken: '${c.pageIndex}:${c.mode.name}:single',
+        onTapAt: (pos, width) => _handleTapZones(
+          controller: c,
+          localPosition: pos,
+          width: width,
+        ),
+        child: ComicPageImage(controller: c, pageIndex: c.pageIndex),
+      );
+    }
 
-        final left = rtl ? spread.secondaryPage! : spread.primaryPage;
-        final right = rtl ? spread.primaryPage : spread.secondaryPage!;
+    final left = rtl ? spread.secondaryPage! : spread.primaryPage;
+    final right = rtl ? spread.primaryPage : spread.secondaryPage!;
 
-        return ComicZoomHost(
-          resetToken: '${c.pageIndex}:${c.mode.name}:spread',
-          onTapAt: (pos, width) =>
-              _handleTapZones(controller: c, localPosition: pos, width: width),
-          child: _GluedSpread(
-            controller: c,
-            leftIndex: left,
-            rightIndex: right,
-          ),
-        );
-      },
+    return ComicZoomHost(
+      resetToken: '${c.pageIndex}:${c.mode.name}:spread',
+      onTapAt: (pos, width) =>
+          _handleTapZones(controller: c, localPosition: pos, width: width),
+      child: _GluedSpread(
+        controller: c,
+        leftIndex: left,
+        rightIndex: right,
+      ),
     );
   }
 }

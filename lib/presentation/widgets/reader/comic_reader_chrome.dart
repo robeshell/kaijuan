@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../controllers/comic_reader_controller.dart';
 import 'comic_reader_tool_strip.dart';
 import 'glass_bar.dart';
@@ -18,6 +19,7 @@ class ComicReaderChrome extends StatelessWidget {
   final VoidCallback onBack;
 
   static const double _barHeight = 56;
+  static const double _barHeightShort = 44;
   static const double _macTrafficLightClearance = 78;
 
   @override
@@ -27,6 +29,8 @@ class ComicReaderChrome extends StatelessWidget {
     final fg = Color(theme.foregroundArgb);
     final fgMuted = Color(theme.metaColorArgb);
     final accent = Theme.of(context).colorScheme.primary;
+    final short = context.appIsShortViewport;
+    final barH = short ? _barHeightShort : _barHeight;
 
     final leadingClearance =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
@@ -46,7 +50,7 @@ class ComicReaderChrome extends StatelessWidget {
             child: SafeArea(
               bottom: false,
               child: SizedBox(
-                height: _barHeight,
+                height: barH,
                 child: Material(
                   type: MaterialType.transparency,
                   child: Row(
@@ -54,6 +58,9 @@ class ComicReaderChrome extends StatelessWidget {
                       SizedBox(width: leadingClearance),
                       IconButton(
                         tooltip: '返回',
+                        visualDensity: short
+                            ? VisualDensity.compact
+                            : VisualDensity.standard,
                         onPressed: onBack,
                         icon: Icon(
                           Icons.arrow_back_outlined,
@@ -62,31 +69,49 @@ class ComicReaderChrome extends StatelessWidget {
                         ),
                       ),
                       Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              controller.item.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: fg,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
+                        child: short
+                            ? Text(
+                                '${controller.item.title}  ·  ${controller.pageLabel}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: fg,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              )
+                            : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    controller.item.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: fg,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    controller.pageLabel,
+                                    style: TextStyle(
+                                      color: fgMuted,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            Text(
-                              controller.pageLabel,
-                              style: TextStyle(color: fgMuted, fontSize: 11),
-                            ),
-                          ],
-                        ),
                       ),
                       IconButton(
                         tooltip: controller.isCurrentPageBookmarked
                             ? '移除当前页书签'
                             : '添加当前页书签',
+                        visualDensity: short
+                            ? VisualDensity.compact
+                            : VisualDensity.standard,
                         onPressed: controller.toggleBookmark,
                         icon: Icon(
                           controller.isCurrentPageBookmarked

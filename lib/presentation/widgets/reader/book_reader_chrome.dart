@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import 'book_reader_tool_strip.dart';
@@ -24,6 +25,7 @@ class BookReaderChrome extends StatelessWidget {
 
   /// Clear of macOS traffic lights (same band as [DesktopTitleBar]).
   static const double _macTrafficLightClearance = 78;
+  static const double _barHeightShort = 44;
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +35,10 @@ class BookReaderChrome extends StatelessWidget {
     final fg = Color(theme.foregroundArgb);
     final fgMuted = Color(theme.metaColorArgb);
     final accent = Theme.of(context).colorScheme.primary;
+    final short = context.appIsShortViewport;
+    final barH = short ? _barHeightShort : kBookReaderChromeBarHeight;
+    final density =
+        short ? VisualDensity.compact : VisualDensity.standard;
 
     final leadingClearance =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
@@ -52,7 +58,7 @@ class BookReaderChrome extends StatelessWidget {
             child: SafeArea(
               bottom: false,
               child: SizedBox(
-                height: kBookReaderChromeBarHeight,
+                height: barH,
                 child: Material(
                   type: MaterialType.transparency,
                   child: Row(
@@ -60,6 +66,7 @@ class BookReaderChrome extends StatelessWidget {
                       SizedBox(width: leadingClearance),
                       IconButton(
                         tooltip: '返回',
+                        visualDensity: density,
                         onPressed: onBack,
                         icon: Icon(
                           Icons.arrow_back_outlined,
@@ -68,31 +75,47 @@ class BookReaderChrome extends StatelessWidget {
                         ),
                       ),
                       Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              controller.item.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: fg,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
+                        child: short
+                            ? Text(
+                                '${controller.item.title}  ·  ${controller.progressPercentLabel}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: fg,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              )
+                            : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    controller.item.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: fg,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    controller.progressPercentLabel,
+                                    style: TextStyle(
+                                      color: fgMuted,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            Text(
-                              controller.progressPercentLabel,
-                              style: TextStyle(color: fgMuted, fontSize: 11),
-                            ),
-                          ],
-                        ),
                       ),
                       IconButton(
                         tooltip: controller.isCurrentPositionBookmarked
                             ? '移除当前位置书签'
                             : '添加当前位置书签',
+                        visualDensity: density,
                         onPressed: controller.toggleBookmark,
                         icon: Icon(
                           controller.isCurrentPositionBookmarked
@@ -104,6 +127,7 @@ class BookReaderChrome extends StatelessWidget {
                       ),
                       IconButton(
                         tooltip: '搜索',
+                        visualDensity: density,
                         onPressed: () => controller.openSearch(),
                         icon: Icon(
                           Icons.search,

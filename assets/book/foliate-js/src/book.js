@@ -11,57 +11,107 @@ const { EPUB } = await import('./epub.js')
 
 var isPdf = false;
 
+/**
+ * Map a Range/Element to a normalized viewport box for Flutter's selection menu.
+ * Uses the union of *visible* client rects (full multi-line selection), so the
+ * menu can sit fully above or below the mark without covering mid-lines.
+ */
 const getPosition = (target) => {
   const clamp01 = value => Math.min(Math.max(value, 0), 1);
 
-  const frameRect = (framePos, elementRect, scaleX = 1, scaleY = 1) => {
-    return {
-      left: scaleX * elementRect.left + framePos.left,
-      right: scaleX * elementRect.right + framePos.left,
-      top: scaleY * elementRect.top + framePos.top,
-      bottom: scaleY * elementRect.bottom + framePos.top
-    };
-  };
+  const frameRect = (framePos, elementRect, scaleX = 1, scaleY = 1) => ({
+    left: scaleX * elementRect.left + framePos.left,
+    right: scaleX * elementRect.right + framePos.left,
+    top: scaleY * elementRect.top + framePos.top,
+    bottom: scaleY * elementRect.bottom + framePos.top,
+  });
+
+  const unionRects = (rects) => rects.reduce((acc, rect) => ({
+    left: Math.min(acc.left, rect.left),
+    top: Math.min(acc.top, rect.top),
+    right: Math.max(acc.right, rect.right),
+    bottom: Math.max(acc.bottom, rect.bottom),
+  }), { ...rects[0] });
+
   const rootNode = target.getRootNode?.() ?? target?.endContainer?.getRootNode?.();
-  const frameElement = rootNode?.defaultView?.frameElement;
+  const frameElement = rootNode?.defaultView?.frameElement
+    ?? target?.endContainer?.ownerDocument?.defaultView?.frameElement;
 
   let scaleX = 1, scaleY = 1;
   if (frameElement) {
     const transform = getComputedStyle(frameElement).transform;
-    const matches = transform.match(/matrix\((.+)\)/);
-    if (matches) {
-      [scaleX, , , scaleY] = matches[1].split(/\s*,\s*/).map(Number);
+    const m2 = transform.match(/matrix\(([^)]+)\)/);
+    if (m2) {
+      const parts = m2[1].split(/\s*,\s*/).map(Number);
+      if (parts.length >= 4 && Number.isFinite(parts[0]) && Number.isFinite(parts[3])) {
+        scaleX = parts[0] || 1;
+        scaleY = parts[3] || 1;
+      }
+    } else {
+      const m3 = transform.match(/matrix3d\(([^)]+)\)/);
+      if (m3) {
+        const parts = m3[1].split(/\s*,\s*/).map(Number);
+        if (parts.length >= 6 && Number.isFinite(parts[0]) && Number.isFinite(parts[5])) {
+          scaleX = parts[0] || 1;
+          scaleY = parts[5] || 1;
+        }
+      }
     }
   }
 
   const frame = frameElement?.getBoundingClientRect() ?? { top: 0, left: 0 };
+  const screenWidth = window.innerWidth || 1;
+  const screenHeight = window.innerHeight || 1;
 
-  const rects = Array.from(target.getClientRects());
-  if (!rects.length) {
+  let rawRects = [];
+  try {
+    rawRects = Array.from(target.getClientRects?.() ?? []);
+  } catch (_) {
+    rawRects = [];
+  }
+  // Drop empty fragments (common around BR / collapsed line boxes).
+  rawRects = rawRects.filter(r => r.width > 0.5 && r.height > 0.5);
+  if (!rawRects.length) {
+    try {
+      const b = target.getBoundingClientRect?.();
+      if (b && (b.width > 0.5 || b.height > 0.5)) rawRects = [b];
+    } catch (_) {}
+  }
+  if (!rawRects.length) {
+    return { left: 0, top: 0, right: 0, bottom: 0 };
+  }
+
+  let frameRects = rawRects.map(rect => frameRect(frame, rect, scaleX, scaleY));
+
+  // Column pagination can yield rects in off-screen columns; ignore those so
+  // the union does not stretch to the full viewport after clamp01.
+  const visible = frameRects.filter(r =>
+    r.right > 0 && r.left < screenWidth && r.bottom > 0 && r.top < screenHeight);
+  if (visible.length) frameRects = visible;
+
+  const boundingRect = unionRects(frameRects);
+
+  // Clip to viewport before normalize so partial off-screen lines stay tight.
+  const clipped = {
+    left: Math.max(0, boundingRect.left),
+    top: Math.max(0, boundingRect.top),
+    right: Math.min(screenWidth, boundingRect.right),
+    bottom: Math.min(screenHeight, boundingRect.bottom),
+  };
+  if (clipped.right <= clipped.left || clipped.bottom <= clipped.top) {
     return {
-      left: 0,
-      top: 0,
-      right: 0,
-      bottom: 0
+      left: clamp01(boundingRect.left / screenWidth),
+      top: clamp01(boundingRect.top / screenHeight),
+      right: clamp01(boundingRect.right / screenWidth),
+      bottom: clamp01(boundingRect.bottom / screenHeight),
     };
   }
-  const frameRects = rects.map(rect => frameRect(frame, rect, scaleX, scaleY));
-
-  const boundingRect = frameRects.reduce((acc, rect) => ({
-    left: Math.min(acc.left, rect.left),
-    top: Math.min(acc.top, rect.top),
-    right: Math.max(acc.right, rect.right),
-    bottom: Math.max(acc.bottom, rect.bottom)
-  }), { ...frameRects[0] });
-
-  const screenWidth = window.innerWidth;
-  const screenHeight = window.innerHeight;
 
   return {
-    left: clamp01(boundingRect.left / screenWidth),
-    top: clamp01(boundingRect.top / screenHeight),
-    right: clamp01(boundingRect.right / screenWidth),
-    bottom: clamp01(boundingRect.bottom / screenHeight)
+    left: clamp01(clipped.left / screenWidth),
+    top: clamp01(clipped.top / screenHeight),
+    right: clamp01(clipped.right / screenWidth),
+    bottom: clamp01(clipped.bottom / screenHeight),
   };
 };
 
@@ -146,6 +196,7 @@ const handleSelection = (view, doc, index) => {
 
   if (!range) return;
 
+  // Full visible selection bounds — menu sits above/below the whole mark.
   const position = getPosition(range);
   const cfi = view.getCFI(index, range);
   const lang = 'en-US'
