@@ -239,10 +239,19 @@ class LibraryController extends ChangeNotifier {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return _pickAndImportAndroid();
     }
-    // Desktop / iOS: file_selector is fine (paths, no whole-file byte[]).
+    // Desktop uses extensions; iOS ignores them and requires UTIs
+    // (file_selector_ios throws without uniformTypeIdentifiers).
+    // CBZ often has no dedicated UTI — include zip + public.data; extension
+    // filtering still happens in [importPaths].
     final typeGroup = XTypeGroup(
       label: '图书与漫画',
       extensions: importExtensions,
+      uniformTypeIdentifiers: const [
+        'org.idpf.epub-container', // .epub
+        'public.zip-archive', // .zip / many .cbz
+        'com.pkware.zip-archive',
+        'public.data', // Files app / cloud providers without typed UTIs
+      ],
     );
     final files = await openFiles(acceptedTypeGroups: [typeGroup]);
     if (files.isEmpty) return null;

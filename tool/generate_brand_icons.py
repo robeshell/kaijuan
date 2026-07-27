@@ -134,15 +134,36 @@ def copy_mac_contents(src: Path, dest: Path) -> None:
 
 
 def write_android(brand: str, img: Image.Image) -> None:
+    """Write launcher mipmaps under a source set (main / legacy comic|book)."""
     base = ROOT / "android" / "app" / "src" / brand / "res"
     for folder, px in ANDROID_MIPMAP.items():
         d = base / folder
         d.mkdir(parents=True, exist_ok=True)
-        resize(img, px).save(d / "ic_launcher.png", format="PNG")
+        # Opaque RGB — some OEMs mishandle palette/alpha launcher icons.
+        resize(img, px).convert("RGB").save(d / "ic_launcher.png", format="PNG")
+
+
+def write_windows_ico(img: Image.Image) -> None:
+    ico_path = ROOT / "windows" / "runner" / "resources" / "app_icon.ico"
+    ico_path.parent.mkdir(parents=True, exist_ok=True)
+    sizes = (16, 24, 32, 48, 64, 128, 256)
+    frames = [resize(img, size).convert("RGBA") for size in sizes]
+    frames[-1].save(
+        ico_path,
+        format="ICO",
+        sizes=[(size, size) for size in sizes],
+        append_images=frames[:-1],
+        bitmap_format="png",
+    )
 
 
 def sync_default_from_comic() -> None:
-    """Default AppIcon catalogs track comic for non-flavor / legacy builds."""
+    """Single-app defaults track the comic (warm-orange) master.
+
+    Android no longer uses product flavors — only ``main`` ships. Apple still
+    keeps book/comic catalogs for deprecated schemes, but AppIcon.appiconset
+    is what non-flavor builds use.
+    """
     for platform, sizes in (
         ("ios", IOS_SIZES),
         ("macos", MAC_SIZES),
@@ -206,26 +227,40 @@ def main() -> None:
     ios_src = ROOT / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
     mac_src = ROOT / "macos/Runner/Assets.xcassets/AppIcon.appiconset"
 
+    masters: dict[str, Image.Image] = {}
     for brand in BRANDS:
         img = ensure_master(brand)
+        masters[brand] = img
 
-        # iOS
+        # iOS / macOS brand catalogs (legacy schemes still reference these).
         ios_dest = ROOT / f"ios/Runner/Assets.xcassets/AppIcon-{brand}.appiconset"
         copy_ios_contents(ios_src, ios_dest)
         write_set(img, ios_dest, IOS_SIZES)
 
-        # macOS
         mac_dest = ROOT / f"macos/Runner/Assets.xcassets/AppIcon-{brand}.appiconset"
         copy_mac_contents(mac_src, mac_dest)
         write_set(img, mac_dest, MAC_SIZES)
 
-        # Android flavor source sets
+        # Legacy Android flavor dirs (no longer used by Gradle; keep in sync).
         write_android(brand, img)
         print(f"generated icons for {brand}")
+
+    # Shipping single-app install uses Android main + default AppIcon catalogs.
+    default_img = masters["comic"]
+    write_android("main", default_img)
+    write_windows_ico(default_img)
+    print("generated icons for android main + windows ico (default=comic)")
 
     sync_default_from_comic()
     patch_xcode_appicon_names()
     print("done. Replace brands/icons/*/master_1024.png and re-run this script.")
+    # Keep launch surfaces (mark / lockup / branding) in sync with comic master.
+    try:
+        from generate_launch_assets import main as generate_launch
+
+        generate_launch()
+    except Exception as exc:  # noqa: BLE001
+        print(f"warning: launch assets not regenerated ({exc})")
 
 
 if __name__ == "__main__":

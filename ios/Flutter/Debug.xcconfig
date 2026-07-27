@@ -1,2 +1,6 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 #include "Generated.xcconfig"
+
+// Local debug signing — kaifa ou (Personal Team)
+DEVELOPMENT_TEAM=85BL9ASXMD
+CODE_SIGN_STYLE=Automatic

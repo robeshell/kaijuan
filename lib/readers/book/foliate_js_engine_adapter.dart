@@ -590,6 +590,10 @@ try {
       readerController.clearSelectionMenu();
       return;
     }
+    // Selection finger-up can deliver onClick before/without a live menu.
+    if (readerController.shouldSuppressPageTurnFromClick) {
+      return;
+    }
     if (readerController.chromeVisible) {
       readerController.hideChrome();
       return;

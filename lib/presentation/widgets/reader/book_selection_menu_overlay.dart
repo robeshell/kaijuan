@@ -6,10 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
-import '../../../app/book_reading_preferences.dart';
 import '../../../core/theme.dart';
 import '../../../domain/reader_models.dart';
-import '../../../readers/book/book_reader_capabilities.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
 import 'book_annotation_note_sheet.dart';
@@ -242,19 +240,13 @@ class BookSelectionMenuOverlay extends StatelessWidget {
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTapUp: (details) {
-              final width = MediaQuery.sizeOf(context).width;
-              final x = width <= 0 ? 0.5 : details.globalPosition.dx / width;
+            onTapUp: (_) {
+              // Absorb the finger-up that finished the selection (menu open race).
+              if (!controller.selectionMenuBarrierAcceptsDismiss) return;
+              // Dismiss only — never page-turn here. Edge zones are ~28% wide;
+              // coupling flip to dismiss made left-side selections jump 上一页
+              // on iOS/Android as soon as the bubble appeared.
               controller.clearSelectionMenu();
-              // Same tap: if in page-turn zone, flip immediately (mobile barrier
-              // otherwise eats the gesture and the next tap felt "dead").
-              if (controller.readingMode == BookReadingMode.page) {
-                if (x < BookReaderCapabilities.pageTurnEdgeFraction) {
-                  controller.goPreviousPage();
-                } else if (x > 1 - BookReaderCapabilities.pageTurnEdgeFraction) {
-                  controller.goNextPage();
-                }
-              }
             },
           ),
         ),

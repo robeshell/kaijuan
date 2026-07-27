@@ -65,10 +65,16 @@ dependency_overrides:
   # from 10.15. Keep the Apache-2.0 package local until the fix is released.
   flutter_inappwebview_macos:
     path: third_party/flutter_inappwebview_macos
+  # Upstream always calls super.buildMenu, which injects iOS 18.2+
+  # "Copy Link with Highlight" even when disableContextMenu is true.
+  # Local fork skips super + disables Writing Tools (readium/swift-toolkit#509).
+  flutter_inappwebview_ios:
+    path: third_party/flutter_inappwebview_ios
 
 flutter:
   uses-material-design: true
   assets:
+    - brands/launch/launch_mark.png
     - assets/book/FOLIATE_UPSTREAM_LICENSE
     - assets/book/UPSTREAM_ATTRIBUTION.md
     - assets/book/foliate-js/index.html

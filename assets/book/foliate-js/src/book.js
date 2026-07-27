@@ -1,7 +1,7 @@
 console.log('book.js')
 console.log('AnxUA', navigator.userAgent)
 
-import './view.js?v=20260723w'
+import './view.js?v=20260727c'
 import { FootnoteHandler } from './footnotes.js'
 import { Overlayer } from './overlayer.js?v=20260723k'
 import { collapse, compare, fromRange, toRange } from './epubcfi.js?v=20260723k'
@@ -211,6 +211,10 @@ const handleSelection = (view, doc, index) => {
 
   // Skip buildRangeContextText — Flutter selection menu only uses `text` + pos.
   // Context probing walked the DOM and made mobile selection menus feel delayed.
+  // Arm suppress *before* the async Flutter hop so the same gesture's click /
+  // touchend cannot page-turn while the menu is still opening.
+  window.__kaikaSelectionMenuOpen = true
+  window.__kaikaSuppressPageTurnUntil = Date.now() + 900
   onSelectionEnd({
     index,
     lang,
@@ -1505,6 +1509,15 @@ class Reader {
     // Do not gate page-turns on __kaikaIgnoreAnnotationClickUntil — that flag
     // only suppresses show-annotation / note double-open after menu dismiss.
     const menuOpen = !!window.__kaikaSelectionMenuOpen || !!window.__kaikaMenuCursorZone
+    const suppressTurn = window.__kaikaSuppressPageTurnUntil
+      && Date.now() < window.__kaikaSuppressPageTurnUntil
+
+    // Ghost click / touchend from finishing a selection — never page-turn.
+    // (Menu may still be in flight to Flutter; flags are set in handleSelection.)
+    if (suppressTurn) {
+      return
+    }
+
     // Menu open: always forward to Flutter (dismiss). Do not bail on Range.
     if (!menuOpen) {
       const selection = this.#doc?.getSelection?.()

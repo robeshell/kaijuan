@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../../domain/reader_models.dart';
 import '../persistence/app_database.dart';
+import '../storage/library_paths.dart';
 import 'comic_archive.dart';
 import 'import_models.dart';
 import 'import_staging.dart';
@@ -56,9 +57,19 @@ class ComicImportService {
     final item = await database.readingItemById(id);
     if (item == null) return;
     await database.deleteReadingItem(id);
-    await _deleteIfExists(item.filePath);
+    final paths = LibraryPaths(supportDirectory);
+    final file = await paths.resolveExisting(
+      item.filePath,
+      contentHash: item.contentHash,
+    );
+    await _deleteIfExists(file?.path ?? item.filePath);
     if (item.coverPath != null) {
-      await _deleteIfExists(item.coverPath!);
+      final cover = await paths.resolveExisting(
+        item.coverPath!,
+        contentHash: item.contentHash,
+        cover: true,
+      );
+      await _deleteIfExists(cover?.path ?? item.coverPath!);
     }
   }
 
@@ -124,7 +135,6 @@ class ComicImportService {
       final storedPath = await content.file.commit();
       final coverPath = await cover.commit();
       trace.mark('files-committed');
-
       final now = DateTime.now();
       await database.upsertReadingItem(
         ReadingItemsCompanion(
@@ -132,6 +142,7 @@ class ComicImportService {
           kind: Value(ReaderKind.comic.storageValue),
           format: Value(format.storageValue),
           title: Value(existing?.title ?? title),
+          // Absolute under current support root; rebound after iOS reinstall.
           filePath: Value(storedPath),
           contentHash: Value(hash),
           coverPath: Value(coverPath),

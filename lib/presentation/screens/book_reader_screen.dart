@@ -7,6 +7,7 @@ import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
+import '../../library/storage/library_paths.dart';
 import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
@@ -108,7 +109,18 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       }
     });
     _engine.attach();
-    unawaited(_engine.open(widget.item.filePath));
+    unawaited(_openBookFile());
+  }
+
+  Future<void> _openBookFile() async {
+    final item = widget.item;
+    final paths = await LibraryPaths.forApp();
+    final resolved = await paths.resolveExistingPath(
+      item.filePath,
+      contentHash: item.contentHash,
+    );
+    if (!mounted) return;
+    await _engine.open(resolved ?? item.filePath);
   }
 
   void _maybeStartReveal(bool contentReady) {

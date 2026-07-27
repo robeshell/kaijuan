@@ -8,14 +8,16 @@ class MainFlutterWindow: NSWindow {
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
-    // Match the Flutter splash canvas so the first native frame is not black.
-    flutterViewController.backgroundColor = NSColor.white
-    self.contentViewController = flutterViewController
-    self.backgroundColor = NSColor(
-      srgbRed: 1,
-      green: 1,
-      blue: 1,
+    // Match the Flutter launch canvas (#F7F9FC brand canvas) so the first
+    // native frame is not black or pure white.
+    let launchCanvas = NSColor(
+      srgbRed: 0xF7 / 255.0,
+      green: 0xF9 / 255.0,
+      blue: 0xFC / 255.0,
       alpha: 1)
+    flutterViewController.backgroundColor = launchCanvas
+    self.contentViewController = flutterViewController
+    self.backgroundColor = launchCanvas
 
     // Reverie-style: content draws under the titlebar; traffic lights stay native.
     self.titleVisibility = .hidden

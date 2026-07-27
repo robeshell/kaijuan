@@ -6,6 +6,7 @@ import '../../domain/reader_models.dart';
 import '../../readers/book/foliate_import_probe.dart';
 import '../../readers/book/foliate_js_bridge.dart';
 import '../persistence/app_database.dart';
+import '../storage/library_paths.dart';
 import 'import_models.dart';
 import 'import_staging.dart';
 
@@ -82,9 +83,19 @@ class BookImportService {
     final item = await database.readingItemById(id);
     if (item == null) return;
     await database.deleteReadingItem(id);
-    await _deleteIfExists(item.filePath);
+    final paths = LibraryPaths(supportDirectory);
+    final file = await paths.resolveExisting(
+      item.filePath,
+      contentHash: item.contentHash,
+    );
+    await _deleteIfExists(file?.path ?? item.filePath);
     if (item.coverPath != null) {
-      await _deleteIfExists(item.coverPath!);
+      final cover = await paths.resolveExisting(
+        item.coverPath!,
+        contentHash: item.contentHash,
+        cover: true,
+      );
+      await _deleteIfExists(cover?.path ?? item.coverPath!);
     }
   }
 
@@ -139,6 +150,8 @@ class BookImportService {
           kind: Value(ReaderKind.book.storageValue),
           format: Value(ReaderFormat.epub.storageValue),
           title: Value(existing?.title ?? title),
+          // Absolute under current support root; [LibraryPaths.rebindDatabase]
+          // rewrites container UUID after iOS reinstall.
           filePath: Value(storedPath),
           contentHash: Value(hash),
           coverPath: Value(coverPath),

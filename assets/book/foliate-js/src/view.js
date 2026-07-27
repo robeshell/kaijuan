@@ -109,7 +109,7 @@ export class View extends HTMLElement {
       await import('./fixed-layout.js')
       this.renderer = document.createElement('foliate-fxl')
     } else {
-      await import('./paginator.js?v=20260723w')
+      await import('./paginator.js?v=20260727c')
       this.renderer = document.createElement('foliate-paginator')
     }
     this.renderer.setAttribute('exportparts', 'head,foot,filter')
@@ -318,6 +318,12 @@ export class View extends HTMLElement {
         return
       }
 
+      // Finger-up after select must not become a page-turn click.
+      if (window.__kaikaSuppressPageTurnUntil
+          && Date.now() < window.__kaikaSuppressPageTurnUntil) {
+        return
+      }
+
       // Only suppress page-turn/chrome when there is real selected text.
       // Phantom `type === 'Range'` (empty) must not dead-end desktop clicks.
       // While Kaika's selection menu is open we still emit so Flutter can dismiss.
@@ -355,6 +361,12 @@ export class View extends HTMLElement {
       this.#emit('click-view', { x: clientX, y: clientY })
     })
     this.renderer.addEventListener('click', e => {
+      // Renderer path has no selection gate — still respect select suppress.
+      if (window.__kaikaSuppressPageTurnUntil
+          && Date.now() < window.__kaikaSuppressPageTurnUntil) {
+        return
+      }
+      if (window.__kaikaSelectionMenuOpen) return
       let { clientX, clientY } = e
       while (clientX > window.innerWidth) {
         clientX -= window.innerWidth

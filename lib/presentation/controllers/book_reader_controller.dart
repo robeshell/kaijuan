@@ -119,6 +119,15 @@ class BookReaderController extends ChangeNotifier {
   /// Brief lock while pressing the Flutter bubble / applying a style.
   bool _selectionClearLocked = false;
   Timer? _selectionClearLockTimer;
+  /// Until this instant, the mobile Flutter dismiss-barrier ignores taps.
+  ///
+  /// Opening the menu often races the same finger-up that finished the
+  /// selection; without a grace window that pointer hits the barrier and used
+  /// to dismiss (and historically also page-turn on edge zones).
+  DateTime? _selectionMenuBarrierArmAt;
+  /// Until this instant, edge/tap page-turns from the WebView are ignored.
+  /// Covers the race where `onClick` arrives before/with `onSelectionEnd`.
+  DateTime? _suppressPageTurnUntil;
   /// Foliate asks for annotations at open; DB watch may emit later.
   bool _annotationsHydrated = false;
   bool _annotationsRenderRequested = false;
@@ -220,6 +229,32 @@ class BookReaderController extends ChangeNotifier {
   List<ReaderBookmark> get bookmarks => _bookmarks;
   List<BookAnnotation> get annotations => _annotations;
   BookSelectionMenu? get selectionMenu => _selectionMenu;
+
+  /// Whether the full-screen mobile dismiss barrier should honor a tap.
+  bool get selectionMenuBarrierAcceptsDismiss {
+    if (_selectionMenu == null) return false;
+    final armAt = _selectionMenuBarrierArmAt;
+    if (armAt == null) return true;
+    return !DateTime.now().isBefore(armAt);
+  }
+
+  void _armSelectionMenuDismissBarrier() {
+    // Long enough to absorb selection finger-up / iOS Platform View handoff.
+    _selectionMenuBarrierArmAt =
+        DateTime.now().add(const Duration(milliseconds: 450));
+  }
+
+  /// True while a just-finished selection should not trigger edge page-turns.
+  bool get shouldSuppressPageTurnFromClick {
+    final until = _suppressPageTurnUntil;
+    if (until == null) return false;
+    return DateTime.now().isBefore(until);
+  }
+
+  void _armPageTurnSuppressAfterSelection() {
+    _suppressPageTurnUntil =
+        DateTime.now().add(const Duration(milliseconds: 900));
+  }
   int get navDrawerTabIndex => _navDrawerTabIndex;
 
   bool get searchOpen => _searchOpen;
@@ -733,6 +768,8 @@ class BookReaderController extends ChangeNotifier {
       note: matched?.note,
       fromAnnotation: matched != null,
     );
+    _armSelectionMenuDismissBarrier();
+    _armPageTurnSuppressAfterSelection();
     _setMenuOpen?.call(true);
     notifyListeners();
   }
@@ -791,6 +828,7 @@ class BookReaderController extends ChangeNotifier {
     // Clicking an existing mark often collapses any leftover Range; hold
     // briefly so the markup panel is not torn down by that clear.
     retainSelectionMenuForInteraction();
+    _armSelectionMenuDismissBarrier();
     _setMenuOpen?.call(true);
     notifyListeners();
   }
@@ -833,6 +871,7 @@ class BookReaderController extends ChangeNotifier {
   void clearSelectionMenu({bool clearWebSelection = true}) {
     _selectionClearLockTimer?.cancel();
     _selectionClearLocked = false;
+    _selectionMenuBarrierArmAt = null;
     // Same pointer that dismissed can hit the overlayer next — ignore briefly.
     _ignoreAnnotationClickUntil =
         DateTime.now().add(const Duration(milliseconds: 800));

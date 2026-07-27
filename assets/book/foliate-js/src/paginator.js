@@ -983,6 +983,27 @@ export class Paginator extends HTMLElement {
       this.#touchScrolled = true
     }
   }
+  /** True when the chapter doc has a non-empty text selection (select-drag). */
+  #hasActiveTextSelection() {
+    try {
+      for (const content of this.getContents()) {
+        const sel = content?.doc?.getSelection?.()
+        if (!sel?.rangeCount) continue
+        const range = sel.getRangeAt(0)
+        if (range && !range.collapsed && (sel.toString() || '').trim()) {
+          return true
+        }
+      }
+    } catch (_) {}
+    // Selection menu just opened / click-suppress window (finger-up race).
+    if (window.__kaikaSuppressPageTurnUntil
+        && Date.now() < window.__kaikaSuppressPageTurnUntil) {
+      return true
+    }
+    if (window.__kaikaSelectionMenuOpen) return true
+    return false
+  }
+
   #onTouchEnd(e) {
     const state = this.#touchState
     this.dispatchEvent(new CustomEvent('doctouchend', {
@@ -1020,6 +1041,15 @@ export class Paginator extends HTMLElement {
         this.#pendingRelocate = null
         this.dispatchEvent(new CustomEvent('relocate', { detail }))
       }
+      return
+    }
+
+    // Selecting text is a horizontal drag too — never treat it as a page swipe.
+    if (this.#hasActiveTextSelection()) {
+      if (state) {
+        this.#container[this.scrollProp] = state.startScroll ?? 0
+      }
+      this.#touchState = null
       return
     }
 

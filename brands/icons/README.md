@@ -30,14 +30,24 @@ python3 tool/generate_brand_icons.py
 
 会写入：
 
-- `android/app/src/comic|book/res/mipmap-*/ic_launcher.png`  
-- `ios/Runner/Assets.xcassets/AppIcon-comic|book.appiconset/`  
-- `macos/Runner/Assets.xcassets/AppIcon-comic|book.appiconset/`  
-- 默认 `AppIcon.appiconset` ← 同步为 comic（无 flavor 时）
+- **`android/app/src/main/res/mipmap-*/ic_launcher.png`**（单 App 真正安装用的图标，默认 comic）
+- `android/app/src/comic|book/res/mipmap-*`（遗留目录，一并同步）
+- `ios` / `macos` `AppIcon-comic|book` + 默认 `AppIcon.appiconset`（← comic）
+- `windows/runner/resources/app_icon.ico`
+- 启动页资源（`tool/generate_launch_assets.py`）
 
-## 当前占位
+## 当前 master（2026-07）
 
-仓库里已有**临时色块+字母**占位（C / B），仅供区分 flavor，**不是最终品牌**。你的 master 覆盖后重跑脚本即可。
+用户交付的 Icon Composer 稿（打开的书 · 扁平乳白对开页），整理后写入：
+
+| flavor | 底色 | master |
+|--------|------|--------|
+| comic（默认） | 暖橙 `#EA580C` 系 | `comic/master_1024.png` |
+| book | 岩灰 `#475569` 系（同符号换底） | `book/master_1024.png` |
+
+Icon Composer 包：`brands/icons/Kaijuan.icon/`（fill 珊瑚橙，foreground 为 comic master）。
+
+替换 master 后重跑 `python3 tool/generate_brand_icons.py`。
 
 ## 验收
 

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
+import '../../library/storage/library_paths.dart';
 import '../../readers/comic/comic_models.dart';
 import '../../readers/comic/comic_page_cache.dart';
 import '../../readers/comic/comic_session.dart';
@@ -89,7 +90,12 @@ class ComicReaderController extends ChangeNotifier {
 
   Future<void> open() async {
     try {
-      final session = await ComicSession.open(item.filePath);
+      final paths = await LibraryPaths.forApp();
+      final resolved = await paths.resolveExistingPath(
+        item.filePath,
+        contentHash: item.contentHash,
+      );
+      final session = await ComicSession.open(resolved ?? item.filePath);
       if (_disposed) {
         await session.close();
         return;

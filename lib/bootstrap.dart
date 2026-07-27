@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -8,26 +9,50 @@ import 'package:path_provider/path_provider.dart';
 import 'app/app.dart';
 import 'app/book_reading_preferences.dart';
 import 'app/comic_reading_preferences.dart';
+import 'app/kaijuan_launch_screen.dart';
 import 'app/theme_preferences.dart';
 import 'brand/brand_config.dart';
 import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/import/import_staging.dart';
 import 'library/persistence/app_database.dart';
+import 'library/storage/library_paths.dart';
 import 'presentation/controllers/library_controller.dart';
 import 'readers/book/book_loopback_server.dart';
 import 'readers/book/book_theme.dart';
 
-/// Single App bootstrap for Kaika.
+/// Single App bootstrap for 开卷.
 ///
 /// Both page-image and reflow reader engines are always available; file import
 /// routes by extension, with EPUB auto-detected between page-image and reflow
 /// content.
 ///
-/// [runApp] runs immediately with a splash shell so the native window is never
-/// an empty black surface while prefs / DB / loopback warm up.
+/// Launch surfaces:
+/// - **Android** — system SplashScreen / windowBackground owns the first paint.
+///   Init runs before [runApp] so Flutter never paints a second splash (same as
+///   开听).
+/// - **iOS / macOS / desktop** — native launch storyboard / window canvas hands
+///   off to [KaijuanLaunchScreen] until services are ready.
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Mirror kaiting: Android keeps one native splash until the app is ready.
+  if (!kIsWeb && Platform.isAndroid) {
+    try {
+      final services = await _loadBootServices();
+      runApp(_readyApp(services));
+    } catch (error, stack) {
+      debugPrint('bootstrap failed: $error\n$stack');
+      runApp(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          home: _BootError(error: error),
+        ),
+      );
+    }
+    return;
+  }
+
   runApp(const _BootstrapApp());
 }
 
@@ -56,19 +81,23 @@ class _BootstrapAppState extends State<_BootstrapApp> {
         if (services == null) {
           return const MaterialApp(
             debugShowCheckedModeBanner: false,
-            home: _BootSplash(),
+            home: KaijuanLaunchScreen(),
           );
         }
-        return App(
-          brand: services.brand,
-          themePreferences: services.themePreferences,
-          readingPreferences: services.comicReadingPreferences,
-          bookReadingPreferences: services.bookReadingPreferences,
-          libraryController: services.libraryController,
-        );
+        return _readyApp(services);
       },
     );
   }
+}
+
+Widget _readyApp(_BootServices services) {
+  return App(
+    brand: services.brand,
+    themePreferences: services.themePreferences,
+    readingPreferences: services.comicReadingPreferences,
+    bookReadingPreferences: services.bookReadingPreferences,
+    libraryController: services.libraryController,
+  );
 }
 
 class _BootServices {
@@ -123,6 +152,12 @@ Future<_BootServices> _loadBootServices() async {
   final bookReadingPreferences = loaded[2] as BookReadingPreferences;
 
   final database = AppDatabase.named(brand.databaseName);
+  // Documents (DB) and Application Support (files) can get different container
+  // UUIDs after an iOS reinstall; rewrite absolute file/cover paths first.
+  final rebound = await LibraryPaths(supportDir).rebindDatabase(database);
+  if (rebound > 0) {
+    debugPrint('[Library] rebound $rebound item path(s) to current support root');
+  }
   final libraryController = LibraryController(
     database: database,
     comicImportService: ComicImportService(
@@ -143,35 +178,6 @@ Future<_BootServices> _loadBootServices() async {
     bookReadingPreferences: bookReadingPreferences,
     libraryController: libraryController,
   );
-}
-
-/// First Flutter frame: brand on a system-aware canvas (never native black).
-class _BootSplash extends StatelessWidget {
-  const _BootSplash();
-
-  @override
-  Widget build(BuildContext context) {
-    final dark =
-        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-        Brightness.dark;
-    final bg = dark ? const Color(0xFF141416) : const Color(0xFFFFFFFF);
-    final fg = dark ? const Color(0xFFF2F2F4) : const Color(0xFF111113);
-
-    return ColoredBox(
-      color: bg,
-      child: Center(
-        child: Text(
-          BrandConfig.app.displayName,
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w600,
-            color: fg,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _BootError extends StatelessWidget {

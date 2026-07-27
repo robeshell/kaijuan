@@ -1190,6 +1190,13 @@ class _FontPickerPanel extends StatelessWidget {
         const XTypeGroup(
           label: '字体',
           extensions: ['ttf', 'otf', 'woff', 'woff2'],
+          // iOS requires UTIs; extensions alone crash file_selector_ios.
+          uniformTypeIdentifiers: [
+            'public.truetype-ttf-font',
+            'public.opentype-font',
+            'public.font',
+            'public.data',
+          ],
         ),
       ],
     );
