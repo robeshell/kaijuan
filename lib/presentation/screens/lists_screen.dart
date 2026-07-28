@@ -158,8 +158,8 @@ class ListsScreen extends StatelessWidget {
                     '书单',
                     style: TextStyle(
                       fontSize: context.appPageTitleSize,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.55,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
                       color: context.appPrimaryText,
                     ),
                   ),
@@ -313,8 +313,8 @@ class _ListDetailScreen extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: context.appPageTitleSize,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.55,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
                         color: context.appPrimaryText,
                       ),
                     ),
