@@ -10,13 +10,6 @@ import 'tokens.dart';
 /// [AppTheme.forSkin] — business UI never assembles themes itself.
 abstract final class AppTheme {
   static const _animationDuration = Duration(milliseconds: 160);
-  static const _fontFallback = <String>[
-    'PingFang SC',
-    'Microsoft YaHei',
-    'Noto Sans CJK SC',
-    'Roboto',
-    'sans-serif',
-  ];
 
   static ThemeData forSkin(AppSkinPreset skin, AccentPreset accent) =>
       _build(skin.brightness, skin: skin, accent: accent.color);
@@ -87,29 +80,28 @@ abstract final class AppTheme {
           scrim: Colors.black,
         );
 
+    // Platform default typeface — do not pin ".SF Pro Text" (brand 0.4.2).
     final baseTextTheme = ThemeData(
       brightness: brightness,
-      fontFamily: '.SF Pro Text',
-      fontFamilyFallback: _fontFallback,
     ).textTheme.apply(bodyColor: foreground, displayColor: foreground);
     final textTheme = baseTextTheme.copyWith(
       headlineLarge: baseTextTheme.headlineLarge?.copyWith(
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.8,
-      ),
-      headlineMedium: baseTextTheme.headlineMedium?.copyWith(
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.55,
-      ),
-      titleLarge: baseTextTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.w800,
+        fontWeight: FontWeight.w700,
         letterSpacing: -0.25,
       ),
-      titleMedium: baseTextTheme.titleMedium?.copyWith(
+      headlineMedium: baseTextTheme.headlineMedium?.copyWith(
         fontWeight: FontWeight.w700,
+        letterSpacing: -0.15,
+      ),
+      titleLarge: baseTextTheme.titleLarge?.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.1,
+      ),
+      titleMedium: baseTextTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.w600,
       ),
       labelLarge: baseTextTheme.labelLarge?.copyWith(
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         letterSpacing: 0,
       ),
       bodySmall: baseTextTheme.bodySmall?.copyWith(color: secondary),
@@ -140,7 +132,7 @@ abstract final class AppTheme {
       ),
       shape: const WidgetStatePropertyAll(StadiumBorder()),
       textStyle: WidgetStatePropertyAll(
-        textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+        textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
       ),
       iconSize: const WidgetStatePropertyAll(17),
       elevation: const WidgetStatePropertyAll(0),
@@ -193,8 +185,6 @@ abstract final class AppTheme {
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
       cardColor: surface,
-      fontFamily: '.SF Pro Text',
-      fontFamilyFallback: _fontFallback,
       textTheme: textTheme,
       focusColor: foreground.withValues(alpha: 0.065),
       hoverColor: foreground.withValues(alpha: 0.055),

@@ -70,9 +70,9 @@
 
 ## 排版（壳层）
 
-- 字族：系统字体（`.SF Pro Text`，回退 PingFang SC / Microsoft YaHei / Noto Sans CJK SC / Roboto）。  
-- 层级靠**字重驱动**（w600 → w700 → w800）+ 颜色（primary → secondary → muted），不靠字号堆叠。  
-- 大标题负字距（页标题 26/28 w800、letterSpacing −0.55）。  
+- 字族：**平台默认**（`ThemeData` 不钉 `.SF Pro Text`；品牌规范 0.4.2）。  
+- 层级靠**字重驱动**（壳层 w600 → w700；内容展示可 w800）+ 颜色（primary → secondary → muted），不靠字号堆叠。  
+- 壳层大标题缓和负字距（约 −0.1～−0.25、w700）；沉浸内容标题仍可 w800。  
 - 阅读器正文排版独立（字体栈 / 字号 / 行高属阅读偏好，不受壳层排版影响）。
 
 ## 实现侧 Token 架构（三层）

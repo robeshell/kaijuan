@@ -6,15 +6,6 @@ const kaijuanLaunchBackground = Color(0xFFF7F9FC);
 const kaijuanLaunchTitleColor = Color(0xFF1C1C22);
 const kaijuanLaunchSubtitleColor = Color(0xFF70707A);
 
-const _cjkFallback = <String>[
-  'PingFang SC',
-  'Hiragino Sans GB',
-  'Heiti SC',
-  'Microsoft YaHei',
-  'Noto Sans CJK SC',
-  'sans-serif',
-];
-
 /// First Flutter frame while prefs / DB warm up (non-Android shells).
 class KaijuanLaunchScreen extends StatelessWidget {
   const KaijuanLaunchScreen({super.key});
@@ -72,9 +63,8 @@ class _KaijuanLaunchLockup extends StatelessWidget {
                   color: kaijuanLaunchTitleColor,
                   fontSize: 24,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 0.4,
+                  letterSpacing: 0.2,
                   height: 1.15,
-                  fontFamilyFallback: _cjkFallback,
                 ),
               ),
             ),
@@ -86,9 +76,8 @@ class _KaijuanLaunchLockup extends StatelessWidget {
                   color: kaijuanLaunchSubtitleColor,
                   fontSize: 13.5,
                   fontWeight: FontWeight.w400,
-                  letterSpacing: 1.2,
+                  letterSpacing: 0.4,
                   height: 1.25,
-                  fontFamilyFallback: _cjkFallback,
                 ),
               ),
             ),
