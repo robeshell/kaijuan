@@ -95,7 +95,7 @@ class CollectionsScreen extends StatelessWidget {
                     '合集',
                     style: TextStyle(
                       fontSize: context.appPageTitleSize,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: -0.2,
                       color: context.appPrimaryText,
                     ),
@@ -589,7 +589,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: context.appPageTitleSize,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: -0.2,
                         color: context.appPrimaryText,
                       ),

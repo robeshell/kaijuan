@@ -124,7 +124,7 @@ class _ClassicBody extends StatelessWidget {
           style: TextStyle(
             color: palette.foreground,
             fontSize: 15,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             height: 1.3,
           ),
         ),
@@ -223,7 +223,7 @@ class _LeftBarBody extends StatelessWidget {
           style: TextStyle(
             color: palette.foreground,
             fontSize: 15,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
           ),
         ),
         if ((subtitle ?? '').trim().isNotEmpty) ...[
@@ -320,7 +320,7 @@ class _LargeQuoteBody extends StatelessWidget {
                     style: TextStyle(
                       color: palette.foreground,
                       fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   if ((subtitle ?? '').trim().isNotEmpty)

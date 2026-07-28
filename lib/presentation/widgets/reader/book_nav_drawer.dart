@@ -182,7 +182,7 @@ class _TocList extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w500,
               color: active ? accent : textPrimary,
             ),
           ),

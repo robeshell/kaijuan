@@ -104,7 +104,7 @@ class _BookAnnotationNoteSheetState extends State<_BookAnnotationNoteSheet> {
             children: [
               const Text(
                 '笔记',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
               ),
               if (excerpt.isNotEmpty) ...[
                 const SizedBox(height: 10),

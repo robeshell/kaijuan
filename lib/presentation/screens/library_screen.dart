@@ -512,7 +512,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     '已选 ${_selected.length}',
                     style: TextStyle(
                       fontSize: context.appPageTitleSize,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: -0.2,
                       color: context.appPrimaryText,
                     ),
@@ -522,7 +522,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     '书库',
                     style: TextStyle(
                       fontSize: context.appPageTitleSize,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: -0.2,
                       color: context.appPrimaryText,
                     ),

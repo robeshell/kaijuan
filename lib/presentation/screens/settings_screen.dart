@@ -99,7 +99,7 @@ class SettingsScreen extends StatelessWidget {
                       brand.displayName,
                       style: const TextStyle(
                         fontSize: 15,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -205,7 +205,7 @@ class _SkinCard extends StatelessWidget {
           label,
           style: TextStyle(
             fontSize: 12,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             color: selected ? accent : context.settingsSecondary,
           ),
         ),

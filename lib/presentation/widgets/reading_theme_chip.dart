@@ -56,7 +56,7 @@ class ReadingThemeChip extends StatelessWidget {
                 label,
                 style: TextStyle(
                   fontSize: 11,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   color: fg.withValues(alpha: 0.85),
                 ),
               ),

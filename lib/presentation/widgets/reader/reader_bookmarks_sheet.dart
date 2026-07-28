@@ -27,7 +27,7 @@ void showReaderBookmarksSheet(
                 padding: EdgeInsets.fromLTRB(24, 0, 24, 12),
                 child: Text(
                   '书签',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
                 ),
               ),
               if (rows.isEmpty)

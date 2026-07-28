@@ -217,7 +217,7 @@ class _SideRail extends StatelessWidget {
                       style: TextStyle(
                         color: context.appPrimaryText,
                         fontSize: 17,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: -0.35,
                       ),
                     ),
@@ -306,7 +306,7 @@ class _SidebarRow extends StatelessWidget {
                   style: TextStyle(
                     color: labelColor,
                     fontSize: 13.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
               ),

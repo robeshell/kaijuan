@@ -204,7 +204,7 @@ class _AppChoiceButton<T> extends StatelessWidget {
                   style: TextStyle(
                     color: foreground,
                     fontSize: 12,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
               ],
@@ -1169,7 +1169,7 @@ class _AppNavigationButton extends StatelessWidget {
                   color: foreground,
                   fontSize: 10.5,
                   height: 1,
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,

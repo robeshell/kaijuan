@@ -1147,7 +1147,7 @@ class _SubPanelHeader extends StatelessWidget {
           title,
           style: TextStyle(
             fontSize: 16,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             color: fg,
           ),
         ),
@@ -1967,7 +1967,7 @@ class _ThemePresetCard extends StatelessWidget {
               theme.label,
               style: TextStyle(
                 fontSize: 11,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 color: fg.withValues(alpha: 0.88),
               ),
             ),
@@ -2092,7 +2092,7 @@ class _BoldToggle extends StatelessWidget {
           'B',
           style: TextStyle(
             fontSize: 15,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
             color: selected ? accent : fg,
           ),
         ),

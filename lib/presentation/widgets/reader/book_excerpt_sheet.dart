@@ -353,7 +353,7 @@ class _PaletteDot extends StatelessWidget {
             style: TextStyle(
               color: palette.foreground,
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
