@@ -74,10 +74,7 @@ class _AppShellState extends State<AppShell> {
         readingPreferences: widget.readingPreferences,
         bookReadingPreferences: widget.bookReadingPreferences,
       ),
-      SettingsScreen(
-        brand: widget.brand,
-        themePreferences: widget.themePreferences,
-      ),
+      SettingsScreen(themePreferences: widget.themePreferences),
     ];
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

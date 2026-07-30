@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../app/theme_preferences.dart';
-import '../../brand/brand_config.dart';
 import '../../app_update/app_update_service.dart';
 import '../../app_update/app_update_ui.dart';
 import '../../core/pipeline_diagnostics.dart';
@@ -15,13 +14,8 @@ import '../widgets/app_overlays.dart';
 import '../widgets/settings_components.dart';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({
-    super.key,
-    required this.brand,
-    required this.themePreferences,
-  });
+  const SettingsScreen({super.key, required this.themePreferences});
 
-  final BrandConfig brand;
   final ThemePreferences themePreferences;
 
   @override
@@ -29,7 +23,7 @@ class SettingsScreen extends StatelessWidget {
     final hPad = context.appPageGutter;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: context.settingsCanvas,
       body: ListenableBuilder(
         listenable: themePreferences,
         builder: (context, _) {
@@ -45,23 +39,41 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: AppSettingsMetrics.sectionGap),
               const _SectionLabel('外观'),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 14,
-                runSpacing: 14,
+              AppSettingsGroup(
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 children: [
-                  _SkinCard(
-                    label: '跟随系统',
-                    previews: const [AppSkins.standard, AppSkins.deepNight],
-                    selected: themePreferences.skinId == AppSkins.systemId,
-                    onTap: () => themePreferences.setSkinId(AppSkins.systemId),
-                  ),
-                  for (final skin in AppSkins.presets)
-                    _SkinCard(
-                      label: skin.name,
-                      previews: [skin],
-                      selected: themePreferences.skinId == skin.id,
-                      onTap: () => themePreferences.setSkinId(skin.id),
+                  SizedBox(
+                    height: 104,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: AppSkins.presets.length + 1,
+                      separatorBuilder: (_, _) => const SizedBox(width: 12),
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return _SkinCard(
+                            label: '跟随系统',
+                            previews: const [
+                              AppSkins.standard,
+                              AppSkins.deepNight,
+                            ],
+                            selected:
+                                themePreferences.skinId == AppSkins.systemId,
+                            onTap: () =>
+                                themePreferences.setSkinId(AppSkins.systemId),
+                          );
+                        }
+                        final skin = AppSkins.presets[index - 1];
+                        return _SkinCard(
+                          label: skin.name,
+                          previews: [skin],
+                          selected: themePreferences.skinId == skin.id,
+                          onTap: () => themePreferences.setSkinId(skin.id),
+                        );
+                      },
                     ),
+                  ),
                 ],
               ),
               const SizedBox(height: AppSettingsMetrics.sectionGap),
@@ -90,30 +102,6 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: AppSettingsMetrics.sectionGap),
               const _SectionLabel('关于'),
               const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      brand.displayName,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '本机阅读 · 不上传',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: context.settingsSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
               const AppSettingsGroup(children: [_AboutBlock()]),
             ],
           );
@@ -135,9 +123,9 @@ class _SectionLabel extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: FontWeight.w600,
-          letterSpacing: 0.2,
+          letterSpacing: 0.3,
           color: context.settingsSecondary,
         ),
       ),
@@ -177,8 +165,8 @@ class _SkinCard extends StatelessWidget {
             borderRadius: radius,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
-              width: 124,
-              height: 80,
+              width: 104,
+              height: 68,
               decoration: BoxDecoration(
                 borderRadius: radius,
                 border: Border.all(
