@@ -1167,8 +1167,8 @@ class _AppNavigationButton extends StatelessWidget {
                 curve: Curves.easeOutCubic,
                 style: TextStyle(
                   color: foreground,
-                  fontSize: 10.5,
-                  height: 1,
+                  fontSize: 10,
+                  height: 1.2,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),
                 child: Column(
