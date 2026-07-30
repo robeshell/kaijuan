@@ -74,7 +74,7 @@ class _KaijuanLaunchLockup extends StatelessWidget {
                 '读自己的书',
                 style: TextStyle(
                   color: kaijuanLaunchSubtitleColor,
-                  fontSize: 13.5,
+                  fontSize: 14,
                   fontWeight: FontWeight.w400,
                   letterSpacing: 0.4,
                   height: 1.25,

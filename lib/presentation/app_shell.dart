@@ -302,7 +302,7 @@ class _SidebarRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: labelColor,
-                    fontSize: 13.5,
+                    fontSize: 14,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),

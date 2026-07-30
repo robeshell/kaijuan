@@ -741,8 +741,8 @@ class _AppAnchoredMenu<T> extends StatelessWidget {
 
 /// Content-hugging width for anchored menus (min 160 / max 280).
 double _anchoredMenuWidth<T>(List<AppMenuAction<T>> actions) {
-  const labelStyle = TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600);
-  const subtitleStyle = TextStyle(fontSize: 11.5);
+  const labelStyle = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
+  const subtitleStyle = TextStyle(fontSize: 11);
   final painter = TextPainter(textDirection: TextDirection.ltr);
   var maxLabel = 0.0;
   try {
@@ -894,7 +894,7 @@ class _AppMenuActionRow<T> extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: context.appSecondaryText,
-                              fontSize: 11.5,
+                              fontSize: 11,
                             ),
                           ),
                         ],
@@ -985,7 +985,7 @@ class AppListRow extends StatelessWidget {
                             color: enabled
                                 ? context.appPrimaryText
                                 : context.appMutedText.withValues(alpha: 0.5),
-                            fontSize: 13.5,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
                           ),
                           maxLines: 1,
@@ -997,7 +997,7 @@ class AppListRow extends StatelessWidget {
                           DefaultTextStyle(
                             style: TextStyle(
                               color: context.appSecondaryText,
-                              fontSize: 11.5,
+                              fontSize: 11,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

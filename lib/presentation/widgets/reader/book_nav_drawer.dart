@@ -286,7 +286,7 @@ class _NotesList extends StatelessWidget {
             missingQuote ? subtitle : '「$subtitle」',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12.5, color: muted, height: 1.3),
+            style: TextStyle(fontSize: 13, color: muted, height: 1.3),
           ),
           onTap: () => onOpen(annotation),
           trailing: IconButton(

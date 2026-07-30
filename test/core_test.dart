@@ -35,8 +35,8 @@ void main() {
     expect(listTile.minVerticalPadding, 6);
     expect(listTile.minLeadingWidth, 32);
     expect(listTile.horizontalTitleGap, 10);
-    expect(listTile.titleTextStyle?.fontSize, 13.5);
-    expect(listTile.subtitleTextStyle?.fontSize, 11.5);
+    expect(listTile.titleTextStyle?.fontSize, 14);
+    expect(listTile.subtitleTextStyle?.fontSize, 11);
   });
 
   group('ReaderFormat.fromExtension', () {

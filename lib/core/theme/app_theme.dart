@@ -471,12 +471,12 @@ abstract final class AppTheme {
         horizontalTitleGap: 10,
         titleTextStyle: textTheme.bodyMedium?.copyWith(
           color: foreground,
-          fontSize: 13.5,
+          fontSize: 14,
           fontWeight: FontWeight.w500,
         ),
         subtitleTextStyle: textTheme.bodySmall?.copyWith(
           color: secondary,
-          fontSize: 11.5,
+          fontSize: 11,
         ),
         shape: const RoundedRectangleBorder(),
       ),
