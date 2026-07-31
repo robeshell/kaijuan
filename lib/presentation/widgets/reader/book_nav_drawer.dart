@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
 import '../../../readers/book/book_models.dart';
 import '../../controllers/book_reader_controller.dart';
@@ -78,12 +79,12 @@ class _BookNavDrawerState extends State<BookNavDrawer>
                     ),
                     indicatorColor: accent,
                     dividerColor: context.appDivider,
-                    labelStyle: const TextStyle(
-                      fontSize: 15,
+                    labelStyle: TextStyle(
+                      fontSize: KaiProductTokens.typographyReaderOverlayTitle,
                       fontWeight: FontWeight.w600,
                     ),
-                    unselectedLabelStyle: const TextStyle(
-                      fontSize: 15,
+                    unselectedLabelStyle: TextStyle(
+                      fontSize: KaiProductTokens.typographyReaderOverlayTitle,
                       fontWeight: FontWeight.w500,
                     ),
                     tabs: [
@@ -286,7 +287,11 @@ class _NotesList extends StatelessWidget {
             missingQuote ? subtitle : '「$subtitle」',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 13, color: muted, height: 1.3),
+            style: TextStyle(
+              fontSize: context.appCaptionSize,
+              color: muted,
+              height: 1.3,
+            ),
           ),
           onTap: () => onOpen(annotation),
           trailing: IconButton(

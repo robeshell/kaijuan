@@ -41,7 +41,7 @@ class BookPageMetaOverlay extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: meta,
-                        fontSize: 12,
+                        fontSize: context.appCaptionSize,
                         height: 1.2,
                         fontWeight: FontWeight.w400,
                       ),
@@ -54,7 +54,7 @@ class BookPageMetaOverlay extends StatelessWidget {
                     controller.bookProgressLabel,
                     style: TextStyle(
                       color: meta,
-                      fontSize: 12,
+                      fontSize: context.appCaptionSize,
                       height: 1.2,
                       fontWeight: FontWeight.w400,
                       fontFeatures: const [FontFeature.tabularFigures()],

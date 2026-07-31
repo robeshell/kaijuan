@@ -46,9 +46,7 @@ class SelectionActionSheet extends StatelessWidget {
     final rows = <List<SelectionActionItem?>>[];
     for (var i = 0; i < actions.length; i += _columns) {
       final end = (i + _columns).clamp(0, actions.length);
-      final slice = <SelectionActionItem?>[
-        ...actions.sublist(i, end),
-      ];
+      final slice = <SelectionActionItem?>[...actions.sublist(i, end)];
       while (slice.length < _columns) {
         slice.add(null);
       }
@@ -102,7 +100,7 @@ class SelectionActionSheet extends StatelessWidget {
                         '$selectedCount 项',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: context.appLabelSize,
                           color: context.appSecondaryText,
                         ),
                       ),
@@ -183,7 +181,7 @@ class _ActionCell extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: context.appCaptionSmallSize,
                 height: 1.2,
                 fontWeight: FontWeight.w500,
                 color: color,

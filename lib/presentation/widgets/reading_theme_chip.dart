@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 
 /// A compact selectable chip showing a reading theme swatch.
 class ReadingThemeChip extends StatelessWidget {
@@ -46,7 +47,7 @@ class ReadingThemeChip extends StatelessWidget {
               Text(
                 'Aa',
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: KaiProductTokens.typographyShelfSectionTitle,
                   fontWeight: FontWeight.w600,
                   color: fg,
                 ),
@@ -55,7 +56,7 @@ class ReadingThemeChip extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: context.appCaptionSmallSize,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   color: fg.withValues(alpha: 0.85),
                 ),

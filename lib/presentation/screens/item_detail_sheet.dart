@@ -184,10 +184,13 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                       Navigator.pop(ctx);
                       final name = await _promptListName();
                       if (name == null || name.isEmpty || !mounted) return;
-                      final id =
-                          await widget.controller.createReadingList(name);
-                      await widget.controller
-                          .addItemToList(listId: id, itemId: _item.id);
+                      final id = await widget.controller.createReadingList(
+                        name,
+                      );
+                      await widget.controller.addItemToList(
+                        listId: id,
+                        itemId: _item.id,
+                      );
                       if (!mounted) return;
                       showAppSnackBar(this.context, '已加入书单「$name」');
                     },
@@ -355,8 +358,8 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                       children: [
                         TextField(
                           controller: _titleController,
-                          style: const TextStyle(
-                            fontSize: 17,
+                          style: TextStyle(
+                            fontSize: context.appTitleSize,
                             fontWeight: FontWeight.w600,
                           ),
                           decoration: const InputDecoration(
@@ -369,7 +372,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                         Text(
                           _item.format.toUpperCase(),
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: context.appCaptionSize,
                             color: context.appSecondaryText,
                           ),
                         ),
@@ -378,7 +381,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                           Text(
                             '${_item.pageCount} 页',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: context.appCaptionSize,
                               color: context.appSecondaryText,
                             ),
                           ),
@@ -398,7 +401,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                           Text(
                             '进度 ${(progress * 100).round()}%',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: context.appCaptionSize,
                               color: context.appSecondaryText,
                             ),
                           ),

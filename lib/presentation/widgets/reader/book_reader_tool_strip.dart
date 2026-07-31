@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/book_reading_preferences.dart';
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
@@ -89,12 +90,11 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                       ),
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          maxHeight: MediaQuery.sizeOf(context).height *
+                          maxHeight:
+                              MediaQuery.sizeOf(context).height *
                               context.appReaderToolPanelMaxHeightFraction,
                         ),
-                        child: SingleChildScrollView(
-                          child: _buildPanel(),
-                        ),
+                        child: SingleChildScrollView(child: _buildPanel()),
                       ),
                     ),
             ),
@@ -262,7 +262,7 @@ class _TtsPanel extends StatelessWidget {
           active ? (playing ? '正在朗读' : '已暂停') : '听书',
           style: TextStyle(
             color: fg,
-            fontSize: 13,
+            fontSize: KaiProductTokens.typographyReaderToolValue,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -308,7 +308,7 @@ class _TtsPanel extends StatelessWidget {
           '语速',
           style: TextStyle(
             color: fgMuted,
-            fontSize: 12,
+            fontSize: context.appCaptionSize,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -362,7 +362,13 @@ class _TtsIconButton extends StatelessWidget {
             children: [
               Icon(icon, size: large ? 36 : 26, color: fg, weight: 300),
               const SizedBox(height: 4),
-              Text(label, style: TextStyle(color: fg, fontSize: 11)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: KaiProductTokens.typographyReaderToolLabel,
+                ),
+              ),
             ],
           ),
         ),
@@ -402,7 +408,7 @@ class _TtsRateChip extends StatelessWidget {
             label,
             style: TextStyle(
               color: selected ? accent : fg,
-              fontSize: 13,
+              fontSize: KaiProductTokens.typographyReaderToolValue,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             ),
           ),
@@ -681,7 +687,7 @@ class _SegmentedChoices<T> extends StatelessWidget {
                       child: Text(
                         labels[i],
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: KaiProductTokens.typographyReaderToolValue,
                           fontWeight: values[i] == selected
                               ? FontWeight.w600
                               : FontWeight.w500,
@@ -708,7 +714,13 @@ class _PanelLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text, style: TextStyle(fontSize: 13, color: color));
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: KaiProductTokens.typographyReaderToolValue,
+        color: color,
+      ),
+    );
   }
 }
 
@@ -859,7 +871,8 @@ class _TypographyPanelState extends State<_TypographyPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final maxH = MediaQuery.sizeOf(context).height *
+    final maxH =
+        MediaQuery.sizeOf(context).height *
         context.appReaderToolPanelMaxHeightFraction;
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxH),
@@ -1146,7 +1159,7 @@ class _SubPanelHeader extends StatelessWidget {
         Text(
           title,
           style: TextStyle(
-            fontSize: 16,
+            fontSize: KaiProductTokens.typographyReaderBookTitle,
             fontWeight: FontWeight.w600,
             color: fg,
           ),
@@ -1230,7 +1243,7 @@ class _FontPickerPanel extends StatelessWidget {
                 Text(
                   '导入',
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: KaiProductTokens.typographyReaderToolValue,
                     fontWeight: FontWeight.w600,
                     color: accent,
                   ),
@@ -1346,7 +1359,7 @@ class _FontSectionTitle extends StatelessWidget {
     return Text(
       label,
       style: TextStyle(
-        fontSize: 12,
+        fontSize: context.appCaptionSize,
         fontWeight: FontWeight.w600,
         color: fg,
         letterSpacing: 0.2,
@@ -1396,7 +1409,7 @@ class _FontChoiceTile extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: context.appLabelSize,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             color: fg,
             fontFamily: previewFamily,
@@ -1469,7 +1482,7 @@ class _CatalogFontTile extends StatelessWidget {
                   Text(
                     catalog.displayName,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: context.appLabelSize,
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                       color: fg,
                     ),
@@ -1480,7 +1493,10 @@ class _CatalogFontTile extends StatelessWidget {
                         : installed != null
                         ? catalog.license
                         : '${catalog.license} · ${catalog.sizeLabel}',
-                    style: TextStyle(fontSize: 11, color: fgMuted),
+                    style: TextStyle(
+                      fontSize: context.appCaptionSmallSize,
+                      color: fgMuted,
+                    ),
                   ),
                 ],
               ),
@@ -1551,16 +1567,11 @@ class _UserFontTile extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: context.appLabelSize,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   color: fg,
                 ),
               ),
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              onPressed: onDelete,
-              icon: Icon(Icons.delete_outline, size: 18, color: fgMuted),
             ),
           ],
         ),
@@ -1850,7 +1861,7 @@ class _PrefToggleRow extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: context.appLabelSize,
               fontWeight: FontWeight.w500,
               color: fg,
             ),
@@ -1957,7 +1968,7 @@ class _ThemePresetCard extends StatelessWidget {
             Text(
               'Aa',
               style: TextStyle(
-                fontSize: 18,
+                fontSize: KaiProductTokens.typographyReaderChapterTitle,
                 fontWeight: FontWeight.w600,
                 color: fg,
               ),
@@ -1966,7 +1977,7 @@ class _ThemePresetCard extends StatelessWidget {
             Text(
               theme.label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: context.appCaptionSmallSize,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 color: fg.withValues(alpha: 0.88),
               ),
@@ -2027,7 +2038,7 @@ class _PrefScrubberRow extends StatelessWidget {
             valueLabel,
             textAlign: TextAlign.right,
             style: TextStyle(
-              fontSize: 13,
+              fontSize: KaiProductTokens.typographyReaderToolValue,
               fontWeight: FontWeight.w500,
               color: fgMuted,
             ),
@@ -2046,7 +2057,7 @@ class _PrefScrubberRow extends StatelessWidget {
         Text(
           title!,
           style: TextStyle(
-            fontSize: 13,
+            fontSize: KaiProductTokens.typographyReaderToolValue,
             fontWeight: FontWeight.w500,
             color: fgMuted,
           ),
@@ -2091,7 +2102,7 @@ class _BoldToggle extends StatelessWidget {
         child: Text(
           'B',
           style: TextStyle(
-            fontSize: 15,
+            fontSize: KaiProductTokens.typographyReaderOverlayTitle,
             fontWeight: FontWeight.w600,
             color: selected ? accent : fg,
           ),
@@ -2131,7 +2142,7 @@ class _TypographyActionRow extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: context.appLabelSize,
                   fontWeight: FontWeight.w500,
                   color: fg,
                 ),

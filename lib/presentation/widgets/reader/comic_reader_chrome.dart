@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../controllers/comic_reader_controller.dart';
 import 'comic_reader_tool_strip.dart';
 import 'glass_bar.dart';
@@ -77,7 +78,7 @@ class ComicReaderChrome extends StatelessWidget {
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: fg,
-                                  fontSize: 14,
+                                  fontSize: context.appLabelSize,
                                   fontWeight: FontWeight.w600,
                                 ),
                               )
@@ -91,7 +92,8 @@ class ComicReaderChrome extends StatelessWidget {
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                       color: fg,
-                                      fontSize: 15,
+                                      fontSize: KaiProductTokens
+                                          .typographyReaderOverlayTitle,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
@@ -99,7 +101,8 @@ class ComicReaderChrome extends StatelessWidget {
                                     controller.pageLabel,
                                     style: TextStyle(
                                       color: fgMuted,
-                                      fontSize: 11,
+                                      fontSize: KaiProductTokens
+                                          .typographyReaderOverlaySubtitle,
                                     ),
                                   ),
                                 ],

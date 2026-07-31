@@ -331,11 +331,8 @@ class _SpreadBody extends StatelessWidget {
     if (!spread.usesSpreadLayout) {
       return ComicZoomHost(
         resetToken: '${c.pageIndex}:${c.mode.name}:single',
-        onTapAt: (pos, width) => _handleTapZones(
-          controller: c,
-          localPosition: pos,
-          width: width,
-        ),
+        onTapAt: (pos, width) =>
+            _handleTapZones(controller: c, localPosition: pos, width: width),
         child: ComicPageImage(controller: c, pageIndex: c.pageIndex),
       );
     }
@@ -347,11 +344,7 @@ class _SpreadBody extends StatelessWidget {
       resetToken: '${c.pageIndex}:${c.mode.name}:spread',
       onTapAt: (pos, width) =>
           _handleTapZones(controller: c, localPosition: pos, width: width),
-      child: _GluedSpread(
-        controller: c,
-        leftIndex: left,
-        rightIndex: right,
-      ),
+      child: _GluedSpread(controller: c, leftIndex: left, rightIndex: right),
     );
   }
 }

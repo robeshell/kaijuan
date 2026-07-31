@@ -6,6 +6,7 @@ import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/theme.dart';
+import '../../core/theme/brand_tokens.g.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
@@ -200,8 +201,8 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
-        fontSize: 18,
+      style: TextStyle(
+        fontSize: KaiProductTokens.typographyShelfSectionTitle,
         fontWeight: FontWeight.w600,
         letterSpacing: -0.2,
         height: 1.2,
@@ -263,8 +264,8 @@ class _HeroCard extends StatelessWidget {
                               title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 16,
+                              style: TextStyle(
+                                fontSize: context.appTitleSize,
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: -0.15,
                                 height: 1.25,
@@ -274,7 +275,7 @@ class _HeroCard extends StatelessWidget {
                             Text(
                               '继续阅读',
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: context.appCaptionSize,
                                 fontWeight: FontWeight.w600,
                                 color: accent,
                                 letterSpacing: 0.2,
@@ -294,7 +295,7 @@ class _HeroCard extends StatelessWidget {
                             Text(
                               '${(p * 100).round()}%',
                               style: TextStyle(
-                                fontSize: 11,
+                                fontSize: context.appCaptionSmallSize,
                                 color: muted,
                                 letterSpacing: 0.2,
                               ),
@@ -356,8 +357,8 @@ class _CoverCard extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13,
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
                   fontWeight: FontWeight.w500,
                   height: 1.2,
                 ),

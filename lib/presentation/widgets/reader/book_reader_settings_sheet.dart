@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../app/book_reading_preferences.dart';
+import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_components.dart';
@@ -89,7 +91,7 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                     '排版',
                     style: TextStyle(
                       color: fg,
-                      fontSize: 18,
+                      fontSize: KaiProductTokens.typographyReaderChapterTitle,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -111,7 +113,10 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                             value: m,
                             label: Text(
                               m.label,
-                              style: const TextStyle(fontSize: 13),
+                              style: TextStyle(
+                                fontSize: KaiProductTokens
+                                    .typographyReaderSectionLabel,
+                              ),
                             ),
                           ),
                       ],
@@ -138,7 +143,9 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                             value: e,
                             label: Text(
                               e.label,
-                              style: const TextStyle(fontSize: 12),
+                              style: TextStyle(
+                                fontSize: context.appCaptionSize,
+                              ),
                             ),
                           ),
                       ],
@@ -209,7 +216,10 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                           value: BookReadingPreferences.marginPresets[i],
                           label: Text(
                             _marginLabels[i],
-                            style: const TextStyle(fontSize: 13),
+                            style: TextStyle(
+                              fontSize:
+                                  KaiProductTokens.typographyReaderSectionLabel,
+                            ),
                           ),
                         ),
                     ],
@@ -243,6 +253,12 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
   }
 
   Widget _label(String text, Color color) {
-    return Text(text, style: TextStyle(fontSize: 13, color: color));
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: KaiProductTokens.typographyReaderSectionLabel,
+        color: color,
+      ),
+    );
   }
 }

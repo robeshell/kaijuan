@@ -15,14 +15,17 @@ import '../../../brand/brand_config.dart';
 
 /// Capture and export helpers for [BookExcerptCard] via [RepaintBoundary].
 abstract final class BookExcerptExport {
-  static const _clipboardChannel = MethodChannel('com.kaijuan.reader/clipboard');
+  static const _clipboardChannel = MethodChannel(
+    'com.kaijuan.reader/clipboard',
+  );
 
   static Future<Uint8List?> capturePng(
     GlobalKey boundaryKey, {
     double pixelRatio = 3,
   }) async {
     final boundary =
-        boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+        boundaryKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
     if (boundary == null) return null;
     if (boundary.debugNeedsPaint) {
       await Future<void>.delayed(Duration.zero);
@@ -36,9 +39,7 @@ abstract final class BookExcerptExport {
   static Future<File> writeTempPng(Uint8List bytes, {String? name}) async {
     final dir = await getTemporaryDirectory();
     final stamp = DateTime.now().millisecondsSinceEpoch;
-    final file = File(
-      p.join(dir.path, name ?? 'kaika-excerpt-$stamp.png'),
-    );
+    final file = File(p.join(dir.path, name ?? 'kaika-excerpt-$stamp.png'));
     await file.writeAsBytes(bytes, flush: true);
     return file;
   }

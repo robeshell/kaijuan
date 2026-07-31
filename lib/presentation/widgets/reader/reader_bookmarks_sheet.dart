@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
 import '../app_components.dart';
 
@@ -27,7 +28,10 @@ void showReaderBookmarksSheet(
                 padding: EdgeInsets.fromLTRB(24, 0, 24, 12),
                 child: Text(
                   '书签',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: KaiProductTokens.typographyReaderBookmarkTitle,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               if (rows.isEmpty)

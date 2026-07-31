@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/theme/brand_tokens.g.dart';
 import 'app_components.dart';
 
 /// Shared overlay language: dialogs, sheets, snackbars.
@@ -222,7 +223,10 @@ class _AppTextPromptDialogState extends State<_AppTextPromptDialog> {
       content: TextField(
         controller: _controller,
         autofocus: true,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+        style: TextStyle(
+          fontSize: KaiProductTokens.typographyReaderOverlayTitle,
+          fontWeight: FontWeight.w500,
+        ),
         decoration: InputDecoration(hintText: widget.hint),
         onSubmitted: (_) => _submit(),
       ),
@@ -313,7 +317,13 @@ class AppSheetTile extends StatelessWidget {
         weight: AppIcons.weight,
         color: iconColor,
       ),
-      title: Text(title, style: TextStyle(color: color, fontSize: 15)),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: color,
+          fontSize: KaiProductTokens.typographyReaderOverlayTitle,
+        ),
+      ),
       subtitle: subtitle == null ? null : Text(subtitle!),
     );
   }

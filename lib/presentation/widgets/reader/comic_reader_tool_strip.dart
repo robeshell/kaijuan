@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/comic_reading_preferences.dart';
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/comic/comic_models.dart';
 import '../../controllers/comic_reader_controller.dart';
 import 'comic_thumbnails_sheet.dart';
@@ -82,12 +83,11 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
                       ),
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          maxHeight: MediaQuery.sizeOf(context).height *
+                          maxHeight:
+                              MediaQuery.sizeOf(context).height *
                               context.appReaderToolPanelMaxHeightFraction,
                         ),
-                        child: SingleChildScrollView(
-                          child: _buildPanel(),
-                        ),
+                        child: SingleChildScrollView(child: _buildPanel()),
                       ),
                     ),
             ),
@@ -199,23 +199,23 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
   Widget _buildPanel() {
     return switch (_panel!) {
       ComicToolStripPanel.brightness => _BrightnessPanel(
-          controller: controller,
-          fg: widget.fg,
-          fgMuted: widget.fgMuted,
-          accent: widget.accent,
-        ),
+        controller: controller,
+        fg: widget.fg,
+        fgMuted: widget.fgMuted,
+        accent: widget.accent,
+      ),
       ComicToolStripPanel.direction => _DirectionPanel(
-          controller: controller,
-          fg: widget.fg,
-          fgMuted: widget.fgMuted,
-          accent: widget.accent,
-        ),
+        controller: controller,
+        fg: widget.fg,
+        fgMuted: widget.fgMuted,
+        accent: widget.accent,
+      ),
       ComicToolStripPanel.readingMode => _ReadingModePanel(
-          controller: controller,
-          fg: widget.fg,
-          fgMuted: widget.fgMuted,
-          accent: widget.accent,
-        ),
+        controller: controller,
+        fg: widget.fg,
+        fgMuted: widget.fgMuted,
+        accent: widget.accent,
+      ),
     };
   }
 }
@@ -292,7 +292,7 @@ class _ProgressScrubber extends StatelessWidget {
         Text(
           pageLabel,
           textAlign: TextAlign.center,
-          style: TextStyle(color: fgMuted, fontSize: 12),
+          style: TextStyle(color: fgMuted, fontSize: context.appCaptionSize),
         ),
         const SizedBox(height: AppSpacing.x2),
         Row(
@@ -462,7 +462,13 @@ class _PanelLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text, style: TextStyle(fontSize: 13, color: color));
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: KaiProductTokens.typographyReaderToolValue,
+        color: color,
+      ),
+    );
   }
 }
 
@@ -516,7 +522,7 @@ class _SegmentedChoices<T> extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: context.appCaptionSize,
                           fontWeight: values[i] == selected
                               ? FontWeight.w600
                               : FontWeight.w500,
@@ -567,10 +573,11 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
     if (!_dragging) {
       _preview = widget.controller.brightness;
     }
-    final t = ((_preview - ComicReadingPreferences.minBrightness) /
-            (ComicReadingPreferences.maxBrightness -
-                ComicReadingPreferences.minBrightness))
-        .clamp(0.0, 1.0);
+    final t =
+        ((_preview - ComicReadingPreferences.minBrightness) /
+                (ComicReadingPreferences.maxBrightness -
+                    ComicReadingPreferences.minBrightness))
+            .clamp(0.0, 1.0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -589,7 +596,8 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                 thumbColor: widget.accent,
                 onDragStart: (v) {
                   _dragging = true;
-                  final next = ComicReadingPreferences.minBrightness +
+                  final next =
+                      ComicReadingPreferences.minBrightness +
                       v *
                           (ComicReadingPreferences.maxBrightness -
                               ComicReadingPreferences.minBrightness);
@@ -597,7 +605,8 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                   widget.controller.previewBrightness(next);
                 },
                 onDragUpdate: (v) {
-                  final next = ComicReadingPreferences.minBrightness +
+                  final next =
+                      ComicReadingPreferences.minBrightness +
                       v *
                           (ComicReadingPreferences.maxBrightness -
                               ComicReadingPreferences.minBrightness);

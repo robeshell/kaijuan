@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/theme/brand_tokens.g.dart';
 
 /// Shared component kit built on the semantic tokens (see
 /// docs/DESIGN_FOUNDATION.md). Components read glass/effects via the
@@ -203,7 +204,7 @@ class _AppChoiceButton<T> extends StatelessWidget {
                   option.label,
                   style: TextStyle(
                     color: foreground,
-                    fontSize: 12,
+                    fontSize: context.appCaptionSize,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
@@ -250,7 +251,7 @@ class AppToolbarButton extends StatelessWidget {
                 value,
                 style: TextStyle(
                   color: context.appSecondaryText,
-                  fontSize: 12,
+                  fontSize: context.appCaptionSize,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -321,7 +322,7 @@ class AppEmptyState extends StatelessWidget {
                   color: context.appPrimaryText.withValues(
                     alpha: context.appPrimaryText.a * 0.88,
                   ),
-                  fontSize: 16,
+                  fontSize: KaiProductTokens.typographyEmptyStateTitle,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -333,7 +334,7 @@ class AppEmptyState extends StatelessWidget {
                   color: context.appMutedText.withValues(
                     alpha: context.appMutedText.a * 0.76,
                   ),
-                  fontSize: 12,
+                  fontSize: KaiProductTokens.typographyEmptyStateMessage,
                   height: 1.45,
                 ),
               ),
@@ -699,7 +700,7 @@ class _AppAnchoredMenu<T> extends StatelessWidget {
     final viewport = MediaQuery.sizeOf(context);
     final estimatedHeight =
         actions.length * 36.0 + (title == null ? 8 : 48) + 8;
-    final menuWidth = _anchoredMenuWidth(actions);
+    final menuWidth = _anchoredMenuWidth(context, actions);
     const edge = 12.0;
     final left = (anchor.right - menuWidth)
         .clamp(edge, math.max(edge, viewport.width - menuWidth - edge))
@@ -740,9 +741,15 @@ class _AppAnchoredMenu<T> extends StatelessWidget {
 }
 
 /// Content-hugging width for anchored menus (min 160 / max 280).
-double _anchoredMenuWidth<T>(List<AppMenuAction<T>> actions) {
-  const labelStyle = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
-  const subtitleStyle = TextStyle(fontSize: 11);
+double _anchoredMenuWidth<T>(
+  BuildContext context,
+  List<AppMenuAction<T>> actions,
+) {
+  final labelStyle = TextStyle(
+    fontSize: context.appLabelSize,
+    fontWeight: FontWeight.w600,
+  );
+  final subtitleStyle = TextStyle(fontSize: context.appCaptionSmallSize);
   final painter = TextPainter(textDirection: TextDirection.ltr);
   var maxLabel = 0.0;
   try {
@@ -803,7 +810,9 @@ class _AppMenuList<T> extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: context.appSecondaryText,
-                fontSize: compact ? 12.5 : 12,
+                fontSize: compact
+                    ? KaiProductTokens.typographyMenuTitleCompact
+                    : KaiProductTokens.typographyMenuTitleWide,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -882,7 +891,10 @@ class _AppMenuActionRow<T> extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: foreground,
-                            fontSize: compact ? 14 : 13.5,
+                            fontSize: compact
+                                ? KaiProductTokens
+                                      .typographyMenuItemLabelCompact
+                                : KaiProductTokens.typographyMenuItemLabelWide,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -894,7 +906,7 @@ class _AppMenuActionRow<T> extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: context.appSecondaryText,
-                              fontSize: 11,
+                              fontSize: context.appCaptionSmallSize,
                             ),
                           ),
                         ],
@@ -985,7 +997,7 @@ class AppListRow extends StatelessWidget {
                             color: enabled
                                 ? context.appPrimaryText
                                 : context.appMutedText.withValues(alpha: 0.5),
-                            fontSize: 14,
+                            fontSize: context.appListTitleSize,
                             fontWeight: FontWeight.w600,
                           ),
                           maxLines: 1,
@@ -997,7 +1009,7 @@ class AppListRow extends StatelessWidget {
                           DefaultTextStyle(
                             style: TextStyle(
                               color: context.appSecondaryText,
-                              fontSize: 11,
+                              fontSize: context.appCaptionSmallSize,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1167,7 +1179,7 @@ class _AppNavigationButton extends StatelessWidget {
                 curve: Curves.easeOutCubic,
                 style: TextStyle(
                   color: foreground,
-                  fontSize: 10,
+                  fontSize: KaiProductTokens.typographyNavigationMobileLabel,
                   height: 1.2,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),

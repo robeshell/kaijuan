@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/theme/brand_tokens.g.dart';
+
 /// Shared launch canvas colors — match kai-brand-design light canvas.
 const kaijuanLaunchBackground = Color(0xFFF7F9FC);
 const kaijuanLaunchTitleColor = Color(0xFF1C1C22);
@@ -49,19 +51,17 @@ class _KaijuanLaunchLockup extends StatelessWidget {
                 height: 144,
                 filterQuality: FilterQuality.high,
                 excludeFromSemantics: true,
-                errorBuilder: (_, __, ___) => const SizedBox(
-                  width: 144,
-                  height: 144,
-                ),
+                errorBuilder: (_, __, ___) =>
+                    const SizedBox(width: 144, height: 144),
               ),
             ),
             Transform.translate(
               offset: const Offset(0, 28),
-              child: const Text(
+              child: Text(
                 '开卷',
                 style: TextStyle(
                   color: kaijuanLaunchTitleColor,
-                  fontSize: 24,
+                  fontSize: KaiProductTokens.typographyLaunchLockupTitle,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.2,
                   height: 1.15,
@@ -70,11 +70,11 @@ class _KaijuanLaunchLockup extends StatelessWidget {
             ),
             Transform.translate(
               offset: const Offset(0, 58),
-              child: const Text(
+              child: Text(
                 '读自己的书',
                 style: TextStyle(
                   color: kaijuanLaunchSubtitleColor,
-                  fontSize: 14,
+                  fontSize: KaiProductTokens.typographyLaunchLockupSubtitle,
                   fontWeight: FontWeight.w400,
                   letterSpacing: 0.4,
                   height: 1.25,

@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'context.dart';
 import 'skins.dart';
 import 'tokens.dart';
 
@@ -84,27 +86,11 @@ abstract final class AppTheme {
     final baseTextTheme = ThemeData(
       brightness: brightness,
     ).textTheme.apply(bodyColor: foreground, displayColor: foreground);
-    final textTheme = baseTextTheme.copyWith(
-      headlineLarge: baseTextTheme.headlineLarge?.copyWith(
-        fontWeight: FontWeight.w600,
-        letterSpacing: -0.25,
-      ),
-      headlineMedium: baseTextTheme.headlineMedium?.copyWith(
-        fontWeight: FontWeight.w600,
-        letterSpacing: -0.15,
-      ),
-      titleLarge: baseTextTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.w600,
-        letterSpacing: -0.1,
-      ),
-      titleMedium: baseTextTheme.titleMedium?.copyWith(
-        fontWeight: FontWeight.w500,
-      ),
-      labelLarge: baseTextTheme.labelLarge?.copyWith(
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0,
-      ),
-      bodySmall: baseTextTheme.bodySmall?.copyWith(color: secondary),
+    final componentProfile = resolveAppComponentProfile(defaultTargetPlatform);
+    final textTheme = componentProfile.applyTypeScale(
+      baseTextTheme,
+      foreground: foreground,
+      secondary: secondary,
     );
 
     final focusOverlay = WidgetStateProperty.resolveWith<Color?>((states) {
@@ -268,7 +254,7 @@ abstract final class AppTheme {
         }),
         labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((states) {
           return TextStyle(
-            fontSize: 11,
+            fontSize: componentProfile.captionSmallSize,
             fontWeight: states.contains(WidgetState.selected)
                 ? FontWeight.w600
                 : FontWeight.w500,
@@ -284,13 +270,13 @@ abstract final class AppTheme {
         selectedIconTheme: IconThemeData(color: accent),
         selectedLabelTextStyle: TextStyle(
           color: accent,
-          fontSize: 11,
+          fontSize: componentProfile.captionSmallSize,
           fontWeight: FontWeight.w600,
         ),
         unselectedIconTheme: IconThemeData(color: secondary),
         unselectedLabelTextStyle: TextStyle(
           color: secondary,
-          fontSize: 11,
+          fontSize: componentProfile.captionSmallSize,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -471,12 +457,12 @@ abstract final class AppTheme {
         horizontalTitleGap: 10,
         titleTextStyle: textTheme.bodyMedium?.copyWith(
           color: foreground,
-          fontSize: 14,
+          fontSize: componentProfile.listTitleSize,
           fontWeight: FontWeight.w500,
         ),
         subtitleTextStyle: textTheme.bodySmall?.copyWith(
           color: secondary,
-          fontSize: 11,
+          fontSize: componentProfile.captionSmallSize,
         ),
         shape: const RoundedRectangleBorder(),
       ),

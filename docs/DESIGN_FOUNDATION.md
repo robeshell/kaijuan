@@ -75,7 +75,12 @@
 - 壳层大标题缓和负字距（约 −0.1～−0.25、w700）；沉浸内容标题仍可 w800。  
 - 阅读器正文排版独立（字体栈 / 字号 / 行高属阅读偏好，不受壳层排版影响）。
 
-## 实现侧 Token 架构（三层）
+## 排版边界
+
+壳层字号遵循品牌层与 Kaijuan 产品层：通用角色通过 `AppComponentProfileTokens` / `context.app*Size` 使用 `KaiBrandMobileType` 或 `KaiBrandDesktopType`，开卷特有的阅读器 chrome 角色使用 `KaiProductTokens`。业务 UI 不直接写数字型 `fontSize`。
+
+图书内容层的字号、行高、字距、段间距和字体栈由 `BookReadingPreferences` 及阅读器渲染链路控制，属于用户可调功能参数，不属于品牌或产品 chrome token；漫画内容是图像，不新增正文 `fontSize`。壳层 `TextScaler` 可访问性与内容层字号保持独立。
+
 
 1. **基础 token 镜像**：由品牌规范移植的间距 / 圆角 / 强调色预设 / 皮肤色板（`lib/core/theme/tokens.dart`、`skins.dart`），不是新的事实源。
 2. **语义 token**：`AppGlassTheme` + `AppSkinEffects` + `ColorScheme`，业务经 `context.appGlass`、`context.appPrimaryText` 等 context getter 读取（`lib/core/theme/context.dart`）。  

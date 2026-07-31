@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../brand/brand_config.dart';
+import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_excerpt_style.dart';
 
 /// Pure excerpt preview / export surface (same tree for RepaintBoundary).
@@ -94,7 +96,7 @@ class _ClassicBody extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: palette.foreground,
-            fontSize: 16,
+            fontSize: KaiProductTokens.typographyReaderExcerptTitle,
             height: 1.55,
             fontWeight: FontWeight.w400,
           ),
@@ -110,7 +112,7 @@ class _ClassicBody extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: palette.muted,
-              fontSize: 12,
+              fontSize: context.appCaptionSize,
               height: 1.35,
             ),
           ),
@@ -123,7 +125,7 @@ class _ClassicBody extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: palette.foreground,
-            fontSize: 15,
+            fontSize: KaiProductTokens.typographyReaderExcerptBody,
             fontWeight: FontWeight.w600,
             height: 1.3,
           ),
@@ -135,7 +137,10 @@ class _ClassicBody extends StatelessWidget {
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: palette.muted, fontSize: 12),
+            style: TextStyle(
+              color: palette.muted,
+              fontSize: context.appCaptionSize,
+            ),
           ),
         ],
         const SizedBox(height: 18),
@@ -145,7 +150,7 @@ class _ClassicBody extends StatelessWidget {
             BrandConfig.app.displayName,
             style: TextStyle(
               color: palette.accent,
-              fontSize: 11,
+              fontSize: context.appCaptionSmallSize,
               fontWeight: FontWeight.w500,
               letterSpacing: 0.3,
             ),
@@ -198,7 +203,7 @@ class _LeftBarBody extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: palette.foreground,
-                    fontSize: 16,
+                    fontSize: KaiProductTokens.typographyReaderExcerptTitle,
                     height: 1.55,
                   ),
                 ),
@@ -212,7 +217,11 @@ class _LeftBarBody extends StatelessWidget {
             chapter,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: palette.muted, fontSize: 12, height: 1.35),
+            style: TextStyle(
+              color: palette.muted,
+              fontSize: context.appCaptionSize,
+              height: 1.35,
+            ),
           ),
           const SizedBox(height: 6),
         ],
@@ -222,7 +231,7 @@ class _LeftBarBody extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: palette.foreground,
-            fontSize: 15,
+            fontSize: KaiProductTokens.typographyReaderExcerptBody,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -232,7 +241,10 @@ class _LeftBarBody extends StatelessWidget {
             subtitle!.trim(),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: palette.muted, fontSize: 12),
+            style: TextStyle(
+              color: palette.muted,
+              fontSize: context.appCaptionSize,
+            ),
           ),
         ],
         const SizedBox(height: 16),
@@ -242,7 +254,7 @@ class _LeftBarBody extends StatelessWidget {
             BrandConfig.app.displayName,
             style: TextStyle(
               color: palette.accent,
-              fontSize: 11,
+              fontSize: context.appCaptionSmallSize,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -275,10 +287,10 @@ class _LargeQuoteBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '“',
+          '"”',
           style: TextStyle(
             color: palette.accent.withValues(alpha: 0.7),
-            fontSize: 48,
+            fontSize: KaiProductTokens.typographyReaderExcerptQuote,
             height: 0.75,
             fontWeight: FontWeight.w300,
           ),
@@ -290,7 +302,7 @@ class _LargeQuoteBody extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: palette.foreground,
-            fontSize: 18,
+            fontSize: KaiProductTokens.typographyReaderChapterTitle,
             height: 1.5,
             fontWeight: FontWeight.w500,
           ),
@@ -310,7 +322,7 @@ class _LargeQuoteBody extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: palette.muted,
-                        fontSize: 11,
+                        fontSize: context.appCaptionSmallSize,
                       ),
                     ),
                   Text(
@@ -319,7 +331,7 @@ class _LargeQuoteBody extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: palette.foreground,
-                      fontSize: 14,
+                      fontSize: context.appLabelSize,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -328,7 +340,10 @@ class _LargeQuoteBody extends StatelessWidget {
                       subtitle!.trim(),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: palette.muted, fontSize: 11),
+                      style: TextStyle(
+                        color: palette.muted,
+                        fontSize: context.appCaptionSmallSize,
+                      ),
                     ),
                 ],
               ),
@@ -337,7 +352,7 @@ class _LargeQuoteBody extends StatelessWidget {
               BrandConfig.app.displayName,
               style: TextStyle(
                 color: palette.accent,
-                fontSize: 11,
+                fontSize: context.appCaptionSmallSize,
                 fontWeight: FontWeight.w500,
               ),
             ),

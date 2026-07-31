@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/foliate_js_bridge.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_components.dart';
@@ -76,7 +77,10 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
                       focusNode: _focus,
                       textInputAction: TextInputAction.search,
                       onSubmitted: (_) => _submit(),
-                      style: TextStyle(color: fg, fontSize: 16),
+                      style: TextStyle(
+                        color: fg,
+                        fontSize: KaiProductTokens.typographyReaderBookTitle,
+                      ),
                       cursorColor: accent,
                       decoration: InputDecoration(
                         hintText: '搜索书中内容',
@@ -224,14 +228,18 @@ class _HitTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: muted,
-                    fontSize: 12,
+                    fontSize: context.appCaptionSize,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
             Text.rich(
               TextSpan(
-                style: TextStyle(color: fg, fontSize: 15, height: 1.35),
+                style: TextStyle(
+                  color: fg,
+                  fontSize: KaiProductTokens.typographyReaderSearchResult,
+                  height: 1.35,
+                ),
                 children: [
                   TextSpan(text: hit.excerptPre),
                   TextSpan(

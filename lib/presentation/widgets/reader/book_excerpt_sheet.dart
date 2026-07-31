@@ -117,10 +117,7 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
       );
     }
     return _withBytes((bytes) async {
-      await BookExcerptExport.shareImage(
-        bytes,
-        sharePositionOrigin: origin,
-      );
+      await BookExcerptExport.shareImage(bytes, sharePositionOrigin: origin);
       return '已打开分享';
     });
   }
@@ -137,8 +134,10 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
     final muted = context.appSecondaryText;
     final accent = Theme.of(context).colorScheme.primary;
     final viewInsets = MediaQuery.viewInsetsOf(context);
-    final cardWidth =
-        (MediaQuery.sizeOf(context).width - 48).clamp(260.0, 360.0);
+    final cardWidth = (MediaQuery.sizeOf(context).width - 48).clamp(
+      260.0,
+      360.0,
+    );
     final maxH = MediaQuery.sizeOf(context).height * 0.85;
 
     return Padding(
@@ -174,7 +173,7 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
                         '排版',
                         style: TextStyle(
                           color: muted,
-                          fontSize: 12,
+                          fontSize: context.appCaptionSize,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -198,7 +197,7 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
                         '配色',
                         style: TextStyle(
                           color: muted,
-                          fontSize: 12,
+                          fontSize: context.appCaptionSize,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -243,8 +242,7 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
                             icon: Icons.ios_share_outlined,
                             label: '分享',
                             enabled: !_busy,
-                            onPressed: () =>
-                                unawaited(_share(buttonContext)),
+                            onPressed: () => unawaited(_share(buttonContext)),
                           );
                         },
                       ),
@@ -306,7 +304,7 @@ class _Chip extends StatelessWidget {
                 label,
                 style: TextStyle(
                   color: selected ? accent : fg,
-                  fontSize: 13,
+                  fontSize: context.appCaptionSize,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
@@ -352,7 +350,7 @@ class _PaletteDot extends StatelessWidget {
             'Aa',
             style: TextStyle(
               color: palette.foreground,
-              fontSize: 11,
+              fontSize: context.appCaptionSmallSize,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -388,7 +386,7 @@ class _ActionButton extends StatelessWidget {
         children: [
           Icon(icon, size: 22, weight: 300),
           const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 12)),
+          Text(label, style: TextStyle(fontSize: context.appCaptionSize)),
         ],
       ),
     );

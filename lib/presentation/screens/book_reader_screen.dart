@@ -301,16 +301,10 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                           animation: _reveal,
                           builder: (context, _) {
                             final coverT = Curves.easeOutCubic.transform(
-                              const Interval(
-                                0,
-                                0.52,
-                              ).transform(_reveal.value),
+                              const Interval(0, 0.52).transform(_reveal.value),
                             );
                             final pageT = Curves.easeInOut.transform(
-                              const Interval(
-                                0.48,
-                                1,
-                              ).transform(_reveal.value),
+                              const Interval(0.48, 1).transform(_reveal.value),
                             );
                             return Stack(
                               fit: StackFit.expand,

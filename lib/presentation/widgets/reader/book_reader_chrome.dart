@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import 'book_reader_tool_strip.dart';
@@ -37,8 +38,7 @@ class BookReaderChrome extends StatelessWidget {
     final accent = Theme.of(context).colorScheme.primary;
     final short = context.appIsShortViewport;
     final barH = short ? _barHeightShort : kBookReaderChromeBarHeight;
-    final density =
-        short ? VisualDensity.compact : VisualDensity.standard;
+    final density = short ? VisualDensity.compact : VisualDensity.standard;
 
     final leadingClearance =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
@@ -83,7 +83,7 @@ class BookReaderChrome extends StatelessWidget {
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: fg,
-                                  fontSize: 14,
+                                  fontSize: context.appLabelSize,
                                   fontWeight: FontWeight.w600,
                                 ),
                               )
@@ -97,7 +97,8 @@ class BookReaderChrome extends StatelessWidget {
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                       color: fg,
-                                      fontSize: 15,
+                                      fontSize: KaiProductTokens
+                                          .typographyReaderOverlayTitle,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
@@ -105,7 +106,8 @@ class BookReaderChrome extends StatelessWidget {
                                     controller.progressPercentLabel,
                                     style: TextStyle(
                                       color: fgMuted,
-                                      fontSize: 11,
+                                      fontSize: KaiProductTokens
+                                          .typographyReaderOverlaySubtitle,
                                     ),
                                   ),
                                 ],
@@ -129,11 +131,7 @@ class BookReaderChrome extends StatelessWidget {
                         tooltip: '搜索',
                         visualDensity: density,
                         onPressed: () => controller.openSearch(),
-                        icon: Icon(
-                          Icons.search,
-                          color: fg,
-                          weight: 300,
-                        ),
+                        icon: Icon(Icons.search, color: fg, weight: 300),
                       ),
                       if (leadingClearance > 0)
                         SizedBox(width: leadingClearance - 8),

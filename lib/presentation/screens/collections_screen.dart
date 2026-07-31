@@ -268,8 +268,8 @@ class _CollectionGridCard extends StatelessWidget {
                   summary.collection.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
                     fontWeight: FontWeight.w600,
                     height: 1.2,
                   ),
@@ -280,7 +280,7 @@ class _CollectionGridCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: context.appCaptionSmallSize,
                     height: 1.2,
                     color: context.appSecondaryText,
                   ),
@@ -703,8 +703,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                     item.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 13,
+                                    style: TextStyle(
+                                      fontSize: context.appCaptionSize,
                                       fontWeight: FontWeight.w500,
                                       height: 1.2,
                                     ),

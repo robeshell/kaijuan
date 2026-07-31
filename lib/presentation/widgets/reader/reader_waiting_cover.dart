@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart'; // appIsShortViewport + appPrimaryText
+import '../../../core/theme/brand_tokens.g.dart';
 
 /// Window-fitted cover shown while a reader prepares content (Apple Books–style
 /// open). Backdrop is painted by the reveal layer behind this widget.
@@ -56,7 +57,7 @@ class _TitleFallback extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
         color: fg.withValues(alpha: 0.72),
-        fontSize: 28,
+        fontSize: KaiProductTokens.typographyReaderWaitingCover,
         fontWeight: FontWeight.w600,
         height: 1.25,
       ),

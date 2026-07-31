@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
@@ -136,8 +137,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
         zoneBottom = safeTop + menuHEstimate;
       }
     } else {
-      posTop =
-          (anchorBottom + _gap).clamp(safeTop, safeBottom - menuHEstimate);
+      posTop = (anchorBottom + _gap).clamp(safeTop, safeBottom - menuHEstimate);
       slotHeight = null;
       zoneTop = posTop;
       zoneBottom = posTop + menuHEstimate;
@@ -195,9 +195,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
             onSearch: () {
               final q = text.trim();
               controller.clearSelectionMenu();
-              controller.openSearch(
-                initialQuery: q.isEmpty ? null : q,
-              );
+              controller.openSearch(initialQuery: q.isEmpty ? null : q);
             },
             onExcerpt: () => _excerpt(context, text),
           );
@@ -208,10 +206,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
       child: PointerInterceptor(
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
-          child: Material(
-            color: Colors.transparent,
-            child: card,
-          ),
+          child: Material(color: Colors.transparent, child: card),
         ),
       ),
     );
@@ -354,11 +349,7 @@ class _ActionsCard extends StatelessWidget {
             label: '笔记',
             onPressed: onNote,
           ),
-          _ActionItem(
-            icon: Icons.copy_rounded,
-            label: '复制',
-            onPressed: onCopy,
-          ),
+          _ActionItem(icon: Icons.copy_rounded, label: '复制', onPressed: onCopy),
           _ActionItem(
             icon: Icons.menu_book_rounded,
             label: '词典',
@@ -383,11 +374,7 @@ class _ActionsCard extends StatelessWidget {
       ),
     );
 
-    return _Bubble(
-      placeAbove: placeAbove,
-      caretX: caretX,
-      child: body,
-    );
+    return _Bubble(placeAbove: placeAbove, caretX: caretX, child: body);
   }
 }
 
@@ -446,7 +433,11 @@ class _MarkupCard extends StatelessWidget {
             onPressed: () => onStyle(BookAnnotationType.highlight, activeColor),
           ),
           const Spacer(),
-          for (var i = 0; i < BookSelectionMenuOverlay._markupColors.length; i++)
+          for (
+            var i = 0;
+            i < BookSelectionMenuOverlay._markupColors.length;
+            i++
+          )
             Padding(
               padding: EdgeInsets.only(left: i == 0 ? 0 : 6),
               child: _ColorDot(
@@ -477,11 +468,7 @@ class _MarkupCard extends StatelessWidget {
             label: '笔记',
             onPressed: onNote,
           ),
-          _ActionItem(
-            icon: Icons.copy_rounded,
-            label: '复制',
-            onPressed: onCopy,
-          ),
+          _ActionItem(icon: Icons.copy_rounded, label: '复制', onPressed: onCopy),
           _ActionItem(
             icon: Icons.menu_book_rounded,
             label: '词典',
@@ -506,11 +493,7 @@ class _MarkupCard extends StatelessWidget {
         ? Column(mainAxisSize: MainAxisSize.min, children: [tools, actions])
         : Column(mainAxisSize: MainAxisSize.min, children: [actions, tools]);
 
-    return _Bubble(
-      placeAbove: placeAbove,
-      caretX: caretX,
-      child: column,
-    );
+    return _Bubble(placeAbove: placeAbove, caretX: caretX, child: column);
   }
 }
 
@@ -580,10 +563,7 @@ class _CaretSlot extends StatelessWidget {
             top: pointDown ? -1 : 1,
             child: CustomPaint(
               size: const Size(14, 7),
-              painter: _CaretPainter(
-                color: color,
-                pointDown: pointDown,
-              ),
+              painter: _CaretPainter(color: color, pointDown: pointDown),
             ),
           ),
         ],
@@ -653,7 +633,7 @@ class _ActionItem extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: KaiProductTokens.typographyReaderSelectionMenu,
                   height: 1.1,
                   color: fg,
                   fontWeight: FontWeight.w500,

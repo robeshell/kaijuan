@@ -211,8 +211,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
                   IgnorePointer(
                     child: ColoredBox(
                       color: Colors.black.withValues(
-                        alpha:
-                            (1.0 - _controller.brightness).clamp(0.0, 1.0),
+                        alpha: (1.0 - _controller.brightness).clamp(0.0, 1.0),
                       ),
                     ),
                   ),

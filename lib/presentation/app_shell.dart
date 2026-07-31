@@ -9,6 +9,7 @@ import '../brand/brand_config.dart';
 import '../app_update/app_update_ui.dart';
 import '../core/platform_window.dart';
 import '../core/theme.dart';
+import '../core/theme/brand_tokens.g.dart';
 import 'controllers/library_controller.dart';
 import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
@@ -213,7 +214,7 @@ class _SideRail extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: context.appPrimaryText,
-                        fontSize: 17,
+                        fontSize: KaiProductTokens.typographyShellBrandTitle,
                         fontWeight: FontWeight.w600,
                         letterSpacing: -0.35,
                       ),
@@ -302,7 +303,7 @@ class _SidebarRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: labelColor,
-                    fontSize: 14,
+                    fontSize: context.appLabelSize,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),

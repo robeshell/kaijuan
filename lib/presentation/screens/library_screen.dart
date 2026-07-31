@@ -139,8 +139,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     children: [
                       Text(
                         name,
-                        style: const TextStyle(
-                          fontSize: 14,
+                        style: TextStyle(
+                          fontSize: context.appLabelSize,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -148,7 +148,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       Text(
                         f.reason,
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: context.appCaptionSize,
                           color: ctx.appSecondaryText,
                         ),
                       ),
@@ -354,7 +354,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
         decoration: InputDecoration(
           isDense: true,
           hintText: '搜索标题…',
-          hintStyle: TextStyle(color: context.appSecondaryText, fontSize: 14),
+          hintStyle: TextStyle(
+            color: context.appSecondaryText,
+            fontSize: context.appLabelSize,
+          ),
           prefixIcon: Icon(
             Icons.search,
             size: 18,
@@ -422,7 +425,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           label: Text(
             '书单',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: context.appLabelSize,
               fontWeight: FontWeight.w600,
               color: muted,
             ),
@@ -465,7 +468,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           label: Text(
             '合集',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: context.appLabelSize,
               fontWeight: FontWeight.w600,
               color: muted,
             ),
@@ -1031,8 +1034,8 @@ class _LibraryCollectionCard extends StatelessWidget {
                   summary.collection.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
                     fontWeight: FontWeight.w600,
                     height: 1.2,
                   ),
@@ -1043,7 +1046,7 @@ class _LibraryCollectionCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: context.appCaptionSmallSize,
                     height: 1.2,
                     color: context.appSecondaryText,
                   ),
@@ -1112,7 +1115,7 @@ class _FilterMenu<T> extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: context.appCaptionSize,
                 fontWeight: active ? FontWeight.w600 : FontWeight.w500,
                 color: active ? accent : context.appSecondaryText,
               ),
@@ -1213,8 +1216,8 @@ class _GridCard extends StatelessWidget {
                   item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
                     fontWeight: FontWeight.w500,
                     height: 1.2,
                   ),
@@ -1229,7 +1232,7 @@ class _GridCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: context.appCaptionSmallSize,
                     height: 1.2,
                     color: context.appSecondaryText,
                   ),

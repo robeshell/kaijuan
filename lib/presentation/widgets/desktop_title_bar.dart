@@ -15,10 +15,7 @@ import '../../core/theme.dart';
 /// - **Windows**: drag surface + custom min / max / close (system caption
 ///   hidden by the runner).
 class DesktopTitleBar extends StatefulWidget {
-  const DesktopTitleBar({
-    super.key,
-    required this.title,
-  });
+  const DesktopTitleBar({super.key, required this.title});
 
   final String title;
 
@@ -96,7 +93,7 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> {
                       child: Text(
                         widget.title,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: context.appCaptionSize,
                           fontWeight: FontWeight.w600,
                           color: context.appSecondaryText,
                           letterSpacing: -0.1,

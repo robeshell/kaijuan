@@ -123,7 +123,7 @@ class _SectionLabel extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 13,
+          fontSize: context.appCaptionSize,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.3,
           color: context.settingsSecondary,
@@ -192,7 +192,7 @@ class _SkinCard extends StatelessWidget {
         Text(
           label,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: context.appBodySecondarySize,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             color: selected ? accent : context.settingsSecondary,
           ),
@@ -418,7 +418,7 @@ class _AboutRow extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: context.appCaptionSize,
                   color: context.settingsSecondary,
                 ),
               ),
@@ -427,15 +427,15 @@ class _AboutRow extends StatelessWidget {
               child: onTap == null
                   ? SelectableText(
                       value,
-                      style: const TextStyle(
-                        fontSize: 13,
+                      style: TextStyle(
+                        fontSize: context.appCaptionSize,
                         fontWeight: FontWeight.w500,
                       ),
                     )
                   : Text(
                       value,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: context.appCaptionSize,
                         fontWeight: FontWeight.w500,
                         color: Theme.of(context).colorScheme.primary,
                       ),

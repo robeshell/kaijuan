@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../controllers/comic_reader_controller.dart';
 import '../app_components.dart';
 import 'comic_page_image.dart';
@@ -23,7 +24,8 @@ Future<void> showComicThumbnailsSheet(
           final count = controller.pageCount;
           final current = controller.pageIndex;
           // Landscape / short: leave more room to see the page behind the sheet.
-          final sheetH = MediaQuery.sizeOf(context).height *
+          final sheetH =
+              MediaQuery.sizeOf(context).height *
               (context.appIsShortViewport ? 0.78 : 0.62);
           return ColoredBox(
             color: bg,
@@ -43,7 +45,8 @@ Future<void> showComicThumbnailsSheet(
                       '页面',
                       style: TextStyle(
                         color: fg,
-                        fontSize: 16,
+                        fontSize:
+                            KaiProductTokens.typographyReaderThumbnailLabel,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -101,9 +104,10 @@ Future<void> showComicThumbnailsSheet(
                                         ),
                                         child: Text(
                                           '${index + 1}',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             color: Colors.white,
-                                            fontSize: 11,
+                                            fontSize:
+                                                context.appCaptionSmallSize,
                                           ),
                                         ),
                                       ),

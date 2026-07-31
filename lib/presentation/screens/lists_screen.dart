@@ -229,7 +229,7 @@ class ListsScreen extends StatelessWidget {
                       subtitle: Text(
                         '${s.memberCount} 本',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: context.appCaptionSize,
                           color: context.appSecondaryText,
                         ),
                       ),
@@ -391,7 +391,7 @@ class _ListDetailScreen extends StatelessWidget {
                       subtitle: Text(
                         item.format.toUpperCase(),
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: context.appCaptionSize,
                           color: context.appSecondaryText,
                         ),
                       ),

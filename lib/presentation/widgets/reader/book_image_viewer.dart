@@ -44,11 +44,7 @@ class BookImageViewer extends StatelessWidget {
               child: IconButton(
                 tooltip: '关闭',
                 onPressed: controller.closeImageViewer,
-                icon: const Icon(
-                  Icons.close,
-                  color: Colors.white,
-                  weight: 300,
-                ),
+                icon: const Icon(Icons.close, color: Colors.white, weight: 300),
               ),
             ),
           ),

@@ -31,7 +31,12 @@ components:
 - **组件前缀 `App*`**：`brand_tokens.g.dart` 由品牌 JSON 生成；主题层 `lib/core/theme/` 提供兼容语义 API，组件 kit 位于 `lib/presentation/widgets/app_components.dart`。
 - **单 App 双引擎**：`main.dart` 是唯一产品入口；`main_book.dart` / `main_comic.dart` 仅为兼容重定向。漫画与图书共享主题路径，任何主题/组件改动必须覆盖两类内容。
 
-## Colors
+## Typography migration status
+
+Kaijuan 壳层字号已按 Kaiting 的迁移规则收敛到两层 token：通用层使用生成的 `KaiBrandMobileType` / `KaiBrandDesktopType`，产品特例使用 `KaiProductTokens`。业务 UI 不直接承载数字型 `fontSize`；新增字号先判断已有 `context.app*Size`，只有开卷特有的 chrome 角色才进入产品 token。
+
+图书正文是独立的内容层：字号、行高、字距、段间距和字体栈由 `BookReadingPreferences` 与阅读器渲染链路提供，默认值与可调范围是功能参数，不迁入品牌或产品 chrome token。漫画内容为图像，不定义正文 `fontSize`。主题、组件和阅读器 chrome 的改动必须同时覆盖图书与漫画两类引擎。
+
 
 ### Accent（产品轴：ember 暖橙）
 

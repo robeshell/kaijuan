@@ -132,7 +132,7 @@ class AppSettingsPageHeader extends StatelessWidget {
               value,
               style: TextStyle(
                 color: context.settingsSecondary,
-                fontSize: 13,
+                fontSize: context.appCaptionSize,
                 height: 1.45,
               ),
             ),

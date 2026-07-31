@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme.dart';
+import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
@@ -104,7 +106,10 @@ class _BookAnnotationNoteSheetState extends State<_BookAnnotationNoteSheet> {
             children: [
               const Text(
                 '笔记',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: KaiProductTokens.typographyReaderAnnotationTitle,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               if (excerpt.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -113,7 +118,7 @@ class _BookAnnotationNoteSheetState extends State<_BookAnnotationNoteSheet> {
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: context.appCaptionSize,
                     height: 1.35,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
