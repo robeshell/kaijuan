@@ -10,6 +10,8 @@ import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../library/import/import_models.dart';
 import '../../library/import/wifi_transfer_service.dart';
+import '../../library/remote/remote_models.dart';
+import '../../library/remote/remote_source_controller.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
@@ -21,6 +23,8 @@ import '../widgets/selection_action_sheet.dart';
 import '../widgets/wifi_transfer_sheet.dart';
 import 'collections_screen.dart';
 import 'lists_screen.dart';
+import 'local_import_review_screen.dart';
+import 'remote_source_screen.dart';
 
 enum _LibraryLayout { grid, list }
 
@@ -58,6 +62,7 @@ class LibraryScreen extends StatefulWidget {
     required this.brand,
     required this.controller,
     this.wifiTransferService,
+    required this.remoteSourceController,
     this.readingPreferences,
     this.bookReadingPreferences,
   });
@@ -65,6 +70,7 @@ class LibraryScreen extends StatefulWidget {
   final BrandConfig brand;
   final LibraryController controller;
   final WifiTransferService? wifiTransferService;
+  final RemoteSourceController remoteSourceController;
   final ComicReadingPreferences? readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
 
@@ -98,6 +104,7 @@ class _LibraryScreenState extends State<LibraryScreen>
       action: _LibraryImportAction.cloud,
       icon: KaijuanIcons.cloud,
       label: '云端存储',
+      enabled: true,
     ),
     _ImportMenuOption(
       action: _LibraryImportAction.wifi,
@@ -109,6 +116,7 @@ class _LibraryScreenState extends State<LibraryScreen>
       action: _LibraryImportAction.onlineLibrary,
       icon: KaijuanIcons.globe,
       label: '在线书库',
+      enabled: true,
     ),
   ];
 
@@ -172,14 +180,14 @@ class _LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     final progress = showAppProgressSnackBar(context, '扫描中');
     final stopwatch = Stopwatch()..start();
-    ImportResult result;
+    ImportDiscoveryResult discovery;
     try {
       // Give the status chip a frame to paint before a fast empty-directory
       // scan completes and replaces it with the result message.
       await WidgetsBinding.instance.endOfFrame;
-      result = await widget.controller.scanDefaultDirectory();
+      discovery = await widget.controller.discoverDefaultImport();
     } catch (_) {
-      result = const ImportResult();
+      discovery = const ImportDiscoveryResult();
     } finally {
       const minimumVisible = Duration(milliseconds: 240);
       final remaining = minimumVisible - stopwatch.elapsed;
@@ -187,7 +195,41 @@ class _LibraryScreenState extends State<LibraryScreen>
       progress.close();
     }
     if (!mounted) return;
-    await _showScanSummary(result);
+    var paths = discovery.paths;
+    if (discovery.needsDownloadsAuthorization) {
+      final useFilePicker = Platform.isAndroid || Platform.isIOS;
+      final authorize = await showAppConfirmDialog(
+        context,
+        title: '访问下载目录',
+        message: useFilePicker
+            ? '系统不允许应用直接扫描公共下载目录，请在接下来的系统窗口中选择要导入的书籍。'
+            : '系统不允许应用直接读取公共下载目录，请在接下来的系统窗口中选择“下载”文件夹。',
+        cancelLabel: '暂不',
+        confirmLabel: useFilePicker ? '选择文件' : '选择目录',
+      );
+      if (authorize == true && mounted) {
+        final grantedPaths = useFilePicker
+            ? await widget.controller.pickFilesForReview()
+            : await widget.controller.pickDirectoryForReview(
+                initialDirectory: discovery.downloadsPath,
+              );
+        if (grantedPaths != null && grantedPaths.isNotEmpty) {
+          paths = {...paths, ...grantedPaths}.toList()..sort();
+        }
+      }
+    }
+    if (!mounted) return;
+    if (paths.isEmpty) {
+      await _showScanSummary(const ImportResult());
+      return;
+    }
+    final result = await LocalImportReviewScreen.open(
+      context,
+      paths: paths,
+      controller: widget.controller,
+    );
+    if (!mounted || result == null) return;
+    await _showImportSummary(result);
   }
 
   Future<void> _openWifiTransfer() async {
@@ -643,8 +685,19 @@ class _LibraryScreenState extends State<LibraryScreen>
       case _LibraryImportAction.autoScan:
         await _scanDirectory();
       case _LibraryImportAction.cloud:
+        await RemoteSourceManagementScreen.open(
+          context,
+          type: RemoteSourceType.webDav,
+          remote: widget.remoteSourceController,
+          libraryController: widget.controller,
+        );
       case _LibraryImportAction.onlineLibrary:
-        return;
+        await RemoteSourceManagementScreen.open(
+          context,
+          type: RemoteSourceType.opds,
+          remote: widget.remoteSourceController,
+          libraryController: widget.controller,
+        );
       case _LibraryImportAction.wifi:
         await _openWifiTransfer();
     }

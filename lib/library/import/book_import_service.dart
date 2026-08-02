@@ -1,5 +1,6 @@
 import 'dart:io';
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../domain/reader_models.dart';
@@ -10,6 +11,7 @@ import '../storage/library_paths.dart';
 import 'import_models.dart';
 import 'import_sources.dart';
 import 'import_staging.dart';
+import 'default_cover_generator.dart';
 
 /// Imports reflow EPUB into content-addressed storage for the book app.
 class BookImportService {
@@ -40,6 +42,52 @@ class BookImportService {
   ImportStagingArea get stagingArea => _staging;
 
   EpubImportProbe get probe => _probe;
+
+  /// Backfills the deterministic cover for books imported by older versions.
+  ///
+  /// New imports go through [_stageCover], but older rows may legitimately
+  /// have no cover path because the source did not contain artwork. Keeping
+  /// the repair here means every import entry point and the startup migration
+  /// use exactly the same cover generation and storage rules.
+  Future<int> ensureDefaultCovers() async {
+    final query = database.select(database.readingItems)
+      ..where(
+        (t) =>
+            t.kind.equals(ReaderKind.book.storageValue) &
+            (t.coverPath.isNull() | t.coverPath.equals('')),
+      );
+    final items = await query.get();
+    var repaired = 0;
+    for (final item in items) {
+      try {
+        final staged = await _staging.stageCover(
+          hash: DefaultCoverGenerator.storageKey(item.contentHash),
+          extension: '.png',
+          bytes: await DefaultCoverGenerator.png(
+            seed: item.contentHash,
+            title: item.title,
+          ),
+        );
+        final coverPath = await staged.commit();
+        try {
+          await (database.update(database.readingItems)
+                ..where((t) => t.id.equals(item.id)))
+              .write(ReadingItemsCompanion(coverPath: Value(coverPath)));
+        } catch (_) {
+          await rollbackStagedFiles([staged]);
+          rethrow;
+        }
+        repaired++;
+      } catch (error) {
+        // A legacy row must not prevent the library from opening. The next
+        // launch can retry a failed repair after the storage becomes writable.
+        debugPrint(
+          '[Library] default cover repair skipped for ${item.id}: $error',
+        );
+      }
+    }
+    return repaired;
+  }
 
   Future<ImportResult> importPaths(List<String> paths) async {
     var added = 0;
@@ -169,8 +217,6 @@ class BookImportService {
         throw const FoliateImportException('图书没有可阅读的正文');
       }
       trace.mark('metadata-ready');
-      cover = await _stageCover(hash, metadata);
-      trace.mark('cover-staged');
       final fallbackTitle = p.basenameWithoutExtension(candidate.displayName);
       final title = titleOverride?.trim().isNotEmpty == true
           ? titleOverride!.trim()
@@ -179,6 +225,12 @@ class BookImportService {
           : fallbackTitle;
 
       final existing = await database.readingItemByHash(hash);
+      cover = await _stageCover(
+        hash,
+        metadata,
+        title: existing?.title ?? title,
+      );
+      trace.mark('cover-staged');
 
       final storedPath = await content.file.commit();
       final coverPath = await cover?.commit();
@@ -214,10 +266,17 @@ class BookImportService {
 
   Future<StagedImportFile?> _stageCover(
     String hash,
-    FoliateImportSnapshot metadata,
-  ) async {
+    FoliateImportSnapshot metadata, {
+    required String title,
+  }) async {
     final bytes = metadata.coverBytes;
-    if (bytes == null || bytes.isEmpty) return null;
+    if (bytes == null || bytes.isEmpty) {
+      return _staging.stageCover(
+        hash: DefaultCoverGenerator.storageKey(hash),
+        extension: '.png',
+        bytes: await DefaultCoverGenerator.png(seed: hash, title: title),
+      );
+    }
     final extension = switch (metadata.coverMimeType?.toLowerCase()) {
       'image/png' => '.png',
       'image/webp' => '.webp',

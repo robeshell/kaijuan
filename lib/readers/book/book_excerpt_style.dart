@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 
 /// Quote-card layout variants for book excerpts.
 enum BookExcerptLayout {
-  classic('经典'),
-  leftBar('左齐'),
-  largeQuote('大引号');
+  classic('书页'),
+  leftBar('左栏'),
+  largeQuote('引号框');
 
   const BookExcerptLayout(this.label);
   final String label;

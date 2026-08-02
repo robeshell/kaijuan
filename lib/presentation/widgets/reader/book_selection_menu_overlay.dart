@@ -14,6 +14,7 @@ import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
 import 'book_annotation_note_sheet.dart';
 import 'book_excerpt_sheet.dart';
+import '../../../readers/book/book_language_actions.dart';
 
 /// Two-phase selection menu (actions → markup) with edge-aware placement.
 class BookSelectionMenuOverlay extends StatelessWidget {
@@ -182,8 +183,16 @@ class BookSelectionMenuOverlay extends StatelessWidget {
             onCopy: () => _copy(context, text),
             onExcerpt: () => _excerpt(context, text),
             onNote: () => unawaited(_openNote(context)),
-            onDict: () => _soon(context, '词典'),
-            onTranslate: () => _soon(context, '翻译'),
+            onDict: () => unawaited(
+              _openLanguage(context, BookLanguageOperation.dictionary, text),
+            ),
+            onTranslate: () => unawaited(
+              _openLanguage(
+                context,
+                BookLanguageOperation.selectionTranslation,
+                text,
+              ),
+            ),
           )
         : _ActionsCard(
             placeAbove: placeAbove,
@@ -191,8 +200,16 @@ class BookSelectionMenuOverlay extends StatelessWidget {
             onUnderline: () => unawaited(controller.openMarkupPhase()),
             onNote: () => unawaited(_openNote(context)),
             onCopy: () => _copy(context, text),
-            onDict: () => _soon(context, '词典'),
-            onTranslate: () => _soon(context, '翻译'),
+            onDict: () => unawaited(
+              _openLanguage(context, BookLanguageOperation.dictionary, text),
+            ),
+            onTranslate: () => unawaited(
+              _openLanguage(
+                context,
+                BookLanguageOperation.selectionTranslation,
+                text,
+              ),
+            ),
             onSearch: () {
               final q = text.trim();
               controller.clearSelectionMenu();
@@ -306,8 +323,19 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     );
   }
 
-  void _soon(BuildContext context, String name) {
-    showAppSnackBar(context, '$name即将推出');
+  Future<void> _openLanguage(
+    BuildContext context,
+    BookLanguageOperation operation,
+    String text,
+  ) async {
+    final action = controller.performLanguageAction(
+      operation: operation,
+      textOverride: text,
+    );
+    controller.clearSelectionMenu();
+    final result = await action;
+    if (!context.mounted || result.handled) return;
+    showAppSnackBar(context, result.message ?? '当前设备暂不可用');
   }
 }
 
@@ -345,17 +373,9 @@ class _ActionsCard extends StatelessWidget {
             label: '划线',
             onPressed: onUnderline,
           ),
-          _ActionItem(
-            icon: KaijuanIcons.edit,
-            label: '笔记',
-            onPressed: onNote,
-          ),
+          _ActionItem(icon: KaijuanIcons.edit, label: '笔记', onPressed: onNote),
           _ActionItem(icon: KaijuanIcons.copy, label: '复制', onPressed: onCopy),
-          _ActionItem(
-            icon: KaijuanIcons.open,
-            label: '词典',
-            onPressed: onDict,
-          ),
+          _ActionItem(icon: KaijuanIcons.open, label: '词典', onPressed: onDict),
           _ActionItem(
             icon: KaijuanIcons.translate,
             label: '翻译',
@@ -464,17 +484,9 @@ class _MarkupCard extends StatelessWidget {
             label: '清空',
             onPressed: onClear,
           ),
-          _ActionItem(
-            icon: KaijuanIcons.edit,
-            label: '笔记',
-            onPressed: onNote,
-          ),
+          _ActionItem(icon: KaijuanIcons.edit, label: '笔记', onPressed: onNote),
           _ActionItem(icon: KaijuanIcons.copy, label: '复制', onPressed: onCopy),
-          _ActionItem(
-            icon: KaijuanIcons.open,
-            label: '词典',
-            onPressed: onDict,
-          ),
+          _ActionItem(icon: KaijuanIcons.open, label: '词典', onPressed: onDict),
           _ActionItem(
             icon: KaijuanIcons.translate,
             label: '翻译',
@@ -499,6 +511,8 @@ class _MarkupCard extends StatelessWidget {
 }
 
 class _Bubble extends StatelessWidget {
+  static const _minimumSurfaceOpacity = 0.96;
+
   const _Bubble({
     required this.placeAbove,
     required this.caretX,
@@ -512,7 +526,13 @@ class _Bubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final glass = context.appGlass;
-    final surface = glass.strongSurface;
+    // The selection menu sits directly over the reading page, so the shared
+    // strong glass surface still lets a little too much text show through.
+    // Keep skin-specific colors, but make this transient menu slightly more
+    // opaque without changing every other strong glass surface in the app.
+    final surface = glass.strongSurface.withValues(
+      alpha: math.max(glass.strongSurface.a, _minimumSurfaceOpacity),
+    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

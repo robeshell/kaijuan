@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../presentation/widgets/app_components.dart';
 import 'app_update_installer.dart';
 import 'app_update_models.dart';
 import 'app_update_service.dart';
@@ -15,11 +16,14 @@ Future<void> showAppUpdateFlow(
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,
-        builder: (ctx) => AlertDialog(
+        builder: (ctx) => AppDialog(
           title: const Text('检查更新'),
           content: Text(message),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('好'),
+            ),
           ],
         ),
       );
@@ -27,11 +31,14 @@ Future<void> showAppUpdateFlow(
       if (silentWhenUpToDate || !context.mounted) return;
       await showDialog<void>(
         context: context,
-        builder: (ctx) => AlertDialog(
+        builder: (ctx) => AppDialog(
           title: const Text('检查更新'),
           content: Text('已是最新版本（$currentVersion）'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('好'),
+            ),
           ],
         ),
       );
@@ -104,7 +111,7 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
   @override
   Widget build(BuildContext context) {
     final release = widget.release;
-    return AlertDialog(
+    return AppDialog(
       title: Text(release.force ? '需要更新' : '发现新版本'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -121,7 +128,10 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
           ],
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ],
         ],
       ),

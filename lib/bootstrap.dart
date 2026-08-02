@@ -16,6 +16,8 @@ import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/import/import_staging.dart';
 import 'library/import/wifi_transfer_service.dart';
+import 'library/remote/remote_source_controller.dart';
+import 'library/remote/remote_store.dart';
 import 'library/persistence/app_database.dart';
 import 'library/storage/library_paths.dart';
 import 'presentation/controllers/library_controller.dart';
@@ -99,6 +101,7 @@ Widget _readyApp(_BootServices services) {
     bookReadingPreferences: services.bookReadingPreferences,
     libraryController: services.libraryController,
     wifiTransferService: services.wifiTransferService,
+    remoteSourceController: services.remoteSourceController,
   );
 }
 
@@ -110,6 +113,7 @@ class _BootServices {
     required this.bookReadingPreferences,
     required this.libraryController,
     required this.wifiTransferService,
+    required this.remoteSourceController,
   });
 
   final BrandConfig brand;
@@ -118,6 +122,7 @@ class _BootServices {
   final BookReadingPreferences bookReadingPreferences;
   final LibraryController libraryController;
   final WifiTransferService wifiTransferService;
+  final RemoteSourceController remoteSourceController;
 }
 
 Future<_BootServices> _loadBootServices() async {
@@ -164,22 +169,35 @@ Future<_BootServices> _loadBootServices() async {
       '[Library] rebound $rebound item path(s) to current support root',
     );
   }
+  final comicImportService = ComicImportService(
+    database: database,
+    supportDirectory: supportDir,
+  );
+  final bookImportService = BookImportService(
+    database: database,
+    supportDirectory: supportDir,
+  );
+  final repairedCovers = await bookImportService.ensureDefaultCovers();
+  if (repairedCovers > 0) {
+    debugPrint('[Library] generated $repairedCovers missing book cover(s)');
+  }
   final libraryController = LibraryController(
     database: database,
-    comicImportService: ComicImportService(
-      database: database,
-      supportDirectory: supportDir,
-    ),
-    bookImportService: BookImportService(
-      database: database,
-      supportDirectory: supportDir,
-    ),
+    comicImportService: comicImportService,
+    bookImportService: bookImportService,
     importExtensions: brand.importExtensions,
   );
   final wifiTransferService = WifiTransferService(
     supportDirectory: supportDir,
     onImport: (candidate) => libraryController.importCandidates([candidate]),
   );
+  final remoteSourceController = RemoteSourceController(
+    connectionStore: JsonRemoteConnectionStore(
+      File(p.join(supportDir.path, 'remote_connections.json')),
+    ),
+    credentialStore: SecureRemoteCredentialStore(),
+  );
+  await remoteSourceController.load();
 
   return _BootServices(
     brand: brand,
@@ -188,6 +206,7 @@ Future<_BootServices> _loadBootServices() async {
     bookReadingPreferences: bookReadingPreferences,
     libraryController: libraryController,
     wifiTransferService: wifiTransferService,
+    remoteSourceController: remoteSourceController,
   );
 }
 

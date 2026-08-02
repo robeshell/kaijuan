@@ -43,7 +43,6 @@ class BookExcerptCard extends StatelessWidget {
             BookExcerptLayout.classic => _ClassicBody(
               quote: quote,
               bookTitle: bookTitle,
-              chapterTitle: chapterTitle,
               subtitle: subtitle,
               palette: palette,
             ),
@@ -72,20 +71,17 @@ class _ClassicBody extends StatelessWidget {
   const _ClassicBody({
     required this.quote,
     required this.bookTitle,
-    required this.chapterTitle,
     required this.subtitle,
     required this.palette,
   });
 
   final String quote;
   final String bookTitle;
-  final String? chapterTitle;
   final String? subtitle;
   final BookExcerptPalette palette;
 
   @override
   Widget build(BuildContext context) {
-    final chapter = chapterTitle?.trim() ?? '';
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -97,27 +93,11 @@ class _ClassicBody extends StatelessWidget {
           style: TextStyle(
             color: palette.foreground,
             fontSize: KaiProductTokens.typographyReaderExcerptTitle,
-            height: 1.55,
-            fontWeight: FontWeight.w400,
+            height: 1.65,
+            fontWeight: FontWeight.w500,
           ),
         ),
-        const SizedBox(height: 20),
-        Container(height: 1, color: palette.accent.withValues(alpha: 0.45)),
-        const SizedBox(height: 16),
-        if (chapter.isNotEmpty) ...[
-          Text(
-            '—— $chapter ——',
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: palette.muted,
-              fontSize: context.appCaptionSize,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
+        const SizedBox(height: 24),
         Text(
           bookTitle,
           textAlign: TextAlign.center,
@@ -139,22 +119,36 @@ class _ClassicBody extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: palette.muted,
-              fontSize: context.appCaptionSize,
+              fontSize: context.appCaptionSmallSize,
             ),
           ),
         ],
         const SizedBox(height: 18),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Text(
-            BrandConfig.app.displayName,
-            style: TextStyle(
-              color: palette.accent,
-              fontSize: context.appCaptionSmallSize,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.3,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 18,
+              height: 1,
+              color: palette.accent.withValues(alpha: 0.65),
             ),
-          ),
+            const SizedBox(width: 8),
+            Text(
+              BrandConfig.app.displayName,
+              style: TextStyle(
+                color: palette.accent,
+                fontSize: context.appCaptionSmallSize,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              width: 18,
+              height: 1,
+              color: palette.accent.withValues(alpha: 0.65),
+            ),
+          ],
         ),
       ],
     );
@@ -183,6 +177,20 @@ class _LeftBarBody extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (chapter.isNotEmpty) ...[
+          Text(
+            chapter,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: palette.muted,
+              fontSize: context.appCaptionSmallSize,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -211,20 +219,7 @@ class _LeftBarBody extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 20),
-        if (chapter.isNotEmpty) ...[
-          Text(
-            chapter,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: palette.muted,
-              fontSize: context.appCaptionSize,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 6),
-        ],
+        const SizedBox(height: 22),
         Text(
           bookTitle,
           maxLines: 2,
@@ -286,28 +281,47 @@ class _LargeQuoteBody extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '"”',
-          style: TextStyle(
-            color: palette.accent.withValues(alpha: 0.7),
-            fontSize: KaiProductTokens.typographyReaderExcerptQuote,
-            height: 0.75,
-            fontWeight: FontWeight.w300,
-          ),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: palette.accent.withValues(alpha: 0.62),
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 26, 20, 28),
+              child: Text(
+                quote,
+                textAlign: TextAlign.left,
+                maxLines: BookExcerptCard.maxQuoteLines,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: palette.foreground,
+                  fontSize: KaiProductTokens.typographyReaderChapterTitle,
+                  height: 1.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              top: -8,
+              child: _QuoteMark(text: '“', palette: palette),
+            ),
+            Positioned(
+              right: 12,
+              bottom: -20,
+              child: _QuoteMark(
+                text: '”',
+                palette: palette,
+                maskBackground: false,
+              ),
+            ),
+          ],
         ),
-        Text(
-          quote,
-          textAlign: TextAlign.left,
-          maxLines: BookExcerptCard.maxQuoteLines,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: palette.foreground,
-            fontSize: KaiProductTokens.typographyReaderChapterTitle,
-            height: 1.5,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 28),
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -359,6 +373,42 @@ class _LargeQuoteBody extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _QuoteMark extends StatelessWidget {
+  const _QuoteMark({
+    required this.text,
+    required this.palette,
+    this.maskBackground = true,
+  });
+
+  final String text;
+  final BookExcerptPalette palette;
+  final bool maskBackground;
+
+  @override
+  Widget build(BuildContext context) {
+    final mark = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: palette.accent,
+          fontSize: KaiProductTokens.typographyReaderExcerptQuote,
+          height: 0.75,
+          fontWeight: FontWeight.w300,
+        ),
+      ),
+    );
+    if (!maskBackground) return mark;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: mark,
     );
   }
 }

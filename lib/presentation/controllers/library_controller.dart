@@ -33,6 +33,13 @@ enum LibraryKindFilter {
   };
 }
 
+typedef ImportDirectoryPicker =
+    Future<String?> Function({String? initialDirectory});
+
+Future<String?> _defaultImportDirectoryPicker({String? initialDirectory}) {
+  return getDirectoryPath(initialDirectory: initialDirectory);
+}
+
 /// Presentation-facing library state. Screens subscribe to this; they do not
 /// touch drift or the import service directly.
 class LibraryController extends ChangeNotifier {
@@ -42,6 +49,8 @@ class LibraryController extends ChangeNotifier {
     required BookImportService bookImportService,
     ImportPipeline? importPipeline,
     Future<Directory> Function()? documentsDirectoryProvider,
+    Future<Directory?> Function()? downloadsDirectoryProvider,
+    ImportDirectoryPicker? directoryPicker,
     this.importExtensions = const [
       'cbz',
       'zip',
@@ -59,6 +68,9 @@ class LibraryController extends ChangeNotifier {
        _bookImport = bookImportService,
        _documentsDirectoryProvider =
            documentsDirectoryProvider ?? getApplicationDocumentsDirectory,
+       _downloadsDirectoryProvider =
+           downloadsDirectoryProvider ?? getDownloadsDirectory,
+       _directoryPicker = directoryPicker ?? _defaultImportDirectoryPicker,
        _importPipeline =
            importPipeline ??
            ImportPipeline(
@@ -70,6 +82,8 @@ class LibraryController extends ChangeNotifier {
   final ComicImportService _comicImport;
   final BookImportService _bookImport;
   final Future<Directory> Function() _documentsDirectoryProvider;
+  final Future<Directory?> Function() _downloadsDirectoryProvider;
+  final ImportDirectoryPicker _directoryPicker;
   final ImportPipeline _importPipeline;
 
   /// File picker extensions (no dots), from [BrandConfig].
@@ -210,8 +224,28 @@ class LibraryController extends ChangeNotifier {
 
   /// Opens the system file picker. Returns null when the user cancels.
   Future<ImportResult?> pickAndImport() async {
+    final paths = await pickFilesForReview();
+    if (paths == null) return null;
+    if (paths.isEmpty) {
+      return const ImportResult(
+        failures: [
+          ImportFailure(path: '', reason: '无法读取所选文件路径，请换一本或换一个文件管理器再试'),
+        ],
+      );
+    }
+    return importCandidates([
+      for (final path in paths)
+        ImportCandidate(source: LocalFileImportSource.picked(path)),
+    ]);
+  }
+
+  /// Opens the system file picker and returns paths for the review screen.
+  /// Mobile platforms use file selection rather than traversing a directory
+  /// path: Android's SAF and iOS Files can grant individual files reliably,
+  /// while a raw public-folder path is not guaranteed to be readable.
+  Future<List<String>?> pickFilesForReview() async {
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return _pickAndImportAndroid();
+      return _pickAndroidPathsForReview();
     }
     // Desktop uses extensions; iOS ignores them and requires UTIs
     // (file_selector_ios throws without uniformTypeIdentifiers).
@@ -229,10 +263,7 @@ class LibraryController extends ChangeNotifier {
     );
     final files = await openFiles(acceptedTypeGroups: [typeGroup]);
     if (files.isEmpty) return null;
-    return importCandidates([
-      for (final f in files)
-        ImportCandidate(source: LocalFileImportSource.picked(f.path)),
-    ]);
+    return [for (final f in files) f.path];
   }
 
   /// Android SAF via [FilePicker] without loading whole-file bytes.
@@ -240,7 +271,7 @@ class LibraryController extends ChangeNotifier {
   /// Upstream [file_selector] Android impl allocates `byte[size]` for every
   /// pick and OOMs on large CBZ/EPUB (flutter/flutter#141002). We only need a
   /// filesystem path for staging; [importPaths] still rejects bad extensions.
-  Future<ImportResult?> _pickAndImportAndroid() async {
+  Future<List<String>?> _pickAndroidPathsForReview() async {
     // Several document providers omit application/epub+zip, so do not filter
     // by MIME/extension in the picker — reject after selection instead.
     final result = await FilePicker.pickFiles(type: FileType.any);
@@ -249,76 +280,197 @@ class LibraryController extends ChangeNotifier {
       for (final f in result.files)
         if (f.path != null && f.path!.isNotEmpty) f.path!,
     ];
-    if (paths.isEmpty) {
-      return const ImportResult(
-        failures: [
-          ImportFailure(path: '', reason: '无法读取所选文件路径，请换一本或换一个文件管理器再试'),
-        ],
-      );
-    }
-    return importCandidates([
-      for (final path in paths)
-        ImportCandidate(source: LocalFileImportSource.picked(path)),
-    ]);
+    return paths;
   }
 
   /// Opens a directory picker and recursively imports supported files.
   Future<ImportResult?> pickDirectoryAndImport() async {
     String? directory;
     try {
-      directory = await getDirectoryPath();
+      directory = await _directoryPicker();
     } catch (_) {
-      // Directory selection is not implemented by every platform plugin
-      // (notably the mobile implementations). Auto scan is best-effort, so a
-      // missing picker is simply an empty scan rather than an import failure.
+      // Directory selection is optional on platforms without a native folder
+      // picker. The explicit action remains cancellable rather than turning a
+      // picker limitation into an import failure.
       return null;
     }
     if (directory == null || directory.isEmpty) return null;
     return importDirectory(directory);
   }
 
-  /// Scans the app's user-facing Documents directory without opening a
-  /// platform folder picker. This is the source used by the library's
-  /// "自动扫描" action.
+  /// Scans the app Documents directory and the platform Downloads directory
+  /// without opening a folder picker. This is the source used by the
+  /// library's "自动扫描" action.
   Future<ImportResult> scanDefaultDirectory() {
-    return _runImport(() async {
-      final Directory directory;
-      try {
-        directory = await _documentsDirectoryProvider();
-      } catch (_) {
-        return const ImportResult();
-      }
-      return _importDirectoryContents(directory.path);
-    });
+    return _runImport(
+      () async {
+        final discovery = await _discoverDefaultImport();
+        return _importScannedPaths(discovery.paths);
+      },
+      busyResult: const ImportResult(
+        failures: [ImportFailure(path: '', reason: '已有导入任务在进行')],
+      ),
+    );
+  }
+
+  /// Finds supported files in the app Documents and platform Downloads
+  /// directories without importing them. The caller presents these paths for
+  /// confirmation before handing selected files to [importScannedPaths].
+  Future<ImportDiscoveryResult> discoverDefaultImport() {
+    return _runImport(
+      _discoverDefaultImport,
+      busyResult: const ImportDiscoveryResult(),
+    );
+  }
+
+  Future<List<String>> discoverDefaultImportPaths() {
+    return _runImport(
+      () async => (await _discoverDefaultImport()).paths,
+      busyResult: const <String>[],
+    );
+  }
+
+  /// Lets the user grant access to a directory through the platform picker,
+  /// then discovers supported files inside it. The picker is important on
+  /// sandboxed macOS and mobile platforms where a public Downloads path cannot
+  /// be read directly.
+  Future<List<String>?> pickDirectoryForReview({
+    String? initialDirectory,
+  }) async {
+    String? directory;
+    try {
+      directory = await _directoryPicker(initialDirectory: initialDirectory);
+    } catch (_) {
+      return null;
+    }
+    if (directory == null || directory.isEmpty) return null;
+    return discoverImportPaths(directory);
+  }
+
+  Future<List<String>> discoverImportPaths(String directoryPath) {
+    return _runImport(
+      () => _discoverImportPaths([directoryPath]),
+      busyResult: const <String>[],
+    );
   }
 
   /// Recursively finds supported files and feeds them into the same pipeline
   /// used by local file selection.
   Future<ImportResult> importDirectory(String directoryPath) {
-    return _runImport(() => _importDirectoryContents(directoryPath));
+    return _runImport(
+      () async {
+        final paths = await _discoverImportPaths([directoryPath]);
+        return _importScannedPaths(paths);
+      },
+      busyResult: const ImportResult(
+        failures: [ImportFailure(path: '', reason: '已有导入任务在进行')],
+      ),
+    );
   }
 
-  Future<ImportResult> _importDirectoryContents(String directoryPath) async {
-    final directory = Directory(directoryPath);
+  Future<ImportResult> importScannedPaths(Iterable<String> paths) {
+    return _runImport(
+      () => _importScannedPaths(paths),
+      busyResult: const ImportResult(
+        failures: [ImportFailure(path: '', reason: '已有导入任务在进行')],
+      ),
+    );
+  }
+
+  Future<ImportDiscoveryResult> _discoverDefaultImport() async {
     final paths = <String>[];
     try {
+      paths.addAll(
+        await _discoverImportPaths([
+          (await _documentsDirectoryProvider()).path,
+        ]),
+      );
+    } catch (_) {
+      // Keep scanning if the platform documents directory is unavailable.
+    }
+
+    // iOS and Android intentionally do not use path_provider's downloads
+    // result here. On iOS it is not a public Files location, and on Android it
+    // is the app-specific external files directory rather than the user's
+    // shared Download folder. Both platforms must use a system picker grant.
+    if (Platform.isIOS || Platform.isAndroid) {
+      return ImportDiscoveryResult(
+        paths: paths,
+        downloadsAvailability: ImportDirectoryAvailability.needsAuthorization,
+      );
+    }
+
+    String? downloadsPath;
+    var downloadsAvailability = ImportDirectoryAvailability.unavailable;
+    try {
+      final directory = await _downloadsDirectoryProvider();
+      if (directory != null) {
+        downloadsPath = directory.path;
+        final scan = await _discoverImportDirectory(directory.path);
+        if (scan.readable) {
+          paths.addAll(scan.paths);
+          downloadsAvailability = ImportDirectoryAvailability.available;
+        } else {
+          downloadsAvailability =
+              ImportDirectoryAvailability.needsAuthorization;
+        }
+      } else {
+        downloadsAvailability = ImportDirectoryAvailability.needsAuthorization;
+      }
+    } catch (_) {
+      downloadsAvailability = ImportDirectoryAvailability.needsAuthorization;
+    }
+
+    return ImportDiscoveryResult(
+      paths: paths.toSet().toList()..sort(),
+      downloadsAvailability: downloadsAvailability,
+      downloadsPath: downloadsPath,
+    );
+  }
+
+  Future<List<String>> _discoverImportPaths(
+    Iterable<String> directoryPaths,
+  ) async {
+    final paths = <String>{};
+    for (final directoryPath in directoryPaths) {
+      final scan = await _discoverImportDirectory(directoryPath);
+      paths.addAll(scan.paths);
+    }
+    final sortedPaths = paths.toList()..sort();
+    return sortedPaths;
+  }
+
+  Future<({List<String> paths, bool readable})> _discoverImportDirectory(
+    String directoryPath,
+  ) async {
+    final directory = Directory(directoryPath);
+    final paths = <String>{};
+    try {
       if (!await directory.exists()) {
-        return const ImportResult();
+        return (paths: const <String>[], readable: false);
       }
       await for (final entity in directory.list(
         recursive: true,
         followLinks: false,
       )) {
         if (entity is! File) continue;
-        if (_isSupportedImportFile(entity.path)) paths.add(entity.path);
+        if (_isSupportedImportFile(entity.path)) {
+          paths.add(p.normalize(p.absolute(entity.path)));
+        }
       }
+      return (paths: paths.toList()..sort(), readable: true);
     } catch (_) {
-      return const ImportResult();
+      // A permission error in one source must not block another source, but it
+      // must be surfaced so the UI can ask the user for a picker grant.
+      return (paths: const <String>[], readable: false);
     }
-    paths.sort();
-    if (paths.isEmpty) return const ImportResult();
+  }
+
+  Future<ImportResult> _importScannedPaths(Iterable<String> paths) {
+    final sortedPaths = paths.toList()..sort();
+    if (sortedPaths.isEmpty) return Future.value(const ImportResult());
     return _importPipeline.importCandidates([
-      for (final path in paths)
+      for (final path in sortedPaths)
         ImportCandidate(source: LocalFileImportSource.scanned(path)),
     ]);
   }
@@ -343,16 +495,20 @@ class LibraryController extends ChangeNotifier {
   Future<ImportResult> importCandidates(
     Iterable<ImportCandidate> candidates,
   ) async {
-    return _runImport(() => _importPipeline.importCandidates(candidates));
+    return _runImport(
+      () => _importPipeline.importCandidates(candidates),
+      busyResult: const ImportResult(
+        failures: [ImportFailure(path: '', reason: '已有导入任务在进行')],
+      ),
+    );
   }
 
-  Future<ImportResult> _runImport(
-    Future<ImportResult> Function() operation,
-  ) async {
+  Future<T> _runImport<T>(
+    Future<T> Function() operation, {
+    required T busyResult,
+  }) async {
     if (_importing) {
-      return const ImportResult(
-        failures: [ImportFailure(path: '', reason: '已有导入任务在进行')],
-      );
+      return busyResult;
     }
     _importing = true;
     notifyListeners();

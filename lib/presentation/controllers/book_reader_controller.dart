@@ -11,6 +11,7 @@ import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/book/book_models.dart';
 import '../../readers/book/book_theme.dart';
+import '../../readers/book/book_language_actions.dart';
 import '../../readers/book/foliate_js_bridge.dart';
 
 /// Listen-to-book playback state (system TTS).
@@ -25,8 +26,11 @@ class BookReaderController extends ChangeNotifier {
     required this.database,
     required this.item,
     BookReadingPreferences? readingPreferences,
+    BookLanguageProvider? languageProvider,
     this.scrollModeEnabled = true,
-  }) : _prefs = readingPreferences,
+  }) : languageProvider =
+           languageProvider ?? const PlatformBookLanguageProvider(),
+       _prefs = readingPreferences,
        _fontSize =
            readingPreferences?.fontSize ??
            BookReadingPreferences.defaultFontSize,
@@ -44,7 +48,8 @@ class BookReaderController extends ChangeNotifier {
        _brightness =
            readingPreferences?.brightness ??
            BookReadingPreferences.defaultBrightness,
-       _fontSelection = readingPreferences?.fontSelection ??
+       _fontSelection =
+           readingPreferences?.fontSelection ??
            BookReadingPreferences.defaultFontSelection,
        _letterSpacing =
            readingPreferences?.letterSpacing ??
@@ -78,6 +83,7 @@ class BookReaderController extends ChangeNotifier {
 
   final AppDatabase database;
   final ReadingItem item;
+  final BookLanguageProvider languageProvider;
   final BookReadingPreferences? _prefs;
   final bool scrollModeEnabled;
 
@@ -116,23 +122,29 @@ class BookReaderController extends ChangeNotifier {
   List<BookAnnotation> _annotations = const [];
   StreamSubscription<List<BookAnnotation>>? _annotationsSubscription;
   BookSelectionMenu? _selectionMenu;
+
   /// Brief lock while pressing the Flutter bubble / applying a style.
   bool _selectionClearLocked = false;
   Timer? _selectionClearLockTimer;
+
   /// Until this instant, the mobile Flutter dismiss-barrier ignores taps.
   ///
   /// Opening the menu often races the same finger-up that finished the
   /// selection; without a grace window that pointer hits the barrier and used
   /// to dismiss (and historically also page-turn on edge zones).
   DateTime? _selectionMenuBarrierArmAt;
+
   /// Until this instant, edge/tap page-turns from the WebView are ignored.
   /// Covers the race where `onClick` arrives before/with `onSelectionEnd`.
   DateTime? _suppressPageTurnUntil;
+
   /// Foliate asks for annotations at open; DB watch may emit later.
   bool _annotationsHydrated = false;
   bool _annotationsRenderRequested = false;
+
   /// Ignore overlayer taps right after dismiss (same click would reopen ②).
   DateTime? _ignoreAnnotationClickUntil;
+
   /// Last tab in the nav drawer (目录 / 书签 / 笔记).
   int _navDrawerTabIndex = 0;
 
@@ -166,14 +178,18 @@ class BookReaderController extends ChangeNotifier {
   double _ttsRate = 1.0;
   String? _ttsCurrentText;
   int _ttsGeneration = 0;
+
   /// Completes when the active play loop exits.
   Completer<void>? _ttsLoopIdle;
+
   /// Completes when the armed utterance ends (complete / cancel).
   Completer<void>? _ttsUtteranceDone;
+
   /// Only accept engine complete/cancel after [setStartHandler] for this speak.
   /// Prevents a stale `stop()` cancel from closing the *next* utterance gate
   /// (that race was advancing Foliate on rate change).
   bool _ttsUtteranceArmed = false;
+
   /// Optional one-shot message for UI snackbars (cleared by screen).
   String? ttsUserMessage;
   String? _renditionCfi;
@@ -216,6 +232,7 @@ class BookReaderController extends ChangeNotifier {
             '用户字体';
     }
   }
+
   double get letterSpacing => _letterSpacing;
   double get paragraphSpacing => _paragraphSpacing;
   BookTextAlign get textAlign => _textAlign;
@@ -240,8 +257,9 @@ class BookReaderController extends ChangeNotifier {
 
   void _armSelectionMenuDismissBarrier() {
     // Long enough to absorb selection finger-up / iOS Platform View handoff.
-    _selectionMenuBarrierArmAt =
-        DateTime.now().add(const Duration(milliseconds: 450));
+    _selectionMenuBarrierArmAt = DateTime.now().add(
+      const Duration(milliseconds: 450),
+    );
   }
 
   /// True while a just-finished selection should not trigger edge page-turns.
@@ -252,9 +270,11 @@ class BookReaderController extends ChangeNotifier {
   }
 
   void _armPageTurnSuppressAfterSelection() {
-    _suppressPageTurnUntil =
-        DateTime.now().add(const Duration(milliseconds: 900));
+    _suppressPageTurnUntil = DateTime.now().add(
+      const Duration(milliseconds: 900),
+    );
   }
+
   int get navDrawerTabIndex => _navDrawerTabIndex;
 
   bool get searchOpen => _searchOpen;
@@ -494,9 +514,7 @@ class BookReaderController extends ChangeNotifier {
   void pushAnnotationsToEngine() {
     final render = _renderAnnotations;
     if (render == null) return;
-    render([
-      for (final annotation in _annotations) annotation.toFoliateJson(),
-    ]);
+    render([for (final annotation in _annotations) annotation.toFoliateJson()]);
     _annotationsRenderRequested = false;
   }
 
@@ -873,8 +891,9 @@ class BookReaderController extends ChangeNotifier {
     _selectionClearLocked = false;
     _selectionMenuBarrierArmAt = null;
     // Same pointer that dismissed can hit the overlayer next — ignore briefly.
-    _ignoreAnnotationClickUntil =
-        DateTime.now().add(const Duration(milliseconds: 800));
+    _ignoreAnnotationClickUntil = DateTime.now().add(
+      const Duration(milliseconds: 800),
+    );
     if (_selectionMenu == null) {
       _setMenuOpen?.call(false);
       _setMenuCursorZone?.call(null);
@@ -932,6 +951,22 @@ class BookReaderController extends ChangeNotifier {
     return true;
   }
 
+  Future<BookLanguageActionResult> performLanguageAction({
+    required BookLanguageOperation operation,
+    String? textOverride,
+  }) {
+    final menu = _selectionMenu;
+    final text = (textOverride ?? _selectionMenu?.text ?? '').trim();
+    return languageProvider.execute(
+      BookLanguageRequest(
+        operation: operation,
+        text: text,
+        itemId: item.id,
+        cfi: menu?.cfi,
+      ),
+    );
+  }
+
   /// Legacy clipboard excerpt helper (金句卡走 [showBookExcerptSheet]).
   Future<bool> copyExcerpt({String? textOverride}) =>
       copySelection(textOverride: textOverride);
@@ -958,8 +993,7 @@ class BookReaderController extends ChangeNotifier {
     if (_disposed) return;
     // Keep note in the engine payload so the「注」bubble is not dropped on
     // style-only upserts (JS replace-by-cfi).
-    final existingNote =
-        _selectionMenu?.note ?? _annotationForCfi(cfi)?.note;
+    final existingNote = _selectionMenu?.note ?? _annotationForCfi(cfi)?.note;
     _addAnnotationToEngine?.call({
       'id': id,
       'value': cfi,
@@ -1070,8 +1104,8 @@ class BookReaderController extends ChangeNotifier {
     final cfi = annotation.cfi.trim();
     if (cfi.isEmpty) return;
     final fromCfi = BookLocator.sectionIndexFromCfi(cfi);
-    final sectionIndex = (fromCfi != null &&
-            (sectionCount <= 0 || fromCfi < sectionCount))
+    final sectionIndex =
+        (fromCfi != null && (sectionCount <= 0 || fromCfi < sectionCount))
         ? fromCfi
         : _sectionIndex;
     _sectionIndex = sectionIndex;
@@ -1155,8 +1189,8 @@ class BookReaderController extends ChangeNotifier {
     final cfi = hit.cfi.trim();
     if (cfi.isEmpty) return;
     final fromCfi = BookLocator.sectionIndexFromCfi(cfi);
-    final sectionIndex = (fromCfi != null &&
-            (sectionCount <= 0 || fromCfi < sectionCount))
+    final sectionIndex =
+        (fromCfi != null && (sectionCount <= 0 || fromCfi < sectionCount))
         ? fromCfi
         : _sectionIndex;
     _sectionIndex = sectionIndex;
@@ -1201,10 +1235,7 @@ class BookReaderController extends ChangeNotifier {
     final existing = _annotationForCfi(key);
     if (trimmed.isEmpty && existing == null) return;
 
-    final resolvedType =
-        type ??
-        existing?.type ??
-        BookAnnotationType.underline;
+    final resolvedType = type ?? existing?.type ?? BookAnnotationType.underline;
     final resolvedColor = BookHighlightColor.fromCss(
       colorCss ?? existing?.colorCss ?? BookHighlightColor.yellow.css,
     );
@@ -1429,7 +1460,8 @@ class BookReaderController extends ChangeNotifier {
   Future<void> deleteUserFont(String id) async {
     final store = fontStore;
     if (store == null) return;
-    final wasSelected = _fontSelection.kind == BookFontKind.user &&
+    final wasSelected =
+        _fontSelection.kind == BookFontKind.user &&
         _fontSelection.userFontId == id;
     await store.deleteUserFont(id);
     if (wasSelected) {

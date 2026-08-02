@@ -159,7 +159,9 @@ const main = async () => {
       }),
       sampleSpineText(book),
     ])
-    await zipReader.close()
+    // MOBI/AZW3 books do not use a ZIP reader. EPUB/FBZ books do, but the
+    // probe must be able to finish successfully for both paths.
+    await zipReader?.close()
     zipReader = null
     await callFlutter('onMetadata', {
       ...(book.metadata || {}),

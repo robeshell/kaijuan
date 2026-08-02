@@ -29,6 +29,7 @@ class AppTextField extends StatelessWidget {
     this.maxLines = 1,
     this.minLines,
     this.expands = false,
+    this.obscureText = false,
     this.readOnly = false,
     this.decoration,
     this.style,
@@ -46,6 +47,7 @@ class AppTextField extends StatelessWidget {
   final int? maxLines;
   final int? minLines;
   final bool expands;
+  final bool obscureText;
   final bool readOnly;
   final InputDecoration? decoration;
   final TextStyle? style;
@@ -81,6 +83,7 @@ class AppTextField extends StatelessWidget {
       maxLines: maxLines,
       minLines: minLines,
       expands: expands,
+      obscureText: obscureText,
       readOnly: readOnly,
       style: inputStyle,
       decoration: resolvedDecoration,

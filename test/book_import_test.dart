@@ -3,8 +3,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/import/book_import_service.dart';
 import 'package:kaijuan/library/import/comic_import_service.dart';
@@ -235,12 +237,25 @@ void main() {
     expect(item.title, '小说');
     expect(item.pageCount, 1);
     expect(File(item.filePath).existsSync(), isTrue);
+    expect(item.coverPath, isNotNull);
+    final generatedCover = File(item.coverPath!);
+    expect(await generatedCover.exists(), isTrue);
+    expect(img.decodePng(await generatedCover.readAsBytes()), isNotNull);
 
     final r2 = await controller.importPaths([file.path]);
     expect(r2.added, 0);
     expect(r2.updated, 1);
     final after = await controller.watchLibraryEntries().first;
     expect(after, hasLength(1));
+
+    await (database.update(database.readingItems)
+          ..where((t) => t.id.equals(item.id)))
+        .write(const ReadingItemsCompanion(coverPath: Value(null)));
+    expect((await database.readingItemById(item.id))!.coverPath, isNull);
+    expect(await importService.ensureDefaultCovers(), 1);
+    final repaired = await database.readingItemById(item.id);
+    expect(repaired?.coverPath, isNotNull);
+    expect(await File(repaired!.coverPath!).exists(), isTrue);
   });
 
   test('image-only EPUB fails book import with friendly reason', () async {

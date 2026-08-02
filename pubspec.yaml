@@ -1,7 +1,7 @@
 name: kaijuan
 description: "开卷 — a local reader for page-image and reflow content."
 publish_to: 'none'
-version: 0.1.1+2
+version: 1.0.0+1
 
 environment:
   sdk: ^3.12.2
@@ -29,6 +29,8 @@ dependencies:
 
   package_info_plus: ^10.2.1
   http: ^1.6.0
+  xml: ^6.5.0
+  flutter_secure_storage: ^10.3.1
   open_filex: ^4.7.0
 
   # Book reader

@@ -92,6 +92,23 @@ class ImportResult {
   );
 }
 
+enum ImportDirectoryAvailability { available, needsAuthorization, unavailable }
+
+class ImportDiscoveryResult {
+  const ImportDiscoveryResult({
+    this.paths = const [],
+    this.downloadsAvailability = ImportDirectoryAvailability.unavailable,
+    this.downloadsPath,
+  });
+
+  final List<String> paths;
+  final ImportDirectoryAvailability downloadsAvailability;
+  final String? downloadsPath;
+
+  bool get needsDownloadsAuthorization =>
+      downloadsAvailability == ImportDirectoryAvailability.needsAuthorization;
+}
+
 class ImportException implements Exception {
   const ImportException(this.message);
 

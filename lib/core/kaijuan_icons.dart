@@ -10,6 +10,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 abstract final class KaijuanIcons {
   static const IconData add = FluentIcons.add_24_regular;
   static const IconData back = FluentIcons.arrow_left_24_regular;
+  static const IconData navigateUp = FluentIcons.arrow_turn_up_left_20_regular;
   static const IconData forward = FluentIcons.arrow_right_24_regular;
   static const IconData bookmark = FluentIcons.bookmark_24_regular;
   static const IconData bookmarkFilled = FluentIcons.bookmark_24_filled;
@@ -45,6 +46,7 @@ abstract final class KaijuanIcons {
   static const IconData edit = FluentIcons.edit_24_regular;
   static const IconData error = FluentIcons.error_circle_24_regular;
   static const IconData fontIncrease = FluentIcons.font_increase_24_regular;
+  static const IconData folder = FluentIcons.folder_24_regular;
   static const IconData grid = FluentIcons.grid_24_regular;
   static const IconData globe = FluentIcons.globe_24_regular;
   static const IconData headphones = FluentIcons.headphones_24_regular;
@@ -72,6 +74,7 @@ abstract final class KaijuanIcons {
   static const IconData removeFromCollection =
       FluentIcons.folder_prohibited_24_regular;
   static const IconData moveToCollection = FluentIcons.folder_add_24_regular;
+  static const IconData refresh = FluentIcons.arrow_clockwise_24_regular;
   static const IconData restore = FluentIcons.rectangle_landscape_24_regular;
   static const IconData search = FluentIcons.search_24_regular;
   static const IconData searchEmpty = FluentIcons.search_24_regular;
@@ -87,6 +90,8 @@ abstract final class KaijuanIcons {
   static const IconData translate = FluentIcons.translate_24_regular;
   static const IconData tune = FluentIcons.options_24_regular;
   static const IconData typography = FluentIcons.text_field_24_regular;
+  static const IconData visibility = FluentIcons.eye_24_regular;
+  static const IconData visibilityOff = FluentIcons.eye_off_24_regular;
   static const IconData underline = FluentIcons.text_underline_24_regular;
   static const IconData wavy = FluentIcons.text_underline_double_24_regular;
   static const IconData wifi = FluentIcons.wifi_1_24_regular;

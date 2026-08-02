@@ -37,7 +37,8 @@ class AppUpdateService {
         return const AppUpdateUnavailable('更新信息格式无效');
       }
       root = decoded;
-    } catch (_) {
+    } catch (error) {
+      debugPrint('AppUpdateService: check failed: $error');
       return const AppUpdateUnavailable('暂时无法检查更新');
     }
 
@@ -78,9 +79,7 @@ class AppUpdateService {
     required AppUpdateRelease remote,
     required bool preferBuildNumber,
   }) {
-    if (preferBuildNumber &&
-        remote.versionCode != null &&
-        localBuild != null) {
+    if (preferBuildNumber && remote.versionCode != null && localBuild != null) {
       return remote.versionCode! > localBuild;
     }
     return compareVersions(remote.version, localVersion) > 0;
@@ -103,7 +102,9 @@ class AppUpdateService {
     final core = raw.split(RegExp(r'[-+]')).first;
     return core
         .split('.')
-        .map((part) => int.tryParse(part.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)
+        .map(
+          (part) => int.tryParse(part.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0,
+        )
         .toList();
   }
 }

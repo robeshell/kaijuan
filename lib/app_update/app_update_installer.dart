@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,6 +11,10 @@ import 'app_update_models.dart';
 
 class AppUpdateInstaller {
   AppUpdateInstaller({http.Client? client}) : _client = client ?? http.Client();
+
+  static const _androidSystemChannel = MethodChannel(
+    'com.kaijuan.reader/system_media',
+  );
 
   final http.Client _client;
 
@@ -40,9 +44,12 @@ class AppUpdateInstaller {
       return;
     }
     if (Platform.isAndroid) {
-      final result = await OpenFilex.open(file.path);
-      if (result.type != ResultType.done) {
-        throw StateError(result.message);
+      try {
+        await _androidSystemChannel.invokeMethod<void>('installApk', {
+          'path': file.path,
+        });
+      } on PlatformException catch (error) {
+        throw StateError(error.message ?? '无法打开安装程序');
       }
       return;
     }

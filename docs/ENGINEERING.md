@@ -73,10 +73,18 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - `ImportCandidate` 是两层之间的边界，至少携带来源方式、显示名称、可重复读取的字节流和可选 MIME。
 - `ImportPipeline` 统一执行候选的 staging、SHA-256、格式路由、失败隔离和结果汇总。方式适配器不得绕过它直接落库。
 - `WifiTransferService` 只负责临时局域网 HTTP、会话令牌和上传临时文件；上传完成后必须以 `ImportMethod.wifi` 交给 `ImportPipeline`，不得直接写正式目录或数据库。
+- `RemoteSourceController` 负责 WebDAV / OPDS 连接记录、凭据访问、目录状态和远程导入队列；表现层不得直接持有 HTTP 客户端或安全存储。
+- WebDAV / OPDS 适配器只负责协议解析和远程字节流，必须把选中的文件转换为 `ImportCandidate`，再交给 `ImportPipeline`；不得直接写正式文件或数据库。
 
 详细的格式矩阵与方式状态见 [specs/import.md](./specs/import.md)。
 
 禁止：core 依赖某个品牌文案；image 引擎包 import book 引擎（仅 import service / router 可桥接）。
+
+### 图书语言能力边界
+
+- 选区词典 / 翻译由 `BookReaderController` 调用 `BookLanguageProvider`，表现层不直接持有平台通道。
+- 默认 `PlatformBookLanguageProvider` 只调用设备已有能力：Android 使用系统 Intent 选择器，Apple 使用系统词典 / Translation framework；不内置外网词典，也不发起网络请求。
+- `BookLanguageProvider` 的请求包含 `dictionary`、`selectionTranslation`、`fullBookTranslation` 三种操作；后续 AI Provider 可替换默认实现，承载单句结果或整本书任务，不改选区菜单协议。
 
 ### 图书排版实现
 

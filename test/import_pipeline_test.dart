@@ -23,10 +23,12 @@ Future<File> _writeCbz(Directory directory, String name) async {
 
 void main() {
   late Directory tempRoot;
+  Directory? downloadsRoot;
   late AppDatabase database;
   late LibraryController controller;
 
   setUp(() async {
+    downloadsRoot = null;
     tempRoot = await Directory.systemTemp.createTemp('kaijuan_import_');
     database = AppDatabase(NativeDatabase.memory());
     final book = BookImportService(
@@ -37,6 +39,8 @@ void main() {
     controller = LibraryController(
       database: database,
       documentsDirectoryProvider: () async => tempRoot,
+      downloadsDirectoryProvider: () async => downloadsRoot,
+      directoryPicker: ({String? initialDirectory}) async => tempRoot.path,
       comicImportService: ComicImportService(
         database: database,
         supportDirectory: tempRoot,
@@ -48,6 +52,9 @@ void main() {
   tearDown(() async {
     await database.close();
     if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
+    if (downloadsRoot != null && await downloadsRoot!.exists()) {
+      await downloadsRoot!.delete(recursive: true);
+    }
   });
 
   test('format and method remain independent', () {
@@ -112,6 +119,47 @@ void main() {
 
   test('automatic scan uses the app documents directory', () async {
     await _writeCbz(tempRoot, 'auto.cbz');
+
+    final result = await controller.scanDefaultDirectory();
+
+    expect(result.added, 1);
+    expect(result.failures, isEmpty);
+  });
+
+  test('automatic scan can review paths before importing them', () async {
+    await _writeCbz(tempRoot, 'review.cbz');
+
+    final paths = await controller.discoverDefaultImportPaths();
+
+    expect(paths, hasLength(1));
+    expect(await controller.watchLibraryEntries().first, isEmpty);
+
+    final result = await controller.importScannedPaths(paths);
+
+    expect(result.added, 1);
+    expect(result.failures, isEmpty);
+  });
+
+  test(
+    'reports unavailable downloads and can discover an authorized folder',
+    () async {
+      await _writeCbz(tempRoot, 'authorized.cbz');
+
+      final discovery = await controller.discoverDefaultImport();
+      final grantedPaths = await controller.pickDirectoryForReview(
+        initialDirectory: discovery.downloadsPath,
+      );
+
+      expect(discovery.needsDownloadsAuthorization, isTrue);
+      expect(grantedPaths, hasLength(1));
+      expect(p.basename(grantedPaths!.single), 'authorized.cbz');
+      expect(await controller.watchLibraryEntries().first, isEmpty);
+    },
+  );
+
+  test('automatic scan also includes the system downloads directory', () async {
+    downloadsRoot = await Directory.systemTemp.createTemp('kaijuan_downloads_');
+    await _writeCbz(downloadsRoot!, 'downloaded.cbz');
 
     final result = await controller.scanDefaultDirectory();
 
