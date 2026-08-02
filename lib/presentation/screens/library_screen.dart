@@ -89,6 +89,7 @@ class _LibraryScreenState extends State<LibraryScreen>
       action: _LibraryImportAction.autoScan,
       icon: KaijuanIcons.scan,
       label: '自动扫描',
+      enabled: true,
     ),
     _ImportMenuOption(
       action: _LibraryImportAction.cloud,
@@ -159,6 +160,12 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _import() async {
     final result = await widget.controller.pickAndImport();
+    if (!mounted || result == null) return;
+    await _showImportSummary(result);
+  }
+
+  Future<void> _scanDirectory() async {
+    final result = await widget.controller.pickDirectoryAndImport();
     if (!mounted || result == null) return;
     await _showImportSummary(result);
   }
@@ -525,7 +532,16 @@ class _LibraryScreenState extends State<LibraryScreen>
       context,
       title: '格式',
       actions: [
-        for (final value in const ['all', 'cbz', 'zip', 'epub'])
+        for (final value in const [
+          'all',
+          'cbz',
+          'zip',
+          'epub',
+          'fb2',
+          'mobi',
+          'azw3',
+          'pdf',
+        ])
           AppMenuAction(
             value: value,
             label: value == 'all' ? '全部格式' : value.toUpperCase(),
@@ -592,8 +608,17 @@ class _LibraryScreenState extends State<LibraryScreen>
   Future<void> _handleImportAction(_ImportMenuOption option) async {
     if (!option.enabled) return;
     await _closeImportMenu();
-    if (!mounted || option.action != _LibraryImportAction.localFile) return;
-    await _import();
+    if (!mounted) return;
+    switch (option.action) {
+      case _LibraryImportAction.localFile:
+        await _import();
+      case _LibraryImportAction.autoScan:
+        await _scanDirectory();
+      case _LibraryImportAction.cloud:
+      case _LibraryImportAction.wifi:
+      case _LibraryImportAction.onlineLibrary:
+        return;
+    }
   }
 
   Widget _buildImportMenu({
@@ -748,20 +773,13 @@ class _LibraryScreenState extends State<LibraryScreen>
   Widget _searchField({required Color accent}) {
     return SizedBox(
       height: 40,
-      child: TextField(
+      child: AppTextField(
         controller: _searchController,
         onChanged: (value) => setState(() => _query = value),
-        style: TextStyle(
-          fontSize: context.appLabelSize,
-          color: context.appPrimaryText,
-        ),
         decoration: InputDecoration(
           isDense: true,
           hintText: '搜索标题…',
-          hintStyle: TextStyle(
-            color: context.appSecondaryText,
-            fontSize: context.appLabelSize,
-          ),
+          hintStyle: TextStyle(color: context.appSecondaryText),
           prefixIcon: Icon(
             KaijuanIcons.search,
             size: 18,
@@ -1029,7 +1047,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                     content = AppEmptyState(
                       icon: KaijuanIcons.library,
                       title: '书库还是空的',
-                      message: '导入 CBZ、ZIP 或 EPUB 后会显示在这里。',
+                      message: '导入图书或漫画文件后会显示在这里。',
                     );
                   } else if (filtered.isEmpty && collections.isEmpty) {
                     content = AppEmptyState(
@@ -1410,10 +1428,9 @@ class _LibraryCollectionCard extends StatelessWidget {
                   summary.collection.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: context.appListTitleSize,
+                  style: context.appGridTitleStyle.copyWith(
+                    color: context.appPrimaryText,
                     fontWeight: FontWeight.w600,
-                    height: 1.2,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -1518,10 +1535,8 @@ class _GridCard extends StatelessWidget {
                   item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: context.appListTitleSize,
-                    fontWeight: FontWeight.w500,
-                    height: 1.2,
+                  style: context.appGridTitleStyle.copyWith(
+                    color: context.appPrimaryText,
                   ),
                 ),
                 const SizedBox(height: 2),

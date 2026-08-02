@@ -71,25 +71,45 @@ void main() {
     expect(post.statusCode, HttpStatus.methodNotAllowed);
   });
 
-  test('closing a session unmounts the book but keeps the shared origin', () async {
-    final first = await openSession();
-    final origin = first.indexUri.origin;
-    final bookUri = first.bookUri;
-    final client = HttpClient();
-    addTearDown(client.close);
+  test(
+    'loopback keeps the source extension and content type for PDF books',
+    () async {
+      bookFile = File('${tempDirectory.path}/book.pdf');
+      await bookFile.writeAsBytes([0x25, 0x50, 0x44, 0x46, 0x2d]);
+      final session = await openSession();
+      final client = HttpClient();
+      addTearDown(client.close);
 
-    await first.close();
-    sessions.remove(first);
+      final response = await (await client.getUrl(session.bookUri)).close();
 
-    final unmounted = await (await client.getUrl(bookUri)).close();
-    expect(unmounted.statusCode, HttpStatus.notFound);
+      expect(response.statusCode, HttpStatus.ok);
+      expect(response.headers.contentType?.mimeType, 'application/pdf');
+      expect(session.bookUri.path, matches(r'^/books/\d+\.pdf$'));
+    },
+  );
 
-    final second = await openSession();
-    expect(second.indexUri.origin, origin);
+  test(
+    'closing a session unmounts the book but keeps the shared origin',
+    () async {
+      final first = await openSession();
+      final origin = first.indexUri.origin;
+      final bookUri = first.bookUri;
+      final client = HttpClient();
+      addTearDown(client.close);
 
-    final assets = await (await client.getUrl(second.indexUri)).close();
-    expect(assets.statusCode, HttpStatus.ok);
-  });
+      await first.close();
+      sessions.remove(first);
+
+      final unmounted = await (await client.getUrl(bookUri)).close();
+      expect(unmounted.statusCode, HttpStatus.notFound);
+
+      final second = await openSession();
+      expect(second.indexUri.origin, origin);
+
+      final assets = await (await client.getUrl(second.indexUri)).close();
+      expect(assets.statusCode, HttpStatus.ok);
+    },
+  );
 
   test('two sessions can mount different books on the shared server', () async {
     final other = File('${tempDirectory.path}/other.epub');
@@ -104,14 +124,10 @@ void main() {
     expect(first.bookUri, isNot(second.bookUri));
     expect(first.indexUri.origin, second.indexUri.origin);
 
-    final firstBytes = await (await client.getUrl(first.bookUri))
-        .close()
-        .then(
-          (response) => response.fold<List<int>>(
-            <int>[],
-            (all, chunk) => all..addAll(chunk),
-          ),
-        );
+    final firstBytes = await (await client.getUrl(first.bookUri)).close().then(
+      (response) =>
+          response.fold<List<int>>(<int>[], (all, chunk) => all..addAll(chunk)),
+    );
     final secondBytes = await (await client.getUrl(second.bookUri))
         .close()
         .then(

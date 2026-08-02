@@ -80,13 +80,17 @@ App 仍是三 Tab（宽屏 Rail / 窄屏 BottomBar）：
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| 系统文件选择导入 | **已有** | CBZ / ZIP / EPUB |
+| 本地文件选择导入 | **已有** | CBZ / ZIP / EPUB；图书格式逐步扩展 |
+| 文件夹扫描导入 | **首批** | 选择目录后递归发现支持格式，复用本地导入链路 |
 | 内容哈希去重 | **已有** | |
 | EPUB 自动探测 | **已有** | Dart ZIP/OPF spine 抽样：正文 → 图书；页图 → 漫画（不经 WebView） |
-| 封面提取 | **已有** | 图书 EPUB cover（Foliate metadata probe；仅 kind=book） |
+| 图书元数据 / 封面提取 | **已有** | Foliate metadata probe；kind=book |
+| FB2 / MOBI / AZW3 / PDF | **首批** | 复用 Foliate 图书引擎 |
 | 导入结果摘要 | **已有** | |
 | 导入失败详情 | **已有** | |
-| 拖拽 / 文件夹导入 | **中** | |
+| 拖拽导入 | **中** | 方式层适配器，复用统一导入管线 |
+| 系统分享导入 | **中** | |
+| WiFi / WebDAV / OPDS | **远** | 先完成安全、凭据和下载策略后再做 |
 | 云同步 / 书店 | **不做** | |
 
 ### 4.2 书库
@@ -228,9 +232,10 @@ App 仍是三 Tab（宽屏 Rail / 窄屏 BottomBar）：
 | CBZ / ZIP | 直接导入 | 漫画页图 | **已有** |
 | EPUB（reflow 正文） | 自动探测 → book | 图书 reflow | **已有** |
 | EPUB（页图 / 固定版式） | 自动探测 → image | 漫画页图 | **已有** |
-| TXT / MD | — | reflow | **中～远** |
-| PDF | — | 待定 | **远** |
-| MOBI | — | 待定 | **远** |
+| FB2 | 直接导入 | reflow | **首批** |
+| MOBI / AZW3 | 直接导入 | reflow | **首批** |
+| PDF | 直接导入 | fixed-layout book | **首批** |
+| TXT / MD | 转规范 EPUB | reflow | **中** |
 
 ---
 

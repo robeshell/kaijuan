@@ -8,6 +8,7 @@ import '../persistence/app_database.dart';
 import '../storage/library_paths.dart';
 import 'comic_archive.dart';
 import 'import_models.dart';
+import 'import_sources.dart';
 import 'import_staging.dart';
 
 /// Imports comic files into content-addressed storage:
@@ -29,6 +30,8 @@ class ComicImportService {
   final ImportTimingListener? onTiming;
   final ImportStagingArea _staging;
 
+  ImportStagingArea get stagingArea => _staging;
+
   static const supportedFormats = {
     ReaderFormat.cbz,
     ReaderFormat.zip,
@@ -42,7 +45,7 @@ class ComicImportService {
     for (final path in paths) {
       try {
         final outcome = await _importOne(path);
-        outcome == _Outcome.added ? added++ : updated++;
+        outcome == ImportCommitOutcome.added ? added++ : updated++;
       } on ImportException catch (e) {
         failures.add(ImportFailure(path: path, reason: e.message));
       } catch (e) {
@@ -73,26 +76,41 @@ class ComicImportService {
     }
   }
 
-  Future<_Outcome> _importOne(String path) async {
-    final trace = ImportPipelineTrace(
-      pipeline: 'comic',
-      sourcePath: path,
-      onTiming: onTiming,
+  Future<ImportCommitOutcome> _importOne(String path) async {
+    final candidate = ImportCandidate(
+      source: LocalFileImportSource.picked(path),
     );
-    final format = ReaderFormat.fromExtension(p.extension(path));
+    final format = candidate.format;
     if (format == null || !supportedFormats.contains(format)) {
       throw ImportException('不支持的漫画格式：${p.extension(path)}');
     }
-    final file = File(path);
+    final file = candidate.localFile!;
     if (!await file.exists()) {
       throw ImportException('文件不存在');
     }
+    final content = await _staging.stageContent(file);
+    return importStaged(candidate: candidate, format: format, content: content);
+  }
+
+  /// Completes the comic half of the shared pipeline after the source bytes
+  /// have already been staged and hashed.
+  Future<ImportCommitOutcome> importStaged({
+    required ImportCandidate candidate,
+    required ReaderFormat format,
+    required StagedContentFile content,
+  }) async {
+    if (!supportedFormats.contains(format)) {
+      throw ImportException('不支持的漫画格式：${candidate.displayName}');
+    }
+    final trace = ImportPipelineTrace(
+      pipeline: 'comic',
+      sourcePath: candidate.displayName,
+      onTiming: onTiming,
+    );
     trace.mark('validated');
 
-    StagedContentFile? content;
     StagedImportFile? cover;
     try {
-      content = await _staging.stageContent(file);
       final hash = content.hash;
       trace.mark('content-staged');
 
@@ -127,7 +145,7 @@ class ComicImportService {
       );
       trace.mark('cover-staged');
 
-      final fallbackTitle = p.basenameWithoutExtension(path);
+      final fallbackTitle = p.basenameWithoutExtension(candidate.displayName);
       final title = (listing.title?.trim().isNotEmpty ?? false)
           ? listing.title!.trim()
           : fallbackTitle;
@@ -153,9 +171,11 @@ class ComicImportService {
         ),
       );
       trace.mark('database-committed');
-      return existing == null ? _Outcome.added : _Outcome.updated;
+      return existing == null
+          ? ImportCommitOutcome.added
+          : ImportCommitOutcome.updated;
     } catch (_) {
-      await rollbackStagedFiles([cover, content?.file]);
+      await rollbackStagedFiles([cover, content.file]);
       trace.mark('rolled-back');
       rethrow;
     }
@@ -168,5 +188,3 @@ class ComicImportService {
     }
   }
 }
-
-enum _Outcome { added, updated }

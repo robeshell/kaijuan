@@ -54,6 +54,8 @@ void main() {
     test('parses known extensions case-insensitively', () {
       expect(ReaderFormat.fromExtension('epub'), ReaderFormat.epub);
       expect(ReaderFormat.fromExtension('.CBZ'), ReaderFormat.cbz);
+      expect(ReaderFormat.fromExtension('fb2'), ReaderFormat.fb2);
+      expect(ReaderFormat.fromExtension('azw3'), ReaderFormat.azw3);
       expect(ReaderFormat.fromExtension('md'), ReaderFormat.markdown);
       expect(ReaderFormat.fromExtension('markdown'), ReaderFormat.markdown);
     });
@@ -74,6 +76,7 @@ void main() {
     test('ReaderFormat round-trips', () {
       expect(ReaderFormat.cbz.storageValue, 'cbz');
       expect(ReaderFormat.fromStorage('zip'), ReaderFormat.zip);
+      expect(ReaderFormat.fromStorage('pdf'), ReaderFormat.pdf);
       expect(ReaderFormat.fromStorage('nope'), isNull);
     });
 

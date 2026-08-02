@@ -51,6 +51,15 @@ class BrandConfig {
       color: Color(0xFFEA580C),
     ),
     defaultReadingTheme: ComicReadingTheme.comicDefault,
-    importExtensions: ['cbz', 'zip', 'epub'],
+    importExtensions: [
+      'cbz',
+      'zip',
+      'epub',
+      'fb2',
+      'fbz',
+      'mobi',
+      'azw3',
+      'pdf',
+    ],
   );
 }

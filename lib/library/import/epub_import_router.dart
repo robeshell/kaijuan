@@ -4,10 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../domain/reader_models.dart';
+import '../../readers/book/foliate_import_probe.dart';
 import 'comic_import_service.dart';
 import 'book_import_service.dart';
 import 'epub_kind_probe.dart';
 import 'import_models.dart';
+import 'import_sources.dart';
+import 'import_staging.dart';
 
 /// Decides whether an EPUB should be treated as a reflow book or a page-image
 /// comic, then imports it through the right service.
@@ -24,24 +27,93 @@ class EpubImportRouter {
   EpubImportRouter({
     required this.comicImport,
     required this.bookImport,
+    ImportStagingArea? staging,
     this.onTiming,
-  });
+  }) : _staging = staging ?? comicImport.stagingArea;
 
   final ComicImportService comicImport;
   final BookImportService bookImport;
   final ImportTimingListener? onTiming;
+  final ImportStagingArea _staging;
 
   /// Imports a single EPUB file using the detected reader kind.
   ///
   /// Returns an [ImportResult] representing exactly one file (added/updated
   /// will be at most 1).
   Future<ImportResult> importOne(String path) async {
-    final kind = await detectKind(path, onTiming: onTiming);
-    if (kind == ReaderKind.book) {
-      // Metadata/cover still use Foliate for book imports only.
-      return bookImport.importOne(path);
+    final candidate = ImportCandidate(
+      source: LocalFileImportSource.picked(path),
+    );
+    if (candidate.format != ReaderFormat.epub) {
+      return ImportResult(
+        failures: [ImportFailure(path: path, reason: '不是 EPUB 文件')],
+      );
     }
-    return comicImport.importPaths([path]);
+    final file = candidate.localFile!;
+    if (!await file.exists()) {
+      return const ImportResult(
+        failures: [ImportFailure(path: '', reason: '文件不存在')],
+      );
+    }
+    final content = await _staging.stageContent(file);
+    try {
+      final outcome = await importStaged(
+        candidate: candidate,
+        format: ReaderFormat.epub,
+        content: content,
+      );
+      return ImportResult(
+        added: outcome == ImportCommitOutcome.added ? 1 : 0,
+        updated: outcome == ImportCommitOutcome.updated ? 1 : 0,
+      );
+    } on ImportException catch (e) {
+      return ImportResult(
+        failures: [ImportFailure(path: path, reason: e.message)],
+      );
+    } on FoliateImportException catch (e) {
+      return ImportResult(
+        failures: [ImportFailure(path: path, reason: e.message)],
+      );
+    } catch (e) {
+      return ImportResult(
+        failures: [ImportFailure(path: path, reason: e.toString())],
+      );
+    }
+  }
+
+  /// Routes one already-staged EPUB without copying it a second time.
+  Future<ImportCommitOutcome> importStaged({
+    required ImportCandidate candidate,
+    required ReaderFormat format,
+    required StagedContentFile content,
+  }) async {
+    if (format != ReaderFormat.epub) {
+      throw const ImportException('EPUB 路由收到非 EPUB 格式');
+    }
+    var handedOff = false;
+    try {
+      final kind = await detectKind(
+        content.file.stagedPath,
+        sourceName: candidate.displayName,
+        onTiming: onTiming,
+      );
+      handedOff = true;
+      if (kind == ReaderKind.book) {
+        return bookImport.importStaged(
+          candidate: candidate,
+          format: format,
+          content: content,
+        );
+      }
+      return comicImport.importStaged(
+        candidate: candidate,
+        format: format,
+        content: content,
+      );
+    } catch (_) {
+      if (!handedOff) await rollbackStagedFiles([content.file]);
+      rethrow;
+    }
   }
 
   /// Imports a list of EPUB files, routing each one independently.
@@ -74,11 +146,12 @@ class EpubImportRouter {
   /// Inspects the EPUB through bounded, file-backed Dart probes (no WebView).
   static Future<ReaderKind> detectKind(
     String path, {
+    String? sourceName,
     ImportTimingListener? onTiming,
   }) async {
     final trace = ImportPipelineTrace(
       pipeline: 'epub-kind-probe',
-      sourcePath: path,
+      sourcePath: sourceName ?? path,
       onTiming: onTiming,
     );
     final file = File(path);
@@ -96,7 +169,7 @@ class EpubImportRouter {
 
     if (kDebugMode) {
       debugPrint(
-        '[EpubImportRouter] ${p.basename(path)}\n'
+        '[EpubImportRouter] ${sourceName ?? p.basename(path)}\n'
         '  sections=${probe.sectionCount} sampled=${probe.sampledSectionCount} '
         'imageOnly=${probe.sampledImageOnlySections} '
         'totalText=${probe.totalTextLength}'

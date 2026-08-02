@@ -6,8 +6,10 @@ enum ReaderFormat {
   markdown,
   cbz,
   zip,
+  fb2,
   pdf,
-  mobi;
+  mobi,
+  azw3;
 
   static ReaderFormat? fromExtension(String extension) {
     final normalized = extension.toLowerCase().replaceFirst(RegExp(r'^\.'), '');
@@ -17,10 +19,21 @@ enum ReaderFormat {
       'md' || 'markdown' => ReaderFormat.markdown,
       'cbz' => ReaderFormat.cbz,
       'zip' => ReaderFormat.zip,
+      'fb2' || 'fbz' => ReaderFormat.fb2,
       'pdf' => ReaderFormat.pdf,
       'mobi' => ReaderFormat.mobi,
+      'azw' || 'azw3' || 'kfx' => ReaderFormat.azw3,
       _ => null,
     };
+  }
+
+  static ReaderFormat? fromFileName(String fileName) {
+    final normalized = fileName.toLowerCase().replaceAll('\\', '/');
+    if (normalized.endsWith('.fb2.zip') || normalized.endsWith('.fbz')) {
+      return ReaderFormat.fb2;
+    }
+    final dot = normalized.lastIndexOf('.');
+    return fromExtension(dot < 0 ? normalized : normalized.substring(dot + 1));
   }
 
   /// Wire format for drift / JSON. Never write [name] ad-hoc at call sites.

@@ -54,14 +54,19 @@ class BookLoopbackServer {
   /// Currently running shared server, if any.
   static BookLoopbackServer? get sharedOrNull => _shared;
 
-  Uri get indexUri =>
-      Uri.parse('http://127.0.0.1:$port/foliate-js/index.html');
+  Uri get indexUri => Uri.parse('http://127.0.0.1:$port/foliate-js/index.html');
 
   Uri get probeUri =>
       Uri.parse('http://127.0.0.1:$port/foliate-js/metadata-probe.html');
 
-  Uri bookUriFor(String mountId) =>
-      Uri.parse('http://127.0.0.1:$port/books/$mountId.epub');
+  Uri bookUriFor(String mountId) {
+    final file = _mounts[mountId];
+    final extension = p.extension(file?.path ?? '').toLowerCase();
+    final safeExtension = RegExp(r'^\.[a-z0-9]{1,12}$').hasMatch(extension)
+        ? extension
+        : '.bin';
+    return Uri.parse('http://127.0.0.1:$port/books/$mountId$safeExtension');
+  }
 
   Uri fontUriFor(String fontId, String fileName) {
     final ext = fileName.contains('.')
@@ -74,7 +79,9 @@ class BookLoopbackServer {
   ///
   /// Call once during bootstrap so restarts can keep the same origin and hit
   /// WebView disk cache for foliate-js.
-  static Future<void> configureSupportDirectory(Directory supportDirectory) async {
+  static Future<void> configureSupportDirectory(
+    Directory supportDirectory,
+  ) async {
     final file = File(p.join(supportDirectory.path, _portFileName));
     _portFile = file;
     try {
@@ -174,7 +181,8 @@ class BookLoopbackServer {
   Future<Uint8List> _loadAssetBytes(String relative) async {
     // Never memoize HTML/JS: hot reload keeps this server alive and would keep
     // serving a pre-fix overlayer.js (missing/broken squiggly, stale dismiss).
-    final skipMemo = relative.endsWith('.js') ||
+    final skipMemo =
+        relative.endsWith('.js') ||
         relative.endsWith('.mjs') ||
         relative.endsWith('.html');
     if (!skipMemo) {
@@ -225,7 +233,9 @@ class BookLoopbackServer {
         if (bookFile == null) {
           response.statusCode = HttpStatus.notFound;
         } else {
-          response.headers.contentType = ContentType('application', 'epub+zip');
+          response.headers.contentType = ContentType.parse(
+            _contentTypeFor(bookFile.path),
+          );
           response.contentLength = await bookFile.length();
           if (request.method == 'GET') {
             await response.addStream(bookFile.openRead());
@@ -277,17 +287,19 @@ class BookLoopbackServer {
   }
 
   static bool _isBookPath(String path) {
-    return RegExp(r'^/books/\d+\.epub$').hasMatch(path);
+    return RegExp(r'^/books/\d+\.[a-z0-9]{1,12}$').hasMatch(path);
   }
 
   static String? _mountIdFromPath(String path) {
-    final match = RegExp(r'^/books/(\d+)\.epub$').firstMatch(path);
+    final match = RegExp(r'^/books/(\d+)\.[a-z0-9]{1,12}$').firstMatch(path);
     return match?.group(1);
   }
 
   static bool _isFontPath(String path) {
-    return RegExp(r'^/fonts/[^/]+\.(ttf|otf|woff2?)$', caseSensitive: false)
-        .hasMatch(path);
+    return RegExp(
+      r'^/fonts/[^/]+\.(ttf|otf|woff2?)$',
+      caseSensitive: false,
+    ).hasMatch(path);
   }
 
   static String? _fontIdFromPath(String path) {
@@ -309,6 +321,9 @@ class BookLoopbackServer {
         ? path.substring(path.lastIndexOf('.') + 1).toLowerCase()
         : '';
     return switch (extension) {
+      'epub' => 'application/epub+zip',
+      'pdf' => 'application/pdf',
+      'fb2' => 'application/xml',
       'html' => 'text/html; charset=utf-8',
       'css' => 'text/css; charset=utf-8',
       'js' => 'application/javascript; charset=utf-8',

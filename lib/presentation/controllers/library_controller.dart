@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -6,8 +8,9 @@ import 'package:path/path.dart' as p;
 import '../../domain/reader_models.dart';
 import '../../library/import/book_import_service.dart';
 import '../../library/import/comic_import_service.dart';
-import '../../library/import/epub_import_router.dart';
 import '../../library/import/import_models.dart';
+import '../../library/import/import_pipeline.dart';
+import '../../library/import/import_sources.dart';
 import '../../library/persistence/app_database.dart';
 
 /// How the library grid orders items (client-side after stream).
@@ -36,18 +39,30 @@ class LibraryController extends ChangeNotifier {
     required this.database,
     required ComicImportService comicImportService,
     required BookImportService bookImportService,
-    this.importExtensions = const ['cbz', 'zip', 'epub'],
+    ImportPipeline? importPipeline,
+    this.importExtensions = const [
+      'cbz',
+      'zip',
+      'epub',
+      'fb2',
+      'fbz',
+      'mobi',
+      'azw3',
+      'pdf',
+    ],
   }) : _comicImport = comicImportService,
        _bookImport = bookImportService,
-       _epubRouter = EpubImportRouter(
-         comicImport: comicImportService,
-         bookImport: bookImportService,
-       );
+       _importPipeline =
+           importPipeline ??
+           ImportPipeline(
+             comicImport: comicImportService,
+             bookImport: bookImportService,
+           );
 
   final AppDatabase database;
   final ComicImportService _comicImport;
   final BookImportService _bookImport;
-  final EpubImportRouter _epubRouter;
+  final ImportPipeline _importPipeline;
 
   /// File picker extensions (no dots), from [BrandConfig].
   final List<String> importExtensions;
@@ -229,7 +244,10 @@ class LibraryController extends ChangeNotifier {
     );
     final files = await openFiles(acceptedTypeGroups: [typeGroup]);
     if (files.isEmpty) return null;
-    return importPaths([for (final f in files) f.path]);
+    return importCandidates([
+      for (final f in files)
+        ImportCandidate(source: LocalFileImportSource.picked(f.path)),
+    ]);
   }
 
   /// Android SAF via [FilePicker] without loading whole-file bytes.
@@ -253,14 +271,77 @@ class LibraryController extends ChangeNotifier {
         ],
       );
     }
-    return importPaths(paths);
+    return importCandidates([
+      for (final path in paths)
+        ImportCandidate(source: LocalFileImportSource.picked(path)),
+    ]);
   }
 
-  /// Import entry point used by tests and by [pickAndImport].
-  ///
-  /// Routes by extension: cbz/zip → image archive service, epub → auto-detect,
-  /// others fail.
+  /// Opens a directory picker and recursively imports supported files.
+  Future<ImportResult?> pickDirectoryAndImport() async {
+    String? directory;
+    try {
+      directory = await getDirectoryPath();
+    } catch (error) {
+      return ImportResult(
+        failures: [ImportFailure(path: '', reason: '无法打开文件夹选择器：$error')],
+      );
+    }
+    if (directory == null || directory.isEmpty) return null;
+    return importDirectory(directory);
+  }
+
+  /// Recursively finds supported files and feeds them into the same pipeline
+  /// used by local file selection.
+  Future<ImportResult> importDirectory(String directoryPath) async {
+    final directory = Directory(directoryPath);
+    if (!await directory.exists()) {
+      return ImportResult(
+        failures: [ImportFailure(path: directoryPath, reason: '文件夹不存在')],
+      );
+    }
+    final paths = <String>[];
+    await for (final entity in directory.list(
+      recursive: true,
+      followLinks: false,
+    )) {
+      if (entity is! File) continue;
+      if (_isSupportedImportFile(entity.path)) paths.add(entity.path);
+    }
+    paths.sort();
+    if (paths.isEmpty) {
+      return ImportResult(
+        failures: [
+          ImportFailure(path: directoryPath, reason: '文件夹中没有找到可导入的文件'),
+        ],
+      );
+    }
+    return importCandidates([
+      for (final path in paths)
+        ImportCandidate(source: LocalFileImportSource.scanned(path)),
+    ]);
+  }
+
+  bool _isSupportedImportFile(String path) {
+    final format = ReaderFormat.fromFileName(p.basename(path));
+    return format != null &&
+        (ComicImportService.supportedFormats.contains(format) ||
+            BookImportService.supportedFormats.contains(format));
+  }
+
+  /// Compatibility entry point used by tests and existing callers. Paths are
+  /// adapted to the local-file method and then share the common pipeline.
   Future<ImportResult> importPaths(List<String> paths) async {
+    return importCandidates([
+      for (final path in paths)
+        ImportCandidate(source: LocalFileImportSource.picked(path)),
+    ]);
+  }
+
+  /// Import entry point for every current and future source adapter.
+  Future<ImportResult> importCandidates(
+    Iterable<ImportCandidate> candidates,
+  ) async {
     if (_importing) {
       return const ImportResult(
         failures: [ImportFailure(path: '', reason: '已有导入任务在进行')],
@@ -269,39 +350,7 @@ class LibraryController extends ChangeNotifier {
     _importing = true;
     notifyListeners();
     try {
-      final comicPaths = <String>[];
-      final epubPaths = <String>[];
-      final failures = <ImportFailure>[];
-
-      for (final path in paths) {
-        final format = ReaderFormat.fromExtension(p.extension(path));
-        if (format == ReaderFormat.cbz || format == ReaderFormat.zip) {
-          comicPaths.add(path);
-        } else if (format == ReaderFormat.epub) {
-          epubPaths.add(path);
-        } else {
-          failures.add(ImportFailure(path: path, reason: '不支持的格式：$path'));
-        }
-      }
-
-      var added = 0;
-      var updated = 0;
-
-      if (comicPaths.isNotEmpty) {
-        final comicResult = await _comicImport.importPaths(comicPaths);
-        added += comicResult.added;
-        updated += comicResult.updated;
-        failures.addAll(comicResult.failures);
-      }
-
-      if (epubPaths.isNotEmpty) {
-        final epubResult = await _epubRouter.importPaths(epubPaths);
-        added += epubResult.added;
-        updated += epubResult.updated;
-        failures.addAll(epubResult.failures);
-      }
-
-      return ImportResult(added: added, updated: updated, failures: failures);
+      return await _importPipeline.importCandidates(candidates);
     } finally {
       _importing = false;
       notifyListeners();

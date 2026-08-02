@@ -46,7 +46,7 @@ void main() {
             child: AppEmptyState(
               icon: Icons.library_books_outlined,
               title: '书库还是空的',
-              message: '导入 CBZ、ZIP 或 EPUB 后会显示在这里。',
+              message: '导入图书或漫画文件后会显示在这里。',
               actionLabel: '导入',
               onAction: () {},
             ),

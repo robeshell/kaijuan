@@ -5,6 +5,8 @@ import '../../core/pipeline_diagnostics.dart';
 
 typedef ImportTimingListener = void Function(ImportPipelineTiming timing);
 
+enum ImportCommitOutcome { added, updated }
+
 class ImportPipelineTiming {
   const ImportPipelineTiming({
     required this.pipeline,
@@ -82,6 +84,12 @@ class ImportResult {
 
   bool get isEmpty => added == 0 && updated == 0 && failures.isEmpty;
   bool get hasFailures => failures.isNotEmpty;
+
+  ImportResult operator +(ImportResult other) => ImportResult(
+    added: added + other.added,
+    updated: updated + other.updated,
+    failures: [...failures, ...other.failures],
+  );
 }
 
 class ImportException implements Exception {

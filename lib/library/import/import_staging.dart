@@ -15,14 +15,26 @@ class ImportStagingArea {
   static int _sequence = 0;
 
   Future<StagedContentFile> stageContent(File source) async {
-    final staged = await _newStagingFile(p.basename(source.path));
+    return stageContentStream(
+      sourceName: p.basename(source.path),
+      bytes: source.openRead(),
+    );
+  }
+
+  /// Stages bytes from any import method while preserving the source name's
+  /// extension for the eventual content-addressed target.
+  Future<StagedContentFile> stageContentStream({
+    required String sourceName,
+    required Stream<List<int>> bytes,
+  }) async {
+    final staged = await _newStagingFile(p.basename(sourceName));
     final output = staged.openWrite();
     final digestResult = _DigestResultSink();
     final digestSink = sha256.startChunkedConversion(digestResult);
     var digestClosed = false;
     var outputClosed = false;
     try {
-      await for (final chunk in source.openRead()) {
+      await for (final chunk in bytes) {
         digestSink.add(chunk);
         output.add(chunk);
       }
@@ -32,7 +44,7 @@ class ImportStagingArea {
       await output.close();
       outputClosed = true;
       final digest = digestResult.value.toString();
-      final extension = p.extension(source.path).toLowerCase();
+      final extension = _storageExtension(sourceName);
       return StagedContentFile(
         hash: digest,
         file: StagedImportFile._(
@@ -118,7 +130,9 @@ class ImportStagingArea {
         await entity.delete();
         deleted++;
       } catch (error) {
-        debugPrint('[Import] stale partial purge skipped ${entity.path}: $error');
+        debugPrint(
+          '[Import] stale partial purge skipped ${entity.path}: $error',
+        );
       }
     }
     return deleted;
@@ -130,6 +144,12 @@ class ImportStagingArea {
       Directory(p.join(supportDirectory.path, 'library'));
   Directory get _coversDirectory =>
       Directory(p.join(supportDirectory.path, 'covers'));
+
+  static String _storageExtension(String sourceName) {
+    final normalized = sourceName.toLowerCase().replaceAll('\\', '/');
+    if (normalized.endsWith('.fb2.zip')) return '.fbz';
+    return p.extension(sourceName).toLowerCase();
+  }
 }
 
 class StagedContentFile {

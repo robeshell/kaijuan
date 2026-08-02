@@ -8,6 +8,7 @@ import '../../readers/book/foliate_js_bridge.dart';
 import '../persistence/app_database.dart';
 import '../storage/library_paths.dart';
 import 'import_models.dart';
+import 'import_sources.dart';
 import 'import_staging.dart';
 
 /// Imports reflow EPUB into content-addressed storage for the book app.
@@ -26,6 +27,16 @@ class BookImportService {
   final EpubImportProbe _probe;
   final ImportStagingArea _staging;
 
+  static const supportedFormats = {
+    ReaderFormat.epub,
+    ReaderFormat.fb2,
+    ReaderFormat.mobi,
+    ReaderFormat.azw3,
+    ReaderFormat.pdf,
+  };
+
+  ImportStagingArea get stagingArea => _staging;
+
   EpubImportProbe get probe => _probe;
 
   Future<ImportResult> importPaths(List<String> paths) async {
@@ -35,7 +46,7 @@ class BookImportService {
     for (final path in paths) {
       try {
         final outcome = await _importOne(path);
-        outcome == _Outcome.added ? added++ : updated++;
+        outcome == ImportCommitOutcome.added ? added++ : updated++;
       } on ImportException catch (e) {
         failures.add(ImportFailure(path: path, reason: e.message));
       } on FoliateImportException catch (e) {
@@ -54,8 +65,8 @@ class BookImportService {
     try {
       final outcome = await _importOne(path, snapshot: snapshot);
       return ImportResult(
-        added: outcome == _Outcome.added ? 1 : 0,
-        updated: outcome == _Outcome.updated ? 1 : 0,
+        added: outcome == ImportCommitOutcome.added ? 1 : 0,
+        updated: outcome == ImportCommitOutcome.updated ? 1 : 0,
         failures: const [],
       );
     } on ImportException catch (e) {
@@ -99,41 +110,62 @@ class BookImportService {
     }
   }
 
-  Future<_Outcome> _importOne(
+  Future<ImportCommitOutcome> _importOne(
     String path, {
     FoliateImportSnapshot? snapshot,
   }) async {
-    final trace = ImportPipelineTrace(
-      pipeline: 'book',
-      sourcePath: path,
-      onTiming: onTiming,
+    final candidate = ImportCandidate(
+      source: LocalFileImportSource.picked(path),
     );
-    final format = ReaderFormat.fromExtension(p.extension(path));
-    if (format != ReaderFormat.epub) {
-      throw ImportException('图书目前仅支持 EPUB：${p.extension(path)}');
+    final format = candidate.format;
+    if (format == null || !supportedFormats.contains(format)) {
+      throw ImportException('图书暂不支持此格式：${p.extension(path)}');
     }
-    final file = File(path);
+    final file = candidate.localFile!;
     if (!await file.exists()) {
       throw ImportException('文件不存在');
     }
+    final content = await _staging.stageContent(file);
+    return importStaged(
+      candidate: candidate,
+      format: format,
+      content: content,
+      snapshot: snapshot,
+    );
+  }
+
+  /// Completes the book half of the shared pipeline after source bytes have
+  /// already been staged and hashed.
+  Future<ImportCommitOutcome> importStaged({
+    required ImportCandidate candidate,
+    required ReaderFormat format,
+    required StagedContentFile content,
+    FoliateImportSnapshot? snapshot,
+  }) async {
+    if (!supportedFormats.contains(format)) {
+      throw ImportException('图书暂不支持此格式：${candidate.displayName}');
+    }
+    final trace = ImportPipelineTrace(
+      pipeline: 'book',
+      sourcePath: candidate.displayName,
+      onTiming: onTiming,
+    );
     trace.mark('validated');
 
-    StagedContentFile? content;
     StagedImportFile? cover;
     try {
-      content = await _staging.stageContent(file);
       final hash = content.hash;
       trace.mark('content-staged');
 
       final metadata =
           snapshot ?? await _probe.inspect(content.file.stagedPath);
       if (metadata.sectionCount <= 0) {
-        throw const FoliateImportException('EPUB 没有可阅读的正文');
+        throw const FoliateImportException('图书没有可阅读的正文');
       }
       trace.mark('metadata-ready');
       cover = await _stageCover(hash, metadata);
       trace.mark('cover-staged');
-      final fallbackTitle = p.basenameWithoutExtension(path);
+      final fallbackTitle = p.basenameWithoutExtension(candidate.displayName);
       final title = metadata.title.trim().isNotEmpty
           ? metadata.title.trim()
           : fallbackTitle;
@@ -148,7 +180,7 @@ class BookImportService {
         ReadingItemsCompanion(
           id: Value(existing?.id ?? hash),
           kind: Value(ReaderKind.book.storageValue),
-          format: Value(ReaderFormat.epub.storageValue),
+          format: Value(format.storageValue),
           title: Value(existing?.title ?? title),
           // Absolute under current support root; [LibraryPaths.rebindDatabase]
           // rewrites container UUID after iOS reinstall.
@@ -162,9 +194,11 @@ class BookImportService {
         ),
       );
       trace.mark('database-committed');
-      return existing == null ? _Outcome.added : _Outcome.updated;
+      return existing == null
+          ? ImportCommitOutcome.added
+          : ImportCommitOutcome.updated;
     } catch (_) {
-      await rollbackStagedFiles([cover, content?.file]);
+      await rollbackStagedFiles([cover, content.file]);
       trace.mark('rolled-back');
       rethrow;
     }
@@ -193,5 +227,3 @@ class BookImportService {
     }
   }
 }
-
-enum _Outcome { added, updated }

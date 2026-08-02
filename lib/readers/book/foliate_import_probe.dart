@@ -13,7 +13,8 @@ abstract interface class EpubImportProbe {
   Future<FoliateImportSnapshot> inspect(String path);
 }
 
-/// Opens an EPUB through the same Foliate parser used by the visible reader.
+/// Opens a supported book format through the same Foliate parser used by the
+/// visible reader.
 ///
 /// This follows Anx Reader's import path: a short-lived headless WebView emits
 /// `onMetadata`, then the WebView is disposed and the book mount is released.
@@ -75,7 +76,7 @@ class FoliateJsImportProbe implements EpubImportProbe {
                 arguments,
               );
               if (snapshot == null || snapshot.sectionCount <= 0) {
-                fail(const FoliateImportException('EPUB 没有可读取的 spine'));
+                fail(const FoliateImportException('图书没有可读取的正文'));
               } else if (!result.isCompleted) {
                 session?.mark('probe-metadata-ready');
                 result.complete(snapshot);
@@ -111,12 +112,12 @@ class FoliateJsImportProbe implements EpubImportProbe {
       await webView.run();
       return await result.future.timeout(
         timeout,
-        onTimeout: () => throw const FoliateImportException('EPUB 元数据读取超时'),
+        onTimeout: () => throw const FoliateImportException('图书元数据读取超时'),
       );
     } on FoliateImportException {
       rethrow;
     } catch (error) {
-      throw FoliateImportException('无法读取 EPUB：$error');
+      throw FoliateImportException('无法读取图书：$error');
     } finally {
       // Skip HeadlessInAppWebView.dispose() on Windows: the C++ destructor
       // in flutter_inappwebview_windows_plugin hits an access violation

@@ -17,7 +17,7 @@ kaijuan/                            # 仓库名
     main.dart                       # 唯一入口
     main_comic.dart / main_book.dart # 兼容重定向到 main
     brand/brand_config.dart         # 单 App 配置
-    library/import/                 # 格式判定、内容寻址、元数据、DB 提交
+    library/import/                 # 方式适配、格式判定、内容寻址、元数据、DB 提交
     readers/comic/                  # 页图引擎
     readers/book/                   # reflow 引擎
     presentation/                   # UI / controllers
@@ -33,7 +33,7 @@ BrandConfig
   applicationId: com.kaijuan.reader
   accent presets + default accent
   default reading theme
-  import extension whitelist: cbz, zip, epub
+  import extension whitelist: cbz, zip, epub, fb2, fbz, mobi, azw3, pdf
   databaseName: app_library        # 沿用已有数据
   storageNamespace: ''             # support root
 ```
@@ -65,6 +65,15 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 | 间距圆角色板 | | |
 | 书架/书库通用 widgets | | |
 | EpubImportRouter | | |
+
+### 导入两层
+
+- `ImportMethod` 表示来源方式（本地文件、目录扫描、拖拽、分享、WiFi、WebDAV、OPDS）；它只负责把来源变成候选，不知道 book/comic。
+- `ReaderFormat` 表示内容格式（CBZ、ZIP、EPUB、FB2、MOBI、AZW3、PDF，以及后续 TXT/Markdown）；它决定格式服务和必要的 kind 探测。
+- `ImportCandidate` 是两层之间的边界，至少携带来源方式、显示名称、可重复读取的字节流和可选 MIME。
+- `ImportPipeline` 统一执行候选的 staging、SHA-256、格式路由、失败隔离和结果汇总。方式适配器不得绕过它直接落库。
+
+详细的格式矩阵与方式状态见 [specs/import.md](./specs/import.md)。
 
 禁止：core 依赖某个品牌文案；image 引擎包 import book 引擎（仅 import service / router 可桥接）。
 

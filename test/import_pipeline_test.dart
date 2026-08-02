@@ -1,0 +1,142 @@
+import 'dart:io';
+
+import 'package:archive/archive.dart';
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/domain/reader_models.dart';
+import 'package:kaijuan/library/import/book_import_service.dart';
+import 'package:kaijuan/library/import/comic_import_service.dart';
+import 'package:kaijuan/library/import/import_sources.dart';
+import 'package:kaijuan/library/persistence/app_database.dart';
+import 'package:kaijuan/presentation/controllers/library_controller.dart';
+import 'package:path/path.dart' as p;
+
+import 'support/fake_epub_import_probe.dart';
+
+Future<File> _writeCbz(Directory directory, String name) async {
+  final archive = Archive()..addFile(ArchiveFile('001.png', 3, [1, 2, 3]));
+  final file = File(p.join(directory.path, name));
+  await file.writeAsBytes(ZipEncoder().encode(archive), flush: true);
+  return file;
+}
+
+void main() {
+  late Directory tempRoot;
+  late AppDatabase database;
+  late LibraryController controller;
+
+  setUp(() async {
+    tempRoot = await Directory.systemTemp.createTemp('kaijuan_import_');
+    database = AppDatabase(NativeDatabase.memory());
+    final book = BookImportService(
+      database: database,
+      supportDirectory: tempRoot,
+      probe: FakeEpubImportProbe((_) => reflowSnapshot(title: '通用图书格式')),
+    );
+    controller = LibraryController(
+      database: database,
+      comicImportService: ComicImportService(
+        database: database,
+        supportDirectory: tempRoot,
+      ),
+      bookImportService: book,
+    );
+  });
+
+  tearDown(() async {
+    await database.close();
+    if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
+  });
+
+  test('format and method remain independent', () {
+    expect(ReaderFormat.fromFileName('novel.FB2'), ReaderFormat.fb2);
+    expect(ReaderFormat.fromFileName('novel.fb2.zip'), ReaderFormat.fb2);
+    expect(ReaderFormat.fromFileName('novel.AZW3'), ReaderFormat.azw3);
+    expect(ReaderFormat.fromFileName('novel.txt'), ReaderFormat.txt);
+
+    final picked = ImportCandidate(
+      source: LocalFileImportSource.picked('/tmp/novel.fb2'),
+    );
+    final scanned = ImportCandidate(
+      source: LocalFileImportSource.scanned('/tmp/novel.fb2'),
+    );
+    expect(picked.format, ReaderFormat.fb2);
+    expect(picked.method, ImportMethod.localFile);
+    expect(scanned.format, ReaderFormat.fb2);
+    expect(scanned.method, ImportMethod.directoryScan);
+  });
+
+  test(
+    'directory scan uses the same comic pipeline and ignores unsupported files',
+    () async {
+      final nested = Directory(p.join(tempRoot.path, 'nested'))
+        ..createSync(recursive: true);
+      await _writeCbz(nested, 'scan.cbz');
+      await File(p.join(nested.path, 'notes.txt')).writeAsString('ignore me');
+
+      final result = await controller.importDirectory(tempRoot.path);
+
+      expect(result.added, 1);
+      expect(result.failures, isEmpty);
+      final entries = await controller.watchLibraryEntries().first;
+      expect(entries, hasLength(1));
+      expect(entries.single.item.format, ReaderFormat.cbz.storageValue);
+      final staging = Directory(p.join(tempRoot.path, '.import-staging'));
+      expect(
+        await staging.exists() ? await staging.list().toList() : const [],
+        isEmpty,
+      );
+    },
+  );
+
+  test('Foliate book formats share one book import route', () async {
+    const names = ['book.fb2', 'book.mobi', 'book.azw3', 'book.pdf'];
+    final candidates = <ImportCandidate>[];
+    for (var i = 0; i < names.length; i++) {
+      final file = File(p.join(tempRoot.path, names[i]));
+      await file.writeAsBytes([i + 1, 2, 3, 4], flush: true);
+      candidates.add(
+        ImportCandidate(source: LocalFileImportSource.picked(file.path)),
+      );
+    }
+    final fbz = File(p.join(tempRoot.path, 'boxed.fb2.zip'));
+    await fbz.writeAsBytes([9, 8, 7, 6], flush: true);
+    candidates.add(
+      ImportCandidate(source: LocalFileImportSource.picked(fbz.path)),
+    );
+
+    final result = await controller.importCandidates(candidates);
+
+    expect(result.added, names.length + 1);
+    expect(result.failures, isEmpty);
+    final entries = await controller.watchLibraryEntries().first;
+    expect(entries, hasLength(names.length + 1));
+    expect(
+      entries.map((entry) => entry.item.format),
+      containsAll([
+        ReaderFormat.fb2.storageValue,
+        ReaderFormat.mobi.storageValue,
+        ReaderFormat.azw3.storageValue,
+        ReaderFormat.pdf.storageValue,
+      ]),
+    );
+    final fbzItem = entries.firstWhere(
+      (entry) =>
+          entry.item.format == ReaderFormat.fb2.storageValue &&
+          entry.item.filePath.endsWith('.fbz'),
+    );
+    expect(fbzItem.item.filePath, endsWith('.fbz'));
+  });
+
+  test('TXT and Markdown stay explicit until conversion is added', () async {
+    final file = File(p.join(tempRoot.path, 'plain.txt'));
+    await file.writeAsString('plain text');
+
+    final result = await controller.importPaths([file.path]);
+
+    expect(result.added, 0);
+    expect(result.failures, hasLength(1));
+    expect(result.failures.single.reason, contains('暂不支持'));
+    expect(await Directory(p.join(tempRoot.path, 'library')).exists(), isFalse);
+  });
+}

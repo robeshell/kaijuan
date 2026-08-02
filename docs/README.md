@@ -57,7 +57,7 @@ docs/
 - **一个 App、一套数据**（沿用已有 `app_library`）。  
 - **一个仓库**，共享 core；两个引擎按 `item.kind` 路由。  
 - 书库内提供「全部 / 漫画 / 图书」类型筛选，不再用品牌分段。  
-- 导入 **CBZ / ZIP / EPUB**；EPUB 自动探测正文 vs 页图。
+- 导入 **CBZ / ZIP / EPUB**；EPUB 自动探测正文 vs 页图。导入链路按「方式 / 格式」两层组织，见 [specs/import.md](./specs/import.md)。
 
 ## 如何扩展
 
@@ -69,9 +69,10 @@ docs/
 
 ### 加格式 / 导入策略
 
-1. PRODUCT §8 格式矩阵说明。  
-2. `ReaderFormat` / `EpubImportRouter` 加路由。  
-3. 对应 import service 加支持。
+1. PRODUCT §8 格式矩阵说明。
+2. `docs/specs/import.md` 先明确方式层与格式层的边界。
+3. `ReaderFormat` / `EpubImportRouter` 加格式路由；方式适配器只产生 `ImportCandidate`。
+4. 对应 import service 加支持，并复用统一 staging / hash / 提交协议。
 
 ### 加工程包
 
@@ -83,6 +84,7 @@ docs/
 | Spec | 说明 |
 |------|------|
 | library / shelf / search | 书库 / 书架 / 搜索 |
+| import | 导入方式与导入格式两层链路 |
 | lists | **书单**（长清单） |
 | collections | **合集**（拼贴盒） |
 | reader-chrome | 共享 chrome 语言 |

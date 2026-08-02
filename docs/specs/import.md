@@ -1,0 +1,68 @@
+# 导入链路规范
+
+## 目标
+
+导入拆成两层：
+
+1. **导入方式（ImportMethod）**：文件从哪里来、用户怎样把它交给 App。
+2. **导入格式（ReaderFormat）**：交给 App 的内容是什么、由哪个阅读引擎处理。
+
+两层不能互相编码。任何导入方式都只能产生 `ImportCandidate`，之后统一进入 staging、hash、格式路由、封面/页序解析和数据库提交。
+
+```text
+导入方式
+  → ImportCandidate（名称 / MIME / 字节流）
+  → .import-staging 流式复制 + SHA-256
+  → 格式识别 / EPUB kind 探测
+  → comic import 或 book import
+  → library / covers 原子提交
+  → app_library upsert
+```
+
+## 导入方式
+
+| 方式 | 说明 | 状态 |
+|------|------|------|
+| 本地文件 | 系统文件选择器选择一个或多个文件 | 已有 |
+| 文件夹扫描 | 用户选择目录，递归发现支持格式后批量导入 | 首批 |
+| 拖拽 | 桌面把文件拖入书库 | 后续 |
+| 系统分享 | iOS / Android 分享到开卷，落成一个候选文件 | 后续 |
+| WiFi 传书 | App 临时开启局域网上传入口 | 后续 |
+| WebDAV / 云端 | 用户明确选择的远程文件源 | 后续 |
+| OPDS / 在线书库 | 浏览远程目录并下载后导入 | 后续 |
+
+方式层的实现约束：
+
+- 方式适配器不判断 `kind`，不直接调用 `ComicImportService` 或 `BookImportService`。
+- 本地文件和目录扫描都只负责提供 `File` / 字节流与显示名称。
+- 远程来源必须先下载到同一 staging 协议，不能把网络响应直接写进正式 `library`。
+- 批量导入逐文件隔离失败；一个候选失败不能回滚同一批已成功提交的其他候选。
+
+## 导入格式
+
+| 格式 | 目标引擎 | 处理方式 | 状态 |
+|------|----------|----------|------|
+| CBZ / ZIP | 漫画页图 | 直接列图、提取首图、保存原文件 | 已有 |
+| EPUB 页图 | 漫画页图 | Dart ZIP/OPF spine 抽样后自动路由 | 已有 |
+| EPUB 正文 | 图书 reflow | Foliate metadata probe + 原文件阅读 | 已有 |
+| FB2 | 图书 reflow | Foliate `makeFB2` | 首批 |
+| MOBI | 图书 reflow | Foliate `MOBI` | 首批 |
+| AZW3 / KF8 | 图书 reflow | Foliate `MOBI` 内容探测 | 首批 |
+| PDF | 图书固定版式 | Foliate `makePDF`，保留为 book | 首批 |
+| TXT | 图书 reflow | 转换为规范 EPUB 后导入 | 后续 |
+| Markdown | 图书 reflow | 受限 Markdown 转换为规范 EPUB | 后续 |
+
+格式层的处理原则：
+
+- `ReaderFormat` 是唯一格式枚举；筛选、导入白名单、数据库字段都使用它的 storage value。
+- `kind` 是阅读引擎路由，不是导入方式的属性。普通图书格式直接进入 book；EPUB 需要额外做正文/页图探测。
+- 文件扩展名只用于候选初判；格式服务仍必须检查文件是否存在、是否可解析和是否有可阅读内容。
+- 正式文件默认保留原始格式和原始内容 hash。转换格式只有在转换器落地后才引入独立的派生内容策略。
+
+## 首批验收
+
+- 本地单文件、多文件批量、目录递归扫描都走同一个 `ImportPipeline`。
+- 同一个文件从本地文件或目录扫描进入时，content hash 去重行为一致。
+- CBZ / ZIP / EPUB 既有链路回归通过。
+- FB2 / MOBI / AZW3 / PDF 能通过同一 BookImportService 进入 `kind=book`，保存对应 `format`。
+- 任一解析失败只留下失败项，不留下 `.partial`、半成品正式文件或错误 DB 行。
