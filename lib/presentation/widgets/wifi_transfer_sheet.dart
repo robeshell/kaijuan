@@ -9,18 +9,27 @@ import '../../library/import/wifi_transfer_service.dart';
 import 'app_components.dart';
 import 'app_overlays.dart';
 
-class WifiTransferSheet extends StatelessWidget {
+class WifiTransferSheet extends StatefulWidget {
   const WifiTransferSheet({super.key, required this.service});
 
   final WifiTransferService service;
 
   @override
+  State<WifiTransferSheet> createState() => _WifiTransferSheetState();
+}
+
+class _WifiTransferSheetState extends State<WifiTransferSheet> {
+  bool _copyNoticeVisible = false;
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: service,
+      listenable: widget.service,
       builder: (context, _) {
+        final service = widget.service;
         final url = service.url;
         final progress = service.progress;
+        final queue = service.queue;
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
@@ -97,14 +106,29 @@ class WifiTransferSheet extends StatelessWidget {
                             tooltip: '复制地址',
                             onPressed: () async {
                               await Clipboard.setData(ClipboardData(text: url));
-                              if (context.mounted) {
-                                showAppSnackBar(context, '已复制传输地址');
+                              if (mounted) {
+                                setState(() => _copyNoticeVisible = true);
+                                showAppSnackBar(this.context, '已复制传输地址');
                               }
                             },
                           ),
                         ],
                       ),
                     ),
+                    if (_copyNoticeVisible)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 6, right: 8),
+                          child: Text(
+                            '已复制传输地址',
+                            style: TextStyle(
+                              color: context.appColors.primary,
+                              fontSize: context.appCaptionSize,
+                            ),
+                          ),
+                        ),
+                      ),
                   ] else
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 56),
@@ -129,9 +153,18 @@ class WifiTransferSheet extends StatelessWidget {
                     LinearProgressIndicator(value: progress),
                     const SizedBox(height: 8),
                   ],
+                  if (queue.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _TransferQueueList(items: queue),
+                    const SizedBox(height: 8),
+                  ],
                   if (service.phase == WifiTransferPhase.completed)
                     _StatusText(
-                      text: _resultLabel(service.lastResult),
+                      text: _resultLabel(
+                        queue.isEmpty
+                            ? service.lastResult
+                            : service.queueResult,
+                      ),
                       color: context.appColors.primary,
                     ),
                   if (service.phase == WifiTransferPhase.failed)
@@ -171,6 +204,95 @@ class WifiTransferSheet extends StatelessWidget {
     final minutes = (seconds / 60).ceil();
     return '$minutes 分钟';
   }
+}
+
+class _TransferQueueList extends StatelessWidget {
+  const _TransferQueueList({required this.items});
+
+  final List<WifiTransferQueueItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '传输队列 · ${items.length}',
+            style: TextStyle(
+              color: context.appPrimaryText,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final item in items) ...[
+          AppGlassSurface(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            borderRadius: BorderRadius.circular(12),
+            child: Row(
+              children: [
+                Icon(
+                  _iconFor(item.phase),
+                  size: 17,
+                  color: _colorFor(context, item.phase),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    item.fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: context.appPrimaryText),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _labelFor(item.phase),
+                  style: TextStyle(
+                    color: _colorFor(context, item.phase),
+                    fontSize: context.appCaptionSize,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (item.phase == WifiTransferItemPhase.receiving &&
+              item.progress != null) ...[
+            const SizedBox(height: 4),
+            LinearProgressIndicator(value: item.progress),
+          ],
+          const SizedBox(height: 6),
+        ],
+      ],
+    );
+  }
+
+  IconData _iconFor(WifiTransferItemPhase phase) => switch (phase) {
+    WifiTransferItemPhase.queued => Icons.schedule_outlined,
+    WifiTransferItemPhase.receiving => Icons.sync,
+    WifiTransferItemPhase.importing => Icons.downloading_outlined,
+    WifiTransferItemPhase.completed => Icons.check_circle_outline,
+    WifiTransferItemPhase.failed => Icons.error_outline,
+  };
+
+  Color _colorFor(BuildContext context, WifiTransferItemPhase phase) =>
+      switch (phase) {
+        WifiTransferItemPhase.completed => context.appColors.primary,
+        WifiTransferItemPhase.failed => context.appColors.error,
+        WifiTransferItemPhase.receiving ||
+        WifiTransferItemPhase.importing => context.appColors.primary,
+        WifiTransferItemPhase.queued => context.appMutedText,
+      };
+
+  String _labelFor(WifiTransferItemPhase phase) => switch (phase) {
+    WifiTransferItemPhase.queued => '等待传输',
+    WifiTransferItemPhase.receiving => '传输中',
+    WifiTransferItemPhase.importing => '导入中',
+    WifiTransferItemPhase.completed => '已完成',
+    WifiTransferItemPhase.failed => '失败',
+  };
 }
 
 class _StatusText extends StatelessWidget {

@@ -31,6 +31,52 @@ enum WifiTransferPhase {
   failed,
 }
 
+enum WifiTransferItemPhase { queued, receiving, importing, completed, failed }
+
+class WifiTransferQueueItem {
+  const WifiTransferQueueItem({
+    required this.id,
+    required this.fileName,
+    required this.phase,
+    this.receivedBytes = 0,
+    this.totalBytes,
+    this.result,
+    this.error,
+  });
+
+  final String id;
+  final String fileName;
+  final WifiTransferItemPhase phase;
+  final int receivedBytes;
+  final int? totalBytes;
+  final ImportResult? result;
+  final String? error;
+
+  double? get progress {
+    final total = totalBytes;
+    if (total == null || total <= 0) return null;
+    return (receivedBytes / total).clamp(0.0, 1.0);
+  }
+
+  WifiTransferQueueItem copyWith({
+    WifiTransferItemPhase? phase,
+    int? receivedBytes,
+    int? totalBytes,
+    ImportResult? result,
+    String? error,
+  }) {
+    return WifiTransferQueueItem(
+      id: id,
+      fileName: fileName,
+      phase: phase ?? this.phase,
+      receivedBytes: receivedBytes ?? this.receivedBytes,
+      totalBytes: totalBytes ?? this.totalBytes,
+      result: result ?? this.result,
+      error: error ?? this.error,
+    );
+  }
+}
+
 /// Short-lived HTTP upload server used by the WiFi transfer entry point.
 ///
 /// The server only exposes a single token-protected upload endpoint. Uploaded
@@ -51,6 +97,7 @@ class WifiTransferService extends ChangeNotifier {
 
   static const _transferDirectoryName = '.wifi-transfer';
   static const _tokenQuery = 'token';
+  static const _queueIdQuery = 'queueId';
   static const _fileNameHeader = 'x-kaijuan-file-name';
   static const _jsonHeaders = {
     HttpHeaders.contentTypeHeader: 'application/json; charset=utf-8',
@@ -72,6 +119,7 @@ class WifiTransferService extends ChangeNotifier {
   bool _starting = false;
   bool _uploading = false;
   bool _disposed = false;
+  int _sessionGeneration = 0;
 
   WifiTransferPhase _phase = WifiTransferPhase.stopped;
   String? _url;
@@ -80,6 +128,8 @@ class WifiTransferService extends ChangeNotifier {
   int? _totalBytes;
   ImportResult? _lastResult;
   String? _error;
+  int _queueSequence = 0;
+  final List<WifiTransferQueueItem> _queue = [];
 
   WifiTransferPhase get phase => _phase;
   bool get isRunning => _server != null;
@@ -91,6 +141,23 @@ class WifiTransferService extends ChangeNotifier {
   int? get totalBytes => _totalBytes;
   ImportResult? get lastResult => _lastResult;
   String? get error => _error;
+  List<WifiTransferQueueItem> get queue => List.unmodifiable(_queue);
+
+  ImportResult get queueResult {
+    var result = const ImportResult();
+    for (final item in _queue) {
+      final itemResult = item.result;
+      if (itemResult != null) {
+        result += itemResult;
+      } else if (item.phase == WifiTransferItemPhase.failed &&
+          item.error != null) {
+        result += ImportResult(
+          failures: [ImportFailure(path: item.fileName, reason: item.error!)],
+        );
+      }
+    }
+    return result;
+  }
 
   double? get progress {
     final total = _totalBytes;
@@ -101,17 +168,21 @@ class WifiTransferService extends ChangeNotifier {
   Future<void> start() async {
     if (isRunning || _starting) return;
     _starting = true;
+    final generation = ++_sessionGeneration;
     _phase = WifiTransferPhase.starting;
     _error = null;
     _lastResult = null;
+    _queue.clear();
     _notify();
 
     try {
       await _purgeTransferPartials();
+      if (!_isCurrentGeneration(generation)) return;
       final token = _newToken();
       final router = Router()
         ..get('/', _serveUploadPage)
         ..get('/health', _health)
+        ..post('/queue', _createQueue)
         ..post('/upload', _upload);
       final handler = const Pipeline().addHandler(router.call);
       final server = await shelf_io.serve(
@@ -120,10 +191,19 @@ class WifiTransferService extends ChangeNotifier {
         0,
         poweredByHeader: null,
       );
+      if (!_isCurrentGeneration(generation)) {
+        await server.close(force: true);
+        return;
+      }
       _server = server;
       _token = token;
 
       final ip = await _resolveLocalIp();
+      if (!_isCurrentGeneration(generation)) {
+        await server.close(force: true);
+        _server = null;
+        return;
+      }
       if (ip == null || ip.isEmpty) {
         await server.close(force: true);
         _server = null;
@@ -144,6 +224,7 @@ class WifiTransferService extends ChangeNotifier {
       _phase = WifiTransferPhase.waiting;
       _notify();
     } catch (error) {
+      if (!_isCurrentGeneration(generation)) return;
       _error = error.toString();
       _phase = WifiTransferPhase.failed;
       _notify();
@@ -154,6 +235,7 @@ class WifiTransferService extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    ++_sessionGeneration;
     _expiryTimer?.cancel();
     _expiryTimer = null;
     final server = _server;
@@ -165,6 +247,7 @@ class WifiTransferService extends ChangeNotifier {
     _receivedBytes = 0;
     _totalBytes = null;
     _uploading = false;
+    _queue.clear();
     if (server != null) await server.close(force: true);
     _phase = WifiTransferPhase.stopped;
     _notify();
@@ -189,8 +272,95 @@ class WifiTransferService extends ChangeNotifier {
     );
   }
 
+  Future<Response> _createQueue(Request request) async {
+    if (!_isAuthorized(request)) return _unauthorized();
+    final generation = _sessionGeneration;
+    if (_uploading ||
+        _queue.any(
+          (item) =>
+              item.phase == WifiTransferItemPhase.queued ||
+              item.phase == WifiTransferItemPhase.receiving ||
+              item.phase == WifiTransferItemPhase.importing,
+        )) {
+      return Response(
+        HttpStatus.conflict,
+        body: jsonEncode({'ok': false, 'message': '已有传输队列在进行'}),
+        headers: _jsonHeaders,
+      );
+    }
+
+    try {
+      final payload = jsonDecode(await request.readAsString());
+      if (!_isCurrentGeneration(generation)) return _sessionEnded();
+      final rawFiles = payload is Map<String, dynamic>
+          ? payload['files']
+          : null;
+      if (rawFiles is! List || rawFiles.isEmpty || rawFiles.length > 100) {
+        throw const _WifiTransferException('请选择 1 到 100 个文件');
+      }
+
+      final items = <WifiTransferQueueItem>[];
+      for (final rawFile in rawFiles) {
+        if (rawFile is! Map<String, dynamic>) {
+          throw const _WifiTransferException('队列文件信息无效');
+        }
+        final rawName = rawFile['name'];
+        final fileName = rawName is String
+            ? _safeFileName(Uri.encodeComponent(rawName))
+            : null;
+        final rawSize = rawFile['size'];
+        final size = rawSize is num ? rawSize.toInt() : null;
+        if (fileName == null || size == null || size < 0) {
+          throw const _WifiTransferException('队列文件信息无效');
+        }
+        if (size > maxFileBytes) {
+          throw const _WifiTransferException('文件超过大小限制');
+        }
+        items.add(
+          WifiTransferQueueItem(
+            id: _newQueueId(),
+            fileName: fileName,
+            totalBytes: size,
+            phase: WifiTransferItemPhase.queued,
+          ),
+        );
+      }
+
+      _queue
+        ..clear()
+        ..addAll(items);
+      _error = null;
+      _lastResult = null;
+      _phase = WifiTransferPhase.waiting;
+      _notify();
+      return Response.ok(
+        jsonEncode({
+          'ok': true,
+          'files': [
+            for (final item in items)
+              {
+                'id': item.id,
+                'fileName': item.fileName,
+                'size': item.totalBytes,
+              },
+          ],
+        }),
+        headers: _jsonHeaders,
+      );
+    } catch (error) {
+      return Response(
+        error is _WifiTransferException
+            ? HttpStatus.badRequest
+            : HttpStatus.internalServerError,
+        body: jsonEncode({'ok': false, 'message': error.toString()}),
+        headers: _jsonHeaders,
+      );
+    }
+  }
+
   Future<Response> _upload(Request request) async {
     if (!_isAuthorized(request)) return _unauthorized();
+    final generation = _sessionGeneration;
     if (_uploading) {
       return Response(
         HttpStatus.conflict,
@@ -216,11 +386,53 @@ class WifiTransferService extends ChangeNotifier {
       );
     }
 
+    final queueId = request.url.queryParameters[_queueIdQuery];
+    WifiTransferQueueItem? queueItem;
+    if (queueId != null && queueId.isNotEmpty) {
+      for (final item in _queue) {
+        if (item.id == queueId) {
+          queueItem = item;
+          break;
+        }
+      }
+      if (queueItem == null ||
+          queueItem.phase != WifiTransferItemPhase.queued) {
+        return Response(
+          HttpStatus.badRequest,
+          body: jsonEncode({'ok': false, 'message': '传输队列项无效'}),
+          headers: _jsonHeaders,
+        );
+      }
+      if (queueItem.fileName != fileName) {
+        return Response(
+          HttpStatus.badRequest,
+          body: jsonEncode({'ok': false, 'message': '文件名与队列不一致'}),
+          headers: _jsonHeaders,
+        );
+      }
+    } else {
+      queueItem = WifiTransferQueueItem(
+        id: _newQueueId(),
+        fileName: fileName,
+        phase: WifiTransferItemPhase.queued,
+        totalBytes: announcedLength,
+      );
+      _queue.add(queueItem);
+    }
+
+    final itemId = queueItem.id;
+    _updateQueueItem(
+      itemId,
+      phase: WifiTransferItemPhase.receiving,
+      receivedBytes: 0,
+      totalBytes: announcedLength ?? queueItem.totalBytes,
+    );
+
     _uploading = true;
     _phase = WifiTransferPhase.receiving;
     _currentFileName = fileName;
     _receivedBytes = 0;
-    _totalBytes = announcedLength;
+    _totalBytes = announcedLength ?? queueItem.totalBytes;
     _error = null;
     _notify();
 
@@ -239,11 +451,17 @@ class WifiTransferService extends ChangeNotifier {
       final sink = partial.openWrite();
       try {
         await for (final chunk in request.read()) {
+          if (!_isCurrentGeneration(generation)) return _sessionEnded();
           _receivedBytes += chunk.length;
           if (_receivedBytes > maxFileBytes) {
             throw const _WifiTransferException('文件超过大小限制');
           }
           sink.add(chunk);
+          _updateQueueItem(
+            itemId,
+            receivedBytes: _receivedBytes,
+            totalBytes: _totalBytes,
+          );
           _notify();
         }
         await sink.flush();
@@ -251,7 +469,14 @@ class WifiTransferService extends ChangeNotifier {
         await sink.close();
       }
 
+      if (!_isCurrentGeneration(generation)) return _sessionEnded();
       _phase = WifiTransferPhase.importing;
+      _updateQueueItem(
+        itemId,
+        phase: WifiTransferItemPhase.importing,
+        receivedBytes: _receivedBytes,
+        totalBytes: _totalBytes,
+      );
       _notify();
       final result = await _onImport(
         ImportCandidate(
@@ -263,6 +488,7 @@ class WifiTransferService extends ChangeNotifier {
           ),
         ),
       );
+      if (!_isCurrentGeneration(generation)) return _sessionEnded();
       _lastResult = result;
       _phase = result.hasFailures
           ? WifiTransferPhase.failed
@@ -270,6 +496,16 @@ class WifiTransferService extends ChangeNotifier {
       if (result.hasFailures) {
         _error = result.failures.first.reason;
       }
+      _updateQueueItem(
+        itemId,
+        phase: result.hasFailures
+            ? WifiTransferItemPhase.failed
+            : WifiTransferItemPhase.completed,
+        receivedBytes: _receivedBytes,
+        totalBytes: _totalBytes,
+        result: result,
+        error: result.hasFailures ? result.failures.first.reason : null,
+      );
       _notify();
       return Response(
         result.hasFailures ? HttpStatus.unprocessableEntity : HttpStatus.ok,
@@ -277,8 +513,16 @@ class WifiTransferService extends ChangeNotifier {
         headers: _jsonHeaders,
       );
     } catch (error) {
+      if (!_isCurrentGeneration(generation)) return _sessionEnded();
       _phase = WifiTransferPhase.failed;
       _error = error.toString();
+      _updateQueueItem(
+        itemId,
+        phase: WifiTransferItemPhase.failed,
+        receivedBytes: _receivedBytes,
+        totalBytes: _totalBytes,
+        error: error.toString(),
+      );
       _notify();
       final statusCode =
           error is _WifiTransferException && error.message == '文件超过大小限制'
@@ -291,10 +535,58 @@ class WifiTransferService extends ChangeNotifier {
       );
     } finally {
       if (partial != null) await _deleteIfExists(partial);
-      _uploading = false;
-      _notify();
+      if (_isCurrentGeneration(generation)) {
+        _uploading = false;
+        final hasPending = _queue.any(
+          (item) =>
+              item.phase == WifiTransferItemPhase.queued ||
+              item.phase == WifiTransferItemPhase.receiving ||
+              item.phase == WifiTransferItemPhase.importing,
+        );
+        if (hasPending) {
+          _phase = WifiTransferPhase.waiting;
+        } else if (_queue.any(
+          (item) => item.phase == WifiTransferItemPhase.failed,
+        )) {
+          _phase = WifiTransferPhase.failed;
+        } else {
+          _phase = WifiTransferPhase.completed;
+        }
+        _notify();
+      }
     }
   }
+
+  void _updateQueueItem(
+    String id, {
+    WifiTransferItemPhase? phase,
+    int? receivedBytes,
+    int? totalBytes,
+    ImportResult? result,
+    String? error,
+  }) {
+    final index = _queue.indexWhere((item) => item.id == id);
+    if (index < 0) return;
+    _queue[index] = _queue[index].copyWith(
+      phase: phase,
+      receivedBytes: receivedBytes,
+      totalBytes: totalBytes,
+      result: result,
+      error: error,
+    );
+  }
+
+  String _newQueueId() =>
+      '${DateTime.now().microsecondsSinceEpoch}-${++_queueSequence}';
+
+  bool _isCurrentGeneration(int generation) =>
+      !_disposed && generation == _sessionGeneration;
+
+  Response _sessionEnded() => Response(
+    HttpStatus.gone,
+    body: jsonEncode({'ok': false, 'message': '传输会话已结束'}),
+    headers: _jsonHeaders,
+  );
 
   bool _isAuthorized(Request request) {
     final token = _token;
@@ -399,6 +691,7 @@ class WifiTransferService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    ++_sessionGeneration;
     _expiryTimer?.cancel();
     _expiryTimer = null;
     unawaited(_server?.close(force: true));
@@ -414,46 +707,123 @@ class WifiTransferService extends ChangeNotifier {
   <title>开卷 · WiFi 传书</title>
   <style>
     :root { color-scheme: light; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f7f9fc; color:#172033; }
-    main { width:min(92vw,480px); box-sizing:border-box; padding:28px; border:1px solid #dce3ee; border-radius:22px; background:#fff; box-shadow:0 16px 50px #27364a18; }
-    h1 { margin:0 0 8px; font-size:24px; } p { color:#5c687b; line-height:1.6; }
-    label { display:flex; justify-content:center; align-items:center; min-height:54px; margin-top:20px; border-radius:14px; background:#e76b38; color:#fff; font-weight:600; cursor:pointer; }
-    input { display:none; } #status { margin-top:18px; min-height:24px; font-size:14px; color:#5c687b; white-space:pre-wrap; }
+    body { margin:0; min-height:100vh; box-sizing:border-box; padding:24px 0; display:grid; place-items:center; background:#f7f9fc; color:#172033; }
+    main { width:min(92vw,480px); min-width:0; box-sizing:border-box; padding:28px; border:1px solid #dce3ee; border-radius:22px; background:#fff; box-shadow:0 16px 50px #27364a18; }
+    h1 { margin:0 0 8px; font-size:24px; } p { color:#5c687b; line-height:1.6; margin-bottom:0; }
+    label, button { display:flex; justify-content:center; align-items:center; width:100%; box-sizing:border-box; min-height:52px; border-radius:14px; font:inherit; font-weight:600; cursor:pointer; }
+    label { margin-top:20px; border:1px solid #e76b38; background:#fff; color:#d75e2e; }
+    button { margin-top:10px; border:0; background:#e76b38; color:#fff; }
+    label:has(+ input:disabled), button:disabled { opacity:.55; cursor:wait; }
+    input { display:none; } #status { margin-top:18px; min-height:24px; font-size:14px; color:#5c687b; white-space:pre-wrap; overflow-wrap:anywhere; }
+    #queue { display:grid; gap:8px; width:100%; min-width:0; max-width:100%; margin-top:14px; overflow:hidden; }
+    .queue-item { display:flex; align-items:center; gap:10px; width:100%; min-width:0; box-sizing:border-box; overflow:hidden; padding:10px 12px; border-radius:12px; background:#f4f6fa; font-size:13px; }
+    .queue-item .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .queue-item .state { color:#68758a; white-space:nowrap; }
+    .queue-item.completed .state { color:#24865d; } .queue-item.failed .state { color:#c34b4b; }
+    [hidden] { display:none !important; }
   </style>
 </head>
 <body>
   <main>
     <h1>WiFi 传书</h1>
-    <p>请从当前设备选择图书或漫画文件。文件会直接导入开卷，不会上传到互联网。</p>
+    <p>请从当前设备选择图书或漫画文件，确认后再开始传输。文件会直接导入开卷，不会上传到互联网。</p>
     <label for="files">选择文件</label>
     <input id="files" type="file" multiple>
+    <button id="start" type="button" hidden>开始传输</button>
     <div id="status">等待选择文件</div>
+    <div id="queue" aria-live="polite"></div>
   </main>
   <script>
     const token = new URLSearchParams(location.search).get('token');
     const input = document.getElementById('files');
+    const startButton = document.getElementById('start');
     const status = document.getElementById('status');
-    input.addEventListener('change', async () => {
+    const queue = document.getElementById('queue');
+    let selectedFiles = [];
+    let isTransferring = false;
+
+    function renderQueue(files) {
+      queue.replaceChildren(...files.map((file, index) => {
+        const row = document.createElement('div');
+        row.className = 'queue-item queued';
+        row.dataset.index = index;
+        row.innerHTML = `<span class="name"></span><span class="state">等待传输</span>`;
+        row.querySelector('.name').textContent = file.name;
+        return row;
+      }));
+    }
+
+    function updateQueueItem(index, state, label) {
+      const row = queue.querySelector(`[data-index="${index}"]`);
+      if (!row) return;
+      row.className = `queue-item ${state}`;
+      row.querySelector('.state').textContent = label;
+    }
+
+    async function readJson(response) {
+      try { return await response.json(); } catch (_) { return {}; }
+    }
+
+    input.addEventListener('change', () => {
       const files = Array.from(input.files || []);
-      for (const file of files) {
-        status.textContent = `正在传输：${file.name}`;
-        try {
-          const response = await fetch(`/upload?token=${encodeURIComponent(token || '')}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/octet-stream',
-              'X-Kaijuan-File-Name': encodeURIComponent(file.name),
-            },
-            body: file,
-          });
-          const result = await response.json();
-          if (!response.ok || !result.ok) throw new Error(result.message || (result.failures && result.failures[0] && result.failures[0].reason) || '导入失败');
-          status.textContent = `已导入：${file.name}`;
-        } catch (error) {
-          status.textContent = `失败：${file.name}\n${error.message || error}`;
-        }
-      }
+      if (!files.length) return;
+      selectedFiles = files;
+      renderQueue(files);
+      startButton.hidden = false;
+      startButton.disabled = false;
+      status.textContent = `已选择 ${files.length} 个文件，请确认后开始传输`;
       input.value = '';
+    });
+
+    startButton.addEventListener('click', async () => {
+      if (!selectedFiles.length || isTransferring) return;
+      const files = selectedFiles.slice();
+      isTransferring = true;
+      input.disabled = true;
+      startButton.disabled = true;
+      status.textContent = `正在准备队列：${files.length} 个文件`;
+      try {
+        const queueResponse = await fetch(`/queue?token=${encodeURIComponent(token || '')}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ files: files.map(file => ({ name: file.name, size: file.size })) }),
+        });
+        const manifest = await readJson(queueResponse);
+        if (!queueResponse.ok || !manifest.ok) throw new Error(manifest.message || '无法创建传输队列');
+
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index];
+          const queueFile = manifest.files[index];
+          updateQueueItem(index, 'receiving', '正在传输');
+          status.textContent = `正在传输 ${index + 1}/${files.length}：${file.name}`;
+          try {
+            const response = await fetch(`/upload?token=${encodeURIComponent(token || '')}&queueId=${encodeURIComponent(queueFile.id)}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-Kaijuan-File-Name': encodeURIComponent(file.name),
+              },
+              body: file,
+            });
+            const result = await readJson(response);
+            if (!response.ok || !result.ok) throw new Error(result.message || (result.failures && result.failures[0] && result.failures[0].reason) || '导入失败');
+            updateQueueItem(index, 'completed', '已完成');
+          } catch (error) {
+            updateQueueItem(index, 'failed', '失败');
+            status.textContent = `第 ${index + 1} 个文件失败：${file.name}\n${error.message || error}`;
+          }
+        }
+        const failed = Array.from(queue.querySelectorAll('.failed')).length;
+        status.textContent = failed ? `队列完成：${files.length - failed} 个成功，${failed} 个失败` : `队列完成：已导入 ${files.length} 个文件`;
+      } catch (error) {
+        status.textContent = `队列创建失败：${error.message || error}`;
+        files.forEach((_, index) => updateQueueItem(index, 'failed', '未传输'));
+      } finally {
+        selectedFiles = [];
+        isTransferring = false;
+        input.disabled = false;
+        startButton.hidden = true;
+      }
     });
   </script>
 </body>
