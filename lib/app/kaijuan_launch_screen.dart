@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 
 import '../core/theme/brand_tokens.g.dart';
 
-/// Shared launch canvas colors — match kai-brand-design light canvas.
-const kaijuanLaunchBackground = Color(0xFFF7F9FC);
+/// Shared launch canvas colors — match the app's white light canvas.
+const kaijuanLaunchBackground = Colors.white;
 const kaijuanLaunchTitleColor = Color(0xFF1C1C22);
 const kaijuanLaunchSubtitleColor = Color(0xFF70707A);
 
@@ -51,7 +51,7 @@ class _KaijuanLaunchLockup extends StatelessWidget {
                 height: 144,
                 filterQuality: FilterQuality.high,
                 excludeFromSemantics: true,
-                errorBuilder: (_, __, ___) =>
+                errorBuilder: (_, _, _) =>
                     const SizedBox(width: 144, height: 144),
               ),
             ),

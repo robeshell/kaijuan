@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../app/theme_preferences.dart';
 import '../../app_update/app_update_service.dart';
 import '../../app_update/app_update_ui.dart';
+import '../../core/kaijuan_icons.dart';
 import '../../core/pipeline_diagnostics.dart';
 import '../../core/theme.dart';
 import '../widgets/app_overlays.dart';
@@ -192,7 +193,7 @@ class _SkinCard extends StatelessWidget {
         Text(
           label,
           style: TextStyle(
-            fontSize: context.appBodySecondarySize,
+            fontSize: context.appCaptionSize,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             color: selected ? accent : context.settingsSecondary,
           ),
@@ -299,7 +300,7 @@ class _AccentSwatch extends StatelessWidget {
                 width: 28,
                 height: 28,
                 child: selected
-                    ? const Icon(Icons.circle, size: 8, color: Colors.white)
+                    ? const Icon(KaijuanIcons.circleFilled, size: 8, color: Colors.white)
                     : null,
               ),
             ),
@@ -449,7 +450,7 @@ class _AboutRow extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                 icon: Icon(
-                  Icons.copy_outlined,
+                  KaijuanIcons.copy,
                   size: 15,
                   weight: 300,
                   color: context.settingsMuted,

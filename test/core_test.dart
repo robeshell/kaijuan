@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/core/theme.dart';
 import 'package:kaijuan/domain/reader_models.dart';
@@ -28,6 +29,16 @@ void main() {
     );
   });
 
+  test('light shell uses a white canvas while dark shell stays dark', () {
+    final accent = AppColors.defaultAccent;
+
+    expect(AppTheme.light(accent).scaffoldBackgroundColor, Colors.white);
+    expect(
+      AppTheme.dark(accent).scaffoldBackgroundColor,
+      AppSkins.deepNight.canvas,
+    );
+  });
+
   test('system list tiles use the shared list-row metrics', () {
     final listTile = AppTheme.light(AppColors.defaultAccent).listTileTheme;
 
@@ -36,7 +47,7 @@ void main() {
     expect(listTile.minLeadingWidth, 32);
     expect(listTile.horizontalTitleGap, 10);
     expect(listTile.titleTextStyle?.fontSize, 14);
-    expect(listTile.subtitleTextStyle?.fontSize, 11);
+    expect(listTile.subtitleTextStyle?.fontSize, 15);
   });
 
   group('ReaderFormat.fromExtension', () {

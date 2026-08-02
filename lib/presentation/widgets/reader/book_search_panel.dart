@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/foliate_js_bridge.dart';
@@ -69,7 +70,7 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
                   IconButton(
                     tooltip: '关闭',
                     onPressed: _controller.closeSearch,
-                    icon: Icon(Icons.close, color: fg, weight: 300),
+                    icon: Icon(KaijuanIcons.close, color: fg, weight: 300),
                   ),
                   Expanded(
                     child: TextField(
@@ -98,7 +99,7 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
                                   _focus.requestFocus();
                                 },
                                 icon: Icon(
-                                  Icons.cancel_outlined,
+                                  KaijuanIcons.close,
                                   color: muted,
                                   size: 18,
                                   weight: 300,
@@ -154,7 +155,7 @@ class _Results extends StatelessWidget {
 
     if (query.isEmpty) {
       return const AppEmptyState(
-        icon: Icons.search_outlined,
+        icon: KaijuanIcons.search,
         title: '搜索书内内容',
         message: '输入关键词开始搜索。',
         padding: EdgeInsets.all(20),
@@ -162,7 +163,7 @@ class _Results extends StatelessWidget {
     }
     if (!running && hits.isEmpty) {
       return AppEmptyState(
-        icon: Icons.search_off_outlined,
+        icon: KaijuanIcons.searchEmpty,
         title: '没有找到结果',
         message: '没有找到“$query”，换个关键词试试。',
         padding: const EdgeInsets.all(20),
@@ -170,7 +171,7 @@ class _Results extends StatelessWidget {
     }
     if (running && hits.isEmpty) {
       return const AppEmptyState(
-        icon: Icons.search_outlined,
+        icon: KaijuanIcons.search,
         title: '正在搜索',
         message: '正在查找书内内容。',
         loading: true,

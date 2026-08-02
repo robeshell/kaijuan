@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/comic_reading_preferences.dart';
+import '../../core/kaijuan_icons.dart';
 import '../../core/platform_window.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/comic/comic_models.dart';
@@ -291,7 +292,7 @@ class _ErrorBody extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.white70),
+              const Icon(KaijuanIcons.error, size: 48, color: Colors.white70),
               const SizedBox(height: 16),
               Text(
                 message,

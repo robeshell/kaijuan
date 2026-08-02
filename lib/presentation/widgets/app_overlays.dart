@@ -224,7 +224,7 @@ class _AppTextPromptDialogState extends State<_AppTextPromptDialog> {
         controller: _controller,
         autofocus: true,
         style: TextStyle(
-          fontSize: KaiProductTokens.typographyReaderOverlayTitle,
+          fontSize: context.appLabelSize,
           fontWeight: FontWeight.w500,
         ),
         decoration: InputDecoration(hintText: widget.hint),

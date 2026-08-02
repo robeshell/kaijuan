@@ -36,6 +36,29 @@ void main() {
     expect(retried, isTrue);
   });
 
+  testWidgets('empty state fits a short bounded viewport', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(AppColors.defaultAccent),
+        home: Scaffold(
+          body: SizedBox(
+            height: 138,
+            child: AppEmptyState(
+              icon: Icons.library_books_outlined,
+              title: '书库还是空的',
+              message: '导入 CBZ、ZIP 或 EPUB 后会显示在这里。',
+              actionLabel: '导入',
+              onAction: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('书库还是空的'), findsOneWidget);
+  });
+
   testWidgets('App menu becomes a bottom sheet in compact windows', (
     tester,
   ) async {

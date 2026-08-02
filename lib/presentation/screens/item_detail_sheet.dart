@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
@@ -178,7 +179,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                       },
                     ),
                   ListTile(
-                    leading: const Icon(Icons.add),
+                    leading: const Icon(KaijuanIcons.add),
                     title: const Text('新建书单…'),
                     onTap: () async {
                       Navigator.pop(ctx);
@@ -254,8 +255,8 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                 ListTile(
                   leading: Icon(
                     currentId == c.id
-                        ? Icons.check_circle_outline
-                        : Icons.circle_outlined,
+                        ? KaijuanIcons.checkCircle
+                        : KaijuanIcons.circle,
                     weight: 300,
                   ),
                   title: Text(c.name),
@@ -272,7 +273,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                 ),
               if (currentId != null)
                 ListTile(
-                  leading: const Icon(Icons.remove_circle_outline, weight: 300),
+                  leading: const Icon(KaijuanIcons.dismissCircle, weight: 300),
                   title: const Text('移出当前合集'),
                   onTap: () async {
                     await widget.controller.removeItemFromCollection(
@@ -286,7 +287,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                   },
                 ),
               ListTile(
-                leading: const Icon(Icons.add, weight: 300),
+                leading: const Icon(KaijuanIcons.add, weight: 300),
                 title: const Text('新建合集…'),
                 onTap: () async {
                   Navigator.pop(ctx);
@@ -359,7 +360,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                         TextField(
                           controller: _titleController,
                           style: TextStyle(
-                            fontSize: context.appTitleSize,
+                            fontSize: context.appLabelSize,
                             fontWeight: FontWeight.w600,
                           ),
                           decoration: const InputDecoration(
@@ -423,27 +424,21 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                         )
-                      : const Icon(Icons.check_outlined, size: 18),
+                      : const Icon(KaijuanIcons.check, size: 18),
                   label: const Text('保存标题'),
                 ),
               ),
               const Divider(height: 28),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  Icons.menu_book_outlined,
-                  color: accent,
-                  weight: 300,
-                ),
+                leading: Icon(KaijuanIcons.open, color: accent, weight: 300),
                 title: const Text('打开'),
                 onTap: widget.onOpen,
               ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
-                  _item.onShelf
-                      ? Icons.bookmark_outlined
-                      : Icons.bookmark_border_outlined,
+                  _item.onShelf ? KaijuanIcons.bookmark : KaijuanIcons.bookmark,
                   color: accent,
                   weight: 300,
                 ),
@@ -453,7 +448,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
-                  Icons.playlist_add_outlined,
+                  KaijuanIcons.playlistAdd,
                   color: accent,
                   weight: 300,
                 ),
@@ -463,7 +458,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
-                  Icons.collections_bookmark_outlined,
+                  KaijuanIcons.collections,
                   color: accent,
                   weight: 300,
                 ),
@@ -473,7 +468,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
-                  Icons.delete_outline,
+                  KaijuanIcons.delete,
                   color: Theme.of(context).colorScheme.error,
                   weight: 300,
                 ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 
 /// Multi-select corner badge on a cover — filled check, no thick cover border.
@@ -14,7 +15,7 @@ class CoverSelectBadge extends StatelessWidget {
     final accent = Theme.of(context).colorScheme.primary;
     if (!selected) {
       return Icon(
-        Icons.circle_outlined,
+        KaijuanIcons.circle,
         size: size,
         color: Colors.white,
         shadows: const [Shadow(blurRadius: 6, color: Colors.black54)],
@@ -36,7 +37,7 @@ class CoverSelectBadge extends StatelessWidget {
             ),
           ],
         ),
-        child: Icon(Icons.check_circle, size: size, color: accent),
+        child: Icon(KaijuanIcons.checkCircleFilled, size: size, color: accent),
       ),
     );
   }

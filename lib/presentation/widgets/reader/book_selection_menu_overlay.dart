@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
@@ -340,33 +341,33 @@ class _ActionsCard extends StatelessWidget {
       child: Row(
         children: [
           _ActionItem(
-            icon: Icons.format_underlined_rounded,
+            icon: KaijuanIcons.underline,
             label: '划线',
             onPressed: onUnderline,
           ),
           _ActionItem(
-            icon: Icons.edit_note_rounded,
+            icon: KaijuanIcons.edit,
             label: '笔记',
             onPressed: onNote,
           ),
-          _ActionItem(icon: Icons.copy_rounded, label: '复制', onPressed: onCopy),
+          _ActionItem(icon: KaijuanIcons.copy, label: '复制', onPressed: onCopy),
           _ActionItem(
-            icon: Icons.menu_book_rounded,
+            icon: KaijuanIcons.open,
             label: '词典',
             onPressed: onDict,
           ),
           _ActionItem(
-            icon: Icons.translate_rounded,
+            icon: KaijuanIcons.translate,
             label: '翻译',
             onPressed: onTranslate,
           ),
           _ActionItem(
-            icon: Icons.search_rounded,
+            icon: KaijuanIcons.search,
             label: '搜索',
             onPressed: onSearch,
           ),
           _ActionItem(
-            icon: Icons.format_quote_rounded,
+            icon: KaijuanIcons.quote,
             label: '书摘',
             onPressed: onExcerpt,
           ),
@@ -417,19 +418,19 @@ class _MarkupCard extends StatelessWidget {
         children: [
           _StyleChip(
             selected: activeType == BookAnnotationType.underline,
-            child: const Icon(Icons.format_underlined, size: 18),
+            child: const Icon(KaijuanIcons.underline, size: 18),
             onPressed: () => onStyle(BookAnnotationType.underline, activeColor),
           ),
           const SizedBox(width: 6),
           _StyleChip(
             selected: activeType == BookAnnotationType.wavy,
-            child: const Icon(Icons.waves_rounded, size: 18),
+            child: const Icon(KaijuanIcons.wavy, size: 18),
             onPressed: () => onStyle(BookAnnotationType.wavy, activeColor),
           ),
           const SizedBox(width: 6),
           _StyleChip(
             selected: activeType == BookAnnotationType.highlight,
-            child: const Icon(Icons.format_color_fill_rounded, size: 18),
+            child: const Icon(KaijuanIcons.highlight, size: 18),
             onPressed: () => onStyle(BookAnnotationType.highlight, activeColor),
           ),
           const Spacer(),
@@ -459,28 +460,28 @@ class _MarkupCard extends StatelessWidget {
       child: Row(
         children: [
           _ActionItem(
-            icon: Icons.delete_outline_rounded,
+            icon: KaijuanIcons.delete,
             label: '清空',
             onPressed: onClear,
           ),
           _ActionItem(
-            icon: Icons.edit_note_rounded,
+            icon: KaijuanIcons.edit,
             label: '笔记',
             onPressed: onNote,
           ),
-          _ActionItem(icon: Icons.copy_rounded, label: '复制', onPressed: onCopy),
+          _ActionItem(icon: KaijuanIcons.copy, label: '复制', onPressed: onCopy),
           _ActionItem(
-            icon: Icons.menu_book_rounded,
+            icon: KaijuanIcons.open,
             label: '词典',
             onPressed: onDict,
           ),
           _ActionItem(
-            icon: Icons.translate_rounded,
+            icon: KaijuanIcons.translate,
             label: '翻译',
             onPressed: onTranslate,
           ),
           _ActionItem(
-            icon: Icons.format_quote_rounded,
+            icon: KaijuanIcons.quote,
             label: '书摘',
             onPressed: onExcerpt,
           ),
@@ -721,7 +722,7 @@ class _ColorDot extends StatelessWidget {
               ),
             ),
             child: selected
-                ? const Icon(Icons.check, size: 11, color: Colors.white)
+                ? const Icon(KaijuanIcons.check, size: 11, color: Colors.white)
                 : null,
           ),
         ),

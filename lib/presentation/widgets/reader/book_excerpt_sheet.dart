@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../readers/book/book_excerpt_style.dart';
 import '../app_overlays.dart';
@@ -229,7 +230,7 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
                   children: [
                     Expanded(
                       child: _ActionButton(
-                        icon: Icons.download_outlined,
+                        icon: KaijuanIcons.download,
                         label: '保存图片',
                         enabled: !_busy,
                         onPressed: () => unawaited(_save()),
@@ -239,7 +240,7 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
                       child: Builder(
                         builder: (buttonContext) {
                           return _ActionButton(
-                            icon: Icons.ios_share_outlined,
+                            icon: KaijuanIcons.share,
                             label: '分享',
                             enabled: !_busy,
                             onPressed: () => unawaited(_share(buttonContext)),
@@ -249,7 +250,7 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
                     ),
                     Expanded(
                       child: _ActionButton(
-                        icon: Icons.copy_outlined,
+                        icon: KaijuanIcons.copy,
                         label: '复制',
                         enabled: !_busy,
                         onPressed: () => unawaited(_copy()),
@@ -297,7 +298,7 @@ class _Chip extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (selected) ...[
-                Icon(Icons.check, size: 14, color: accent, weight: 300),
+                Icon(KaijuanIcons.check, size: 14, color: accent, weight: 300),
                 const SizedBox(width: 4),
               ],
               Text(

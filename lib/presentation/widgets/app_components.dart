@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../core/theme/brand_tokens.g.dart';
 
@@ -204,7 +205,7 @@ class _AppChoiceButton<T> extends StatelessWidget {
                   option.label,
                   style: TextStyle(
                     color: foreground,
-                    fontSize: context.appCaptionSize,
+                    fontSize: context.appLabelSize,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
@@ -251,7 +252,7 @@ class AppToolbarButton extends StatelessWidget {
                 value,
                 style: TextStyle(
                   color: context.appSecondaryText,
-                  fontSize: context.appCaptionSize,
+                  fontSize: context.appLabelSize,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -286,70 +287,85 @@ class AppEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding:
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Empty states can sit below a tall chrome stack or inside a short
+        // sheet. Hide secondary copy and tighten rhythm before allowing the
+        // shared state to overflow its bounded viewport.
+        final compact =
+            constraints.hasBoundedHeight && constraints.maxHeight < 180;
+        final contentPadding =
             padding ??
             EdgeInsets.fromLTRB(
               context.appPageGutter,
-              30,
+              compact ? 12 : 30,
               context.appPageGutter,
-              context.appContentBottomPadding,
+              compact ? 12 : context.appContentBottomPadding,
+            );
+
+        return Center(
+          child: Padding(
+            padding: contentPadding,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (loading)
+                    const SizedBox.square(
+                      dimension: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(
+                      icon,
+                      size: compact ? 24 : 30,
+                      color: context.appMutedText.withValues(
+                        alpha: context.appMutedText.a * 0.68,
+                      ),
+                    ),
+                  SizedBox(height: compact ? 8 : 14),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: context.appPrimaryText.withValues(
+                        alpha: context.appPrimaryText.a * 0.88,
+                      ),
+                      fontSize: compact
+                          ? context.appTitleSize
+                          : context.appSectionTitleSize,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (!compact) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      message,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: context.appMutedText.withValues(
+                          alpha: context.appMutedText.a * 0.76,
+                        ),
+                        fontSize: context.appBodySecondarySize,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                  if (actionLabel != null && onAction != null) ...[
+                    SizedBox(height: compact ? 10 : 20),
+                    FilledButton.tonalIcon(
+                      onPressed: onAction,
+                      icon: const Icon(KaijuanIcons.forward, size: 17),
+                      label: Text(actionLabel!),
+                    ),
+                  ],
+                ],
+              ),
             ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (loading)
-                const SizedBox.square(
-                  dimension: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(
-                  icon,
-                  size: 30,
-                  color: context.appMutedText.withValues(
-                    alpha: context.appMutedText.a * 0.68,
-                  ),
-                ),
-              const SizedBox(height: 14),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: context.appPrimaryText.withValues(
-                    alpha: context.appPrimaryText.a * 0.88,
-                  ),
-                  fontSize: KaiProductTokens.typographyEmptyStateTitle,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: context.appMutedText.withValues(
-                    alpha: context.appMutedText.a * 0.76,
-                  ),
-                  fontSize: KaiProductTokens.typographyEmptyStateMessage,
-                  height: 1.45,
-                ),
-              ),
-              if (actionLabel != null && onAction != null) ...[
-                const SizedBox(height: 20),
-                FilledButton.tonalIcon(
-                  onPressed: onAction,
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 17),
-                  label: Text(actionLabel!),
-                ),
-              ],
-            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -591,8 +607,9 @@ class AppMenuButton<T> extends StatelessWidget {
     required this.tooltip,
     this.menuTitle,
     this.child,
-    this.icon = const Icon(Icons.more_horiz_rounded, size: 21),
+    this.icon = const Icon(KaijuanIcons.more, size: 21),
     this.padding = EdgeInsets.zero,
+    this.forceAnchored = false,
     this.enabled = true,
     super.key,
   });
@@ -604,6 +621,7 @@ class AppMenuButton<T> extends StatelessWidget {
   final Widget? child;
   final Widget icon;
   final EdgeInsetsGeometry padding;
+  final bool forceAnchored;
   final bool enabled;
 
   Future<void> _open(BuildContext context) async {
@@ -615,6 +633,7 @@ class AppMenuButton<T> extends StatelessWidget {
       anchor: anchor,
       title: menuTitle,
       actions: actions,
+      forceAnchored: forceAnchored,
     );
     if (selected != null) onSelected(selected);
   }
@@ -659,9 +678,10 @@ Future<T?> showAppMenu<T>(
   required List<AppMenuAction<T>> actions,
   Rect? anchor,
   String? title,
+  bool forceAnchored = false,
 }) {
   final compact = MediaQuery.sizeOf(context).width < 680;
-  if (compact || anchor == null) {
+  if ((!forceAnchored && compact) || anchor == null) {
     return showAppBottomSheet<T>(
       context,
       builder: (sheetContext) =>
@@ -702,7 +722,13 @@ class _AppAnchoredMenu<T> extends StatelessWidget {
         actions.length * 36.0 + (title == null ? 8 : 48) + 8;
     final menuWidth = _anchoredMenuWidth(context, actions);
     const edge = 12.0;
-    final left = (anchor.right - menuWidth)
+    // Keep menus triggered from the leading side aligned to the trigger's
+    // left edge. Right-aligning every menu makes a wide filter menu expand
+    // over the navigation rail; trailing actions should still right-align.
+    final preferredLeft = anchor.center.dx < viewport.width / 2
+        ? anchor.left
+        : anchor.right - menuWidth;
+    final left = preferredLeft
         .clamp(edge, math.max(edge, viewport.width - menuWidth - edge))
         .toDouble();
     final opensAbove = anchor.bottom + estimatedHeight > viewport.height - edge;
@@ -713,6 +739,13 @@ class _AppAnchoredMenu<T> extends StatelessWidget {
       color: Colors.transparent,
       child: Stack(
         children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).pop(),
+              child: const SizedBox.expand(),
+            ),
+          ),
           Positioned(
             left: left,
             top: top,
@@ -916,7 +949,7 @@ class _AppMenuActionRow<T> extends StatelessWidget {
                   if (action.selected) ...[
                     SizedBox(width: compact ? 12 : 10),
                     Icon(
-                      Icons.check_rounded,
+                      KaijuanIcons.check,
                       size: compact ? 18 : 16,
                       color: accent,
                     ),
@@ -1009,7 +1042,7 @@ class AppListRow extends StatelessWidget {
                           DefaultTextStyle(
                             style: TextStyle(
                               color: context.appSecondaryText,
-                              fontSize: context.appCaptionSmallSize,
+                              fontSize: context.appBodySecondarySize,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1059,9 +1092,7 @@ class AppCheckRow extends StatelessWidget {
         selected: value,
         onTap: enabled ? () => onChanged(!value) : null,
         leading: Icon(
-          value
-              ? Icons.check_box_rounded
-              : Icons.check_box_outline_blank_rounded,
+          value ? KaijuanIcons.checkboxChecked : KaijuanIcons.checkbox,
           size: 20,
           color: value ? context.appColors.primary : context.appMutedText,
         ),

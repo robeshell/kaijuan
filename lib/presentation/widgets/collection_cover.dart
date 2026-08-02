@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import 'cover_card_ink.dart';
 
@@ -29,7 +30,7 @@ class CollectionCover extends StatelessWidget {
         child: paths.isEmpty
             ? Center(
                 child: Icon(
-                  Icons.collections_bookmark_outlined,
+                  KaijuanIcons.collections,
                   weight: 300,
                   size: 28,
                   color: context.appSecondaryText.withValues(alpha: 0.5),

@@ -7,6 +7,7 @@ import '../app/comic_reading_preferences.dart';
 import '../app/theme_preferences.dart';
 import '../brand/brand_config.dart';
 import '../app_update/app_update_ui.dart';
+import '../core/kaijuan_icons.dart';
 import '../core/platform_window.dart';
 import '../core/theme.dart';
 import '../core/theme/brand_tokens.g.dart';
@@ -43,18 +44,18 @@ class _AppShellState extends State<AppShell> {
 
   static const _destinations = [
     AppNavigationItem(
-      icon: Icons.menu_book_outlined,
-      selectedIcon: Icons.menu_book_outlined,
+      icon: KaijuanIcons.open,
+      selectedIcon: KaijuanIcons.open,
       label: '书架',
     ),
     AppNavigationItem(
-      icon: Icons.grid_view_outlined,
-      selectedIcon: Icons.grid_view_outlined,
+      icon: KaijuanIcons.grid,
+      selectedIcon: KaijuanIcons.grid,
       label: '书库',
     ),
     AppNavigationItem(
-      icon: Icons.settings_outlined,
-      selectedIcon: Icons.settings_outlined,
+      icon: KaijuanIcons.settings,
+      selectedIcon: KaijuanIcons.settings,
       label: '设置',
     ),
   ];
@@ -115,7 +116,7 @@ class _AppShellState extends State<AppShell> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          const Positioned.fill(child: _ShellCanvasGradient()),
+          const Positioned.fill(child: _ShellCanvas()),
           Positioned.fill(child: content),
           if (useSideRail && titleInset > 0)
             Positioned(
@@ -137,27 +138,13 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// All skins use their semantic canvas gradient.
-class _ShellCanvasGradient extends StatelessWidget {
-  const _ShellCanvasGradient();
+/// The app shell uses a solid canvas; surfaces provide the remaining layers.
+class _ShellCanvas extends StatelessWidget {
+  const _ShellCanvas();
 
   @override
   Widget build(BuildContext context) {
-    final canvas = Theme.of(context).scaffoldBackgroundColor;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            canvas,
-            context.appGlass.canvasHighlight,
-            context.appOverlay,
-          ],
-          stops: const [0, 0.46, 1],
-        ),
-      ),
-    );
+    return ColoredBox(color: Theme.of(context).scaffoldBackgroundColor);
   }
 }
 
@@ -176,9 +163,9 @@ class _SideRail extends StatelessWidget {
   final String brandName;
 
   static const _items = [
-    (Icons.menu_book_outlined, Icons.menu_book_outlined, '书架'),
-    (Icons.grid_view_outlined, Icons.grid_view_outlined, '书库'),
-    (Icons.settings_outlined, Icons.settings_outlined, '设置'),
+    (KaijuanIcons.open, KaijuanIcons.open, '书架'),
+    (KaijuanIcons.grid, KaijuanIcons.grid, '书库'),
+    (KaijuanIcons.settings, KaijuanIcons.settings, '设置'),
   ];
 
   @override

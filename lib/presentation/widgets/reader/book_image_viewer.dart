@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../controllers/book_reader_controller.dart';
 
 /// Full-screen image viewer for Foliate `onImageClick` data URLs.
@@ -44,7 +45,7 @@ class BookImageViewer extends StatelessWidget {
               child: IconButton(
                 tooltip: '关闭',
                 onPressed: controller.closeImageViewer,
-                icon: const Icon(Icons.close, color: Colors.white, weight: 300),
+                icon: const Icon(KaijuanIcons.close, color: Colors.white, weight: 300),
               ),
             ),
           ),

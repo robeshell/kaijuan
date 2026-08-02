@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/book_reading_preferences.dart';
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_theme.dart';
@@ -154,7 +155,7 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                 children: [
                   _ToolKey(
                     tooltip: '目录',
-                    icon: Icons.list_alt_outlined,
+                    icon: KaijuanIcons.toc,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: false,
@@ -165,8 +166,8 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                         ? '听书中'
                         : (controller.ttsPaused ? '听书已暂停' : '听书'),
                     icon: controller.ttsActive
-                        ? Icons.headphones
-                        : Icons.headphones_outlined,
+                        ? KaijuanIcons.headphonesFilled
+                        : KaijuanIcons.headphones,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected:
@@ -176,7 +177,7 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                   ),
                   _ToolKey(
                     tooltip: '亮度',
-                    icon: Icons.wb_sunny_outlined,
+                    icon: KaijuanIcons.sunny,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: _panel == BookToolStripPanel.brightness,
@@ -184,7 +185,7 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                   ),
                   _ToolKey(
                     tooltip: '字体排版',
-                    icon: Icons.text_fields_outlined,
+                    icon: KaijuanIcons.typography,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: _panel == BookToolStripPanel.typography,
@@ -192,7 +193,7 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
                   ),
                   _ToolKey(
                     tooltip: '阅读模式',
-                    icon: Icons.tune_outlined,
+                    icon: KaijuanIcons.tune,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: _panel == BookToolStripPanel.readingMode,
@@ -271,7 +272,7 @@ class _TtsPanel extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             _TtsIconButton(
-              icon: Icons.skip_previous_rounded,
+              icon: KaijuanIcons.previous,
               label: '上一句',
               fg: fg,
               enabled: active,
@@ -279,8 +280,8 @@ class _TtsPanel extends StatelessWidget {
             ),
             _TtsIconButton(
               icon: playing
-                  ? Icons.pause_circle_filled_rounded
-                  : Icons.play_circle_filled_rounded,
+                  ? KaijuanIcons.pause
+                  : KaijuanIcons.play,
               label: playing ? '暂停' : (active ? '继续' : '开始'),
               fg: accent,
               enabled: true,
@@ -288,14 +289,14 @@ class _TtsPanel extends StatelessWidget {
               onPressed: () => unawaited(controller.toggleTtsPlayPause()),
             ),
             _TtsIconButton(
-              icon: Icons.skip_next_rounded,
+              icon: KaijuanIcons.next,
               label: '下一句',
               fg: fg,
               enabled: active,
               onPressed: () => unawaited(controller.ttsSkipNext()),
             ),
             _TtsIconButton(
-              icon: Icons.stop_circle_outlined,
+              icon: KaijuanIcons.stop,
               label: '停止',
               fg: fg,
               enabled: active,
@@ -485,7 +486,7 @@ class _ProgressScrubber extends StatelessWidget {
     return Row(
       children: [
         _StepButton(
-          icon: Icons.chevron_left,
+          icon: KaijuanIcons.chevronLeft,
           color: fgMuted,
           onTap: onStepBack,
         ),
@@ -501,7 +502,7 @@ class _ProgressScrubber extends StatelessWidget {
           ),
         ),
         _StepButton(
-          icon: Icons.chevron_right,
+          icon: KaijuanIcons.chevronRight,
           color: fgMuted,
           onTap: onStepForward,
         ),
@@ -769,7 +770,7 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
         const SizedBox(height: AppSpacing.x2),
         Row(
           children: [
-            Icon(Icons.brightness_low, size: 18, color: widget.fgMuted),
+            Icon(KaijuanIcons.brightnessLow, size: 18, color: widget.fgMuted),
             const SizedBox(width: AppSpacing.x2),
             Expanded(
               child: _CustomFractionTrack(
@@ -810,7 +811,7 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
               ),
             ),
             const SizedBox(width: AppSpacing.x2),
-            Icon(Icons.brightness_high, size: 18, color: widget.fgMuted),
+            Icon(KaijuanIcons.brightnessHigh, size: 18, color: widget.fgMuted),
           ],
         ),
       ],
@@ -913,7 +914,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
         const SizedBox(height: AppSpacing.x3),
         _PrefScrubberRow(
           title: '字号',
-          icon: Icons.format_size,
+          icon: KaijuanIcons.fontIncrease,
           valueLabel: _previewFontSize.round().toString(),
           fraction: _t(
             _previewFontSize,
@@ -963,7 +964,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
         const SizedBox(height: AppSpacing.x3),
         _PrefScrubberRow(
           title: '行间距',
-          icon: Icons.format_line_spacing,
+          icon: KaijuanIcons.lineSpacing,
           valueLabel: _previewLineHeight.toStringAsFixed(1),
           fraction: _t(
             _previewLineHeight,
@@ -1011,7 +1012,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
             Expanded(
               child: _PrefScrubberRow(
                 title: '水平页边距',
-                icon: Icons.swap_horiz,
+                icon: KaijuanIcons.swapHorizontal,
                 valueLabel:
                     ((_previewMargin - BookReadingPreferences.minMargin) / 8)
                         .round()
@@ -1061,7 +1062,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
             Expanded(
               child: _PrefScrubberRow(
                 title: '垂直页边距',
-                icon: Icons.swap_vert,
+                icon: KaijuanIcons.swapVertical,
                 valueLabel: (_previewVerticalMargin / 6)
                     .round()
                     .clamp(0, 8)
@@ -1174,7 +1175,7 @@ class _SubPanelHeader extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.x1),
-            child: Icon(Icons.keyboard_arrow_down, size: 22, color: fgMuted),
+            child: Icon(KaijuanIcons.chevronDown, size: 22, color: fgMuted),
           ),
         ),
       ],
@@ -1238,7 +1239,7 @@ class _FontPickerPanel extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.add, size: 16, color: accent),
+                Icon(KaijuanIcons.add, size: 16, color: accent),
                 const SizedBox(width: 2),
                 Text(
                   '导入',
@@ -1511,9 +1512,9 @@ class _CatalogFontTile extends StatelessWidget {
                 ),
               )
             else if (installed == null)
-              Icon(Icons.download_outlined, size: 18, color: accent)
+              Icon(KaijuanIcons.download, size: 18, color: accent)
             else if (selected)
-              Icon(Icons.check, size: 18, color: accent),
+              Icon(KaijuanIcons.check, size: 18, color: accent),
           ],
         ),
       ),
@@ -1648,7 +1649,7 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
         _PanelLabel('词间距', widget.fgMuted),
         const SizedBox(height: AppSpacing.x1),
         _PrefScrubberRow(
-          icon: Icons.space_bar,
+          icon: KaijuanIcons.letterSpacing,
           valueLabel: _fmt(_previewLetter),
           fraction: _t(
             _previewLetter,
@@ -1693,7 +1694,7 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
         _PanelLabel('段间距', widget.fgMuted),
         const SizedBox(height: AppSpacing.x1),
         _PrefScrubberRow(
-          icon: Icons.vertical_distribute,
+          icon: KaijuanIcons.paragraphSpacing,
           valueLabel: _fmt(_previewParagraph),
           fraction: _t(
             _previewParagraph,
@@ -1782,7 +1783,7 @@ class _AlignToggle extends StatelessWidget {
     return Row(
       children: [
         _AlignChip(
-          icon: Icons.format_align_left,
+          icon: KaijuanIcons.alignLeft,
           selected: selected == BookTextAlign.start,
           accent: accent,
           fgMuted: fgMuted,
@@ -1790,7 +1791,7 @@ class _AlignToggle extends StatelessWidget {
         ),
         const SizedBox(width: AppSpacing.x2),
         _AlignChip(
-          icon: Icons.format_align_justify,
+          icon: KaijuanIcons.alignJustify,
           selected: selected == BookTextAlign.justify,
           accent: accent,
           fgMuted: fgMuted,
@@ -2148,7 +2149,7 @@ class _TypographyActionRow extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(Icons.chevron_right, size: 20, color: fgMuted),
+            Icon(KaijuanIcons.chevronRight, size: 20, color: fgMuted),
           ],
         ),
       ),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../core/theme/brand_tokens.g.dart';
 import '../../library/persistence/app_database.dart';
@@ -57,7 +58,7 @@ class ShelfScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               AppSheetTile(
-                icon: Icons.menu_book_outlined,
+                icon: KaijuanIcons.open,
                 title: '打开',
                 onTap: () {
                   Navigator.pop(ctx);
@@ -65,7 +66,7 @@ class ShelfScreen extends StatelessWidget {
                 },
               ),
               AppSheetTile(
-                icon: Icons.bookmark_remove_outlined,
+                icon: KaijuanIcons.bookmarkRemove,
                 title: '移出我的书架',
                 onTap: () {
                   Navigator.pop(ctx);
@@ -352,13 +353,13 @@ class _CoverCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             SizedBox(
-              height: 16,
+              height: 20,
               child: Text(
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: context.appCaptionSize,
+                  fontSize: context.appListTitleSize,
                   fontWeight: FontWeight.w500,
                   height: 1.2,
                 ),
@@ -417,7 +418,7 @@ class _EmptyShelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const AppEmptyState(
-      icon: Icons.auto_stories_outlined,
+      icon: KaijuanIcons.bookOpen,
       title: '还没有阅读记录',
       message: '从书库打开一本书后，会在这里继续阅读。',
     );

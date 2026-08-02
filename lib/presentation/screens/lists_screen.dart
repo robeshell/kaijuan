@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
+import '../navigation/app_page_route.dart';
 import '../navigation/open_reading_item.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
@@ -35,8 +37,8 @@ class ListsScreen extends StatelessWidget {
     BookReadingPreferences? bookReadingPreferences,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => ListsScreen(
+      appPageRoute<void>(
+        (_) => ListsScreen(
           brand: brand,
           controller: controller,
           readingPreferences: readingPreferences,
@@ -86,7 +88,7 @@ class ListsScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               AppSheetTile(
-                icon: Icons.edit_outlined,
+                icon: KaijuanIcons.edit,
                 title: '重命名',
                 onTap: () async {
                   Navigator.pop(ctx);
@@ -100,7 +102,7 @@ class ListsScreen extends StatelessWidget {
                 },
               ),
               AppSheetTile(
-                icon: Icons.delete_outline,
+                icon: KaijuanIcons.delete,
                 title: '删除书单',
                 destructive: true,
                 onTap: () async {
@@ -130,7 +132,7 @@ class ListsScreen extends StatelessWidget {
     final hPad = context.appPageGutter;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -149,7 +151,7 @@ class ListsScreen extends StatelessWidget {
                     tooltip: '返回',
                     onPressed: () => Navigator.of(context).maybePop(),
                     icon: Icon(
-                      Icons.arrow_back_outlined,
+                      KaijuanIcons.back,
                       weight: 300,
                       color: context.appPrimaryText,
                     ),
@@ -168,7 +170,7 @@ class ListsScreen extends StatelessWidget {
                     tooltip: '新建书单',
                     onPressed: () => _create(context),
                     icon: Icon(
-                      Icons.add,
+                      KaijuanIcons.add,
                       weight: 300,
                       color: Theme.of(context).colorScheme.primary,
                     ),
@@ -183,7 +185,7 @@ class ListsScreen extends StatelessWidget {
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return AppEmptyState(
-                    icon: Icons.error_outline,
+                    icon: KaijuanIcons.error,
                     title: '书单加载失败',
                     message: '返回书库后再试一次。',
                     actionLabel: '返回书库',
@@ -193,7 +195,7 @@ class ListsScreen extends StatelessWidget {
                 final lists = snapshot.data ?? const <ReadingListSummary>[];
                 if (lists.isEmpty) {
                   return AppEmptyState(
-                    icon: Icons.playlist_add_outlined,
+                    icon: KaijuanIcons.playlistAdd,
                     title: '还没有书单',
                     message: '新建书单后，可以从书库把书加入进来。',
                     actionLabel: '新建书单',
@@ -218,7 +220,7 @@ class ListsScreen extends StatelessWidget {
                         vertical: 6,
                       ),
                       leading: Icon(
-                        Icons.playlist_play_outlined,
+                        KaijuanIcons.playlists,
                         color: context.appSecondaryText,
                         weight: 300,
                       ),
@@ -229,14 +231,14 @@ class ListsScreen extends StatelessWidget {
                       subtitle: Text(
                         '${s.memberCount} 本',
                         style: TextStyle(
-                          fontSize: context.appCaptionSize,
+                          fontSize: context.appBodySecondarySize,
                           color: context.appSecondaryText,
                         ),
                       ),
                       onTap: () {
                         Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => _ListDetailScreen(
+                          appPageRoute<void>(
+                            (_) => _ListDetailScreen(
                               brand: brand,
                               controller: controller,
                               list: s.list,
@@ -282,7 +284,7 @@ class _ListDetailScreen extends StatelessWidget {
     final hPad = context.appPageGutter;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -301,7 +303,7 @@ class _ListDetailScreen extends StatelessWidget {
                     tooltip: '返回',
                     onPressed: () => Navigator.of(context).maybePop(),
                     icon: Icon(
-                      Icons.arrow_back_outlined,
+                      KaijuanIcons.back,
                       weight: 300,
                       color: context.appPrimaryText,
                     ),
@@ -329,7 +331,7 @@ class _ListDetailScreen extends StatelessWidget {
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return AppEmptyState(
-                    icon: Icons.error_outline,
+                    icon: KaijuanIcons.error,
                     title: '书单内容加载失败',
                     message: '返回书库后再试一次。',
                     actionLabel: '返回书库',
@@ -339,7 +341,7 @@ class _ListDetailScreen extends StatelessWidget {
                 final items = snapshot.data ?? const <ReadingItem>[];
                 if (items.isEmpty) {
                   return AppEmptyState(
-                    icon: Icons.playlist_add_outlined,
+                    icon: KaijuanIcons.playlistAdd,
                     title: '书单里还没有书',
                     message: '回到书库，多选书籍后加入这个书单。',
                     actionLabel: '返回书库',
@@ -391,7 +393,7 @@ class _ListDetailScreen extends StatelessWidget {
                       subtitle: Text(
                         item.format.toUpperCase(),
                         style: TextStyle(
-                          fontSize: context.appCaptionSize,
+                          fontSize: context.appBodySecondarySize,
                           color: context.appSecondaryText,
                         ),
                       ),

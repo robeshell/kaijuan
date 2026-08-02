@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../app/book_reading_preferences.dart';
-import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
@@ -91,7 +90,7 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                     '排版',
                     style: TextStyle(
                       color: fg,
-                      fontSize: KaiProductTokens.typographyReaderChapterTitle,
+                      fontSize: KaiProductTokens.typographySettingsSheetTitle,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -144,7 +143,8 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                             label: Text(
                               e.label,
                               style: TextStyle(
-                                fontSize: context.appCaptionSize,
+                                fontSize: KaiProductTokens
+                                    .typographyReaderSectionLabel,
                               ),
                             ),
                           ),

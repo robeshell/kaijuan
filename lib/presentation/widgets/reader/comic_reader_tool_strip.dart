@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../app/comic_reading_preferences.dart';
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/comic/comic_models.dart';
@@ -139,7 +140,7 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
                 children: [
                   _ToolKey(
                     tooltip: '缩略图',
-                    icon: Icons.grid_view_outlined,
+                    icon: KaijuanIcons.grid,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: false,
@@ -150,7 +151,7 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
                   ),
                   _ToolKey(
                     tooltip: '书签',
-                    icon: Icons.bookmarks_outlined,
+                    icon: KaijuanIcons.bookmarks,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: false,
@@ -165,7 +166,7 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
                   ),
                   _ToolKey(
                     tooltip: '亮度',
-                    icon: Icons.wb_sunny_outlined,
+                    icon: KaijuanIcons.sunny,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: _panel == ComicToolStripPanel.brightness,
@@ -173,7 +174,7 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
                   ),
                   _ToolKey(
                     tooltip: '方向',
-                    icon: Icons.swap_horiz_outlined,
+                    icon: KaijuanIcons.swapHorizontal,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: _panel == ComicToolStripPanel.direction,
@@ -181,7 +182,7 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
                   ),
                   _ToolKey(
                     tooltip: '阅读模式',
-                    icon: Icons.tune_outlined,
+                    icon: KaijuanIcons.tune,
                     fg: widget.fg,
                     accent: widget.accent,
                     selected: _panel == ComicToolStripPanel.readingMode,
@@ -292,13 +293,16 @@ class _ProgressScrubber extends StatelessWidget {
         Text(
           pageLabel,
           textAlign: TextAlign.center,
-          style: TextStyle(color: fgMuted, fontSize: context.appCaptionSize),
+          style: TextStyle(
+            color: fgMuted,
+            fontSize: KaiProductTokens.typographyReaderToolValue,
+          ),
         ),
         const SizedBox(height: AppSpacing.x2),
         Row(
           children: [
             _StepButton(
-              icon: Icons.chevron_left,
+              icon: KaijuanIcons.chevronLeft,
               color: fgMuted,
               onTap: onStepBack,
             ),
@@ -314,7 +318,7 @@ class _ProgressScrubber extends StatelessWidget {
               ),
             ),
             _StepButton(
-              icon: Icons.chevron_right,
+              icon: KaijuanIcons.chevronRight,
               color: fgMuted,
               onTap: onStepForward,
             ),
@@ -522,7 +526,7 @@ class _SegmentedChoices<T> extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: context.appCaptionSize,
+                          fontSize: KaiProductTokens.typographyReaderToolValue,
                           fontWeight: values[i] == selected
                               ? FontWeight.w600
                               : FontWeight.w500,
@@ -586,7 +590,7 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
         const SizedBox(height: AppSpacing.x2),
         Row(
           children: [
-            Icon(Icons.brightness_low, size: 18, color: widget.fgMuted),
+            Icon(KaijuanIcons.brightnessLow, size: 18, color: widget.fgMuted),
             const SizedBox(width: AppSpacing.x2),
             Expanded(
               child: _CustomFractionTrack(
@@ -627,7 +631,7 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
               ),
             ),
             const SizedBox(width: AppSpacing.x2),
-            Icon(Icons.brightness_high, size: 18, color: widget.fgMuted),
+            Icon(KaijuanIcons.brightnessHigh, size: 18, color: widget.fgMuted),
           ],
         ),
       ],

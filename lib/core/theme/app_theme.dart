@@ -29,7 +29,9 @@ abstract final class AppTheme {
     required Color accent,
   }) {
     final dark = brightness == Brightness.dark;
-    final canvas = skin.canvas;
+    // Keep the light app shell on a true white canvas. Surface, elevated and
+    // overlay still provide the neutral ramp for cards and floating chrome.
+    final canvas = dark ? skin.canvas : Colors.white;
     final surface = skin.surface;
     final elevated = skin.elevated;
     final overlay = skin.overlay;
@@ -191,7 +193,7 @@ abstract final class AppTheme {
         backgroundColor: canvas,
         foregroundColor: foreground,
         surfaceTintColor: Colors.transparent,
-        titleTextStyle: textTheme.titleLarge,
+        titleTextStyle: textTheme.headlineSmall,
       ),
       dialogTheme: DialogThemeData(
         elevation: 0,
@@ -462,7 +464,7 @@ abstract final class AppTheme {
         ),
         subtitleTextStyle: textTheme.bodySmall?.copyWith(
           color: secondary,
-          fontSize: componentProfile.captionSmallSize,
+          fontSize: componentProfile.bodySecondarySize,
         ),
         shape: const RoundedRectangleBorder(),
       ),

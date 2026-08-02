@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_theme.dart';
@@ -68,11 +69,7 @@ class BookReaderChrome extends StatelessWidget {
                         tooltip: '返回',
                         visualDensity: density,
                         onPressed: onBack,
-                        icon: Icon(
-                          Icons.arrow_back_outlined,
-                          color: fg,
-                          weight: 300,
-                        ),
+                        icon: Icon(KaijuanIcons.back, color: fg, weight: 300),
                       ),
                       Expanded(
                         child: short
@@ -83,7 +80,8 @@ class BookReaderChrome extends StatelessWidget {
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: fg,
-                                  fontSize: context.appLabelSize,
+                                  fontSize: KaiProductTokens
+                                      .typographyReaderOverlayTitle,
                                   fontWeight: FontWeight.w600,
                                 ),
                               )
@@ -121,8 +119,8 @@ class BookReaderChrome extends StatelessWidget {
                         onPressed: controller.toggleBookmark,
                         icon: Icon(
                           controller.isCurrentPositionBookmarked
-                              ? Icons.bookmark
-                              : Icons.bookmark_border_outlined,
+                              ? KaijuanIcons.bookmarkFilled
+                              : KaijuanIcons.bookmark,
                           color: fg,
                           weight: 300,
                         ),
@@ -131,7 +129,7 @@ class BookReaderChrome extends StatelessWidget {
                         tooltip: '搜索',
                         visualDensity: density,
                         onPressed: () => controller.openSearch(),
-                        icon: Icon(Icons.search, color: fg, weight: 300),
+                        icon: Icon(KaijuanIcons.search, color: fg, weight: 300),
                       ),
                       if (leadingClearance > 0)
                         SizedBox(width: leadingClearance - 8),

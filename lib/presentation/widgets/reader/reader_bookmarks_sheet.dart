@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
 import '../app_components.dart';
@@ -36,7 +37,7 @@ void showReaderBookmarksSheet(
               ),
               if (rows.isEmpty)
                 const AppEmptyState(
-                  icon: Icons.bookmark_border,
+                  icon: KaijuanIcons.bookmark,
                   title: '还没有书签',
                   message: '阅读时添加的书签会显示在这里。',
                   padding: EdgeInsets.fromLTRB(24, 20, 24, 40),
@@ -51,7 +52,7 @@ void showReaderBookmarksSheet(
                     itemBuilder: (context, index) {
                       final bookmark = rows[index];
                       return ListTile(
-                        leading: const Icon(Icons.bookmark_outlined),
+                        leading: const Icon(KaijuanIcons.bookmark),
                         title: Text(labelFor(bookmark)),
                         onTap: () {
                           Navigator.of(sheetContext).pop();
@@ -59,7 +60,7 @@ void showReaderBookmarksSheet(
                         },
                         trailing: IconButton(
                           tooltip: '删除书签',
-                          icon: const Icon(Icons.delete_outline),
+                          icon: const Icon(KaijuanIcons.delete),
                           onPressed: () => onRemove(bookmark),
                         ),
                       );

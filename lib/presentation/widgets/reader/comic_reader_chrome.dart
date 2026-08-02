@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../controllers/comic_reader_controller.dart';
@@ -63,11 +64,7 @@ class ComicReaderChrome extends StatelessWidget {
                             ? VisualDensity.compact
                             : VisualDensity.standard,
                         onPressed: onBack,
-                        icon: Icon(
-                          Icons.arrow_back_outlined,
-                          color: fg,
-                          weight: 300,
-                        ),
+                        icon: Icon(KaijuanIcons.back, color: fg, weight: 300),
                       ),
                       Expanded(
                         child: short
@@ -78,7 +75,8 @@ class ComicReaderChrome extends StatelessWidget {
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: fg,
-                                  fontSize: context.appLabelSize,
+                                  fontSize: KaiProductTokens
+                                      .typographyReaderOverlayTitle,
                                   fontWeight: FontWeight.w600,
                                 ),
                               )
@@ -118,8 +116,8 @@ class ComicReaderChrome extends StatelessWidget {
                         onPressed: controller.toggleBookmark,
                         icon: Icon(
                           controller.isCurrentPageBookmarked
-                              ? Icons.bookmark
-                              : Icons.bookmark_border_outlined,
+                              ? KaijuanIcons.bookmarkFilled
+                              : KaijuanIcons.bookmark,
                           color: fg,
                           weight: 300,
                         ),

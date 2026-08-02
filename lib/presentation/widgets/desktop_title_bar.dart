@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/kaijuan_icons.dart';
 import '../../core/platform_window.dart';
 import '../../core/theme.dart';
 
@@ -110,21 +111,21 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> {
               const Spacer(),
             if (customChrome) ...[
               _WindowControlButton(
-                icon: Icons.horizontal_rule_outlined,
+                icon: KaijuanIcons.minimize,
                 tooltip: '最小化',
                 onPressed: () => unawaited(minimizeWindow()),
               ),
               const SizedBox(width: 2),
               _WindowControlButton(
                 icon: _maximized
-                    ? Icons.filter_none_outlined
-                    : Icons.crop_square_outlined,
+                    ? KaijuanIcons.maximize
+                    : KaijuanIcons.restore,
                 tooltip: _maximized ? '向下还原' : '最大化',
                 onPressed: () => unawaited(_toggleMaximize()),
               ),
               const SizedBox(width: 2),
               _WindowControlButton(
-                icon: Icons.close_outlined,
+                icon: KaijuanIcons.close,
                 tooltip: '关闭',
                 closeButton: true,
                 onPressed: () => unawaited(closeWindow()),

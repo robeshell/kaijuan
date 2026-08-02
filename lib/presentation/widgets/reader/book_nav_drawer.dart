@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
@@ -163,7 +164,7 @@ class _TocList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
       return const AppEmptyState(
-        icon: Icons.toc_outlined,
+        icon: KaijuanIcons.toc,
         title: '这本书没有目录',
         message: '可以继续阅读，或使用搜索定位内容。',
         padding: EdgeInsets.all(20),
@@ -214,7 +215,7 @@ class _BookmarksList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (bookmarks.isEmpty) {
       return const AppEmptyState(
-        icon: Icons.bookmark_border,
+        icon: KaijuanIcons.bookmark,
         title: '还没有书签',
         message: '阅读时添加的书签会显示在这里。',
         padding: EdgeInsets.all(20),
@@ -227,12 +228,12 @@ class _BookmarksList extends StatelessWidget {
       itemBuilder: (context, index) {
         final bookmark = bookmarks[index];
         return ListTile(
-          leading: const Icon(Icons.bookmark_outlined),
+          leading: const Icon(KaijuanIcons.bookmark),
           title: Text(labelFor(bookmark)),
           onTap: () => onOpen(bookmark),
           trailing: IconButton(
             tooltip: '删除书签',
-            icon: const Icon(Icons.delete_outline),
+            icon: const Icon(KaijuanIcons.delete),
             onPressed: () => onRemove(bookmark),
           ),
         );
@@ -260,7 +261,7 @@ class _NotesList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (notes.isEmpty) {
       return const AppEmptyState(
-        icon: Icons.edit_note_outlined,
+        icon: KaijuanIcons.edit,
         title: '还没有笔记',
         message: '选中文字并添加笔记后，会显示在这里。',
         padding: EdgeInsets.all(20),
@@ -277,7 +278,7 @@ class _NotesList extends StatelessWidget {
         final missingQuote = annotation.selectedText?.trim().isEmpty ?? true;
         return ListTile(
           isThreeLine: subtitle.length > 28,
-          leading: const Icon(Icons.edit_note_outlined),
+          leading: const Icon(KaijuanIcons.edit),
           title: Text(
             labelFor(annotation),
             maxLines: 2,
@@ -296,7 +297,7 @@ class _NotesList extends StatelessWidget {
           onTap: () => onOpen(annotation),
           trailing: IconButton(
             tooltip: '清除笔记',
-            icon: const Icon(Icons.delete_outline),
+            icon: const Icon(KaijuanIcons.delete),
             onPressed: () => onClearNote(annotation),
           ),
         );

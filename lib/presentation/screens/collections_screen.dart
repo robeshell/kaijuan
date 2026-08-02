@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
+import '../navigation/app_page_route.dart';
 import '../navigation/open_reading_item.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
@@ -38,8 +40,8 @@ class CollectionsScreen extends StatelessWidget {
     BookReadingPreferences? bookReadingPreferences,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => CollectionsScreen(
+      appPageRoute<void>(
+        (_) => CollectionsScreen(
           brand: brand,
           controller: controller,
           readingPreferences: readingPreferences,
@@ -67,7 +69,7 @@ class CollectionsScreen extends StatelessWidget {
     final hPad = context.appPageGutter;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -86,7 +88,7 @@ class CollectionsScreen extends StatelessWidget {
                     tooltip: '返回',
                     onPressed: () => Navigator.of(context).maybePop(),
                     icon: Icon(
-                      Icons.arrow_back_outlined,
+                      KaijuanIcons.back,
                       weight: 300,
                       color: context.appPrimaryText,
                     ),
@@ -105,7 +107,7 @@ class CollectionsScreen extends StatelessWidget {
                     tooltip: '新建合集',
                     onPressed: () => _create(context),
                     icon: Icon(
-                      Icons.add,
+                      KaijuanIcons.add,
                       weight: 300,
                       color: Theme.of(context).colorScheme.primary,
                     ),
@@ -120,7 +122,7 @@ class CollectionsScreen extends StatelessWidget {
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return AppEmptyState(
-                    icon: Icons.error_outline,
+                    icon: KaijuanIcons.error,
                     title: '合集加载失败',
                     message: '返回书库后再试一次。',
                     actionLabel: '返回书库',
@@ -130,7 +132,7 @@ class CollectionsScreen extends StatelessWidget {
                 final list = snapshot.data ?? const <CollectionSummary>[];
                 if (list.isEmpty) {
                   return AppEmptyState(
-                    icon: Icons.collections_bookmark_outlined,
+                    icon: KaijuanIcons.collections,
                     title: '还没有合集',
                     message: '新建合集后，可以从书库把书加入进来。',
                     actionLabel: '新建合集',
@@ -184,7 +186,7 @@ class CollectionsScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               AppSheetTile(
-                icon: Icons.edit_outlined,
+                icon: KaijuanIcons.edit,
                 title: '重命名',
                 onTap: () async {
                   Navigator.pop(ctx);
@@ -199,8 +201,8 @@ class CollectionsScreen extends StatelessWidget {
               ),
               AppSheetTile(
                 icon: s.collection.onShelf
-                    ? Icons.bookmark_remove_outlined
-                    : Icons.bookmark_add_outlined,
+                    ? KaijuanIcons.bookmarkRemove
+                    : KaijuanIcons.bookmarkAdd,
                 title: s.collection.onShelf ? '从书架移出' : '放到书架',
                 onTap: () async {
                   Navigator.pop(ctx);
@@ -211,7 +213,7 @@ class CollectionsScreen extends StatelessWidget {
                 },
               ),
               AppSheetTile(
-                icon: Icons.delete_outline,
+                icon: KaijuanIcons.delete,
                 title: '删除合集',
                 destructive: true,
                 onTap: () async {
@@ -269,7 +271,7 @@ class _CollectionGridCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: context.appCaptionSize,
+                    fontSize: context.appListTitleSize,
                     fontWeight: FontWeight.w600,
                     height: 1.2,
                   ),
@@ -319,8 +321,8 @@ class CollectionDetailScreen extends StatefulWidget {
     BookReadingPreferences? bookReadingPreferences,
   }) {
     return Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => CollectionDetailScreen(
+      appPageRoute<void>(
+        (_) => CollectionDetailScreen(
           brand: brand,
           controller: controller,
           collection: collection,
@@ -423,7 +425,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     if (!mounted) return;
     final n = _selected.length;
     _exitSelecting();
-    showAppSnackBar(context, onShelf ? '已上架 $n 本' : '已移出书架 $n 本');
+    showAppSnackBar(context, onShelf ? '已加入书架 $n 本' : '已移出书架 $n 本');
   }
 
   Future<void> _batchDelete() async {
@@ -473,7 +475,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           const AppDialogChoice(
             value: '__new__',
             label: '新建书单…',
-            icon: Icons.add,
+            icon: KaijuanIcons.add,
           ),
         ],
       );
@@ -523,7 +525,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           const AppDialogChoice(
             value: '__new__',
             label: '新建合集…',
-            icon: Icons.add,
+            icon: KaijuanIcons.add,
           ),
         ],
       );
@@ -554,7 +556,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     final hPad = context.appPageGutter;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -575,7 +577,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                         ? _exitSelecting
                         : () => Navigator.of(context).maybePop(),
                     icon: Icon(
-                      _selecting ? Icons.close : Icons.arrow_back_outlined,
+                      _selecting ? KaijuanIcons.close : KaijuanIcons.back,
                       weight: 300,
                       color: context.appPrimaryText,
                     ),
@@ -600,7 +602,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                       tooltip: '多选',
                       onPressed: () => _enterSelecting(),
                       icon: Icon(
-                        Icons.checklist_outlined,
+                        KaijuanIcons.multiselect,
                         weight: 300,
                         color: context.appSecondaryText,
                       ),
@@ -617,7 +619,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return AppEmptyState(
-                    icon: Icons.error_outline,
+                    icon: KaijuanIcons.error,
                     title: '合集内容加载失败',
                     message: '返回书库后再试一次。',
                     actionLabel: '返回书库',
@@ -627,7 +629,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                 final items = snapshot.data ?? const <ReadingItem>[];
                 if (items.isEmpty) {
                   return AppEmptyState(
-                    icon: Icons.collections_bookmark_outlined,
+                    icon: KaijuanIcons.collections,
                     title: '合集里还没有书',
                     message: '回到书库，多选书籍后加入这个合集。',
                     actionLabel: '返回书库',
@@ -698,13 +700,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 SizedBox(
-                                  height: 16,
+                                  height: 24,
                                   child: Text(
                                     item.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      fontSize: context.appCaptionSize,
+                                      fontSize: context.appListTitleSize,
                                       fontWeight: FontWeight.w500,
                                       height: 1.2,
                                     ),
@@ -724,28 +726,28 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                         onDone: _exitSelecting,
                         actions: [
                           SelectionActionItem(
-                            icon: Icons.folder_off_outlined,
+                            icon: KaijuanIcons.removeFromCollection,
                             label: '移出合集',
                             onTap: _selected.isEmpty
                                 ? null
                                 : _batchRemoveFromCollection,
                           ),
                           SelectionActionItem(
-                            icon: Icons.drive_file_move_outline,
+                            icon: KaijuanIcons.moveToCollection,
                             label: '移到合集',
                             onTap: _selected.isEmpty
                                 ? null
                                 : _batchMoveToCollection,
                           ),
                           SelectionActionItem(
-                            icon: Icons.bookmark_add_outlined,
+                            icon: KaijuanIcons.bookmarkAdd,
                             label: '加入书架',
                             onTap: _selected.isEmpty
                                 ? null
                                 : () => _batchShelf(onShelf: true),
                           ),
                           SelectionActionItem(
-                            icon: Icons.bookmark_remove_outlined,
+                            icon: KaijuanIcons.bookmarkRemove,
                             label: '移出书架',
                             destructive: true,
                             onTap: _selected.isEmpty
@@ -753,12 +755,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                 : () => _batchShelf(onShelf: false),
                           ),
                           SelectionActionItem(
-                            icon: Icons.playlist_add_outlined,
+                            icon: KaijuanIcons.playlistAdd,
                             label: '加入书单',
                             onTap: _selected.isEmpty ? null : _batchAddToList,
                           ),
                           SelectionActionItem(
-                            icon: Icons.delete_outline,
+                            icon: KaijuanIcons.delete,
                             label: '删除',
                             destructive: true,
                             onTap: _selected.isEmpty ? null : _batchDelete,

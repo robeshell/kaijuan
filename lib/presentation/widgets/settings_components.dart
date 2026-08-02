@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 
 abstract final class AppSettingsMetrics {
@@ -106,7 +107,7 @@ class AppSettingsPageHeader extends StatelessWidget {
                 key: backButtonKey,
                 onPressed: onBack,
                 tooltip: '返回',
-                icon: const Icon(Icons.arrow_back_rounded),
+                icon: const Icon(KaijuanIcons.back),
               ),
               const SizedBox(width: 8),
             ],

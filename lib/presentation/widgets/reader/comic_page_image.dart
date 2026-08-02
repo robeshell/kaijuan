@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/kaijuan_icons.dart';
 import '../../controllers/comic_reader_controller.dart';
 import '../app_components.dart';
 
@@ -107,7 +108,7 @@ class _ComicPageImageState extends State<ComicPageImage> {
     final image = _image;
     if (image == null) {
       return const Center(
-        child: Icon(Icons.broken_image_outlined, color: Colors.white54),
+        child: Icon(KaijuanIcons.imageOff, color: Colors.white54),
       );
     }
     return RawImage(

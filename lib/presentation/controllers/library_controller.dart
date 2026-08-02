@@ -16,9 +16,6 @@ enum LibrarySort { addedDesc, titleAsc, lastOpenedDesc }
 /// Reading-state filter for library grid.
 enum LibraryReadFilter { all, unread, reading, finished }
 
-/// On-shelf pin filter.
-enum LibraryShelfFilter { all, onShelfOnly, notOnShelf }
-
 /// Kind filter for the library grid.
 enum LibraryKindFilter {
   all,
@@ -64,9 +61,6 @@ class LibraryController extends ChangeNotifier {
   LibraryReadFilter _readFilter = LibraryReadFilter.all;
   LibraryReadFilter get readFilter => _readFilter;
 
-  LibraryShelfFilter _shelfFilter = LibraryShelfFilter.all;
-  LibraryShelfFilter get shelfFilter => _shelfFilter;
-
   LibraryKindFilter _kindFilter = LibraryKindFilter.all;
   LibraryKindFilter get kindFilter => _kindFilter;
 
@@ -83,12 +77,6 @@ class LibraryController extends ChangeNotifier {
   void setReadFilter(LibraryReadFilter filter) {
     if (_readFilter == filter) return;
     _readFilter = filter;
-    notifyListeners();
-  }
-
-  void setShelfFilter(LibraryShelfFilter filter) {
-    if (_shelfFilter == filter) return;
-    _shelfFilter = filter;
     notifyListeners();
   }
 
@@ -110,10 +98,6 @@ class LibraryController extends ChangeNotifier {
       _readFilter = LibraryReadFilter.all;
       changed = true;
     }
-    if (_shelfFilter != LibraryShelfFilter.all) {
-      _shelfFilter = LibraryShelfFilter.all;
-      changed = true;
-    }
     if (_kindFilter != LibraryKindFilter.all) {
       _kindFilter = LibraryKindFilter.all;
       changed = true;
@@ -127,9 +111,14 @@ class LibraryController extends ChangeNotifier {
 
   bool get hasActiveFilters =>
       _readFilter != LibraryReadFilter.all ||
-      _shelfFilter != LibraryShelfFilter.all ||
       _kindFilter != LibraryKindFilter.all ||
       _formatFilter != null;
+
+  int get activeFilterCount => [
+    _readFilter != LibraryReadFilter.all,
+    _kindFilter != LibraryKindFilter.all,
+    _formatFilter != null,
+  ].where((active) => active).length;
 
   /// Live library entries with progress (for filters / badges).
   Stream<List<LibraryEntry>> watchLibraryEntries() =>
@@ -155,21 +144,6 @@ class LibraryController extends ChangeNotifier {
         for (final e in list)
           if (e.item.format == _formatFilter) e,
       ];
-    }
-
-    switch (_shelfFilter) {
-      case LibraryShelfFilter.all:
-        break;
-      case LibraryShelfFilter.onShelfOnly:
-        list = [
-          for (final e in list)
-            if (e.item.onShelf) e,
-        ];
-      case LibraryShelfFilter.notOnShelf:
-        list = [
-          for (final e in list)
-            if (!e.item.onShelf) e,
-        ];
     }
 
     switch (_readFilter) {
@@ -266,9 +240,7 @@ class LibraryController extends ChangeNotifier {
   Future<ImportResult?> _pickAndImportAndroid() async {
     // Several document providers omit application/epub+zip, so do not filter
     // by MIME/extension in the picker — reject after selection instead.
-    final result = await FilePicker.pickFiles(
-      type: FileType.any,
-    );
+    final result = await FilePicker.pickFiles(type: FileType.any);
     if (result == null || result.files.isEmpty) return null;
     final paths = <String>[
       for (final f in result.files)
@@ -277,10 +249,7 @@ class LibraryController extends ChangeNotifier {
     if (paths.isEmpty) {
       return const ImportResult(
         failures: [
-          ImportFailure(
-            path: '',
-            reason: '无法读取所选文件路径，请换一本或换一个文件管理器再试',
-          ),
+          ImportFailure(path: '', reason: '无法读取所选文件路径，请换一本或换一个文件管理器再试'),
         ],
       );
     }
