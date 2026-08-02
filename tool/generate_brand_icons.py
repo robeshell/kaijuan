@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Generate per-brand app icons from 1024 masters.
+"""Generate every 开卷 app icon from the unified 1024 master.
 
-Masters (drop your designs here):
-  brands/icons/comic/master_1024.png
-  brands/icons/book/master_1024.png
+The shipping app and deprecated comic/book source sets intentionally mirror
+the same coral open-book identity. The editable source is:
+  brands/icons/kaijuan_master-v2.svg
 
 If a master is missing, a distinct placeholder is generated.
 """
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 
@@ -58,12 +57,12 @@ ANDROID_MIPMAP = {
 BRANDS = {
     "comic": {
         "letter": "C",
-        "bg": (0xEA, 0x58, 0x0C, 255),  # ember
+        "bg": (0xFF, 0x5A, 0x4D, 255),  # coral
         "fg": (255, 255, 255, 255),
     },
     "book": {
         "letter": "B",
-        "bg": (0x47, 0x55, 0x69, 255),  # slate
+        "bg": (0xFF, 0x5A, 0x4D, 255),  # legacy mirror
         "fg": (255, 255, 255, 255),
     },
 }
@@ -94,7 +93,9 @@ def ensure_master(brand: str) -> Image.Image:
     )
     letter = meta["letter"]
     try:
-        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 520)
+        font = ImageFont.truetype(
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf", 520
+        )
     except OSError:
         try:
             font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 520)
@@ -183,7 +184,7 @@ def sync_default_from_comic() -> None:
 
 
 def patch_xcode_appicon_names() -> None:
-    """Set ASSETCATALOG_COMPILER_APPICON_NAME per flavor config."""
+    """Keep iOS legacy catalogs and make macOS use Icon Composer."""
     for rel in (
         "ios/Runner.xcodeproj/project.pbxproj",
         "macos/Runner.xcodeproj/project.pbxproj",
@@ -217,8 +218,14 @@ def patch_xcode_appicon_names() -> None:
             text,
             flags=re.DOTALL,
         )
-        # Also plain Debug/Release/Profile Runner targets → comic default
-        # only when they already have ASSETCATALOG and not flavor-suffixed
+        if rel.startswith("macos/"):
+            # The file name must match the App Icon build setting. Xcode then
+            # uses Kaijuan.icon instead of any legacy AppIcon asset catalog.
+            text2 = re.sub(
+                r"ASSETCATALOG_COMPILER_APPICON_NAME = [^;]+;",
+                "ASSETCATALOG_COMPILER_APPICON_NAME = Kaijuan;",
+                text2,
+            )
         path.write_text(text2)
         print(f"patched app icon names in {rel}")
 
@@ -249,6 +256,11 @@ def main() -> None:
     default_img = masters["comic"]
     write_android("main", default_img)
     write_windows_ico(default_img)
+    icon_composer_foreground = (
+        ROOT / "brands" / "icons" / "Kaijuan.icon" / "Assets" / "foreground.png"
+    )
+    icon_composer_foreground.parent.mkdir(parents=True, exist_ok=True)
+    default_img.convert("RGB").save(icon_composer_foreground, format="PNG")
     print("generated icons for android main + windows ico (default=comic)")
 
     sync_default_from_comic()

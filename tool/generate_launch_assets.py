@@ -26,8 +26,8 @@ LAUNCH_TAGLINE = "读自己的书"
 LAUNCH_BG = (0xF7, 0xF9, 0xFC, 255)
 TITLE_COLOR = (0x1C, 0x1C, 0x22, 255)
 SUBTITLE_COLOR = (0x70, 0x70, 0x7A, 255)
-# ember accent
-ACCENT = (0xEA, 0x58, 0x0C)
+# Unified coral accent shared with 开听.
+ACCENT = (0xFF, 0x5A, 0x4D)
 
 _LAUNCH_TITLE_FACES: tuple[tuple[str, int], ...] = (
     (
@@ -188,9 +188,7 @@ def launch_branding(scale: int) -> Image.Image:
 
 def launch_lockup(mark: Image.Image, scale: int) -> Image.Image:
     image = Image.new("RGBA", (288 * scale, 288 * scale), (0, 0, 0, 0))
-    mark_layer = contain(
-        mark, (104 * scale, 104 * scale), (144 * scale, 144 * scale)
-    )
+    mark_layer = contain(mark, (104 * scale, 104 * scale), (144 * scale, 144 * scale))
     image.alpha_composite(mark_layer, (72 * scale, 28 * scale))
     draw = ImageDraw.Draw(image)
     title = launch_font(24 * scale, weight="semibold")

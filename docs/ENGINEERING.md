@@ -160,7 +160,7 @@ CI（`.github/workflows/ci.yml`）在 `main` push / PR 上跑 analyze + test，�
 
 - Android：**无 productFlavor**；普通 `flutter run` / `assembleDebug` 直接构建；namespace 与 applicationId 均为 `com.kaijuan.reader`，应用名 **开卷**。
 - iOS/macOS：保留 `comic` scheme；`book` scheme 标 deprecated；App 显示名 **开卷**（`.app` / `PRODUCT_NAME` 同）。
-- 图标：`brands/icons/comic/master_1024.png` 继续作为开卷图标源；`book` 目录可归档。
+- 图标：`brands/icons/kaijuan_master-v2.svg` 为可编辑母版；`comic/master_1024.png` 为正式栅格源，`book` 目录镜像同一身份供旧 scheme 使用。
 
 后续清理：删除 Apple 端 `book` scheme/xcconfig/icon set，以及 Android 已失效的旧 flavor 图标目录。
 
@@ -170,7 +170,7 @@ CI（`.github/workflows/ci.yml`）在 `main` push / PR 上跑 analyze + test，�
 python3 tool/generate_brand_icons.py
 ```
 
-当前源图：`brands/icons/comic/master_1024.png`（开卷图标）。
+当前源图：`brands/icons/kaijuan_master-v2.svg`；导出的兼容栅格为 `brands/icons/comic/master_1024.png`。
 
 ### 5.5 发布打包
 
