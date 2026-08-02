@@ -27,7 +27,6 @@ enum _LibraryMoreAction { toggleLayout, sort, lists, collections }
 enum _LibraryFilterAction {
   all,
   kind,
-  format,
   author,
   collections,
   series,
@@ -165,9 +164,25 @@ class _LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _scanDirectory() async {
-    final result = await widget.controller.pickDirectoryAndImport();
-    if (!mounted || result == null) return;
-    await _showImportSummary(result);
+    if (!mounted) return;
+    final progress = showAppProgressSnackBar(context, '扫描中');
+    final stopwatch = Stopwatch()..start();
+    ImportResult result;
+    try {
+      // Give the status chip a frame to paint before a fast empty-directory
+      // scan completes and replaces it with the result message.
+      await WidgetsBinding.instance.endOfFrame;
+      result = await widget.controller.scanDefaultDirectory();
+    } catch (_) {
+      result = const ImportResult();
+    } finally {
+      const minimumVisible = Duration(milliseconds: 240);
+      final remaining = minimumVisible - stopwatch.elapsed;
+      if (remaining > Duration.zero) await Future<void>.delayed(remaining);
+      progress.close();
+    }
+    if (!mounted) return;
+    await _showScanSummary(result);
   }
 
   Future<void> _showImportSummary(ImportResult result) async {
@@ -185,6 +200,30 @@ class _LibraryScreenState extends State<LibraryScreen>
     final openDetails = await showAppConfirmDialog(
       context,
       title: '导入结果',
+      message: summary.toString(),
+      cancelLabel: '关闭',
+      confirmLabel: '查看失败详情',
+    );
+    if (openDetails == true && mounted) {
+      await _showFailureDetails(result.failures);
+    }
+  }
+
+  Future<void> _showScanSummary(ImportResult result) async {
+    final total = result.added + result.updated;
+    final summary = StringBuffer('扫描完成，$total 本');
+    if (result.failures.isNotEmpty) {
+      summary.write('，失败 ${result.failures.length} 本');
+    }
+
+    if (!result.hasFailures) {
+      showAppSnackBar(context, summary.toString());
+      return;
+    }
+
+    final openDetails = await showAppConfirmDialog(
+      context,
+      title: '扫描结果',
       message: summary.toString(),
       cancelLabel: '关闭',
       confirmLabel: '查看失败详情',
@@ -422,9 +461,6 @@ class _LibraryScreenState extends State<LibraryScreen>
     if (controller.kindFilter != LibraryKindFilter.all) {
       return _kindFilterLabel(controller.kindFilter);
     }
-    if (controller.formatFilter case final format?) {
-      return format.toUpperCase();
-    }
     return _readFilterLabel(controller.readFilter);
   }
 
@@ -443,12 +479,6 @@ class _LibraryScreenState extends State<LibraryScreen>
         label: '类型',
         icon: KaijuanIcons.category,
         selected: controller.kindFilter != LibraryKindFilter.all,
-      ),
-      AppMenuAction(
-        value: _LibraryFilterAction.format,
-        label: '格式',
-        icon: KaijuanIcons.document,
-        selected: controller.formatFilter != null,
       ),
       const AppMenuAction(
         value: _LibraryFilterAction.author,
@@ -498,8 +528,6 @@ class _LibraryScreenState extends State<LibraryScreen>
         controller.clearFilters();
       case _LibraryFilterAction.kind:
         await _openKindFilterMenu(controller);
-      case _LibraryFilterAction.format:
-        await _openFormatFilterMenu(controller);
       case _LibraryFilterAction.read:
         await _openReadFilterMenu(controller);
       case _LibraryFilterAction.author ||
@@ -525,39 +553,6 @@ class _LibraryScreenState extends State<LibraryScreen>
       ],
     );
     if (selected != null) controller.setKindFilter(selected);
-  }
-
-  Future<void> _openFormatFilterMenu(LibraryController controller) async {
-    final selected = await showAppMenu<String>(
-      context,
-      title: '格式',
-      actions: [
-        for (final value in const [
-          'all',
-          'cbz',
-          'zip',
-          'epub',
-          'fb2',
-          'mobi',
-          'azw3',
-          'pdf',
-          'txt',
-          'md',
-          'markdown',
-        ])
-          AppMenuAction(
-            value: value,
-            label: value == 'all' ? '全部格式' : value.toUpperCase(),
-            icon: KaijuanIcons.document,
-            selected: value == 'all'
-                ? controller.formatFilter == null
-                : controller.formatFilter == value,
-          ),
-      ],
-    );
-    if (selected != null) {
-      controller.setFormatFilter(selected == 'all' ? null : selected);
-    }
   }
 
   Future<void> _openReadFilterMenu(LibraryController controller) async {
@@ -1389,15 +1384,6 @@ class _ListBody extends StatelessWidget {
             ),
           ),
           title: Text(item.title),
-          subtitle: Text(
-            [
-              item.format.toUpperCase(),
-              if (item.pageCount > 0) '${item.pageCount} 页',
-              if (entry.progressFraction != null)
-                '${(entry.progressFraction! * 100).round()}%',
-              if (item.onShelf) '在书架',
-            ].join(' · '),
-          ),
           onTap: () => onTap(entry),
           onLongPress: () => onLongPress(entry),
         );
@@ -1423,7 +1409,8 @@ class _LibraryCollectionCard extends StatelessWidget {
           Expanded(child: CollectionCover(coverPaths: summary.coverPaths)),
           const SizedBox(height: 8),
           SizedBox(
-            height: 34,
+            // 20px title + 2px gap + 14.4px metadata line.
+            height: 38,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1528,36 +1515,16 @@ class _GridCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          // Fixed title/meta band so grid cells stay aligned.
+          // Keep the title band fixed so grid cells stay aligned.
           SizedBox(
-            height: 34,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.appGridTitleStyle.copyWith(
-                    color: context.appPrimaryText,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    if (item.format == 'epub') 'EPUB',
-                    if (entry.progressFraction != null)
-                      '${(entry.progressFraction! * 100).round()}%',
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: context.appCaptionSmallSize,
-                    height: 1.2,
-                    color: context.appSecondaryText,
-                  ),
-                ),
-              ],
+            height: 20,
+            child: Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.appGridTitleStyle.copyWith(
+                color: context.appPrimaryText,
+              ),
             ),
           ),
         ],

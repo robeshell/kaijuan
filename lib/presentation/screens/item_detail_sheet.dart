@@ -6,6 +6,7 @@ import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 
 /// Detail / manage sheet for one library item (rename, shelf, lists, delete).
@@ -357,12 +358,9 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextField(
+                        AppTextField(
                           controller: _titleController,
-                          style: TextStyle(
-                            fontSize: context.appLabelSize,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                           decoration: const InputDecoration(
                             isDense: true,
                             border: InputBorder.none,

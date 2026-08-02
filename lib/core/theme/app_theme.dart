@@ -229,15 +229,18 @@ abstract final class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         elevation: 0,
-        backgroundColor: overlay,
+        // The shared feedback helpers provide the light glass surface. Keep
+        // the Material shell transparent so it cannot add a gray slab behind
+        // that surface.
+        backgroundColor: Colors.transparent,
         actionTextColor: accent,
         disabledActionTextColor: secondary,
-        contentTextStyle: textTheme.bodyMedium?.copyWith(color: foreground),
+        // SnackBars are short status feedback, not body copy. Keep them on
+        // the shared caption role so a mobile body size does not make every
+        // floating chip look like a dialog.
+        contentTextStyle: textTheme.labelSmall?.copyWith(color: foreground),
         insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.menu),
-          side: BorderSide(color: border),
-        ),
+        shape: const RoundedRectangleBorder(),
       ),
       navigationBarTheme: NavigationBarThemeData(
         height: 68,

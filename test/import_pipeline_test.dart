@@ -36,6 +36,7 @@ void main() {
     );
     controller = LibraryController(
       database: database,
+      documentsDirectoryProvider: () async => tempRoot,
       comicImportService: ComicImportService(
         database: database,
         supportDirectory: tempRoot,
@@ -98,6 +99,25 @@ void main() {
       );
     },
   );
+
+  test(
+    'directory scan treats missing or empty sources as an empty result',
+    () async {
+      final missing = p.join(tempRoot.path, 'does-not-exist');
+      expect((await controller.importDirectory(missing)).isEmpty, isTrue);
+      expect((await controller.importDirectory(tempRoot.path)).isEmpty, isTrue);
+      expect((await controller.scanDefaultDirectory()).isEmpty, isTrue);
+    },
+  );
+
+  test('automatic scan uses the app documents directory', () async {
+    await _writeCbz(tempRoot, 'auto.cbz');
+
+    final result = await controller.scanDefaultDirectory();
+
+    expect(result.added, 1);
+    expect(result.failures, isEmpty);
+  });
 
   test('Foliate book formats share one book import route', () async {
     const names = ['book.fb2', 'book.mobi', 'book.azw3', 'book.pdf'];

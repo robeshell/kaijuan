@@ -12,6 +12,82 @@ import '../../core/theme/brand_tokens.g.dart';
 /// context getters and the accent via `ColorScheme.primary` — never
 /// hardcode colors or translucency.
 
+/// Text input with the component-owned `inputText` typography role.
+///
+/// Shell inputs share the same type scale, while their decorations remain
+/// local to the use case (search, rename, or prompt).
+class AppTextField extends StatelessWidget {
+  const AppTextField({
+    this.controller,
+    this.focusNode,
+    this.autofocus = false,
+    this.onChanged,
+    this.onSubmitted,
+    this.textInputAction,
+    this.keyboardType,
+    this.textCapitalization = TextCapitalization.none,
+    this.maxLines = 1,
+    this.minLines,
+    this.expands = false,
+    this.readOnly = false,
+    this.decoration,
+    this.style,
+    super.key,
+  });
+
+  final TextEditingController? controller;
+  final FocusNode? focusNode;
+  final bool autofocus;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSubmitted;
+  final TextInputAction? textInputAction;
+  final TextInputType? keyboardType;
+  final TextCapitalization textCapitalization;
+  final int? maxLines;
+  final int? minLines;
+  final bool expands;
+  final bool readOnly;
+  final InputDecoration? decoration;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokenStyle = context.appInputTextStyle;
+    final inputStyle = tokenStyle.copyWith(
+      color: style?.color ?? context.appPrimaryText,
+      fontWeight: style?.fontWeight ?? tokenStyle.fontWeight,
+      fontSize: tokenStyle.fontSize,
+      height: tokenStyle.height,
+      letterSpacing: tokenStyle.letterSpacing,
+    );
+    final resolvedDecoration = decoration?.copyWith(
+      hintStyle: (decoration?.hintStyle ?? tokenStyle).copyWith(
+        color: decoration?.hintStyle?.color ?? context.appSecondaryText,
+        fontSize: tokenStyle.fontSize,
+        height: tokenStyle.height,
+        fontWeight: decoration?.hintStyle?.fontWeight ?? tokenStyle.fontWeight,
+        letterSpacing: tokenStyle.letterSpacing,
+      ),
+    );
+    return TextField(
+      controller: controller,
+      focusNode: focusNode,
+      autofocus: autofocus,
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+      textInputAction: textInputAction,
+      keyboardType: keyboardType,
+      textCapitalization: textCapitalization,
+      maxLines: maxLines,
+      minLines: minLines,
+      expands: expands,
+      readOnly: readOnly,
+      style: inputStyle,
+      decoration: resolvedDecoration,
+    );
+  }
+}
+
 /// Shared translucent surface used by the application shell and overlays.
 ///
 /// Backdrop blur is intentionally optional: floating surfaces use it, while

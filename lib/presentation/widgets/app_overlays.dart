@@ -220,13 +220,10 @@ class _AppTextPromptDialogState extends State<_AppTextPromptDialog> {
   Widget build(BuildContext context) {
     return AppAlertDialog(
       title: widget.title,
-      content: TextField(
+      content: AppTextField(
         controller: _controller,
         autofocus: true,
-        style: TextStyle(
-          fontSize: context.appLabelSize,
-          fontWeight: FontWeight.w500,
-        ),
+        style: const TextStyle(fontWeight: FontWeight.w500),
         decoration: InputDecoration(hintText: widget.hint),
         onSubmitted: (_) => _submit(),
       ),
@@ -255,7 +252,7 @@ void showAppSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context)
     ..clearSnackBars()
     ..showSnackBar(
-      SnackBar(
+      _buildAppSnackBar(
         content: Text(
           message,
           textAlign: TextAlign.center,
@@ -263,11 +260,74 @@ void showAppSnackBar(BuildContext context, String message) {
           overflow: TextOverflow.ellipsis,
         ),
         duration: const Duration(milliseconds: 2200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         margin: EdgeInsets.fromLTRB(side, 0, side, 36),
         dismissDirection: DismissDirection.down,
       ),
     );
+}
+
+/// Persistent lightweight status chip for work that must remain visible until
+/// the caller explicitly closes it (for example, automatic library scanning).
+/// It deliberately shares the same floating geometry as [showAppSnackBar].
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>
+showAppProgressSnackBar(BuildContext context, String message) {
+  final width = MediaQuery.sizeOf(context).width;
+  final toastWidth = width >= 420 ? 220.0 : (width - 56).clamp(140.0, 220.0);
+  final side = (width - toastWidth) / 2;
+  final accent = context.appColors.primary;
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.clearSnackBars();
+
+  return messenger.showSnackBar(
+    _buildAppSnackBar(
+      content: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      duration: const Duration(days: 1),
+      margin: EdgeInsets.fromLTRB(side, 0, side, 36),
+      dismissDirection: DismissDirection.none,
+    ),
+  );
+}
+
+SnackBar _buildAppSnackBar({
+  required Widget content,
+  required Duration duration,
+  required EdgeInsets margin,
+  required DismissDirection dismissDirection,
+}) {
+  return SnackBar(
+    content: AppGlassSurface(
+      borderRadius: BorderRadius.circular(AppRadii.pill),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      shadowOffset: const Offset(0, 3),
+      shadowBlur: 12,
+      child: SizedBox(width: double.infinity, child: content),
+    ),
+    backgroundColor: Colors.transparent,
+    elevation: 0,
+    padding: EdgeInsets.zero,
+    margin: margin,
+    shape: const RoundedRectangleBorder(),
+    clipBehavior: Clip.none,
+    duration: duration,
+    dismissDirection: dismissDirection,
+  );
 }
 
 Future<T?> showAppSheet<T>({

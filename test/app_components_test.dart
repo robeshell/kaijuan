@@ -59,6 +59,39 @@ void main() {
     expect(find.text('书库还是空的'), findsOneWidget);
   });
 
+  testWidgets('progress snackbar shows a persistent scanning status', (
+    tester,
+  ) async {
+    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? progress;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(AppColors.defaultAccent),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => FilledButton(
+              onPressed: () {
+                progress = showAppProgressSnackBar(context, '扫描中');
+              },
+              child: const Text('开始扫描'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('开始扫描'));
+    await tester.pump();
+    expect(find.text('扫描中'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(AppGlassSurface), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsOneWidget);
+
+    progress!.close();
+    await tester.pumpAndSettle();
+    expect(find.text('扫描中'), findsNothing);
+  });
+
   testWidgets('App menu becomes a bottom sheet in compact windows', (
     tester,
   ) async {

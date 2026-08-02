@@ -47,6 +47,32 @@ extension AppComponentProfileTokens on AppComponentProfile {
     AppComponentProfile.desktop => KaiBrandDesktopType.bodySize,
   };
 
+  double get inputTextSize => switch (this) {
+    AppComponentProfile.mobile => KaiBrandMobileType.inputTextSize,
+    AppComponentProfile.desktop => KaiBrandDesktopType.inputTextSize,
+  };
+
+  TextStyle get inputTextStyle => switch (this) {
+    AppComponentProfile.mobile => TextStyle(
+      fontSize: KaiBrandMobileType.inputTextSize,
+      height:
+          KaiBrandMobileType.inputTextLineHeight /
+          KaiBrandMobileType.inputTextSize,
+      fontWeight:
+          FontWeight.values[KaiBrandMobileType.inputTextWeight ~/ 100 - 1],
+      letterSpacing: KaiBrandMobileType.inputTextLetterSpacing,
+    ),
+    AppComponentProfile.desktop => TextStyle(
+      fontSize: KaiBrandDesktopType.inputTextSize,
+      height:
+          KaiBrandDesktopType.inputTextLineHeight /
+          KaiBrandDesktopType.inputTextSize,
+      fontWeight:
+          FontWeight.values[KaiBrandDesktopType.inputTextWeight ~/ 100 - 1],
+      letterSpacing: KaiBrandDesktopType.inputTextLetterSpacing,
+    ),
+  };
+
   double get bodySecondarySize => switch (this) {
     AppComponentProfile.mobile => KaiBrandMobileType.bodySecondarySize,
     AppComponentProfile.desktop => KaiBrandDesktopType.bodySecondarySize,
@@ -60,6 +86,32 @@ extension AppComponentProfileTokens on AppComponentProfile {
   double get listTitleSize => switch (this) {
     AppComponentProfile.mobile => KaiBrandMobileType.listTitleSize,
     AppComponentProfile.desktop => KaiBrandDesktopType.listTitleSize,
+  };
+
+  double get gridTitleSize => switch (this) {
+    AppComponentProfile.mobile => KaiBrandMobileType.gridTitleSize,
+    AppComponentProfile.desktop => KaiBrandDesktopType.gridTitleSize,
+  };
+
+  TextStyle get gridTitleStyle => switch (this) {
+    AppComponentProfile.mobile => TextStyle(
+      fontSize: KaiBrandMobileType.gridTitleSize,
+      height:
+          KaiBrandMobileType.gridTitleLineHeight /
+          KaiBrandMobileType.gridTitleSize,
+      fontWeight:
+          FontWeight.values[KaiBrandMobileType.gridTitleWeight ~/ 100 - 1],
+      letterSpacing: KaiBrandMobileType.gridTitleLetterSpacing,
+    ),
+    AppComponentProfile.desktop => TextStyle(
+      fontSize: KaiBrandDesktopType.gridTitleSize,
+      height:
+          KaiBrandDesktopType.gridTitleLineHeight /
+          KaiBrandDesktopType.gridTitleSize,
+      fontWeight:
+          FontWeight.values[KaiBrandDesktopType.gridTitleWeight ~/ 100 - 1],
+      letterSpacing: KaiBrandDesktopType.gridTitleLetterSpacing,
+    ),
   };
 
   double get captionSize => switch (this) {
@@ -308,11 +360,19 @@ extension AppThemeContext on BuildContext {
 
   double get appBodySize => appComponentProfile.bodySize;
 
+  double get appInputTextSize => appComponentProfile.inputTextSize;
+
+  TextStyle get appInputTextStyle => appComponentProfile.inputTextStyle;
+
   double get appBodySecondarySize => appComponentProfile.bodySecondarySize;
 
   double get appLabelSize => appComponentProfile.labelSize;
 
   double get appListTitleSize => appComponentProfile.listTitleSize;
+
+  double get appGridTitleSize => appComponentProfile.gridTitleSize;
+
+  TextStyle get appGridTitleStyle => appComponentProfile.gridTitleStyle;
 
   double get appCaptionSize => appComponentProfile.captionSize;
 

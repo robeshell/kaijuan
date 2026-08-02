@@ -358,10 +358,8 @@ class _CoverCard extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: context.appListTitleSize,
-                  fontWeight: FontWeight.w500,
-                  height: 1.2,
+                style: context.appGridTitleStyle.copyWith(
+                  color: context.appPrimaryText,
                 ),
               ),
             ),

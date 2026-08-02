@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../domain/reader_models.dart';
 import '../../library/import/book_import_service.dart';
@@ -40,6 +41,7 @@ class LibraryController extends ChangeNotifier {
     required ComicImportService comicImportService,
     required BookImportService bookImportService,
     ImportPipeline? importPipeline,
+    Future<Directory> Function()? documentsDirectoryProvider,
     this.importExtensions = const [
       'cbz',
       'zip',
@@ -55,6 +57,8 @@ class LibraryController extends ChangeNotifier {
     ],
   }) : _comicImport = comicImportService,
        _bookImport = bookImportService,
+       _documentsDirectoryProvider =
+           documentsDirectoryProvider ?? getApplicationDocumentsDirectory,
        _importPipeline =
            importPipeline ??
            ImportPipeline(
@@ -65,6 +69,7 @@ class LibraryController extends ChangeNotifier {
   final AppDatabase database;
   final ComicImportService _comicImport;
   final BookImportService _bookImport;
+  final Future<Directory> Function() _documentsDirectoryProvider;
   final ImportPipeline _importPipeline;
 
   /// File picker extensions (no dots), from [BrandConfig].
@@ -81,10 +86,6 @@ class LibraryController extends ChangeNotifier {
 
   LibraryKindFilter _kindFilter = LibraryKindFilter.all;
   LibraryKindFilter get kindFilter => _kindFilter;
-
-  /// null = all formats; otherwise ReaderFormat.storageValue.
-  String? _formatFilter;
-  String? get formatFilter => _formatFilter;
 
   void setSort(LibrarySort sort) {
     if (_sort == sort) return;
@@ -104,12 +105,6 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setFormatFilter(String? format) {
-    if (_formatFilter == format) return;
-    _formatFilter = format;
-    notifyListeners();
-  }
-
   void clearFilters() {
     var changed = false;
     if (_readFilter != LibraryReadFilter.all) {
@@ -120,22 +115,16 @@ class LibraryController extends ChangeNotifier {
       _kindFilter = LibraryKindFilter.all;
       changed = true;
     }
-    if (_formatFilter != null) {
-      _formatFilter = null;
-      changed = true;
-    }
     if (changed) notifyListeners();
   }
 
   bool get hasActiveFilters =>
       _readFilter != LibraryReadFilter.all ||
-      _kindFilter != LibraryKindFilter.all ||
-      _formatFilter != null;
+      _kindFilter != LibraryKindFilter.all;
 
   int get activeFilterCount => [
     _readFilter != LibraryReadFilter.all,
     _kindFilter != LibraryKindFilter.all,
-    _formatFilter != null,
   ].where((active) => active).length;
 
   /// Live library entries with progress (for filters / badges).
@@ -154,13 +143,6 @@ class LibraryController extends ChangeNotifier {
       list = [
         for (final e in list)
           if (e.item.title.toLowerCase().contains(q)) e,
-      ];
-    }
-
-    if (_formatFilter != null) {
-      list = [
-        for (final e in list)
-          if (e.item.format == _formatFilter) e,
       ];
     }
 
@@ -285,41 +267,57 @@ class LibraryController extends ChangeNotifier {
     String? directory;
     try {
       directory = await getDirectoryPath();
-    } catch (error) {
-      return ImportResult(
-        failures: [ImportFailure(path: '', reason: '无法打开文件夹选择器：$error')],
-      );
+    } catch (_) {
+      // Directory selection is not implemented by every platform plugin
+      // (notably the mobile implementations). Auto scan is best-effort, so a
+      // missing picker is simply an empty scan rather than an import failure.
+      return null;
     }
     if (directory == null || directory.isEmpty) return null;
     return importDirectory(directory);
   }
 
+  /// Scans the app's user-facing Documents directory without opening a
+  /// platform folder picker. This is the source used by the library's
+  /// "自动扫描" action.
+  Future<ImportResult> scanDefaultDirectory() {
+    return _runImport(() async {
+      final Directory directory;
+      try {
+        directory = await _documentsDirectoryProvider();
+      } catch (_) {
+        return const ImportResult();
+      }
+      return _importDirectoryContents(directory.path);
+    });
+  }
+
   /// Recursively finds supported files and feeds them into the same pipeline
   /// used by local file selection.
-  Future<ImportResult> importDirectory(String directoryPath) async {
+  Future<ImportResult> importDirectory(String directoryPath) {
+    return _runImport(() => _importDirectoryContents(directoryPath));
+  }
+
+  Future<ImportResult> _importDirectoryContents(String directoryPath) async {
     final directory = Directory(directoryPath);
-    if (!await directory.exists()) {
-      return ImportResult(
-        failures: [ImportFailure(path: directoryPath, reason: '文件夹不存在')],
-      );
-    }
     final paths = <String>[];
-    await for (final entity in directory.list(
-      recursive: true,
-      followLinks: false,
-    )) {
-      if (entity is! File) continue;
-      if (_isSupportedImportFile(entity.path)) paths.add(entity.path);
+    try {
+      if (!await directory.exists()) {
+        return const ImportResult();
+      }
+      await for (final entity in directory.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is! File) continue;
+        if (_isSupportedImportFile(entity.path)) paths.add(entity.path);
+      }
+    } catch (_) {
+      return const ImportResult();
     }
     paths.sort();
-    if (paths.isEmpty) {
-      return ImportResult(
-        failures: [
-          ImportFailure(path: directoryPath, reason: '文件夹中没有找到可导入的文件'),
-        ],
-      );
-    }
-    return importCandidates([
+    if (paths.isEmpty) return const ImportResult();
+    return _importPipeline.importCandidates([
       for (final path in paths)
         ImportCandidate(source: LocalFileImportSource.scanned(path)),
     ]);
@@ -345,6 +343,12 @@ class LibraryController extends ChangeNotifier {
   Future<ImportResult> importCandidates(
     Iterable<ImportCandidate> candidates,
   ) async {
+    return _runImport(() => _importPipeline.importCandidates(candidates));
+  }
+
+  Future<ImportResult> _runImport(
+    Future<ImportResult> Function() operation,
+  ) async {
     if (_importing) {
       return const ImportResult(
         failures: [ImportFailure(path: '', reason: '已有导入任务在进行')],
@@ -353,7 +357,7 @@ class LibraryController extends ChangeNotifier {
     _importing = true;
     notifyListeners();
     try {
-      return await _importPipeline.importCandidates(candidates);
+      return await operation();
     } finally {
       _importing = false;
       notifyListeners();

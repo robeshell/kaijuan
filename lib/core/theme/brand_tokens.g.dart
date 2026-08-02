@@ -1,11 +1,11 @@
 // GENERATED FILE — DO NOT EDIT.
 // Source: kai-brand-design/tokens/*.json
-// specVersion: 0.7.1 · sha256: 997bd0f0aa4bee02e5783b77270971cc0fd01e4ebf0c0b71c5fc391e7b0cba99
+// specVersion: 0.7.2 · sha256: ef91f9507033c88c8ef72147328570561045a739094bf87f91d4fd3a93b5713a
 
 import 'package:flutter/material.dart';
 
-const kaiBrandSpecVersion = '0.7.1';
-const kaiBrandTokenDigest = '997bd0f0aa4bee02e5783b77270971cc0fd01e4ebf0c0b71c5fc391e7b0cba99';
+const kaiBrandSpecVersion = '0.7.2';
+const kaiBrandTokenDigest = 'ef91f9507033c88c8ef72147328570561045a739094bf87f91d4fd3a93b5713a';
 
 abstract final class KaiBrandBasePalette {
   static const mainBackground = Color(0xFFF7F9FC);
@@ -102,6 +102,10 @@ abstract final class KaiBrandMobileType {
   static const double bodyLineHeight = 24.0;
   static const int bodyWeight = 400;
   static const double bodyLetterSpacing = 0.0;
+  static const double inputTextSize = 16.0;
+  static const double inputTextLineHeight = 22.0;
+  static const int inputTextWeight = 400;
+  static const double inputTextLetterSpacing = 0.0;
   static const double bodySecondarySize = 15.0;
   static const double bodySecondaryLineHeight = 20.0;
   static const int bodySecondaryWeight = 400;
@@ -110,6 +114,10 @@ abstract final class KaiBrandMobileType {
   static const double listTitleLineHeight = 20.0;
   static const int listTitleWeight = 500;
   static const double listTitleLetterSpacing = 0.0;
+  static const double gridTitleSize = 14.0;
+  static const double gridTitleLineHeight = 20.0;
+  static const int gridTitleWeight = 500;
+  static const double gridTitleLetterSpacing = 0.0;
   static const double labelSize = 16.0;
   static const double labelLineHeight = 22.0;
   static const int labelWeight = 600;
@@ -157,6 +165,10 @@ abstract final class KaiBrandDesktopType {
   static const double bodyLineHeight = 20.0;
   static const int bodyWeight = 400;
   static const double bodyLetterSpacing = 0.0;
+  static const double inputTextSize = 14.0;
+  static const double inputTextLineHeight = 20.0;
+  static const int inputTextWeight = 400;
+  static const double inputTextLetterSpacing = 0.0;
   static const double bodySecondarySize = 12.0;
   static const double bodySecondaryLineHeight = 18.0;
   static const int bodySecondaryWeight = 400;
@@ -165,6 +177,10 @@ abstract final class KaiBrandDesktopType {
   static const double listTitleLineHeight = 20.0;
   static const int listTitleWeight = 500;
   static const double listTitleLetterSpacing = 0.0;
+  static const double gridTitleSize = 14.0;
+  static const double gridTitleLineHeight = 20.0;
+  static const int gridTitleWeight = 500;
+  static const double gridTitleLetterSpacing = 0.0;
   static const double labelSize = 14.0;
   static const double labelLineHeight = 20.0;
   static const int labelWeight = 600;

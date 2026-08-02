@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/core/theme.dart';
@@ -37,6 +38,14 @@ void main() {
       AppTheme.dark(accent).scaffoldBackgroundColor,
       AppSkins.deepNight.canvas,
     );
+  });
+
+  test('snackbar feedback uses the compact caption type role', () {
+    final theme = AppTheme.light(AppColors.defaultAccent);
+    final profile = resolveAppComponentProfile(defaultTargetPlatform);
+
+    expect(theme.snackBarTheme.contentTextStyle?.fontSize, profile.captionSize);
+    expect(theme.snackBarTheme.backgroundColor, Colors.transparent);
   });
 
   test('system list tiles use the shared list-row metrics', () {

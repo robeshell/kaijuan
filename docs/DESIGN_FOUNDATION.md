@@ -70,14 +70,14 @@
 
 ## 排版（壳层）
 
-- 字族：**平台默认**（`ThemeData` 不钉 `.SF Pro Text`；品牌规范 0.7.1）。
+- 字族：**平台默认**（`ThemeData` 不钉 `.SF Pro Text`；品牌规范 0.7.2）。
 - 层级靠**字重驱动**（壳层 w600 → w700；内容展示可 w800）+ 颜色（primary → secondary → muted），不靠字号堆叠。  
 - 壳层大标题缓和负字距（约 −0.1～−0.25、w700）；沉浸内容标题仍可 w800。  
 - 阅读器正文排版独立（字体栈 / 字号 / 行高属阅读偏好，不受壳层排版影响）。
 
 ## 排版边界
 
-壳层字号遵循品牌层与 Kaijuan 产品层：通用角色通过 `AppComponentProfileTokens` / `context.app*Size` 使用 `KaiBrandMobileType` 或 `KaiBrandDesktopType`，开卷特有的阅读器 chrome 角色使用 `KaiProductTokens`。业务 UI 不直接写数字型 `fontSize`。
+壳层字号遵循品牌层与 Kaijuan 产品层：统一语义角色和组件角色都通过 `AppComponentProfileTokens` / `context.app*Size` 使用 `KaiBrandMobileType` 或 `KaiBrandDesktopType`，开卷特有的阅读器 chrome 角色使用 `KaiProductTokens`。输入框使用组件角色 `inputText`，封面网格标题使用组件角色 `gridTitle`；页面不得用 `body` 或 `label` 代替它们，也不直接写数字型 `fontSize`。
 
 图书内容层的字号、行高、字距、段间距和字体栈由 `BookReadingPreferences` 及阅读器渲染链路控制，属于用户可调功能参数，不属于品牌或产品 chrome token；漫画内容是图像，不新增正文 `fontSize`。壳层 `TextScaler` 可访问性与内容层字号保持独立。
 
@@ -86,7 +86,14 @@
 2. **语义 token**：`AppGlassTheme` + `AppSkinEffects` + `ColorScheme`，业务经 `context.appGlass`、`context.appPrimaryText` 等 context getter 读取（`lib/core/theme/context.dart`）。  
 3. **组件层**：`AppGlassSurface` 原语 + 共享 kit（`lib/presentation/widgets/app_components.dart`、`app_overlays.dart`、`settings_components.dart`）。  
 
-业务 UI 只引用语义层；玻璃模糊**按面选用**——浮面（对话框 / 菜单 / 底栏）模糊，重复的行 / 卡片不模糊（`blur: false`）。  
+业务 UI 只引用语义层；玻璃模糊**按面选用**：
+
+- 对话框 / Sheet / 菜单 / Popover 使用强玻璃面（`strongSurface + strongBlur`），配合边框、高光和阴影；
+- SnackBar / Toast / Tooltip 使用轻玻璃反馈面（`surface + blur`），不得直接使用中灰色 `overlay` 作为常规浮窗背景；
+- 纯净皮肤在 `blur=0` 时自动退化为实色面；
+- 重复的行 / 卡片不模糊（`blur: false`）。
+
+浮层不通过 Material `elevation` 或任意灰色块表达层级，统一读取 `AppGlassTheme` 与 `AppSkinEffects`。
 
 ## 扩展
 

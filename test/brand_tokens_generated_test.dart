@@ -4,7 +4,13 @@ import 'package:kaijuan/core/theme/brand_tokens.g.dart';
 
 void main() {
   test('runtime theme consumes generated brand tokens', () {
-    expect(kaiBrandSpecVersion, '0.7.1');
+    expect(kaiBrandSpecVersion, '0.7.2');
+    expect(KaiBrandMobileType.inputTextSize, 16);
+    expect(
+      KaiBrandMobileType.inputTextSize,
+      lessThan(KaiBrandMobileType.bodySize),
+    );
+    expect(KaiBrandMobileType.gridTitleSize, 14);
     expect(AppSpacing.x4, KaiBrandSpacing.x4);
     expect(AppRadii.card, KaiBrandRadii.card);
     expect(AppProductRadii.cover, KaiProductTokens.coverRadius);

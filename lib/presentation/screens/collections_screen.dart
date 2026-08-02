@@ -262,7 +262,8 @@ class _CollectionGridCard extends StatelessWidget {
           Expanded(child: CollectionCover(coverPaths: summary.coverPaths)),
           const SizedBox(height: 8),
           SizedBox(
-            height: 34,
+            // 20px title + 2px gap + 14.4px metadata line.
+            height: 38,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -270,10 +271,9 @@ class _CollectionGridCard extends StatelessWidget {
                   summary.collection.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: context.appListTitleSize,
+                  style: context.appGridTitleStyle.copyWith(
+                    color: context.appPrimaryText,
                     fontWeight: FontWeight.w600,
-                    height: 1.2,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -705,10 +705,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                     item.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: context.appListTitleSize,
-                                      fontWeight: FontWeight.w500,
-                                      height: 1.2,
+                                    style: context.appGridTitleStyle.copyWith(
+                                      color: context.appPrimaryText,
                                     ),
                                   ),
                                 ),
