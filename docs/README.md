@@ -35,7 +35,7 @@ docs/
   specs/
     _TEMPLATE.md
     library.md / shelf.md / search.md / lists.md / collections.md
-    reader-chrome.md / comic-reader.md / book-reader.md
+    reader-chrome.md / comic-reader.md / book-reader.md / wifi-transfer.md
     book-reader-tool-strip-plan.md   ← 图书底栏工具条大改（计划）
     book-tts.md                      ← 听书方案（系统 TTS，不接 AI）
   opendesign/

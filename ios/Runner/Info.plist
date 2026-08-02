@@ -49,6 +49,8 @@
 	</dict>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于将书摘卡片保存到相册</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于在同一 WiFi 下接收图书和漫画文件</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

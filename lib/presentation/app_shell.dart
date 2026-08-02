@@ -11,6 +11,7 @@ import '../core/kaijuan_icons.dart';
 import '../core/platform_window.dart';
 import '../core/theme.dart';
 import '../core/theme/brand_tokens.g.dart';
+import '../library/import/wifi_transfer_service.dart';
 import 'controllers/library_controller.dart';
 import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
@@ -24,6 +25,7 @@ class AppShell extends StatefulWidget {
     required this.brand,
     required this.themePreferences,
     required this.libraryController,
+    this.wifiTransferService,
     required this.readingPreferences,
     this.bookReadingPreferences,
   });
@@ -31,6 +33,7 @@ class AppShell extends StatefulWidget {
   final BrandConfig brand;
   final ThemePreferences themePreferences;
   final LibraryController libraryController;
+  final WifiTransferService? wifiTransferService;
   final ComicReadingPreferences readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
 
@@ -73,6 +76,7 @@ class _AppShellState extends State<AppShell> {
       LibraryScreen(
         brand: widget.brand,
         controller: widget.libraryController,
+        wifiTransferService: widget.wifiTransferService,
         readingPreferences: widget.readingPreferences,
         bookReadingPreferences: widget.bookReadingPreferences,
       ),

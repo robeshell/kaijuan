@@ -72,6 +72,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - `ReaderFormat` 表示内容格式（CBZ、ZIP、EPUB、FB2、MOBI、AZW3、PDF、TXT、Markdown）；它决定格式服务和必要的 kind 探测。
 - `ImportCandidate` 是两层之间的边界，至少携带来源方式、显示名称、可重复读取的字节流和可选 MIME。
 - `ImportPipeline` 统一执行候选的 staging、SHA-256、格式路由、失败隔离和结果汇总。方式适配器不得绕过它直接落库。
+- `WifiTransferService` 只负责临时局域网 HTTP、会话令牌和上传临时文件；上传完成后必须以 `ImportMethod.wifi` 交给 `ImportPipeline`，不得直接写正式目录或数据库。
 
 详细的格式矩阵与方式状态见 [specs/import.md](./specs/import.md)。
 

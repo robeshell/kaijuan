@@ -9,6 +9,7 @@ import '../../brand/brand_config.dart';
 import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../library/import/import_models.dart';
+import '../../library/import/wifi_transfer_service.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
@@ -17,6 +18,7 @@ import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
 import '../widgets/cover_card_ink.dart';
 import '../widgets/selection_action_sheet.dart';
+import '../widgets/wifi_transfer_sheet.dart';
 import 'collections_screen.dart';
 import 'lists_screen.dart';
 
@@ -55,12 +57,14 @@ class LibraryScreen extends StatefulWidget {
     super.key,
     required this.brand,
     required this.controller,
+    this.wifiTransferService,
     this.readingPreferences,
     this.bookReadingPreferences,
   });
 
   final BrandConfig brand;
   final LibraryController controller;
+  final WifiTransferService? wifiTransferService;
   final ComicReadingPreferences? readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
 
@@ -99,6 +103,7 @@ class _LibraryScreenState extends State<LibraryScreen>
       action: _LibraryImportAction.wifi,
       icon: KaijuanIcons.wifi,
       label: 'WiFi 传书',
+      enabled: true,
     ),
     _ImportMenuOption(
       action: _LibraryImportAction.onlineLibrary,
@@ -183,6 +188,31 @@ class _LibraryScreenState extends State<LibraryScreen>
     }
     if (!mounted) return;
     await _showScanSummary(result);
+  }
+
+  Future<void> _openWifiTransfer() async {
+    final service = widget.wifiTransferService;
+    if (service == null) return;
+    try {
+      await service.start();
+    } catch (error) {
+      if (mounted) showAppSnackBar(context, 'WiFi 传书启动失败：$error');
+      return;
+    }
+    if (!mounted) {
+      await service.stop();
+      return;
+    }
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        builder: (_) => WifiTransferSheet(service: service),
+      );
+    } finally {
+      await service.stop();
+    }
   }
 
   Future<void> _showImportSummary(ImportResult result) async {
@@ -613,9 +643,10 @@ class _LibraryScreenState extends State<LibraryScreen>
       case _LibraryImportAction.autoScan:
         await _scanDirectory();
       case _LibraryImportAction.cloud:
-      case _LibraryImportAction.wifi:
       case _LibraryImportAction.onlineLibrary:
         return;
+      case _LibraryImportAction.wifi:
+        await _openWifiTransfer();
     }
   }
 

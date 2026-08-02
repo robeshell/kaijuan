@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import '../brand/brand_config.dart';
 import '../core/platform_window.dart';
 import '../core/theme.dart';
+import '../library/import/wifi_transfer_service.dart';
 import '../presentation/app_shell.dart';
 import '../presentation/controllers/library_controller.dart';
 import 'book_reading_preferences.dart';
@@ -18,6 +19,7 @@ class App extends StatelessWidget {
     required this.readingPreferences,
     this.bookReadingPreferences,
     required this.libraryController,
+    this.wifiTransferService,
   });
 
   final BrandConfig brand;
@@ -25,6 +27,7 @@ class App extends StatelessWidget {
   final ComicReadingPreferences readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
   final LibraryController libraryController;
+  final WifiTransferService? wifiTransferService;
 
   @override
   Widget build(BuildContext context) {
@@ -36,17 +39,12 @@ class App extends StatelessWidget {
         // "跟随系统" maps to the light/dark skins via Flutter's own
         // ThemeMode.system, so OS brightness changes apply automatically.
         final followSystem = skinId == AppSkins.systemId;
-        final skin = followSystem
-            ? AppSkins.standard
-            : AppSkins.byId(skinId);
+        final skin = followSystem ? AppSkins.standard : AppSkins.byId(skinId);
         return MaterialApp(
           title: brand.displayName,
           debugShowCheckedModeBanner: false,
           locale: const Locale('zh', 'CN'),
-          supportedLocales: const [
-            Locale('zh', 'CN'),
-            Locale('en', 'US'),
-          ],
+          supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
@@ -73,6 +71,7 @@ class App extends StatelessWidget {
             readingPreferences: readingPreferences,
             bookReadingPreferences: bookReadingPreferences,
             libraryController: libraryController,
+            wifiTransferService: wifiTransferService,
           ),
         );
       },

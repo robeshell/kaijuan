@@ -15,6 +15,7 @@ import 'brand/brand_config.dart';
 import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
 import 'library/import/import_staging.dart';
+import 'library/import/wifi_transfer_service.dart';
 import 'library/persistence/app_database.dart';
 import 'library/storage/library_paths.dart';
 import 'presentation/controllers/library_controller.dart';
@@ -97,6 +98,7 @@ Widget _readyApp(_BootServices services) {
     readingPreferences: services.comicReadingPreferences,
     bookReadingPreferences: services.bookReadingPreferences,
     libraryController: services.libraryController,
+    wifiTransferService: services.wifiTransferService,
   );
 }
 
@@ -107,6 +109,7 @@ class _BootServices {
     required this.comicReadingPreferences,
     required this.bookReadingPreferences,
     required this.libraryController,
+    required this.wifiTransferService,
   });
 
   final BrandConfig brand;
@@ -114,6 +117,7 @@ class _BootServices {
   final ComicReadingPreferences comicReadingPreferences;
   final BookReadingPreferences bookReadingPreferences;
   final LibraryController libraryController;
+  final WifiTransferService wifiTransferService;
 }
 
 Future<_BootServices> _loadBootServices() async {
@@ -156,7 +160,9 @@ Future<_BootServices> _loadBootServices() async {
   // UUIDs after an iOS reinstall; rewrite absolute file/cover paths first.
   final rebound = await LibraryPaths(supportDir).rebindDatabase(database);
   if (rebound > 0) {
-    debugPrint('[Library] rebound $rebound item path(s) to current support root');
+    debugPrint(
+      '[Library] rebound $rebound item path(s) to current support root',
+    );
   }
   final libraryController = LibraryController(
     database: database,
@@ -170,6 +176,10 @@ Future<_BootServices> _loadBootServices() async {
     ),
     importExtensions: brand.importExtensions,
   );
+  final wifiTransferService = WifiTransferService(
+    supportDirectory: supportDir,
+    onImport: (candidate) => libraryController.importCandidates([candidate]),
+  );
 
   return _BootServices(
     brand: brand,
@@ -177,6 +187,7 @@ Future<_BootServices> _loadBootServices() async {
     comicReadingPreferences: comicReadingPreferences,
     bookReadingPreferences: bookReadingPreferences,
     libraryController: libraryController,
+    wifiTransferService: wifiTransferService,
   );
 }
 
@@ -191,10 +202,7 @@ class _BootError extends StatelessWidget {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            '启动失败\n$error',
-            textAlign: TextAlign.center,
-          ),
+          child: Text('启动失败\n$error', textAlign: TextAlign.center),
         ),
       ),
     );
