@@ -30,7 +30,7 @@
 
 - 安装包、图标、名字、默认设定 **统一为开卷**（包名 `com.kaijuan.reader`，仓库 `kaijuan`）。
 - 用户在同一 App 内混排管理漫画与图书，可通过「类型」筛选。
-- 导入 **CBZ / ZIP / EPUB**；EPUB 按内容自动识别为页图漫画或正文图书。
+- 导入 **CBZ / ZIP / EPUB / FB2 / MOBI / AZW3 / PDF / TXT / MD**；EPUB 按内容自动识别为页图漫画或正文图书。
 - 共享工程底座：进度模型、导入范式、不透明 locator、书库管理、桌面 chrome、controller 分层。
 
 ---
@@ -80,7 +80,7 @@ App 仍是三 Tab（宽屏 Rail / 窄屏 BottomBar）：
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| 本地文件选择导入 | **已有** | CBZ / ZIP / EPUB；图书格式逐步扩展 |
+| 本地文件选择导入 | **已有** | CBZ / ZIP / EPUB / FB2 / MOBI / AZW3 / PDF / TXT / MD |
 | 文件夹扫描导入 | **首批** | 选择目录后递归发现支持格式，复用本地导入链路 |
 | 内容哈希去重 | **已有** | |
 | EPUB 自动探测 | **已有** | Dart ZIP/OPF spine 抽样：正文 → 图书；页图 → 漫画（不经 WebView） |
@@ -235,7 +235,7 @@ App 仍是三 Tab（宽屏 Rail / 窄屏 BottomBar）：
 | FB2 | 直接导入 | reflow | **首批** |
 | MOBI / AZW3 | 直接导入 | reflow | **首批** |
 | PDF | 直接导入 | fixed-layout book | **首批** |
-| TXT / MD | 转规范 EPUB | reflow | **中** |
+| TXT / MD | 转规范 EPUB | reflow | **首批** |
 
 ---
 

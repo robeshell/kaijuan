@@ -57,6 +57,9 @@ class LocalFileImportSource implements ImportSource {
   factory LocalFileImportSource.scanned(String path) =>
       LocalFileImportSource(File(path), method: ImportMethod.directoryScan);
 
+  factory LocalFileImportSource.dropped(String path) =>
+      LocalFileImportSource(File(path), method: ImportMethod.dragDrop);
+
   final File file;
   @override
   final ImportMethod method;
@@ -67,6 +70,29 @@ class LocalFileImportSource implements ImportSource {
 
   @override
   Stream<List<int>> openRead() => file.openRead();
+}
+
+/// Small buffered source for platform share receivers and future network
+/// adapters that already own the downloaded bytes. Large local files should
+/// continue to use [LocalFileImportSource] so staging remains streaming.
+class BufferedImportSource implements ImportSource {
+  BufferedImportSource({
+    required List<int> bytes,
+    required this.displayName,
+    required this.method,
+    this.mimeType,
+  }) : bytes = List<int>.unmodifiable(bytes);
+
+  final List<int> bytes;
+  @override
+  final String displayName;
+  @override
+  final ImportMethod method;
+  @override
+  final String? mimeType;
+
+  @override
+  Stream<List<int>> openRead() => Stream<List<int>>.value(bytes);
 }
 
 /// The value passed from a source method into the common import pipeline.

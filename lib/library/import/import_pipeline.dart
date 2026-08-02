@@ -1,11 +1,14 @@
 import '../../domain/reader_models.dart';
 import '../../readers/book/foliate_import_probe.dart';
+import 'package:path/path.dart' as p;
+
 import 'book_import_service.dart';
 import 'comic_import_service.dart';
 import 'epub_import_router.dart';
 import 'import_models.dart';
 import 'import_sources.dart';
 import 'import_staging.dart';
+import 'text_book_converter.dart';
 
 /// The single hand-off between import methods and format services.
 ///
@@ -72,9 +75,16 @@ class ImportPipeline {
 
     StagedContentFile? content;
     try {
+      final isText = route == _ImportRoute.text;
+      final bytes = isText
+          ? Stream<List<int>>.value(
+              await TextBookConverter.convert(candidate.source, format),
+            )
+          : candidate.source.openRead();
       content = await _staging.stageContentStream(
         sourceName: candidate.displayName,
-        bytes: candidate.source.openRead(),
+        bytes: bytes,
+        storageExtension: isText ? '.epub' : null,
       );
     } catch (error) {
       return ImportResult(
@@ -100,6 +110,12 @@ class ImportPipeline {
           candidate: candidate,
           format: format,
           content: content,
+        ),
+        _ImportRoute.text => await _bookImport.importStaged(
+          candidate: candidate,
+          format: format,
+          content: content,
+          titleOverride: p.basenameWithoutExtension(candidate.displayName),
         ),
         _ImportRoute.unsupported => throw StateError('unreachable route'),
       };
@@ -129,6 +145,9 @@ class ImportPipeline {
   }
 
   _ImportRoute _routeFor(ReaderFormat format) {
+    if (format == ReaderFormat.txt || format == ReaderFormat.markdown) {
+      return _ImportRoute.text;
+    }
     if (ComicImportService.supportedFormats.contains(format)) {
       return format == ReaderFormat.epub
           ? _ImportRoute.epub
@@ -141,4 +160,4 @@ class ImportPipeline {
   }
 }
 
-enum _ImportRoute { comic, epub, book, unsupported }
+enum _ImportRoute { comic, epub, book, text, unsupported }

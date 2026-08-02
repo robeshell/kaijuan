@@ -33,6 +33,8 @@ class BookImportService {
     ReaderFormat.mobi,
     ReaderFormat.azw3,
     ReaderFormat.pdf,
+    ReaderFormat.txt,
+    ReaderFormat.markdown,
   };
 
   ImportStagingArea get stagingArea => _staging;
@@ -121,6 +123,9 @@ class BookImportService {
     if (format == null || !supportedFormats.contains(format)) {
       throw ImportException('图书暂不支持此格式：${p.extension(path)}');
     }
+    if (format == ReaderFormat.txt || format == ReaderFormat.markdown) {
+      throw const ImportException('TXT / Markdown 请通过统一导入管线转换');
+    }
     final file = candidate.localFile!;
     if (!await file.exists()) {
       throw ImportException('文件不存在');
@@ -141,6 +146,7 @@ class BookImportService {
     required ReaderFormat format,
     required StagedContentFile content,
     FoliateImportSnapshot? snapshot,
+    String? titleOverride,
   }) async {
     if (!supportedFormats.contains(format)) {
       throw ImportException('图书暂不支持此格式：${candidate.displayName}');
@@ -166,7 +172,9 @@ class BookImportService {
       cover = await _stageCover(hash, metadata);
       trace.mark('cover-staged');
       final fallbackTitle = p.basenameWithoutExtension(candidate.displayName);
-      final title = metadata.title.trim().isNotEmpty
+      final title = titleOverride?.trim().isNotEmpty == true
+          ? titleOverride!.trim()
+          : metadata.title.trim().isNotEmpty
           ? metadata.title.trim()
           : fallbackTitle;
 

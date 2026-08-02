@@ -26,6 +26,7 @@ class ImportStagingArea {
   Future<StagedContentFile> stageContentStream({
     required String sourceName,
     required Stream<List<int>> bytes,
+    String? storageExtension,
   }) async {
     final staged = await _newStagingFile(p.basename(sourceName));
     final output = staged.openWrite();
@@ -44,7 +45,9 @@ class ImportStagingArea {
       await output.close();
       outputClosed = true;
       final digest = digestResult.value.toString();
-      final extension = _storageExtension(sourceName);
+      final extension = storageExtension == null
+          ? _storageExtension(sourceName)
+          : _normalizeStorageExtension(storageExtension);
       return StagedContentFile(
         hash: digest,
         file: StagedImportFile._(
@@ -149,6 +152,15 @@ class ImportStagingArea {
     final normalized = sourceName.toLowerCase().replaceAll('\\', '/');
     if (normalized.endsWith('.fb2.zip')) return '.fbz';
     return p.extension(sourceName).toLowerCase();
+  }
+
+  static String _normalizeStorageExtension(String extension) {
+    final normalized = extension.startsWith('.')
+        ? extension.toLowerCase()
+        : '.${extension.toLowerCase()}';
+    return RegExp(r'^\.[a-z0-9]{1,12}$').hasMatch(normalized)
+        ? normalized
+        : '.bin';
   }
 }
 

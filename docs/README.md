@@ -57,7 +57,7 @@ docs/
 - **一个 App、一套数据**（沿用已有 `app_library`）。  
 - **一个仓库**，共享 core；两个引擎按 `item.kind` 路由。  
 - 书库内提供「全部 / 漫画 / 图书」类型筛选，不再用品牌分段。  
-- 导入 **CBZ / ZIP / EPUB**；EPUB 自动探测正文 vs 页图。导入链路按「方式 / 格式」两层组织，见 [specs/import.md](./specs/import.md)。
+- 导入 **CBZ / ZIP / EPUB / FB2 / MOBI / AZW3 / PDF / TXT / MD**；EPUB 自动探测正文 vs 页图。导入链路按「方式 / 格式」两层组织，见 [specs/import.md](./specs/import.md)。
 
 ## 如何扩展
 

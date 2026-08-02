@@ -33,7 +33,7 @@ BrandConfig
   applicationId: com.kaijuan.reader
   accent presets + default accent
   default reading theme
-  import extension whitelist: cbz, zip, epub, fb2, fbz, mobi, azw3, pdf
+  import extension whitelist: cbz, zip, epub, fb2, fbz, mobi, azw3, pdf, txt, md
   databaseName: app_library        # 沿用已有数据
   storageNamespace: ''             # support root
 ```
@@ -69,7 +69,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 ### 导入两层
 
 - `ImportMethod` 表示来源方式（本地文件、目录扫描、拖拽、分享、WiFi、WebDAV、OPDS）；它只负责把来源变成候选，不知道 book/comic。
-- `ReaderFormat` 表示内容格式（CBZ、ZIP、EPUB、FB2、MOBI、AZW3、PDF，以及后续 TXT/Markdown）；它决定格式服务和必要的 kind 探测。
+- `ReaderFormat` 表示内容格式（CBZ、ZIP、EPUB、FB2、MOBI、AZW3、PDF、TXT、Markdown）；它决定格式服务和必要的 kind 探测。
 - `ImportCandidate` 是两层之间的边界，至少携带来源方式、显示名称、可重复读取的字节流和可选 MIME。
 - `ImportPipeline` 统一执行候选的 staging、SHA-256、格式路由、失败隔离和结果汇总。方式适配器不得绕过它直接落库。
 

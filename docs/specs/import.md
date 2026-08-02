@@ -49,15 +49,15 @@
 | MOBI | 图书 reflow | Foliate `MOBI` | 首批 |
 | AZW3 / KF8 | 图书 reflow | Foliate `MOBI` 内容探测 | 首批 |
 | PDF | 图书固定版式 | Foliate `makePDF`，保留为 book | 首批 |
-| TXT | 图书 reflow | 转换为规范 EPUB 后导入 | 后续 |
-| Markdown | 图书 reflow | 受限 Markdown 转换为规范 EPUB | 后续 |
+| TXT | 图书 reflow | 转换为规范 EPUB 后导入 | 首批 |
+| Markdown | 图书 reflow | 受限 Markdown 转换为规范 EPUB | 首批 |
 
 格式层的处理原则：
 
 - `ReaderFormat` 是唯一格式枚举；筛选、导入白名单、数据库字段都使用它的 storage value。
 - `kind` 是阅读引擎路由，不是导入方式的属性。普通图书格式直接进入 book；EPUB 需要额外做正文/页图探测。
 - 文件扩展名只用于候选初判；格式服务仍必须检查文件是否存在、是否可解析和是否有可阅读内容。
-- 正式文件默认保留原始格式和原始内容 hash。转换格式只有在转换器落地后才引入独立的派生内容策略。
+- 原始格式保存在数据库 `format` 字段；TXT / Markdown 的正式阅读文件是确定性生成的 EPUB，使用生成内容 hash，源文件名只作为标题 fallback。
 
 ## 首批验收
 
@@ -65,4 +65,5 @@
 - 同一个文件从本地文件或目录扫描进入时，content hash 去重行为一致。
 - CBZ / ZIP / EPUB 既有链路回归通过。
 - FB2 / MOBI / AZW3 / PDF 能通过同一 BookImportService 进入 `kind=book`，保存对应 `format`。
+- TXT / Markdown 能转换为 EPUB 后进入同一 book 流程，HTML 特殊字符会被转义。
 - 任一解析失败只留下失败项，不留下 `.partial`、半成品正式文件或错误 DB 行。

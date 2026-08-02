@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -64,6 +65,15 @@ void main() {
     expect(picked.method, ImportMethod.localFile);
     expect(scanned.format, ReaderFormat.fb2);
     expect(scanned.method, ImportMethod.directoryScan);
+    final shared = ImportCandidate(
+      source: BufferedImportSource(
+        bytes: [1, 2, 3],
+        displayName: 'shared.txt',
+        method: ImportMethod.share,
+      ),
+    );
+    expect(shared.format, ReaderFormat.txt);
+    expect(shared.method, ImportMethod.share);
   });
 
   test(
@@ -72,7 +82,7 @@ void main() {
       final nested = Directory(p.join(tempRoot.path, 'nested'))
         ..createSync(recursive: true);
       await _writeCbz(nested, 'scan.cbz');
-      await File(p.join(nested.path, 'notes.txt')).writeAsString('ignore me');
+      await File(p.join(nested.path, 'notes.docx')).writeAsString('ignore me');
 
       final result = await controller.importDirectory(tempRoot.path);
 
@@ -128,15 +138,44 @@ void main() {
     expect(fbzItem.item.filePath, endsWith('.fbz'));
   });
 
-  test('TXT and Markdown stay explicit until conversion is added', () async {
-    final file = File(p.join(tempRoot.path, 'plain.txt'));
-    await file.writeAsString('plain text');
+  test('TXT and Markdown convert into the shared book pipeline', () async {
+    final txt = File(p.join(tempRoot.path, 'plain.txt'));
+    await txt.writeAsString('第一段\n\n第二段 <escaped>');
+    final markdown = File(p.join(tempRoot.path, 'notes.md'));
+    await markdown.writeAsString('# 标题\n\n**重点** and `code`');
 
-    final result = await controller.importPaths([file.path]);
+    final result = await controller.importPaths([txt.path, markdown.path]);
 
-    expect(result.added, 0);
-    expect(result.failures, hasLength(1));
-    expect(result.failures.single.reason, contains('暂不支持'));
-    expect(await Directory(p.join(tempRoot.path, 'library')).exists(), isFalse);
+    expect(result.added, 2);
+    expect(result.failures, isEmpty);
+    final entries = await controller.watchLibraryEntries().first;
+    expect(entries, hasLength(2));
+    final formats = entries.map((entry) => entry.item.format).toSet();
+    expect(
+      formats,
+      containsAll([
+        ReaderFormat.txt.storageValue,
+        ReaderFormat.markdown.storageValue,
+      ]),
+    );
+    expect(
+      entries.every((entry) => entry.item.filePath.endsWith('.epub')),
+      isTrue,
+    );
+    expect(
+      entries.map((entry) => entry.item.title),
+      containsAll(['plain', 'notes']),
+    );
+    final plain = entries.firstWhere((entry) => entry.item.format == 'txt');
+    final generated = ZipDecoder().decodeBytes(
+      await File(plain.item.filePath).readAsBytes(),
+    );
+    final chapter = generated.findFile('OEBPS/chapter-1.xhtml');
+    expect(chapter, isNotNull);
+    expect(utf8.decode(chapter!.readBytes()!), contains('第二段 &lt;escaped&gt;'));
+
+    final reimport = await controller.importPaths([txt.path]);
+    expect(reimport.added, 0);
+    expect(reimport.updated, 1);
   });
 }

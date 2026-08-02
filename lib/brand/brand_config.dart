@@ -60,6 +60,9 @@ class BrandConfig {
       'mobi',
       'azw3',
       'pdf',
+      'txt',
+      'md',
+      'markdown',
     ],
   );
 }

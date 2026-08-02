@@ -541,6 +541,9 @@ class _LibraryScreenState extends State<LibraryScreen>
           'mobi',
           'azw3',
           'pdf',
+          'txt',
+          'md',
+          'markdown',
         ])
           AppMenuAction(
             value: value,

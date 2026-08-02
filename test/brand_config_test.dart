@@ -8,6 +8,20 @@ void main() {
     expect(config.applicationId, 'com.kaijuan.reader');
     expect(config.databaseName, 'app_library');
     expect(config.storageNamespace, isEmpty);
-    expect(config.importExtensions, containsAll(['cbz', 'zip', 'epub']));
+    expect(
+      config.importExtensions,
+      containsAll([
+        'cbz',
+        'zip',
+        'epub',
+        'fb2',
+        'mobi',
+        'azw3',
+        'pdf',
+        'txt',
+        'md',
+        'markdown',
+      ]),
+    );
   });
 }
