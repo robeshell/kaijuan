@@ -21,6 +21,7 @@ class AppTextField extends StatelessWidget {
     this.controller,
     this.focusNode,
     this.autofocus = false,
+    this.onTap,
     this.onChanged,
     this.onSubmitted,
     this.textInputAction,
@@ -39,6 +40,7 @@ class AppTextField extends StatelessWidget {
   final TextEditingController? controller;
   final FocusNode? focusNode;
   final bool autofocus;
+  final GestureTapCallback? onTap;
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
   final TextInputAction? textInputAction;
@@ -75,6 +77,7 @@ class AppTextField extends StatelessWidget {
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
+      onTap: onTap,
       onChanged: onChanged,
       onSubmitted: onSubmitted,
       textInputAction: textInputAction,
@@ -87,6 +90,117 @@ class AppTextField extends StatelessWidget {
       readOnly: readOnly,
       style: inputStyle,
       decoration: resolvedDecoration,
+    );
+  }
+}
+
+/// One finite choice presented by [AppSelectField].
+class AppSelectOption<T> {
+  const AppSelectOption({
+    required this.value,
+    required this.label,
+    required this.icon,
+    this.subtitle,
+    this.enabled = true,
+  });
+
+  final T value;
+  final String label;
+  final IconData icon;
+  final String? subtitle;
+  final bool enabled;
+}
+
+/// Token-driven form selector backed by the shared adaptive menu.
+///
+/// The closed field matches [AppTextField]. Desktop profiles open a compact,
+/// anchored strong-glass menu; mobile profiles retain [showAppMenu]'s platform
+/// mapping. This avoids Material's full-field-width dropdown route and keeps
+/// selected, focus and keyboard semantics in the shared menu implementation.
+class AppSelectField<T> extends StatelessWidget {
+  const AppSelectField({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    required this.tooltip,
+    this.hintText = '请选择',
+    this.menuTitle,
+    this.decoration,
+    super.key,
+  });
+
+  final T? value;
+  final List<AppSelectOption<T>> options;
+  final ValueChanged<T>? onChanged;
+  final String tooltip;
+  final String hintText;
+  final String? menuTitle;
+  final InputDecoration? decoration;
+
+  @override
+  Widget build(BuildContext context) {
+    AppSelectOption<T>? selected;
+    for (final option in options) {
+      if (option.value == value) {
+        selected = option;
+        break;
+      }
+    }
+    final enabled =
+        onChanged != null && options.any((option) => option.enabled);
+    final foreground = enabled
+        ? context.appPrimaryText
+        : context.appMutedText.withValues(alpha: 0.48);
+    final fieldDecoration = (decoration ?? const InputDecoration()).copyWith(
+      enabled: enabled,
+    );
+    return AppMenuButton<T>(
+      actions: [
+        for (final option in options)
+          AppMenuAction<T>(
+            value: option.value,
+            label: option.label,
+            subtitle: option.subtitle,
+            icon: option.icon,
+            selected: option.value == value,
+            enabled: option.enabled,
+          ),
+      ],
+      onSelected: (next) => onChanged?.call(next),
+      tooltip: tooltip,
+      menuTitle: menuTitle,
+      forceAnchored: appUsesDesktopPlatform,
+      enabled: enabled,
+      child: InputDecorator(
+        decoration: fieldDecoration,
+        isEmpty: selected == null,
+        child: Row(
+          children: [
+            if (selected case final option?) ...[
+              Icon(option.icon, size: 17, color: context.appSecondaryText),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: Text(
+                selected?.label ?? hintText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.appInputTextStyle.copyWith(
+                  color: selected == null
+                      ? context.appSecondaryText
+                      : foreground,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              KaijuanIcons.caretDown,
+              size: 16,
+              color: enabled ? context.appSecondaryText : foreground,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -132,6 +246,9 @@ class AppGlassSurface extends StatelessWidget {
     final glass = context.appGlass;
     final effects = context.appSkinEffects;
     final sigma = strong ? glass.strongBlur : glass.blur;
+    // Keep BackdropFilter in the tree and toggle [enabled], matching kaiting
+    // SoundGlassSurface — avoids different layer compositing for chrome.
+    final useBackdropBlur = blur && sigma > 0;
     final surface = DecoratedBox(
       decoration: BoxDecoration(
         color: color ?? (strong ? glass.strongSurface : glass.surface),
@@ -140,15 +257,14 @@ class AppGlassSurface extends StatelessWidget {
       ),
       child: Padding(padding: padding ?? EdgeInsets.zero, child: child),
     );
+    final blurred = BackdropFilter(
+      enabled: useBackdropBlur,
+      filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+      child: surface,
+    );
     final clipped = ClipRRect(
       borderRadius: borderRadius,
-      // Skins with blur 0 (e.g. 纯净) get solid surfaces for free.
-      child: blur && sigma > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-              child: surface,
-            )
-          : surface,
+      child: blurred,
     );
     if (!showShadow) return clipped;
     return DecoratedBox(
@@ -353,6 +469,7 @@ class AppEmptyState extends StatelessWidget {
     this.actionLabel,
     this.onAction,
     this.padding,
+    this.alignment = Alignment.center,
     super.key,
   });
 
@@ -363,6 +480,7 @@ class AppEmptyState extends StatelessWidget {
   final String? actionLabel;
   final VoidCallback? onAction;
   final EdgeInsetsGeometry? padding;
+  final AlignmentGeometry alignment;
 
   @override
   Widget build(BuildContext context) {
@@ -382,7 +500,8 @@ class AppEmptyState extends StatelessWidget {
               compact ? 12 : context.appContentBottomPadding,
             );
 
-        return Center(
+        return Align(
+          alignment: alignment,
           child: Padding(
             padding: contentPadding,
             child: ConstrainedBox(
@@ -798,7 +917,13 @@ class _AppAnchoredMenu<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final viewport = MediaQuery.sizeOf(context);
     final estimatedHeight =
-        actions.length * 36.0 + (title == null ? 8 : 48) + 8;
+        actions.fold<double>(
+          0,
+          (height, action) =>
+              height + _appMenuActionHeight(action, compact: false),
+        ) +
+        (title == null ? 8 : 48) +
+        8;
     final menuWidth = _anchoredMenuWidth(context, actions);
     const edge = 12.0;
     // Keep menus triggered from the leading side aligned to the trigger's
@@ -879,9 +1004,20 @@ double _anchoredMenuWidth<T>(
     painter.dispose();
   }
   final hasSelected = actions.any((action) => action.selected);
+  final hasSubtitle = actions.any((action) => action.subtitle != null);
   // 12h×2 + icon 22 + gap 10 + label + optional check (10+16)
-  final content = 24 + 22 + 10 + maxLabel + (hasSelected ? 26 : 0);
+  // Two-line items get a little more air without exceeding the brand menu cap.
+  final content =
+      24 + 22 + 10 + maxLabel + (hasSelected ? 26 : 0) + (hasSubtitle ? 20 : 0);
   return content.clamp(160.0, 280.0);
+}
+
+double _appMenuActionHeight<T>(
+  AppMenuAction<T> action, {
+  required bool compact,
+}) {
+  if (action.subtitle != null) return compact ? 64 : 56;
+  return compact ? 52 : 36;
 }
 
 class _AppMenuList<T> extends StatelessWidget {
@@ -978,7 +1114,9 @@ class _AppMenuActionRow<T> extends StatelessWidget {
           focusColor: context.appTint(0.055),
           splashColor: Colors.transparent,
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: compact ? 52 : 36),
+            constraints: BoxConstraints(
+              minHeight: _appMenuActionHeight(action, compact: compact),
+            ),
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: compact ? 20 : 12),
               child: Row(
@@ -1043,7 +1181,10 @@ class _AppMenuActionRow<T> extends StatelessWidget {
   }
 }
 
-/// Flat, token-driven list row used inside overlays and structured lists.
+/// Flat list row — port of kaiting `SoundListRow` (token getters only).
+///
+/// Sidebar rows pass [minHeight]/[selectedColor]/[borderRadius]/[hoverColor]
+/// exactly like kaiting `_SidebarRow`.
 class AppListRow extends StatelessWidget {
   const AppListRow({
     required this.title,
@@ -1054,9 +1195,14 @@ class AppListRow extends StatelessWidget {
     this.onLongPress,
     this.selected = false,
     this.enabled = true,
-    this.minHeight = 54,
+    this.minHeight,
     this.leadingWidth = 32,
     this.padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+    this.titleMaxLines = 1,
+    this.subtitleMaxLines = 1,
+    this.selectedColor,
+    this.borderRadius,
+    this.hoverColor,
     super.key,
   });
 
@@ -1068,35 +1214,53 @@ class AppListRow extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool selected;
   final bool enabled;
-  final double minHeight;
+  final double? minHeight;
   final double leadingWidth;
   final EdgeInsetsGeometry padding;
+  final int titleMaxLines;
+  final int subtitleMaxLines;
+
+  /// 选中底色；默认前景 5% tint，侧栏等场景传 accent 10% 胶囊。
+  final Color? selectedColor;
+
+  /// 行体圆角（选中/hover 一并裁剪）；默认直角整行填充。
+  final BorderRadius? borderRadius;
+
+  /// Hover 底色；默认前景 3.5%（list-row）；侧栏传 4.5%。
+  final Color? hoverColor;
 
   @override
   Widget build(BuildContext context) {
+    final interactive = enabled && (onTap != null || onLongPress != null);
     return Semantics(
       button: onTap != null || onLongPress != null,
       enabled: enabled,
       selected: selected,
       child: Material(
-        color: selected ? context.appTint(0.05) : Colors.transparent,
+        color: selected
+            ? selectedColor ?? context.appTint(0.05)
+            : Colors.transparent,
+        borderRadius: borderRadius,
+        clipBehavior: borderRadius == null ? Clip.none : Clip.antiAlias,
         child: InkWell(
-          onTap: enabled ? onTap : null,
+          onTap: interactive ? onTap : null,
           onLongPress: enabled ? onLongPress : null,
-          hoverColor: context.appTint(0.035),
+          hoverColor: hoverColor ?? context.appTint(0.035),
           focusColor: context.appTint(0.05),
           splashColor: Colors.transparent,
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: minHeight),
+            constraints: BoxConstraints(
+              minHeight: minHeight ??
+                  (context.appComponentProfile == AppComponentProfile.desktop
+                      ? KaiBrandDesktopMetrics.listRowSingle
+                      : KaiBrandMobileMetrics.listRowSingle),
+            ),
             child: Padding(
               padding: padding,
               child: Row(
                 children: [
                   if (leading case final value?) ...[
-                    SizedBox(
-                      width: leadingWidth,
-                      child: Center(child: value),
-                    ),
+                    SizedBox(width: leadingWidth, child: Center(child: value)),
                     const SizedBox(width: 10),
                   ],
                   Expanded(
@@ -1104,26 +1268,28 @@ class AppListRow extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Match SoundListRow: default w500 listTitle; title
+                        // child overrides (sidebar uses bodyMedium + w500/600).
                         DefaultTextStyle(
                           style: TextStyle(
                             color: enabled
                                 ? context.appPrimaryText
-                                : context.appMutedText.withValues(alpha: 0.5),
+                                : context.appSecondaryText.withValues(
+                                    alpha: appDisabledForegroundOpacity,
+                                  ),
                             fontSize: context.appListTitleSize,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w500,
                           ),
-                          maxLines: 1,
+                          maxLines: titleMaxLines,
                           overflow: TextOverflow.ellipsis,
                           child: title,
                         ),
                         if (subtitle case final value?) ...[
                           const SizedBox(height: 2),
                           DefaultTextStyle(
-                            style: TextStyle(
-                              color: context.appSecondaryText,
-                              fontSize: context.appBodySecondarySize,
-                            ),
-                            maxLines: 1,
+                            style: Theme.of(context).textTheme.bodySmall!
+                                .copyWith(color: context.appSecondaryText),
+                            maxLines: subtitleMaxLines,
                             overflow: TextOverflow.ellipsis,
                             child: value,
                           ),
@@ -1212,15 +1378,25 @@ class AppNavigationBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     // Phone landscape / short split: icon-only bar frees vertical space.
+    // Heights must match [AppNavigationChromeMetrics] / content bottom inset.
     final short = !embedded && context.appIsShortViewport;
-    final barHeight = embedded ? 46.0 : (short ? 44.0 : 56.0);
+    final barHeight = embedded
+        ? 46.0
+        : (short
+              ? AppNavigationChromeMetrics.barHeightShort
+              : AppNavigationChromeMetrics.barHeight);
+    final minBottom = embedded
+        ? 4.0
+        : (short
+              ? AppNavigationChromeMetrics.barMinBottomShort
+              : AppNavigationChromeMetrics.barMinBottom);
     final content = SafeArea(
       top: false,
       minimum: EdgeInsets.fromLTRB(
         10,
         embedded ? 3 : (short ? 4 : 7),
         10,
-        embedded ? 4 : (short ? 4 : 6),
+        minBottom,
       ),
       child: SizedBox(
         height: barHeight,

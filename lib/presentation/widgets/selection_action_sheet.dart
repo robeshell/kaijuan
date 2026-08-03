@@ -77,7 +77,9 @@ class SelectionActionSheet extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: Theme.of(
                         context,
-                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.38),
+                      ).colorScheme.onSurfaceVariant.withValues(
+                        alpha: appDisabledForegroundOpacity,
+                      ),
                       borderRadius: BorderRadius.circular(AppRadii.pill),
                     ),
                   ),

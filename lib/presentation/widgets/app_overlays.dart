@@ -68,12 +68,27 @@ class AppIconButton extends StatelessWidget {
       visualDensity: visualDensity,
       style: IconButton.styleFrom(
         foregroundColor: color ?? secondary,
-        disabledForegroundColor: secondary.withValues(alpha: 0.35),
+        disabledForegroundColor:
+            secondary.withValues(alpha: appDisabledForegroundOpacity),
       ),
       icon: Icon(icon, size: size, weight: AppIcons.weight),
     );
-    if (tooltip == null || tooltip!.isEmpty) return button;
-    return AppTooltip(message: tooltip!, child: button);
+    final label = tooltip;
+    if (label == null || label.isEmpty) return button;
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: onPressed != null,
+      label: label,
+      onTap: onPressed,
+      child: Tooltip(
+        message: label,
+        waitDuration: const Duration(milliseconds: 450),
+        preferBelow: true,
+        excludeFromSemantics: true,
+        child: ExcludeSemantics(child: button),
+      ),
+    );
   }
 }
 
