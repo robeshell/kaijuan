@@ -8,6 +8,7 @@ import '../library/import/wifi_transfer_service.dart';
 import '../library/remote/remote_source_controller.dart';
 import '../presentation/app_shell.dart';
 import '../presentation/controllers/library_controller.dart';
+import '../presentation/controllers/backup_controller.dart';
 import 'book_reading_preferences.dart';
 import 'comic_reading_preferences.dart';
 import 'theme_preferences.dart';
@@ -22,6 +23,7 @@ class App extends StatelessWidget {
     required this.libraryController,
     this.wifiTransferService,
     required this.remoteSourceController,
+    required this.backupController,
   });
 
   final BrandConfig brand;
@@ -31,6 +33,7 @@ class App extends StatelessWidget {
   final LibraryController libraryController;
   final WifiTransferService? wifiTransferService;
   final RemoteSourceController remoteSourceController;
+  final BackupController backupController;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +79,7 @@ class App extends StatelessWidget {
             libraryController: libraryController,
             wifiTransferService: wifiTransferService,
             remoteSourceController: remoteSourceController,
+            backupController: backupController,
           ),
         );
       },

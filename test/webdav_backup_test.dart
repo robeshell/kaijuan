@@ -1,0 +1,421 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:archive/archive.dart';
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
+
+import 'package:kaijuan/library/backup/backup_service.dart';
+import 'package:kaijuan/library/backup/backup_store.dart';
+import 'package:kaijuan/library/import/book_import_service.dart';
+import 'package:kaijuan/library/import/comic_import_service.dart';
+import 'package:kaijuan/library/import/import_pipeline.dart';
+import 'package:kaijuan/library/import/import_sources.dart';
+import 'package:kaijuan/library/persistence/app_database.dart';
+import 'package:kaijuan/library/remote/remote_models.dart';
+import 'package:kaijuan/library/remote/remote_store.dart';
+import 'package:kaijuan/library/remote/webdav_client.dart';
+
+const _png = <int>[
+  0x89,
+  0x50,
+  0x4e,
+  0x47,
+  0x0d,
+  0x0a,
+  0x1a,
+  0x0a,
+  0x00,
+  0x00,
+  0x00,
+  0x0d,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x08,
+  0x02,
+  0x00,
+  0x00,
+  0x00,
+  0x90,
+  0x77,
+  0x53,
+  0xde,
+  0x00,
+  0x00,
+  0x00,
+  0x0c,
+  0x49,
+  0x44,
+  0x41,
+  0x54,
+  0x08,
+  0xd7,
+  0x63,
+  0xf8,
+  0xcf,
+  0xc0,
+  0x00,
+  0x00,
+  0x00,
+  0x03,
+  0x00,
+  0x01,
+  0x00,
+  0x05,
+  0xfe,
+  0xd4,
+  0xef,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x49,
+  0x45,
+  0x4e,
+  0x44,
+  0xae,
+  0x42,
+  0x60,
+  0x82,
+];
+
+void main() {
+  late _FakeDavServer server;
+  late Directory sourceDir;
+  late AppDatabase sourceDb;
+  late BackupService sourceBackup;
+  late RemoteConnectionStore sourceConnections;
+  late RemoteCredentialStore sourceCredentials;
+
+  setUp(() async {
+    server = _FakeDavServer();
+    sourceDir = await Directory.systemTemp.createTemp('kaijuan_backup_source_');
+    sourceDb = AppDatabase(NativeDatabase.memory());
+    final comic = ComicImportService(
+      database: sourceDb,
+      supportDirectory: sourceDir,
+    );
+    final book = BookImportService(
+      database: sourceDb,
+      supportDirectory: sourceDir,
+    );
+    final pipeline = ImportPipeline(comicImport: comic, bookImport: book);
+    final sourceFile = await _createCbz(sourceDir, 'backup.cbz');
+    final result = await pipeline.importCandidates([
+      ImportCandidate(source: LocalFileImportSource.picked(sourceFile.path)),
+    ]);
+    expect(result.hasFailures, isFalse, reason: '${result.failures}');
+
+    final item = (await sourceDb.select(sourceDb.readingItems).get()).single;
+    await sourceDb.renameReadingItem(item.id, '已重命名的漫画');
+    await sourceDb.upsertProgress(
+      itemId: item.id,
+      locatorJson: '{"page":1}',
+      progressFraction: 0.5,
+      updatedAt: DateTime.utc(2026, 8, 3, 10),
+    );
+    await sourceDb.addBookmark(
+      itemId: item.id,
+      locatorJson: '{"page":1}',
+      label: '重要',
+    );
+    await sourceDb.upsertAnnotation(
+      itemId: item.id,
+      cfi: 'page-1',
+      type: 'highlight',
+      color: '#FACC15',
+      selectedText: '摘录内容',
+      note: '我的笔记',
+    );
+    final listId = await sourceDb.createReadingList('待读');
+    await sourceDb.addItemToList(listId: listId, itemId: item.id);
+    final collectionId = await sourceDb.createCollection('系列', onShelf: true);
+    await sourceDb.addItemToCollection(
+      collectionId: collectionId,
+      itemId: item.id,
+    );
+
+    sourceConnections = MemoryRemoteConnectionStore();
+    sourceCredentials = MemoryRemoteCredentialStore();
+    final connection = _connection();
+    await sourceConnections.write([connection]);
+    await sourceCredentials.write(
+      connection.id,
+      const RemoteCredentials(username: 'u', password: 'p'),
+    );
+    sourceBackup = BackupService(
+      database: sourceDb,
+      supportDirectory: sourceDir,
+      connectionStore: sourceConnections,
+      credentialStore: sourceCredentials,
+      importPipeline: pipeline,
+      settingsStore: JsonBackupTargetSettingsStore(
+        File(p.join(sourceDir.path, 'backup-settings.json')),
+      ),
+      webDav: WebDavClient(clientFactory: server.createClient),
+    );
+    await sourceBackup.load();
+    await sourceBackup.updateSettings(
+      sourceBackup.settings.copyWith(
+        connectionId: connection.id,
+        remotePath: 'KaijuanBackup/v1',
+        deviceId: 'device-a',
+        deviceName: '测试设备',
+      ),
+    );
+  });
+
+  tearDown(() async {
+    await sourceDb.close();
+    if (await sourceDir.exists()) await sourceDir.delete(recursive: true);
+  });
+
+  test(
+    'backup publishes a valid snapshot and second run reuses objects',
+    () async {
+      final first = await sourceBackup.backup();
+      expect(first.manifest.objects, hasLength(1));
+      expect(first.uploadedObjects, 1);
+      expect(
+        server.files.keys.any((key) => key.endsWith('/manifest.json')),
+        isTrue,
+      );
+
+      final second = await sourceBackup.backup();
+      expect(second.uploadedObjects, 0);
+      expect(second.reusedObjects, 1);
+      expect(second.manifest.snapshotId, isNot(first.manifest.snapshotId));
+      final snapshots = await sourceBackup.listSnapshots();
+      expect(snapshots, hasLength(2));
+      expect(snapshots.first.snapshotId, second.manifest.snapshotId);
+    },
+  );
+
+  test('restore merges books and records into an empty database', () async {
+    final backup = await sourceBackup.backup();
+    final targetDir = await Directory.systemTemp.createTemp(
+      'kaijuan_backup_target_',
+    );
+    final targetDb = AppDatabase(NativeDatabase.memory());
+    addTearDown(() async {
+      await targetDb.close();
+      if (await targetDir.exists()) await targetDir.delete(recursive: true);
+    });
+    final comic = ComicImportService(
+      database: targetDb,
+      supportDirectory: targetDir,
+    );
+    final book = BookImportService(
+      database: targetDb,
+      supportDirectory: targetDir,
+    );
+    final connection = _connection();
+    final connections = MemoryRemoteConnectionStore();
+    await connections.write([connection]);
+    final credentials = MemoryRemoteCredentialStore();
+    await credentials.write(
+      connection.id,
+      const RemoteCredentials(username: 'u', password: 'p'),
+    );
+    final targetBackup = BackupService(
+      database: targetDb,
+      supportDirectory: targetDir,
+      connectionStore: connections,
+      credentialStore: credentials,
+      importPipeline: ImportPipeline(comicImport: comic, bookImport: book),
+      settingsStore: JsonBackupTargetSettingsStore(
+        File(p.join(targetDir.path, 'backup-settings.json')),
+      ),
+      webDav: WebDavClient(clientFactory: server.createClient),
+    );
+    await targetBackup.load();
+    await targetBackup.updateSettings(
+      targetBackup.settings.copyWith(
+        connectionId: connection.id,
+        remotePath: 'KaijuanBackup/v1',
+        deviceId: 'device-b',
+        deviceName: '恢复设备',
+      ),
+    );
+
+    final restored = await targetBackup.restore(backup.manifest);
+    expect(restored.addedBooks, 1);
+    expect(restored.restoredProgress, 1);
+    expect(restored.restoredBookmarks, 1);
+    expect(restored.restoredAnnotations, 1);
+    expect(restored.restoredLists, 1);
+    expect(restored.restoredCollections, 1);
+    expect(
+      (await targetDb.select(targetDb.readingItems).get()).single.title,
+      '已重命名的漫画',
+    );
+    expect((await targetDb.select(targetDb.bookmarks).get()), hasLength(1));
+    expect(
+      (await targetDb.select(targetDb.bookAnnotations).get()),
+      hasLength(1),
+    );
+  });
+}
+
+RemoteConnection _connection() => const RemoteConnection(
+  id: 'webdav:test',
+  type: RemoteSourceType.webDav,
+  displayName: '测试 WebDAV',
+  url: 'https://dav.example/root/',
+  status: RemoteConnectionStatus.connected,
+);
+
+Future<File> _createCbz(Directory dir, String name) async {
+  final archive = Archive()
+    ..addFile(ArchiveFile('page.png', _png.length, _png));
+  final file = File(p.join(dir.path, name));
+  await file.writeAsBytes(ZipEncoder().encode(archive), flush: true);
+  return file;
+}
+
+class _FakeDavServer {
+  final Map<String, List<int>> files = {};
+  final Set<String> directories = {'/root'};
+
+  http.Client createClient() => _FakeDavClient(this);
+
+  Future<http.StreamedResponse> handle(http.BaseRequest request) async {
+    final path = _key(request.url.path);
+    switch (request.method) {
+      case 'MKCOL':
+        if (directories.contains(path)) return _response(405, request: request);
+        final parent = _key(p.dirname(path));
+        if (!directories.contains(parent)) {
+          return _response(409, request: request);
+        }
+        directories.add(path);
+        return _response(201, request: request);
+      case 'HEAD':
+        final body = files[path];
+        return body == null
+            ? _response(404, request: request)
+            : _response(
+                200,
+                headers: {'content-length': '${body.length}'},
+                request: request,
+              );
+      case 'PUT':
+        return _put(request, path);
+      case 'MOVE':
+        final destination = Uri.parse(request.headers['destination']!).path;
+        final bytes = files.remove(path);
+        if (bytes == null) return _response(404, request: request);
+        files[_key(destination)] = bytes;
+        return _response(201, request: request);
+      case 'GET':
+        final body = files[path];
+        return body == null
+            ? _response(404, request: request)
+            : _response(200, body: body, request: request);
+      case 'DELETE':
+        files.remove(path);
+        return _response(204, request: request);
+      case 'PROPFIND':
+        return _propfind(request, path);
+      default:
+        return _response(200, request: request);
+    }
+  }
+
+  Future<http.StreamedResponse> _put(
+    http.BaseRequest request,
+    String path,
+  ) async {
+    final done = Completer<void>();
+    unawaited(() async {
+      try {
+        final bytes = await request.finalize().fold<List<int>>(
+          <int>[],
+          (all, chunk) => all..addAll(chunk),
+        );
+        files[path] = bytes;
+        done.complete();
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      }
+    }());
+    return http.StreamedResponse(
+      Stream<List<int>>.fromFuture(done.future.then((_) => <int>[])),
+      201,
+      request: request,
+    );
+  }
+
+  Future<http.StreamedResponse> _propfind(
+    http.BaseRequest request,
+    String path,
+  ) async {
+    final children = <String>[];
+    for (final directory in directories) {
+      if (_key(p.dirname(directory)) == path && directory != path) {
+        children.add(directory);
+      }
+    }
+    for (final file in files.keys) {
+      if (_key(p.dirname(file)) == path) children.add(file);
+    }
+    final response = StringBuffer(
+      '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">',
+    );
+    response.write(
+      '<d:response><d:href>$path/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>',
+    );
+    for (final child in children) {
+      final isDir = directories.contains(child);
+      final size = files[child]?.length ?? 0;
+      response.write(
+        '<d:response><d:href>$child${isDir ? '/' : ''}</d:href><d:propstat><d:prop>${isDir ? '<d:resourcetype><d:collection/></d:resourcetype>' : '<d:getcontentlength>$size</d:getcontentlength>'}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>',
+      );
+    }
+    response.write('</d:multistatus>');
+    return _response(
+      207,
+      body: utf8.encode(response.toString()),
+      request: request,
+    );
+  }
+
+  static String _key(String path) => path.length > 1 && path.endsWith('/')
+      ? path.substring(0, path.length - 1)
+      : path;
+
+  static http.StreamedResponse _response(
+    int status, {
+    List<int> body = const [],
+    Map<String, String> headers = const {},
+    http.BaseRequest? request,
+  }) => http.StreamedResponse(
+    Stream<List<int>>.value(body),
+    status,
+    headers: headers,
+    request: request,
+  );
+}
+
+class _FakeDavClient extends http.BaseClient {
+  _FakeDavClient(this.server);
+
+  final _FakeDavServer server;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) =>
+      server.handle(request);
+}

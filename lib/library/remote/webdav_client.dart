@@ -13,8 +13,27 @@ class WebDavClient {
     : _clientFactory = clientFactory ?? createDefaultRemoteClient;
 
   static const _timeout = Duration(seconds: 12);
+
+  /// Long-lived transfers need a larger connection establishment/response
+  /// window than a directory probe. The response stream itself remains
+  /// back-pressure driven, so a slow NAS can still stream for hours.
+  static const transferTimeout = Duration(seconds: 60);
   static const _maxXmlBytes = 4 * 1024 * 1024;
   final http.Client Function() _clientFactory;
+
+  /// Opens a reusable WebDAV session for write-heavy workflows such as
+  /// backup. The browsing/import APIs below intentionally keep their own
+  /// short-lived clients; a backup may issue hundreds of requests and should
+  /// not create a new TLS connection for every chunk.
+  WebDavSession openSession({
+    required RemoteCredentials credentials,
+    bool allowBadCertificate = false,
+  }) {
+    final client = allowBadCertificate
+        ? createLenientRemoteClient()
+        : _clientFactory();
+    return WebDavSession(client: client, credentials: credentials);
+  }
 
   Future<RemoteProbeResult> probe(
     String url, {
@@ -263,6 +282,40 @@ class WebDavClient {
         .toString();
   }
 
+  /// Returns the path of [targetUrl] relative to the configured WebDAV root.
+  ///
+  /// Folder pickers use this instead of slicing URL strings so encoded names,
+  /// host casing, and a trailing slash on the root remain well-defined.
+  static String? relativePathFromRoot(String rootUrl, String targetUrl) {
+    try {
+      final root = Uri.parse(normalizeWebDavUrl(rootUrl));
+      final target = Uri.parse(targetUrl.trim());
+      if (target.query.isNotEmpty || target.fragment.isNotEmpty) return null;
+      if (root.scheme.toLowerCase() != target.scheme.toLowerCase() ||
+          root.host.toLowerCase() != target.host.toLowerCase() ||
+          root.port != target.port ||
+          target.userInfo.isNotEmpty) {
+        return null;
+      }
+      final baseSegments = root.pathSegments
+          .where((segment) => segment.isNotEmpty)
+          .toList();
+      final targetSegments = target.pathSegments
+          .where((segment) => segment.isNotEmpty)
+          .toList();
+      if (targetSegments.any((segment) => segment == '.' || segment == '..')) {
+        return null;
+      }
+      if (targetSegments.length < baseSegments.length) return null;
+      for (var index = 0; index < baseSegments.length; index++) {
+        if (targetSegments[index] != baseSegments[index]) return null;
+      }
+      return targetSegments.skip(baseSegments.length).join('/');
+    } catch (_) {
+      return null;
+    }
+  }
+
   static String _statusMessage(int status) => '服务器返回 HTTP $status';
 
   static String _friendlyError(Object error) {
@@ -293,3 +346,156 @@ const _propfindBody = '''<?xml version="1.0" encoding="utf-8"?>
     <d:getlastmodified/>
   </d:prop>
 </d:propfind>''';
+
+/// A reusable, authenticated WebDAV request session.
+///
+/// WebDAV servers in the wild differ in how much of RFC 4918 they implement,
+/// so the backup layer only depends on the small common subset: MKCOL, HEAD,
+/// streamed PUT, MOVE, GET and DELETE.
+class WebDavSession {
+  WebDavSession({required this._client, required this.credentials});
+
+  final http.Client _client;
+  final RemoteCredentials credentials;
+  bool _closed = false;
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    _client.close();
+  }
+
+  Future<void> makeCollection(Uri uri) async {
+    final response = await _send(http.Request('MKCOL', uri));
+    // 405 means the collection already exists, which is the desired result
+    // for an idempotent directory ensure operation.
+    if ((response.statusCode < 200 || response.statusCode >= 300) &&
+        response.statusCode != 405) {
+      await response.stream.drain<void>();
+      throw RemoteProtocolException(_statusMessage(response.statusCode));
+    }
+    await response.stream.drain<void>();
+  }
+
+  Future<WebDavStat?> stat(Uri uri) async {
+    final response = await _send(http.Request('HEAD', uri));
+    final status = response.statusCode;
+    await response.stream.drain<void>();
+    if (status == 404 || status == 410) return null;
+    if (status < 200 || status >= 300) {
+      throw RemoteProtocolException(_statusMessage(status));
+    }
+    return WebDavStat(
+      uri: uri,
+      statusCode: status,
+      contentLength: int.tryParse(
+        _header(response.headers, 'content-length') ?? '',
+      ),
+      etag: _header(response.headers, 'etag'),
+    );
+  }
+
+  Future<void> putBytes(Uri uri, List<int> bytes) {
+    return putStream(uri, Stream<List<int>>.value(bytes), length: bytes.length);
+  }
+
+  Future<void> putStream(
+    Uri uri,
+    Stream<List<int>> bytes, {
+    int? length,
+  }) async {
+    final request = http.StreamedRequest('PUT', uri);
+    _applyCredentials(request);
+    request.headers['Content-Type'] = 'application/octet-stream';
+    if (length != null) request.contentLength = length;
+
+    final responseFuture = _client
+        .send(request)
+        .timeout(WebDavClient.transferTimeout);
+    try {
+      await for (final chunk in bytes) {
+        request.sink.add(chunk);
+      }
+      await request.sink.close();
+    } catch (_) {
+      await request.sink.close();
+      rethrow;
+    }
+    final response = await responseFuture;
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.drain<void>();
+      throw RemoteProtocolException(_statusMessage(response.statusCode));
+    }
+    await response.stream.drain<void>();
+  }
+
+  Stream<List<int>> download(Uri uri) async* {
+    final response = await _send(http.Request('GET', uri));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.drain<void>();
+      throw RemoteProtocolException(_statusMessage(response.statusCode));
+    }
+    yield* response.stream;
+  }
+
+  Future<void> move(
+    Uri source,
+    Uri destination, {
+    bool overwrite = false,
+  }) async {
+    final request = http.Request('MOVE', source)
+      ..headers['Destination'] = destination.toString()
+      ..headers['Overwrite'] = overwrite ? 'T' : 'F';
+    final response = await _send(request);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.drain<void>();
+      throw RemoteProtocolException(_statusMessage(response.statusCode));
+    }
+    await response.stream.drain<void>();
+  }
+
+  Future<void> delete(Uri uri) async {
+    final response = await _send(http.Request('DELETE', uri));
+    if (response.statusCode != 404 &&
+        (response.statusCode < 200 || response.statusCode >= 300)) {
+      await response.stream.drain<void>();
+      throw RemoteProtocolException(_statusMessage(response.statusCode));
+    }
+    await response.stream.drain<void>();
+  }
+
+  Future<http.StreamedResponse> _send(http.BaseRequest request) {
+    if (_closed) throw StateError('WebDAV session is closed');
+    _applyCredentials(request);
+    return _client.send(request).timeout(WebDavClient.transferTimeout);
+  }
+
+  void _applyCredentials(http.BaseRequest request) {
+    if (credentials.isEmpty) return;
+    request.headers['Authorization'] =
+        'Basic ${base64Encode(utf8.encode('${credentials.username}:${credentials.password}'))}';
+  }
+
+  String? _header(Map<String, String> headers, String name) {
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == name.toLowerCase()) return entry.value;
+    }
+    return null;
+  }
+
+  static String _statusMessage(int status) => '服务器返回 HTTP $status';
+}
+
+class WebDavStat {
+  const WebDavStat({
+    required this.uri,
+    required this.statusCode,
+    this.contentLength,
+    this.etag,
+  });
+
+  final Uri uri;
+  final int statusCode;
+  final int? contentLength;
+  final String? etag;
+}

@@ -6,6 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../app/theme_preferences.dart';
+import '../controllers/backup_controller.dart';
+import '../controllers/library_controller.dart';
+import '../navigation/app_page_route.dart';
+import 'backup_settings_screen.dart';
 import '../../app_update/app_update_service.dart';
 import '../../app_update/app_update_ui.dart';
 import '../../core/kaijuan_icons.dart';
@@ -15,9 +19,16 @@ import '../widgets/app_overlays.dart';
 import '../widgets/settings_components.dart';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key, required this.themePreferences});
+  const SettingsScreen({
+    super.key,
+    required this.themePreferences,
+    required this.backupController,
+    required this.libraryController,
+  });
 
   final ThemePreferences themePreferences;
+  final BackupController backupController;
+  final LibraryController libraryController;
 
   @override
   Widget build(BuildContext context) {
@@ -26,18 +37,18 @@ class SettingsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: context.settingsCanvas,
       body: ListenableBuilder(
-        listenable: themePreferences,
+        listenable: Listenable.merge([themePreferences, backupController]),
         builder: (context, _) {
           return AppSettingsScrollView(
             padding: EdgeInsets.fromLTRB(
               hPad,
-              context.appIsCompact ? 16 : 24,
+              AppSettingsMetrics.pageTop(context),
               hPad,
               context.appContentBottomPadding,
             ),
             children: [
               const AppSettingsPageHeader(title: '设置'),
-              const SizedBox(height: AppSettingsMetrics.sectionGap),
+              const SizedBox(height: AppSettingsMetrics.headerGap),
               const _SectionLabel('外观'),
               const SizedBox(height: 12),
               AppSettingsGroup(
@@ -101,12 +112,96 @@ class SettingsScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: AppSettingsMetrics.sectionGap),
+              const _SectionLabel('数据与备份'),
+              const SizedBox(height: 12),
+              AppSettingsGroup(
+                children: [
+                  _SettingsActionRow(
+                    icon: Icons.cloud_upload_outlined,
+                    label: 'WebDAV 备份',
+                    description:
+                        backupController.settings.lastSuccessfulAt == null
+                        ? '备份书籍、进度、书签和笔记'
+                        : '上次备份：${_formatBackupDate(backupController.settings.lastSuccessfulAt!)}',
+                    onTap: () => Navigator.of(context).push<void>(
+                      appPageRoute<void>(
+                        (_) => BackupSettingsScreen(
+                          controller: backupController,
+                          libraryController: libraryController,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSettingsMetrics.sectionGap),
               const _SectionLabel('关于'),
               const SizedBox(height: 12),
               const AppSettingsGroup(children: [_AboutBlock()]),
             ],
           );
         },
+      ),
+    );
+  }
+
+  static String _formatBackupDate(DateTime value) {
+    final local = value.toLocal();
+    return '${local.year}/${local.month.toString().padLeft(2, '0')}/${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _SettingsActionRow extends StatelessWidget {
+  const _SettingsActionRow({
+    required this.icon,
+    required this.label,
+    required this.description,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String description;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: context.appSecondaryText),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: context.appListTitleSize,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        fontSize: context.appCaptionSize,
+                        color: context.settingsSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 20, color: context.settingsMuted),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -300,7 +395,11 @@ class _AccentSwatch extends StatelessWidget {
                 width: 28,
                 height: 28,
                 child: selected
-                    ? const Icon(KaijuanIcons.circleFilled, size: 8, color: Colors.white)
+                    ? const Icon(
+                        KaijuanIcons.circleFilled,
+                        size: 8,
+                        color: Colors.white,
+                      )
                     : null,
               ),
             ),

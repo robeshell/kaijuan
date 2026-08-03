@@ -14,13 +14,17 @@ import 'app/theme_preferences.dart';
 import 'brand/brand_config.dart';
 import 'library/import/book_import_service.dart';
 import 'library/import/comic_import_service.dart';
+import 'library/import/import_pipeline.dart';
 import 'library/import/import_staging.dart';
 import 'library/import/wifi_transfer_service.dart';
+import 'library/backup/backup_service.dart';
+import 'library/backup/backup_store.dart';
 import 'library/remote/remote_source_controller.dart';
 import 'library/remote/remote_store.dart';
 import 'library/persistence/app_database.dart';
 import 'library/storage/library_paths.dart';
 import 'presentation/controllers/library_controller.dart';
+import 'presentation/controllers/backup_controller.dart';
 import 'readers/book/book_loopback_server.dart';
 import 'readers/book/book_theme.dart';
 
@@ -102,6 +106,7 @@ Widget _readyApp(_BootServices services) {
     libraryController: services.libraryController,
     wifiTransferService: services.wifiTransferService,
     remoteSourceController: services.remoteSourceController,
+    backupController: services.backupController,
   );
 }
 
@@ -114,6 +119,7 @@ class _BootServices {
     required this.libraryController,
     required this.wifiTransferService,
     required this.remoteSourceController,
+    required this.backupController,
   });
 
   final BrandConfig brand;
@@ -123,6 +129,7 @@ class _BootServices {
   final LibraryController libraryController;
   final WifiTransferService wifiTransferService;
   final RemoteSourceController remoteSourceController;
+  final BackupController backupController;
 }
 
 Future<_BootServices> _loadBootServices() async {
@@ -177,6 +184,10 @@ Future<_BootServices> _loadBootServices() async {
     database: database,
     supportDirectory: supportDir,
   );
+  final importPipeline = ImportPipeline(
+    comicImport: comicImportService,
+    bookImport: bookImportService,
+  );
   final repairedCovers = await bookImportService.ensureDefaultCovers();
   if (repairedCovers > 0) {
     debugPrint('[Library] generated $repairedCovers missing book cover(s)');
@@ -185,19 +196,37 @@ Future<_BootServices> _loadBootServices() async {
     database: database,
     comicImportService: comicImportService,
     bookImportService: bookImportService,
+    importPipeline: importPipeline,
     importExtensions: brand.importExtensions,
   );
   final wifiTransferService = WifiTransferService(
     supportDirectory: supportDir,
     onImport: (candidate) => libraryController.importCandidates([candidate]),
   );
+  final connectionStore = JsonRemoteConnectionStore(
+    File(p.join(supportDir.path, 'remote_connections.json')),
+  );
+  final credentialStore = SecureRemoteCredentialStore();
   final remoteSourceController = RemoteSourceController(
-    connectionStore: JsonRemoteConnectionStore(
-      File(p.join(supportDir.path, 'remote_connections.json')),
-    ),
-    credentialStore: SecureRemoteCredentialStore(),
+    connectionStore: connectionStore,
+    credentialStore: credentialStore,
   );
   await remoteSourceController.load();
+  final backupService = BackupService(
+    database: database,
+    supportDirectory: supportDir,
+    connectionStore: connectionStore,
+    credentialStore: credentialStore,
+    importPipeline: importPipeline,
+    settingsStore: JsonBackupTargetSettingsStore(
+      File(p.join(supportDir.path, 'backup_settings.json')),
+    ),
+  );
+  final backupController = BackupController(
+    service: backupService,
+    remote: remoteSourceController,
+  );
+  await backupController.load();
 
   return _BootServices(
     brand: brand,
@@ -207,6 +236,7 @@ Future<_BootServices> _loadBootServices() async {
     libraryController: libraryController,
     wifiTransferService: wifiTransferService,
     remoteSourceController: remoteSourceController,
+    backupController: backupController,
   );
 }
 
