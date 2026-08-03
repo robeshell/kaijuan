@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../library/remote/remote_import_queue.dart';
 import '../../library/remote/remote_models.dart';
 import '../../library/remote/remote_source_controller.dart';
+import '../../library/remote/webdav_client.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/app_page_route.dart';
 import '../widgets/app_components.dart';
@@ -32,7 +33,7 @@ class RemoteSourceManagementScreen extends StatefulWidget {
     required RemoteSourceController remote,
     required LibraryController libraryController,
   }) {
-    return Navigator.of(context, rootNavigator: true).push<void>(
+    return Navigator.of(context).push<void>(
       appPageRoute<void>(
         (_) => RemoteSourceManagementScreen(
           type: type,
@@ -135,51 +136,66 @@ class _RemoteSourceManagementScreenState
     final hPad = context.appPageGutter;
     return Scaffold(
       backgroundColor: context.settingsCanvas,
-      body: ListenableBuilder(
-        listenable: widget.remote,
-        builder: (context, _) {
-          final connections = _connections;
-          return AppSettingsScrollView(
-            padding: EdgeInsets.fromLTRB(
-              hPad,
-              context.appIsCompact ? 16 : 24,
-              hPad,
-              context.appContentBottomPadding,
-            ),
-            children: [
-              AppSettingsPageHeader(
-                title: widget.type.managementTitle,
-                onBack: () => Navigator.of(context).maybePop(),
+      body: AppSettingsSafeArea(
+        bottom: true,
+        child: ListenableBuilder(
+          listenable: widget.remote,
+          builder: (context, _) {
+            final connections = _connections;
+            return AppSettingsScrollView(
+              maxWidth: AppSettingsMetrics.maxContentWidth,
+              padding: EdgeInsets.fromLTRB(
+                hPad,
+                AppSettingsMetrics.pageTop(context),
+                hPad,
+                AppSpacing.x6,
               ),
-              const SizedBox(height: 28),
-              _RemoteSourceSectionHeader(
-                title: widget.type == RemoteSourceType.webDav
-                    ? 'WebDAV 网盘'
-                    : '自定义 OPDS 目录',
-                description: widget.type == RemoteSourceType.webDav
-                    ? '支持坚果云、Nextcloud、群晖 NAS 等 WebDAV 服务'
-                    : '只连接你自己配置的 OPDS 目录，浏览并下载书目',
-                onAdd: _add,
-              ),
-              const SizedBox(height: 12),
-              if (connections.isEmpty)
-                _RemoteEmptyState(type: widget.type, onAdd: _add)
-              else
-                _RemoteSourceCard(
-                  child: Column(
-                    children: [
-                      for (final connection in connections)
-                        _ConnectionRow(
-                          connection: connection,
-                          onTap: () => unawaited(_open(connection)),
-                          onMore: () => unawaited(_more(connection)),
-                        ),
-                    ],
-                  ),
+              children: [
+                AppSettingsPageHeader(
+                  title: widget.type.managementTitle,
+                  onBack: () => Navigator.of(context).maybePop(),
                 ),
-            ],
-          );
-        },
+                const SizedBox(height: 28),
+                _RemoteSourceSectionHeader(
+                  title: widget.type == RemoteSourceType.webDav
+                      ? 'WebDAV 网盘'
+                      : '自定义 OPDS 目录',
+                  description: widget.type == RemoteSourceType.webDav
+                      ? '连接 NAS 或 WebDAV 服务'
+                      : '浏览并下载 OPDS 书目',
+                  onAdd: _add,
+                ),
+                const SizedBox(height: 12),
+                if (connections.isEmpty)
+                  _RemoteEmptyState(type: widget.type, onAdd: _add)
+                else
+                  _RemoteSourceCard(
+                    child: Column(
+                      children: [
+                        for (
+                          var index = 0;
+                          index < connections.length;
+                          index++
+                        ) ...[
+                          if (index > 0)
+                            Divider(
+                              height: 1,
+                              indent: 76,
+                              color: context.settingsRowDivider,
+                            ),
+                          _ConnectionRow(
+                            connection: connections[index],
+                            onTap: () => unawaited(_open(connections[index])),
+                            onMore: () => unawaited(_more(connections[index])),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -216,15 +232,15 @@ class _RemoteEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: context.settingsPrimary,
-                fontSize: context.appSectionTitleSize,
+                fontSize: context.appTitleSize,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               type == RemoteSourceType.webDav
-                  ? '添加家中 NAS 或其他 WebDAV 服务，按需选择文件导入。'
-                  : '添加你自己使用的 OPDS 目录，只浏览和下载其中提供的书目。',
+                  ? '添加连接，按需导入文件。'
+                  : '添加连接，浏览并下载书目。',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: context.settingsSecondary,
@@ -269,7 +285,7 @@ class _RemoteSourceSectionHeader extends StatelessWidget {
                 title,
                 style: TextStyle(
                   color: context.settingsPrimary,
-                  fontSize: context.appSectionTitleSize,
+                  fontSize: context.appTitleSize,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -284,7 +300,18 @@ class _RemoteSourceSectionHeader extends StatelessWidget {
             ],
           ),
         ),
-        AppIconButton(icon: KaijuanIcons.add, tooltip: '添加', onPressed: onAdd),
+        if (context.appIsCompact)
+          AppIconButton(
+            icon: KaijuanIcons.add,
+            tooltip: '添加连接',
+            onPressed: onAdd,
+          )
+        else
+          OutlinedButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(KaijuanIcons.add),
+            label: const Text('添加连接'),
+          ),
       ],
     );
   }
@@ -300,37 +327,10 @@ class _RemoteSourceCard extends StatelessWidget {
     final radius = BorderRadius.circular(AppRadii.menu);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: context.appColors.surfaceContainerLowest,
-        border: Border.all(color: context.appDivider),
+        color: context.settingsGroupSurface,
         borderRadius: radius,
       ),
       child: ClipRRect(borderRadius: radius, child: child),
-    );
-  }
-}
-
-class _RemoteFormField extends StatelessWidget {
-  const _RemoteFormField({required this.label, required this.child});
-
-  final String label;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: context.settingsSecondary,
-            fontSize: context.appCaptionSize,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        child,
-      ],
     );
   }
 }
@@ -348,12 +348,6 @@ class _ConnectionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = switch (connection.status) {
-      RemoteConnectionStatus.connected => const Color(0xFF2E8B65),
-      RemoteConnectionStatus.checking => Theme.of(context).colorScheme.primary,
-      RemoteConnectionStatus.idle => context.settingsMuted,
-      _ => Theme.of(context).colorScheme.error,
-    };
     final statusLabel = switch (connection.status) {
       RemoteConnectionStatus.connected => '已连接，可直接浏览',
       RemoteConnectionStatus.idle => '未连接',
@@ -362,6 +356,22 @@ class _ConnectionRow extends StatelessWidget {
       RemoteConnectionStatus.unreachable => '无法连接',
       RemoteConnectionStatus.error => '连接异常',
     };
+    final statusIcon = switch (connection.status) {
+      RemoteConnectionStatus.connected => KaijuanIcons.checkCircle,
+      RemoteConnectionStatus.checking => KaijuanIcons.refresh,
+      RemoteConnectionStatus.idle => KaijuanIcons.circle,
+      _ => KaijuanIcons.error,
+    };
+    final statusColor = switch (connection.status) {
+      RemoteConnectionStatus.authenticationFailed ||
+      RemoteConnectionStatus.unreachable ||
+      RemoteConnectionStatus.error => context.appColors.error,
+      RemoteConnectionStatus.checking => context.appColors.primary,
+      _ => context.settingsSecondary,
+    };
+    final checkedLabel = connection.lastCheckedAt == null
+        ? '尚未测试'
+        : '最近测试 ${_formatConnectionDate(connection.lastCheckedAt!)}';
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -396,18 +406,40 @@ class _ConnectionRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: context.settingsPrimary,
+                      fontSize: context.appTitleSize,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    statusLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: context.appBodySecondarySize,
+                  const SizedBox(height: 2),
+                  Tooltip(
+                    message: connection.url,
+                    child: Text(
+                      connection.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.settingsSecondary,
+                        fontSize: context.appBodySecondarySize,
+                      ),
                     ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(statusIcon, size: 14, color: statusColor),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          '$statusLabel · $checkedLabel',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: statusColor,
+                            fontSize: context.appBodySecondarySize,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -422,6 +454,11 @@ class _ConnectionRow extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static String _formatConnectionDate(DateTime value) {
+    final local = value.toLocal();
+    return '${local.month}/${local.day} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 }
 
@@ -565,152 +602,157 @@ class _RemoteConnectionFormScreenState
     final label = widget.type.label;
     return Scaffold(
       backgroundColor: context.settingsCanvas,
-      body: AppSettingsScrollView(
-        padding: EdgeInsets.fromLTRB(
-          hPad,
-          context.appIsCompact ? 16 : 24,
-          hPad,
-          context.appContentBottomPadding,
-        ),
-        children: [
-          AppSettingsPageHeader(
-            title: widget.existing == null ? '添加$label' : '编辑$label',
-            onBack: () => Navigator.of(context).maybePop(),
+      body: AppSettingsSafeArea(
+        child: AppSettingsScrollView(
+          maxWidth: AppSettingsMetrics.formMaxWidth,
+          padding: EdgeInsets.fromLTRB(
+            hPad,
+            AppSettingsMetrics.pageTop(context),
+            hPad,
+            AppSpacing.x6,
           ),
-          const SizedBox(height: 34),
-          _RemoteFormField(
-            label: widget.type == RemoteSourceType.webDav
-                ? '服务器地址'
-                : 'OPDS URL',
-            child: AppTextField(
-              controller: _url,
-              keyboardType: TextInputType.url,
-              textInputAction: TextInputAction.next,
-              decoration: _formDecoration('例如：https://example.com/dav'),
-              onChanged: (_) => setState(() => _tested = false),
+          children: [
+            AppSettingsPageHeader(
+              title: widget.existing == null ? '添加$label' : '编辑$label',
+              onBack: () => Navigator.of(context).maybePop(),
             ),
-          ),
-          const SizedBox(height: 24),
-          _RemoteFormField(
-            label: widget.type == RemoteSourceType.webDav ? '用户名' : '目录名称',
-            child: AppTextField(
-              controller: widget.type == RemoteSourceType.webDav
-                  ? _username
-                  : _name,
-              textInputAction: TextInputAction.next,
-              decoration: _formDecoration(
-                widget.type == RemoteSourceType.webDav
-                    ? '请输入用户名'
-                    : '例如：我的 OPDS 书库',
+            const SizedBox(height: 34),
+            AppSettingsFormField(
+              label: widget.type == RemoteSourceType.webDav
+                  ? '服务器地址'
+                  : 'OPDS URL',
+              child: AppTextField(
+                controller: _url,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+                decoration: _formDecoration('例如：https://example.com/dav'),
+                onChanged: (_) => setState(() => _tested = false),
               ),
-              onChanged: (_) => setState(() => _tested = false),
             ),
-          ),
-          const SizedBox(height: 24),
-          _RemoteFormField(
-            label: widget.type == RemoteSourceType.webDav ? '密码' : '用户名',
-            child: AppTextField(
-              controller: widget.type == RemoteSourceType.webDav
-                  ? _password
-                  : _username,
-              textInputAction: TextInputAction.next,
-              decoration: _formDecoration(
-                widget.type == RemoteSourceType.webDav ? '请输入密码' : '请输入用户名（可选）',
-                suffixIcon: widget.type == RemoteSourceType.webDav
-                    ? IconButton(
-                        tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
-                        icon: Icon(
-                          _obscurePassword
-                              ? KaijuanIcons.visibility
-                              : KaijuanIcons.visibilityOff,
-                        ),
-                        onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword,
-                        ),
-                      )
-                    : null,
-              ),
-              obscureText: widget.type == RemoteSourceType.webDav
-                  ? _obscurePassword
-                  : false,
-              onChanged: (_) => setState(() => _tested = false),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _RemoteFormField(
-            label: widget.type == RemoteSourceType.webDav ? '连接名称' : '密码',
-            child: AppTextField(
-              controller: widget.type == RemoteSourceType.webDav
-                  ? _name
-                  : _password,
-              textInputAction: TextInputAction.done,
-              decoration: _formDecoration(
-                widget.type == RemoteSourceType.webDav
-                    ? '例如：坚果云 / 家用 NAS'
-                    : '请输入密码（可选）',
-                suffixIcon: widget.type == RemoteSourceType.opds
-                    ? IconButton(
-                        tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
-                        icon: Icon(
-                          _obscurePassword
-                              ? KaijuanIcons.visibility
-                              : KaijuanIcons.visibilityOff,
-                        ),
-                        onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword,
-                        ),
-                      )
-                    : null,
-              ),
-              obscureText: widget.type == RemoteSourceType.opds
-                  ? _obscurePassword
-                  : false,
-              onChanged: (_) => setState(() => _tested = false),
-            ),
-          ),
-          if (widget.type == RemoteSourceType.webDav) ...[
-            const SizedBox(height: 20),
-            CheckboxListTile(
-              value: _allowBadCertificate,
-              onChanged: _testing
-                  ? null
-                  : (value) => setState(() {
-                      _allowBadCertificate = value ?? false;
-                      _tested = false;
-                    }),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('允许自签名证书'),
-              subtitle: const Text('仅建议用于可信的家庭 NAS 或局域网服务'),
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-          ],
-          if (_testError case final error?) ...[
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  KaijuanIcons.error,
-                  size: 18,
-                  color: Theme.of(context).colorScheme.error,
+            const SizedBox(height: 24),
+            AppSettingsFormField(
+              label: widget.type == RemoteSourceType.webDav ? '用户名' : '目录名称',
+              child: AppTextField(
+                controller: widget.type == RemoteSourceType.webDav
+                    ? _username
+                    : _name,
+                textInputAction: TextInputAction.next,
+                decoration: _formDecoration(
+                  widget.type == RemoteSourceType.webDav
+                      ? '请输入用户名'
+                      : '例如：我的 OPDS 书库',
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    error,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontSize: context.appBodySecondarySize,
+                onChanged: (_) => setState(() => _tested = false),
+              ),
+            ),
+            const SizedBox(height: 24),
+            AppSettingsFormField(
+              label: widget.type == RemoteSourceType.webDav ? '密码' : '用户名',
+              child: AppTextField(
+                controller: widget.type == RemoteSourceType.webDav
+                    ? _password
+                    : _username,
+                textInputAction: TextInputAction.next,
+                decoration: _formDecoration(
+                  widget.type == RemoteSourceType.webDav
+                      ? '请输入密码'
+                      : '请输入用户名（可选）',
+                  suffixIcon: widget.type == RemoteSourceType.webDav
+                      ? IconButton(
+                          tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
+                          icon: Icon(
+                            _obscurePassword
+                                ? KaijuanIcons.visibility
+                                : KaijuanIcons.visibilityOff,
+                          ),
+                          onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword,
+                          ),
+                        )
+                      : null,
+                ),
+                obscureText: widget.type == RemoteSourceType.webDav
+                    ? _obscurePassword
+                    : false,
+                onChanged: (_) => setState(() => _tested = false),
+              ),
+            ),
+            const SizedBox(height: 24),
+            AppSettingsFormField(
+              label: widget.type == RemoteSourceType.webDav ? '连接名称' : '密码',
+              child: AppTextField(
+                controller: widget.type == RemoteSourceType.webDav
+                    ? _name
+                    : _password,
+                textInputAction: TextInputAction.done,
+                decoration: _formDecoration(
+                  widget.type == RemoteSourceType.webDav
+                      ? '例如：坚果云 / 家用 NAS'
+                      : '请输入密码（可选）',
+                  suffixIcon: widget.type == RemoteSourceType.opds
+                      ? IconButton(
+                          tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
+                          icon: Icon(
+                            _obscurePassword
+                                ? KaijuanIcons.visibility
+                                : KaijuanIcons.visibilityOff,
+                          ),
+                          onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword,
+                          ),
+                        )
+                      : null,
+                ),
+                obscureText: widget.type == RemoteSourceType.opds
+                    ? _obscurePassword
+                    : false,
+                onChanged: (_) => setState(() => _tested = false),
+              ),
+            ),
+            if (widget.type == RemoteSourceType.webDav) ...[
+              const SizedBox(height: 20),
+              CheckboxListTile(
+                value: _allowBadCertificate,
+                onChanged: _testing
+                    ? null
+                    : (value) => setState(() {
+                        _allowBadCertificate = value ?? false;
+                        _tested = false;
+                      }),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('允许自签名证书'),
+                subtitle: const Text('仅建议用于可信的家庭 NAS 或局域网服务'),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ],
+            if (_testError case final error?) ...[
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    KaijuanIcons.error,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      error,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: context.appBodySecondarySize,
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
-        ],
+        ),
       ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      bottomNavigationBar: AppSettingsBottomBar(
+        maxWidth: AppSettingsMetrics.formMaxWidth,
         child: Row(
           children: [
             Expanded(
@@ -741,17 +783,23 @@ class _RemoteConnectionFormScreenState
   }
 }
 
+/// Remote browsing intent. Backup folder selection must not enter the import
+/// queue even though it shares WebDAV authentication and directory loading.
+enum RemoteBrowserMode { importFiles, chooseBackupFolder }
+
 class RemoteBrowserScreen extends StatefulWidget {
   const RemoteBrowserScreen({
     super.key,
     required this.connection,
     required this.remote,
     required this.libraryController,
+    this.mode = RemoteBrowserMode.importFiles,
   });
 
   final RemoteConnection connection;
   final RemoteSourceController remote;
   final LibraryController libraryController;
+  final RemoteBrowserMode mode;
 
   @override
   State<RemoteBrowserScreen> createState() => _RemoteBrowserScreenState();
@@ -768,6 +816,9 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
   Object? _error;
   bool _loading = true;
   bool _preparingQueue = false;
+
+  bool get _isFolderPicker =>
+      widget.mode == RemoteBrowserMode.chooseBackupFolder;
 
   @override
   void initState() {
@@ -867,6 +918,11 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
         entry,
   ];
 
+  List<RemoteEntry> get _folderEntries => [
+    for (final entry in _entries)
+      if (entry.isDirectory) entry,
+  ];
+
   bool get _allVisibleSelected =>
       _selectableEntries.isNotEmpty &&
       _selectableEntries.every(
@@ -933,160 +989,200 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
     if (opened && mounted) setState(() => _selected.clear());
   }
 
+  void _selectCurrentFolder() {
+    if (_loading || _currentUrl == null) return;
+    final relative = WebDavClient.relativePathFromRoot(
+      widget.connection.url,
+      _currentUrl!,
+    );
+    if (relative == null) {
+      showAppSnackBar(context, '无法确定备份目录');
+      return;
+    }
+    Navigator.of(context).pop(relative);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final visible = _selectableEntries;
-    final title = _currentTitle ?? widget.connection.displayName;
+    final visible = _isFolderPicker ? _folderEntries : _selectableEntries;
+    // A folder picker is an action page, not a page named after whichever
+    // remote folder happens to be open. Keep the task visible while the
+    // breadcrumb carries the current location.
+    final title = _isFolderPicker
+        ? '选择备份目录'
+        : (_currentTitle ?? widget.connection.displayName);
     return Scaffold(
       backgroundColor: context.settingsCanvas,
-      body: AppSettingsScrollView(
-        padding: EdgeInsets.fromLTRB(
-          context.appPageGutter,
-          context.appIsCompact ? 16 : 24,
-          context.appPageGutter,
-          _selected.isEmpty
-              ? context.appContentBottomPadding
-              : context.appContentBottomPadding + 76,
-        ),
-        children: [
-          AppSettingsPageHeader(
-            title: title,
-            subtitle: widget.connection.type == RemoteSourceType.webDav
-                ? '选择文件后加入导入队列，不会立即开始'
-                : '选择书目后加入下载队列，不会立即开始',
-            onBack: () => Navigator.of(context).maybePop(),
-            actions: [
-              if (widget.connection.type == RemoteSourceType.opds &&
-                  _searchUrl != null)
+      body: AppSettingsSafeArea(
+        child: AppSettingsScrollView(
+          maxWidth: AppSettingsMetrics.maxContentWidth,
+          padding: EdgeInsets.fromLTRB(
+            context.appPageGutter,
+            AppSettingsMetrics.pageTop(context),
+            context.appPageGutter,
+            AppSpacing.x6,
+          ),
+          children: [
+            AppSettingsPageHeader(
+              title: title,
+              onBack: () => Navigator.of(context).maybePop(),
+              actions: [
+                if (widget.connection.type == RemoteSourceType.opds &&
+                    _searchUrl != null)
+                  AppIconButton(
+                    icon: KaijuanIcons.search,
+                    tooltip: '搜索',
+                    onPressed: _loading ? null : _search,
+                  ),
                 AppIconButton(
-                  icon: KaijuanIcons.search,
-                  tooltip: '搜索',
-                  onPressed: _loading ? null : _search,
+                  icon: KaijuanIcons.refresh,
+                  tooltip: '刷新',
+                  onPressed: _loading || _currentUrl == null
+                      ? null
+                      : () => _load(_currentUrl!),
                 ),
-              AppIconButton(
-                icon: KaijuanIcons.refresh,
-                tooltip: '刷新',
-                onPressed: _loading || _currentUrl == null
-                    ? null
-                    : () => _load(_currentUrl!),
+              ],
+            ),
+            const SizedBox(height: 18),
+            if (_navigationHistory.isNotEmpty) ...[
+              _RemoteBreadcrumb(
+                items: [
+                  for (
+                    var index = 0;
+                    index < _navigationHistory.length;
+                    index++
+                  )
+                    _RemoteBreadcrumbItem(
+                      label: index == 0
+                          ? widget.connection.displayName
+                          : _navigationHistory[index].title,
+                      onTap: _loading
+                          ? null
+                          : () => _navigateToBreadcrumb(index),
+                    ),
+                  _RemoteBreadcrumbItem(
+                    label: _currentTitle ?? widget.connection.displayName,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (_loading)
+              const AppEmptyState(
+                alignment: Alignment.topCenter,
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.x8 * 2),
+                icon: KaijuanIcons.folder,
+                title: '正在读取目录',
+                message: '正在连接远程来源，请稍候。',
+                loading: true,
+              )
+            else if (_error != null)
+              AppSettingsGroup(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Text(
+                    '读取失败',
+                    style: TextStyle(
+                      color: context.settingsPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$_error',
+                    style: TextStyle(color: context.settingsSecondary),
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton(
+                    onPressed: () => _load(_currentUrl!),
+                    child: const Text('重试'),
+                  ),
+                ],
+              )
+            else if (visible.isEmpty)
+              AppSettingsGroup(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  Text(
+                    _isFolderPicker ? '没有子文件夹' : '这里还没有可导入的内容',
+                    style: TextStyle(
+                      color: context.settingsPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isFolderPicker
+                        ? '可直接选择当前目录'
+                        : widget.connection.type == RemoteSourceType.opds
+                        ? '请进入其他分类，或检查 OPDS 目录是否提供下载链接。'
+                        : '请进入其他文件夹，或检查远程目录中的文件格式。',
+                    style: TextStyle(color: context.settingsSecondary),
+                  ),
+                ],
+              )
+            else
+              _RemoteEntryList(
+                entries: visible,
+                selected: _selected,
+                connection: widget.connection,
+                remote: widget.remote,
+                folderPicker: _isFolderPicker,
+                onTap: (entry) =>
+                    entry.isDirectory ? _openDirectory(entry) : _toggle(entry),
+                onToggle: _isFolderPicker ? null : _toggle,
+              ),
+            if (!_loading && _nextUrl != null) ...[
+              const SizedBox(height: 14),
+              Center(
+                child: OutlinedButton(
+                  onPressed: () => _load(_nextUrl!),
+                  child: const Text('加载下一页'),
+                ),
               ),
             ],
-          ),
-          const SizedBox(height: 18),
-          if (_navigationHistory.isNotEmpty) ...[
-            _RemoteBreadcrumb(
-              items: [
-                for (var index = 0; index < _navigationHistory.length; index++)
-                  _RemoteBreadcrumbItem(
-                    label: index == 0
-                        ? widget.connection.displayName
-                        : _navigationHistory[index].title,
-                    onTap: _loading ? null : () => _navigateToBreadcrumb(index),
-                  ),
-                _RemoteBreadcrumbItem(
-                  label: _currentTitle ?? widget.connection.displayName,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-          ],
-          if (_loading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(48),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_error != null)
-            AppSettingsGroup(
-              padding: const EdgeInsets.all(20),
-              children: [
-                Text(
-                  '读取失败',
-                  style: TextStyle(
-                    color: context.settingsPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$_error',
-                  style: TextStyle(color: context.settingsSecondary),
-                ),
-                const SizedBox(height: 14),
-                OutlinedButton(
-                  onPressed: () => _load(_currentUrl!),
-                  child: const Text('重试'),
-                ),
-              ],
-            )
-          else if (visible.isEmpty)
-            AppSettingsGroup(
-              padding: const EdgeInsets.all(24),
-              children: [
-                Text(
-                  '这里还没有可导入的内容',
-                  style: TextStyle(
-                    color: context.settingsPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  widget.connection.type == RemoteSourceType.opds
-                      ? '请进入其他分类，或检查 OPDS 目录是否提供下载链接。'
-                      : '请进入其他文件夹，或检查远程目录中的文件格式。',
-                  style: TextStyle(color: context.settingsSecondary),
-                ),
-              ],
-            )
-          else
-            _RemoteEntryList(
-              entries: visible,
-              selected: _selected,
-              connection: widget.connection,
-              remote: widget.remote,
-              onTap: (entry) =>
-                  entry.isDirectory ? _openDirectory(entry) : _toggle(entry),
-              onToggle: _toggle,
-            ),
-          if (!_loading && _nextUrl != null) ...[
-            const SizedBox(height: 14),
-            Center(
-              child: OutlinedButton(
-                onPressed: () => _load(_nextUrl!),
-                child: const Text('加载下一页'),
-              ),
-            ),
-          ],
-        ],
-      ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: Row(
-          children: [
-            TextButton(
-              onPressed: _preparingQueue || visible.isEmpty ? null : _toggleAll,
-              child: Text(_allVisibleSelected ? '取消全选' : '全选'),
-            ),
-            const Spacer(),
-            FilledButton.icon(
-              onPressed: _preparingQueue || _selected.isEmpty
-                  ? null
-                  : _openQueue,
-              icon: Icon(
-                _preparingQueue ? KaijuanIcons.stop : KaijuanIcons.download,
-              ),
-              label: Text(
-                _preparingQueue
-                    ? '正在整理'
-                    : widget.connection.type == RemoteSourceType.webDav
-                    ? '导入'
-                    : '下载',
-              ),
-            ),
           ],
         ),
+      ),
+      bottomNavigationBar: AppSettingsBottomBar(
+        maxWidth: AppSettingsMetrics.maxContentWidth,
+        child: _isFolderPicker
+            ? SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _loading ? null : _selectCurrentFolder,
+                  icon: const Icon(KaijuanIcons.folder),
+                  label: const Text('选择此目录'),
+                ),
+              )
+            : Row(
+                children: [
+                  TextButton(
+                    onPressed: _preparingQueue || visible.isEmpty
+                        ? null
+                        : _toggleAll,
+                    child: Text(_allVisibleSelected ? '取消全选' : '全选'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _preparingQueue || _selected.isEmpty
+                        ? null
+                        : _openQueue,
+                    icon: Icon(
+                      _preparingQueue
+                          ? KaijuanIcons.stop
+                          : KaijuanIcons.download,
+                    ),
+                    label: Text(
+                      _preparingQueue
+                          ? '正在整理'
+                          : widget.connection.type == RemoteSourceType.webDav
+                          ? '导入'
+                          : '下载',
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -1180,6 +1276,7 @@ class _RemoteEntryList extends StatelessWidget {
     required this.selected,
     required this.connection,
     required this.remote,
+    required this.folderPicker,
     required this.onTap,
     required this.onToggle,
   });
@@ -1188,8 +1285,9 @@ class _RemoteEntryList extends StatelessWidget {
   final Map<String, RemoteEntry> selected;
   final RemoteConnection connection;
   final RemoteSourceController remote;
+  final bool folderPicker;
   final ValueChanged<RemoteEntry> onTap;
-  final ValueChanged<RemoteEntry> onToggle;
+  final ValueChanged<RemoteEntry>? onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -1201,8 +1299,9 @@ class _RemoteEntryList extends StatelessWidget {
             selected: selected.containsKey(entries[index].effectiveDownloadUri),
             connection: connection,
             remote: remote,
+            folderPicker: folderPicker,
             onTap: () => onTap(entries[index]),
-            onToggle: () => onToggle(entries[index]),
+            onToggle: onToggle == null ? null : () => onToggle!(entries[index]),
           ),
           if (index < entries.length - 1)
             Divider(height: 1, indent: 56, color: context.settingsRowDivider),
@@ -1218,6 +1317,7 @@ class _RemoteEntryRow extends StatelessWidget {
     required this.selected,
     required this.connection,
     required this.remote,
+    required this.folderPicker,
     required this.onTap,
     required this.onToggle,
   });
@@ -1226,8 +1326,9 @@ class _RemoteEntryRow extends StatelessWidget {
   final bool selected;
   final RemoteConnection connection;
   final RemoteSourceController remote;
+  final bool folderPicker;
   final VoidCallback onTap;
-  final VoidCallback onToggle;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -1245,19 +1346,21 @@ class _RemoteEntryRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            AppIconButton(
-              icon: selected
-                  ? KaijuanIcons.checkboxChecked
-                  : KaijuanIcons.checkbox,
-              tooltip: entry.isDirectory
-                  ? (selected ? '取消选择文件夹' : '选择整个文件夹')
-                  : (selected ? '取消选择' : '选择'),
-              onPressed: onToggle,
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : context.settingsMuted,
-            ),
-            const SizedBox(width: 12),
+            if (!folderPicker) ...[
+              AppIconButton(
+                icon: selected
+                    ? KaijuanIcons.checkboxChecked
+                    : KaijuanIcons.checkbox,
+                tooltip: entry.isDirectory
+                    ? (selected ? '取消选择文件夹' : '选择整个文件夹')
+                    : (selected ? '取消选择' : '选择'),
+                onPressed: onToggle,
+                color: selected
+                    ? Theme.of(context).colorScheme.primary
+                    : context.settingsMuted,
+              ),
+              const SizedBox(width: 12),
+            ],
             if (entry.isDirectory) ...[
               Icon(
                 KaijuanIcons.folder,
@@ -1278,7 +1381,12 @@ class _RemoteEntryRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: context.appListTitleSize),
+                  ),
                   if (subtitle.isNotEmpty) ...[
                     const SizedBox(height: 3),
                     Text(
@@ -1487,41 +1595,44 @@ class _RemoteImportQueueScreenState extends State<RemoteImportQueueScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: context.settingsCanvas,
-      body: AppSettingsScrollView(
-        padding: EdgeInsets.fromLTRB(
-          context.appPageGutter,
-          context.appIsCompact ? 16 : 24,
-          context.appPageGutter,
-          context.appContentBottomPadding,
+      body: AppSettingsSafeArea(
+        bottom: true,
+        child: AppSettingsScrollView(
+          maxWidth: AppSettingsMetrics.formMaxWidth,
+          padding: EdgeInsets.fromLTRB(
+            context.appPageGutter,
+            AppSettingsMetrics.pageTop(context),
+            context.appPageGutter,
+            AppSpacing.x6,
+          ),
+          children: [
+            AppSettingsPageHeader(
+              title:
+                  '待${widget.connection.type == RemoteSourceType.webDav ? '导入' : '下载'}队列',
+              onBack: () => Navigator.of(context).maybePop(),
+            ),
+            const SizedBox(height: AppSettingsMetrics.headerGap),
+            AppSettingsGroup(
+              children: [
+                for (var index = 0; index < _queue.items.length; index++)
+                  _QueueRow(
+                    item: _queue.items[index],
+                    onRetry: _queue.isRunning
+                        ? null
+                        : () => _queue.start(onlyIndex: index),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (_queue.isRunning)
+              Text(
+                '正在处理，请保持页面打开…',
+                style: TextStyle(color: context.settingsSecondary),
+              )
+            else if (_queue.allCompleted)
+              const Text('全部处理完成，可以返回继续浏览。'),
+          ],
         ),
-        children: [
-          AppSettingsPageHeader(
-            title:
-                '待${widget.connection.type == RemoteSourceType.webDav ? '导入' : '下载'}队列',
-            subtitle: _queue.isRunning ? '正在按顺序处理所选项目' : '按顺序处理所选项目',
-            onBack: () => Navigator.of(context).maybePop(),
-          ),
-          const SizedBox(height: AppSettingsMetrics.sectionGap),
-          AppSettingsGroup(
-            children: [
-              for (var index = 0; index < _queue.items.length; index++)
-                _QueueRow(
-                  item: _queue.items[index],
-                  onRetry: _queue.isRunning
-                      ? null
-                      : () => _queue.start(onlyIndex: index),
-                ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          if (_queue.isRunning)
-            Text(
-              '正在处理，请保持页面打开…',
-              style: TextStyle(color: context.settingsSecondary),
-            )
-          else if (_queue.allCompleted)
-            const Text('全部处理完成，可以返回继续浏览。'),
-        ],
       ),
     );
   }
@@ -1535,11 +1646,19 @@ class _QueueRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = item.status == RemoteQueueStatus.completed
-        ? const Color(0xFF2E8B65)
-        : item.status == RemoteQueueStatus.failed
+    final statusColor = item.status == RemoteQueueStatus.failed
         ? Theme.of(context).colorScheme.error
+        : item.status == RemoteQueueStatus.downloading ||
+              item.status == RemoteQueueStatus.importing
+        ? Theme.of(context).colorScheme.primary
         : context.settingsSecondary;
+    final statusIcon = item.status == RemoteQueueStatus.completed
+        ? KaijuanIcons.checkCircle
+        : item.status == RemoteQueueStatus.failed
+        ? KaijuanIcons.error
+        : item.status == RemoteQueueStatus.waiting
+        ? KaijuanIcons.circle
+        : KaijuanIcons.download;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
@@ -1552,6 +1671,7 @@ class _QueueRow extends StatelessWidget {
                   item.entry.displayTitle,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: context.appListTitleSize),
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -1573,12 +1693,19 @@ class _QueueRow extends StatelessWidget {
               onPressed: onRetry,
             )
           else
-            Text(
-              item.status.label,
-              style: TextStyle(
-                color: statusColor,
-                fontSize: context.appCaptionSmallSize,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(statusIcon, size: 14, color: statusColor),
+                const SizedBox(width: 5),
+                Text(
+                  item.status.label,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: context.appBodySecondarySize,
+                  ),
+                ),
+              ],
             ),
         ],
       ),

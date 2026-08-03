@@ -53,7 +53,7 @@ class _WifiTransferSheetState extends State<WifiTransferSheet> {
                           'WiFi 传书',
                           style: TextStyle(
                             color: context.appPrimaryText,
-                            fontSize: context.appPageTitleSize,
+                            fontSize: context.appSectionTitleSize,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -244,7 +244,10 @@ class _TransferQueueList extends StatelessWidget {
                     item.fileName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: context.appPrimaryText),
+                    style: TextStyle(
+                      color: context.appPrimaryText,
+                      fontSize: context.appListTitleSize,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),

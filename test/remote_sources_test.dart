@@ -12,6 +12,30 @@ import 'package:kaijuan/library/remote/remote_store.dart';
 import 'package:kaijuan/library/remote/webdav_client.dart';
 
 void main() {
+  test('WebDAV folder URLs resolve to root-relative backup paths', () {
+    expect(
+      WebDavClient.relativePathFromRoot(
+        'https://dav.example/books',
+        'https://DAV.EXAMPLE/books/backup%20files/',
+      ),
+      'backup files',
+    );
+    expect(
+      WebDavClient.relativePathFromRoot(
+        'https://dav.example/books/',
+        'https://dav.example/books/',
+      ),
+      isEmpty,
+    );
+    expect(
+      WebDavClient.relativePathFromRoot(
+        'https://dav.example/books/',
+        'https://dav.example/other/',
+      ),
+      isNull,
+    );
+  });
+
   test('WebDAV probes and parses directories and files', () async {
     final requests = <String>[];
     final webDav = WebDavClient(

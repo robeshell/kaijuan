@@ -24,7 +24,7 @@ class LocalImportReviewScreen extends StatefulWidget {
     required List<String> paths,
     required LibraryController controller,
   }) {
-    return Navigator.of(context, rootNavigator: true).push<ImportResult>(
+    return Navigator.of(context).push<ImportResult>(
       appPageRoute<ImportResult>(
         (_) => LocalImportReviewScreen(paths: paths, controller: controller),
       ),
@@ -80,34 +80,38 @@ class _LocalImportReviewScreenState extends State<LocalImportReviewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: context.settingsCanvas,
-      body: AppSettingsScrollView(
-        padding: EdgeInsets.fromLTRB(
-          context.appPageGutter,
-          context.appIsCompact ? 16 : 24,
-          context.appPageGutter,
-          context.appContentBottomPadding,
+      body: AppSettingsSafeArea(
+        child: AppSettingsScrollView(
+          maxWidth: AppSettingsMetrics.maxContentWidth,
+          padding: EdgeInsets.fromLTRB(
+            context.appPageGutter,
+            AppSettingsMetrics.pageTop(context),
+            context.appPageGutter,
+            AppSpacing.x6,
+          ),
+          children: [
+            AppSettingsPageHeader(
+              title: '选择要导入的文件',
+              onBack: _importing
+                  ? null
+                  : () => Navigator.of(context).maybePop(),
+            ),
+            const SizedBox(height: AppSettingsMetrics.headerGap),
+            AppSettingsGroup(
+              children: [
+                for (final path in widget.paths)
+                  _LocalImportRow(
+                    path: path,
+                    selected: _selected.contains(path),
+                    onTap: () => _toggle(path),
+                  ),
+              ],
+            ),
+          ],
         ),
-        children: [
-          AppSettingsPageHeader(
-            title: '选择要导入的文件',
-            subtitle: '扫描发现 ${widget.paths.length} 个文件，请确认后再开始导入',
-            onBack: _importing ? null : () => Navigator.of(context).maybePop(),
-          ),
-          const SizedBox(height: AppSettingsMetrics.sectionGap),
-          AppSettingsGroup(
-            children: [
-              for (final path in widget.paths)
-                _LocalImportRow(
-                  path: path,
-                  selected: _selected.contains(path),
-                  onTap: () => _toggle(path),
-                ),
-            ],
-          ),
-        ],
       ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      bottomNavigationBar: AppSettingsBottomBar(
+        maxWidth: AppSettingsMetrics.maxContentWidth,
         child: Row(
           children: [
             TextButton(
@@ -146,58 +150,72 @@ class _LocalImportRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            AppIconButton(
-              icon: selected
-                  ? KaijuanIcons.checkboxChecked
-                  : KaijuanIcons.checkbox,
-              tooltip: selected ? '取消选择' : '选择',
-              onPressed: onTap,
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : context.settingsMuted,
-            ),
-            const SizedBox(width: 12),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: context.appDivider),
-                borderRadius: BorderRadius.circular(AppRadii.menu),
-              ),
-              child: const SizedBox(
-                width: 44,
-                height: 52,
-                child: Icon(KaijuanIcons.document, size: 28),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    p.basename(path),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+    final fileName = p.basename(path);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '${selected ? '取消选择' : '选择'} $fileName',
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              SizedBox.square(
+                dimension: 40,
+                child: Center(
+                  child: Icon(
+                    selected
+                        ? KaijuanIcons.checkboxChecked
+                        : KaijuanIcons.checkbox,
+                    size: 20,
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : context.settingsMuted,
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    p.dirname(path),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: context.settingsSecondary,
-                      fontSize: context.appCaptionSmallSize,
+                ),
+              ),
+              const SizedBox(width: 12),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: context.appDivider),
+                  borderRadius: BorderRadius.circular(AppRadii.menu),
+                ),
+                child: const SizedBox(
+                  width: 44,
+                  height: 52,
+                  child: Icon(KaijuanIcons.document, size: 28),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fileName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: context.appListTitleSize),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 3),
+                    Tooltip(
+                      message: path,
+                      child: Text(
+                        p.dirname(path),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.settingsSecondary,
+                          fontSize: context.appBodySecondarySize,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
