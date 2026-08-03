@@ -58,6 +58,8 @@ dart run tool/release.dart windows
 dart run tool/release.dart android --no-bump
 ```
 
+macOS 本地发布会同时生成 `dist/kaijuan-x.y.z-macos.zip` 与 `.dmg`；DMG 内含 `/Applications` 拖拽安装入口。
+
 推送 `vMAJOR.MINOR.PATCH` tag 可触发 GitHub Release 工作流。Windows MSIX / Inno 仅本地 `release.dart windows` 产出，说明见 [`packaging/windows/README.md`](packaging/windows/README.md)。
 
 ## 文档

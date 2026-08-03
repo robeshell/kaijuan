@@ -2,11 +2,6 @@ import 'dart:io';
 
 const _knownPlatforms = {'android', 'ios', 'macos', 'windows'};
 const _artifactPrefix = 'kaijuan';
-const _macosAppCandidates = [
-  'build/macos/Build/Products/Release/开卷.app',
-  'build/macos/Build/Products/Release/Kaika.app',
-  'build/macos/Build/Products/Release/kaijuan.app',
-];
 const _windowsIss = 'packaging/windows/kaijuan.iss';
 const _publisher = 'com.kaijuan.reader';
 
@@ -250,28 +245,110 @@ Future<void> _buildPlatform(
       ], workingDirectory: packageRoot.path);
     case 'macos':
       await _flutterBuild('macos', version);
-      final macosApp = _resolveMacosAppBundle();
+      final macosApp = _findMacOsApp();
+      await _signMacOsAppAdHocForDistribution(macosApp);
+      final zip = File(
+        '${dist.path}/$_artifactPrefix-${version.name}-macos.zip',
+      ).absolute;
+      if (zip.existsSync()) await zip.delete();
       await _run('ditto', [
         '-c',
         '-k',
         '--sequesterRsrc',
         '--keepParent',
-        macosApp,
-        '${dist.path}/$_artifactPrefix-${version.name}-macos.zip',
+        macosApp.path,
+        zip.path,
       ]);
+      stdout.writeln('Created ${zip.path}');
+      await _buildMacOsDmg(macosApp, version, dist);
     case 'windows':
       await _buildWindows(version, dist, options);
   }
 }
 
-String _resolveMacosAppBundle() {
-  for (final candidate in _macosAppCandidates) {
-    if (Directory(candidate).existsSync()) return candidate;
+Directory _findMacOsApp() {
+  final releaseDir = Directory('build/macos/Build/Products/Release');
+  if (!releaseDir.existsSync()) {
+    throw StateError('Missing macOS Release output: ${releaseDir.path}');
   }
-  throw StateError(
-    'Missing macOS Release app. Expected one of: '
-    '${_macosAppCandidates.join(', ')}',
+  final apps = releaseDir
+      .listSync(followLinks: false)
+      .whereType<Directory>()
+      .where((entry) => entry.path.endsWith('.app'))
+      .toList();
+  if (apps.length != 1) {
+    throw StateError(
+      'Expected one macOS app in ${releaseDir.path}, found ${apps.length}.',
+    );
+  }
+  return apps.single;
+}
+
+/// Certificate-free macOS distribution signature (ad-hoc, no Apple cert).
+Future<void> _signMacOsAppAdHocForDistribution(Directory app) async {
+  final profile = File('${app.path}/Contents/embedded.provisionprofile');
+  if (profile.existsSync()) {
+    stdout.writeln(
+      'Removing embedded.provisionprofile for portable packaging...',
+    );
+    await profile.delete();
+  }
+
+  stdout.writeln(
+    'Ad-hoc signing macOS app without entitlement blob '
+    '(certificate-free; avoids launchd 163)...',
   );
+  await _run('codesign', [
+    '--force',
+    '--deep',
+    '--sign',
+    '-',
+    app.absolute.path,
+  ]);
+
+  final verify = await Process.run('codesign', [
+    '--verify',
+    '--deep',
+    '--strict',
+    app.absolute.path,
+  ]);
+  if (verify.exitCode != 0) {
+    throw StateError(
+      'Ad-hoc macOS signature failed verification:\n'
+      '${verify.stdout}${verify.stderr}',
+    );
+  }
+}
+
+Future<void> _buildMacOsDmg(
+  Directory app,
+  _ReleaseVersion version,
+  Directory dist,
+) async {
+  final packageRoot = Directory('build/release_package/macos-${version.name}');
+  if (packageRoot.existsSync()) await packageRoot.delete(recursive: true);
+  await packageRoot.create(recursive: true);
+
+  final appName = app.path.split(Platform.pathSeparator).last;
+  final packagedApp = '${packageRoot.path}/$appName';
+  await _run('ditto', [app.path, packagedApp]);
+  await Link('${packageRoot.path}/Applications').create('/Applications');
+
+  final dmg = File(
+    '${dist.path}/$_artifactPrefix-${version.name}-macos.dmg',
+  ).absolute;
+  if (dmg.existsSync()) await dmg.delete();
+  await _run('hdiutil', [
+    'create',
+    '-volname',
+    '开卷',
+    '-srcfolder',
+    packageRoot.absolute.path,
+    '-format',
+    'UDZO',
+    dmg.path,
+  ]);
+  stdout.writeln('Created ${dmg.path}');
 }
 
 Future<void> _buildWindows(
