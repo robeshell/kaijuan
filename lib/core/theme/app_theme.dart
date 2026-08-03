@@ -14,7 +14,7 @@ abstract final class AppTheme {
   static const _animationDuration = Duration(milliseconds: 160);
 
   static ThemeData forSkin(AppSkinPreset skin, AccentPreset accent) =>
-      _build(skin.brightness, skin: skin, accent: accent.color);
+      _build(skin.brightness, skin: skin, accentPreset: accent);
 
   /// Convenience for callers that only know light/dark — prefer [forSkin].
   static ThemeData light(AccentPreset accent) =>
@@ -26,8 +26,9 @@ abstract final class AppTheme {
   static ThemeData _build(
     Brightness brightness, {
     required AppSkinPreset skin,
-    required Color accent,
+    required AccentPreset accentPreset,
   }) {
+    final accent = accentPreset.color;
     final dark = brightness == Brightness.dark;
     // Keep the light app shell on a true white canvas. Surface, elevated and
     // overlay still provide the neutral ramp for cards and floating chrome.
@@ -54,12 +55,12 @@ abstract final class AppTheme {
     final disabledSubtle = dark
         ? Colors.white.withValues(alpha: 0.028)
         : Colors.black.withValues(alpha: 0.024);
-    // fromSeed derives onPrimary for the seed's tonal primary, not for the
-    // raw accent we force below — compute the matching contrast color.
-    final onAccent =
-        ThemeData.estimateBrightnessForColor(accent) == Brightness.dark
-        ? Colors.white
-        : Colors.black;
+    // Light inputs are clean elevated surfaces on the white app canvas.
+    // Dark inputs keep a translucent inset wash so their field boundary does
+    // not turn into a bright slab inside an elevated group.
+    final inputFill = dark ? subtle : elevated;
+    // Registered accent presets carry brand onAccent (≥ 4.5:1).
+    final onAccent = accentPreset.onAccent;
 
     final scheme =
         ColorScheme.fromSeed(
@@ -112,17 +113,23 @@ abstract final class AppTheme {
           ? BorderSide(color: accent, width: 2)
           : null;
     });
+    // Tight label metrics keep icon+text on one optical midline. Default
+    // labelMedium line-height is taller than the 17px icon and reads as
+    // "icon sitting above the text" in Filled/Outlined/TextButton.icon.
+    final buttonLabelStyle = textTheme.labelMedium?.copyWith(
+      fontWeight: FontWeight.w500,
+      height: 1.0,
+      leadingDistribution: TextLeadingDistribution.even,
+    );
     final standardButtonStyle = ButtonStyle(
       animationDuration: _animationDuration,
       minimumSize: const WidgetStatePropertyAll(Size(36, 36)),
       padding: const WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       ),
       shape: const WidgetStatePropertyAll(StadiumBorder()),
-      textStyle: WidgetStatePropertyAll(
-        textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w500),
-      ),
-      iconSize: const WidgetStatePropertyAll(17),
+      textStyle: WidgetStatePropertyAll(buttonLabelStyle),
+      iconSize: const WidgetStatePropertyAll(16),
       elevation: const WidgetStatePropertyAll(0),
       shadowColor: const WidgetStatePropertyAll(Colors.transparent),
       surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
@@ -157,7 +164,7 @@ abstract final class AppTheme {
     });
     final pillForeground = WidgetStateProperty.resolveWith<Color>((states) {
       if (states.contains(WidgetState.disabled)) {
-        return secondary.withValues(alpha: 0.38);
+        return secondary.withValues(alpha: appDisabledForegroundOpacity);
       }
       return accent;
     });
@@ -180,7 +187,7 @@ abstract final class AppTheme {
       splashColor: Colors.transparent,
       splashFactory: NoSplash.splashFactory,
       dividerColor: hairline,
-      disabledColor: secondary.withValues(alpha: 0.38),
+      disabledColor: secondary.withValues(alpha: appDisabledForegroundOpacity),
       visualDensity: VisualDensity.standard,
       materialTapTargetSize: MaterialTapTargetSize.padded,
       // Kill M3 primary-tinted overlays that turn white → dirty gray/orange.
@@ -329,7 +336,7 @@ abstract final class AppTheme {
       dropdownMenuTheme: DropdownMenuThemeData(
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: subtle,
+          fillColor: inputFill,
           border: inputBorder,
           enabledBorder: inputBorder,
           focusedBorder: inputBorder.copyWith(
@@ -350,7 +357,7 @@ abstract final class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: subtle,
+        fillColor: inputFill,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
@@ -410,6 +417,7 @@ abstract final class AppTheme {
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
+          textStyle: WidgetStatePropertyAll(buttonLabelStyle),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
@@ -419,7 +427,7 @@ abstract final class AppTheme {
           iconSize: const WidgetStatePropertyAll(20),
           foregroundColor: WidgetStateProperty.resolveWith<Color>((states) {
             if (states.contains(WidgetState.disabled)) {
-              return secondary.withValues(alpha: 0.38);
+              return secondary.withValues(alpha: appDisabledForegroundOpacity);
             }
             if (states.contains(WidgetState.selected)) {
               return accent;
@@ -454,7 +462,7 @@ abstract final class AppTheme {
         iconColor: secondary,
         textColor: foreground,
         selectedColor: accent,
-        selectedTileColor: accent.withValues(alpha: 0.035),
+        selectedTileColor: accent.withValues(alpha: appListTileSelectedOpacity),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14),
         minTileHeight: 54,
         minVerticalPadding: 6,

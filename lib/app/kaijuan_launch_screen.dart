@@ -5,8 +5,8 @@ import '../core/theme/brand_tokens.g.dart';
 
 /// Shared launch canvas colors — match the app's white light canvas.
 const kaijuanLaunchBackground = Colors.white;
-const kaijuanLaunchTitleColor = Color(0xFF1C1C22);
-const kaijuanLaunchSubtitleColor = Color(0xFF70707A);
+const kaijuanLaunchTitleColor = KaiBrandDefaultSkin.glassPrimaryText;
+const kaijuanLaunchSubtitleColor = KaiBrandDefaultSkin.glassMutedText;
 
 /// First Flutter frame while prefs / DB warm up (non-Android shells).
 class KaijuanLaunchScreen extends StatelessWidget {

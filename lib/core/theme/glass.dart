@@ -14,6 +14,7 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
     required this.canvasHighlight,
     required this.surface,
     required this.strongSurface,
+    required this.chromeSurface,
     required this.border,
     required this.innerHighlight,
     required this.shadow,
@@ -25,9 +26,12 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
   });
 
   static const light = AppGlassTheme(
-    canvasHighlight: KaiBrandDefaultSkin.glassCanvasHighlight,
+    // Match kaiting light shell: highlight stop is elevated white so the
+    // shell gradient stays clean next to chrome glass.
+    canvasHighlight: KaiBrandDefaultSkin.elevated,
     surface: KaiBrandDefaultSkin.glassSurface,
     strongSurface: KaiBrandDefaultSkin.glassStrongSurface,
+    chromeSurface: KaiBrandDefaultSkin.glassChromeSurface,
     border: KaiBrandDefaultSkin.glassBorder,
     innerHighlight: KaiBrandDefaultSkin.glassInnerHighlight,
     shadow: KaiBrandDefaultSkin.glassShadow,
@@ -42,6 +46,7 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
     canvasHighlight: KaiBrandDeepNightSkin.glassCanvasHighlight,
     surface: KaiBrandDeepNightSkin.glassSurface,
     strongSurface: KaiBrandDeepNightSkin.glassStrongSurface,
+    chromeSurface: KaiBrandDeepNightSkin.glassChromeSurface,
     border: KaiBrandDeepNightSkin.glassBorder,
     innerHighlight: KaiBrandDeepNightSkin.glassInnerHighlight,
     shadow: KaiBrandDeepNightSkin.glassShadow,
@@ -55,6 +60,7 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
   final Color canvasHighlight;
   final Color surface;
   final Color strongSurface;
+  final Color chromeSurface;
   final Color border;
   final Color innerHighlight;
   final Color shadow;
@@ -69,6 +75,7 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
     Color? canvasHighlight,
     Color? surface,
     Color? strongSurface,
+    Color? chromeSurface,
     Color? border,
     Color? innerHighlight,
     Color? shadow,
@@ -82,6 +89,7 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
       canvasHighlight: canvasHighlight ?? this.canvasHighlight,
       surface: surface ?? this.surface,
       strongSurface: strongSurface ?? this.strongSurface,
+      chromeSurface: chromeSurface ?? this.chromeSurface,
       border: border ?? this.border,
       innerHighlight: innerHighlight ?? this.innerHighlight,
       shadow: shadow ?? this.shadow,
@@ -100,6 +108,7 @@ class AppGlassTheme extends ThemeExtension<AppGlassTheme> {
       canvasHighlight: Color.lerp(canvasHighlight, other.canvasHighlight, t)!,
       surface: Color.lerp(surface, other.surface, t)!,
       strongSurface: Color.lerp(strongSurface, other.strongSurface, t)!,
+      chromeSurface: Color.lerp(chromeSurface, other.chromeSurface, t)!,
       border: Color.lerp(border, other.border, t)!,
       innerHighlight: Color.lerp(innerHighlight, other.innerHighlight, t)!,
       shadow: Color.lerp(shadow, other.shadow, t)!,

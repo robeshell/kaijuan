@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'brand_tokens.g.dart';
@@ -32,11 +34,18 @@ abstract final class AppProductRadii {
   static const double cover = KaiProductTokens.coverRadius;
 }
 
+/// Disabled foreground: secondary × this alpha (brand `derivedAlphas.disabledForeground`).
+const appDisabledForegroundOpacity = 0.55;
+
+/// List / surface accent wash (brand `derivedAlphas.selection.listTileSelected`).
+const appListTileSelectedOpacity = 0.04;
+
 class AccentPreset {
   const AccentPreset({
     required this.id,
     required this.label,
     required this.color,
+    required this.onAccent,
   });
 
   final String id;
@@ -44,42 +53,83 @@ class AccentPreset {
   final Color color;
 
   /// Contrast foreground for content drawn on top of the accent.
-  Color get onAccent =>
-      ThemeData.estimateBrightnessForColor(color) == Brightness.dark
-      ? Colors.white
-      : Colors.black;
+  final Color onAccent;
+
+  /// Fallback for unregistered custom colors; registered presets use brand tokens.
+  static Color readableForeground(Color color) {
+    const candidates = <Color>[
+      Colors.white,
+      Color(0xFF1C1C22),
+      Color(0xFF141418),
+    ];
+    Color best = candidates.first;
+    var bestRatio = 0.0;
+    for (final candidate in candidates) {
+      final ratio = _contrastRatio(candidate, color);
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
+  static double _relativeLuminance(Color color) {
+    double channel(double c) {
+      return c <= 0.04045
+          ? c / 12.92
+          : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
+    }
+
+    return 0.2126 * channel(color.r) +
+        0.7152 * channel(color.g) +
+        0.0722 * channel(color.b);
+  }
+
+  static double _contrastRatio(Color a, Color b) {
+    final l1 = _relativeLuminance(a);
+    final l2 = _relativeLuminance(b);
+    final lighter = l1 > l2 ? l1 : l2;
+    final darker = l1 > l2 ? l2 : l1;
+    return (lighter + 0.05) / (darker + 0.05);
+  }
 }
 
 abstract final class AppColors {
+  static const defaultAccent = AccentPreset(
+    id: KaiProductAccents.emberId,
+    label: KaiProductAccents.emberLabel,
+    color: KaiProductAccents.ember,
+    onAccent: KaiProductAccents.emberOnAccent,
+  );
+
   static const accentPresets = <AccentPreset>[
-    AccentPreset(
-      id: KaiProductAccents.emberId,
-      label: KaiProductAccents.emberLabel,
-      color: KaiProductAccents.ember,
-    ),
+    defaultAccent,
     AccentPreset(
       id: KaiProductAccents.skyId,
       label: KaiProductAccents.skyLabel,
       color: KaiProductAccents.sky,
+      onAccent: KaiProductAccents.skyOnAccent,
     ),
     AccentPreset(
       id: KaiProductAccents.forestId,
       label: KaiProductAccents.forestLabel,
       color: KaiProductAccents.forest,
+      onAccent: KaiProductAccents.forestOnAccent,
     ),
     AccentPreset(
       id: KaiProductAccents.roseId,
       label: KaiProductAccents.roseLabel,
       color: KaiProductAccents.rose,
+      onAccent: KaiProductAccents.roseOnAccent,
     ),
     AccentPreset(
       id: KaiProductAccents.slateId,
       label: KaiProductAccents.slateLabel,
       color: KaiProductAccents.slate,
+      onAccent: KaiProductAccents.slateOnAccent,
     ),
   ];
-
-  static AccentPreset get defaultAccent => accentPresets.first;
 
   static AccentPreset presetById(String? id) {
     for (final preset in accentPresets) {

@@ -48,9 +48,11 @@ abstract final class KaijuanIcons {
   static const IconData fontIncrease = FluentIcons.font_increase_24_regular;
   static const IconData folder = FluentIcons.folder_24_regular;
   static const IconData grid = FluentIcons.grid_24_regular;
+  static const IconData gridFilled = FluentIcons.grid_24_filled;
   static const IconData globe = FluentIcons.globe_24_regular;
   static const IconData headphones = FluentIcons.headphones_24_regular;
   static const IconData headphonesFilled = FluentIcons.headphones_24_filled;
+  static const IconData history = FluentIcons.history_24_regular;
   static const IconData highlight = FluentIcons.color_fill_24_regular;
   static const IconData imageOff = FluentIcons.image_off_24_regular;
   static const IconData letterSpacing = FluentIcons.spacebar_24_regular;
@@ -62,6 +64,7 @@ abstract final class KaijuanIcons {
   static const IconData multiselect = FluentIcons.multiselect_ltr_24_regular;
   static const IconData next = FluentIcons.next_24_filled;
   static const IconData open = FluentIcons.book_24_regular;
+  static const IconData openFilled = FluentIcons.book_24_filled;
   static const IconData paragraphSpacing =
       FluentIcons.text_add_space_after_24_regular;
   static const IconData pause = FluentIcons.pause_circle_24_filled;
@@ -80,6 +83,7 @@ abstract final class KaijuanIcons {
   static const IconData searchEmpty = FluentIcons.search_24_regular;
   static const IconData scan = FluentIcons.scan_24_regular;
   static const IconData settings = FluentIcons.settings_24_regular;
+  static const IconData settingsFilled = FluentIcons.settings_24_filled;
   static const IconData share = FluentIcons.share_ios_24_regular;
   static const IconData sort = FluentIcons.arrow_sort_24_regular;
   static const IconData stop = FluentIcons.stop_24_regular;

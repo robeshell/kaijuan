@@ -55,7 +55,7 @@ void main() {
     expect(listTile.minVerticalPadding, 6);
     expect(listTile.minLeadingWidth, 32);
     expect(listTile.horizontalTitleGap, 10);
-    expect(listTile.titleTextStyle?.fontSize, 14);
+    expect(listTile.titleTextStyle?.fontSize, 15);
     expect(listTile.subtitleTextStyle?.fontSize, 15);
   });
 

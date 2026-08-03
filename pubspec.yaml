@@ -82,6 +82,7 @@ flutter:
   uses-material-design: true
   assets:
     - brands/launch/launch_mark.png
+    - brands/icons/comic/master_1024.png
     - assets/book/FOLIATE_UPSTREAM_LICENSE
     - assets/book/UPSTREAM_ATTRIBUTION.md
     - assets/book/foliate-js/index.html

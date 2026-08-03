@@ -4,7 +4,7 @@ name: kaijuan
 description: "Kaijuan (开卷) — one quiet-study app with book and comic reading engines. No solid background bars, covers are the protagonists; reading content rendering is independent, chrome recedes into glass. Brand-layer rules live in kai-brand-design; this file is the product overlay."
 colors:
   accent: "#EA580C"
-  accentPresets: ["#EA580C", "#0284C7", "#047857", "#BE123C", "#475569"]
+  accentPresets: ["#EA580C", "#0177B5", "#047857", "#BE123C", "#475569"]
   # 单值模型：hover/pressed 由通用 stateLayer 前景叠加表达，不设独立 accent hover 色
   # 中性色/玻璃/文字三档全部继承品牌层皮肤 token
 typography:
@@ -40,13 +40,13 @@ Kaijuan 壳层字号已按 Kaiting 的迁移规则收敛到两层 token：通用
 
 ### Accent（产品轴：ember 暖橙）
 
-- **accent** `#EA580C`；预设：晴空 `#0284C7` / 松绿 `#047857` / 绯红 `#BE123C` / 岩灰 `#475569`。
+- **accent** `#EA580C`；预设：晴空 `#0177B5` / 松绿 `#047857` / 绯红 `#BE123C` / 岩灰 `#475569`。
 - **单值模型**：hover/pressed 由通用 stateLayer 叠加（hover foreground@0.055–0.065、pressed @0.10、focused accent@0.16），不设独立 accent hover 色。
 - 只用于选中/进度/主操作；阅读内容内的高亮色板属内容层，不受此约束。
 
 ### Text & States
 
-- 文字三档 context getter（`appPrimaryText / appSecondaryText / appMutedText`）；禁用 secondary@0.38；hairline 直接用于分隔。
+- 文字三档 context getter（`appPrimaryText / appSecondaryText / appMutedText`）；禁用 `appDisabledForegroundOpacity`（secondary@0.55）；chrome 用 `appChromeSurface`；onAccent 用 accent preset 登记值；hairline 直接用于分隔。
 - 状态色：错误 `colorScheme.error`；警告用品牌层 `derivedAlphas.status.warning`。
 
 ### Content Layer（阅读主题）

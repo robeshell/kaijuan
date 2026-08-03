@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 import '../core/theme.dart';
 import '../readers/comic/comic_models.dart';
 
@@ -45,11 +43,7 @@ class BrandConfig {
     applicationId: 'com.kaijuan.reader',
     databaseName: 'app_library',
     storageNamespace: '',
-    defaultAccent: AccentPreset(
-      id: 'ember',
-      label: '暖橙',
-      color: Color(0xFFEA580C),
-    ),
+    defaultAccent: AppColors.defaultAccent,
     defaultReadingTheme: ComicReadingTheme.comicDefault,
     importExtensions: [
       'cbz',

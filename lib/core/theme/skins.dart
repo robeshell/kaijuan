@@ -68,6 +68,7 @@ abstract final class AppSkins {
       canvasHighlight: KaiBrandPureSkin.glassCanvasHighlight,
       surface: KaiBrandPureSkin.glassSurface,
       strongSurface: KaiBrandPureSkin.glassStrongSurface,
+      chromeSurface: KaiBrandPureSkin.glassChromeSurface,
       border: KaiBrandPureSkin.glassBorder,
       innerHighlight: KaiBrandPureSkin.glassInnerHighlight,
       shadow: KaiBrandPureSkin.glassShadow,

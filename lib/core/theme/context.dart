@@ -1,16 +1,18 @@
+import 'dart:ui' show DisplayFeature, DisplayFeatureType;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'brand_tokens.g.dart';
 import 'glass.dart';
+import 'tokens.dart';
 
 bool get appUsesDesktopPlatform =>
     defaultTargetPlatform == TargetPlatform.macOS ||
     defaultTargetPlatform == TargetPlatform.windows ||
     defaultTargetPlatform == TargetPlatform.linux;
 
-const appChromeSurfaceTransparency = 0.20;
-const appChromeSurfaceOpacity = 1 - appChromeSurfaceTransparency;
+
 
 enum AppWindowClass { compact, medium, wide }
 
@@ -24,6 +26,164 @@ AppComponentProfile resolveAppComponentProfile(TargetPlatform platform) {
     TargetPlatform.iOS || TargetPlatform.android => AppComponentProfile.mobile,
     _ => AppComponentProfile.mobile,
   };
+}
+
+/// Width-driven window class for phone / fold / tablet shells.
+///
+/// Short height (tabletop fold, landscape, split-screen) must **not** demote
+/// a medium/wide width to [AppWindowClass.compact] — that is handled by
+/// [resolveAppIsShortViewport] for chrome compression only.
+AppWindowClass resolveAppWindowClass({
+  required double width,
+  required bool desktopPlatform,
+}) {
+  if (desktopPlatform) {
+    return width < KaiBrandLayout.desktopBreakpoint
+        ? AppWindowClass.medium
+        : AppWindowClass.wide;
+  }
+  if (width <= KaiBrandLayout.compactWidth) {
+    return AppWindowClass.compact;
+  }
+  if (width < KaiBrandLayout.mobileWideBreakpoint) {
+    return AppWindowClass.medium;
+  }
+  return AppWindowClass.wide;
+}
+
+/// Side rail when the expanded chrome actually fits.
+///
+/// Mobile/fold: open-fold / tablet widths (~840+) get a rail instead of waiting
+/// until the old 1000px device preset. Desktop: only when the window is wide
+/// enough that a 216px rail does not crush content (else bottom bar).
+///
+/// Mobile shell and side rail stay exclusive — never neither.
+const double kAppMobileSideRailMinWidth = 840;
+
+/// Desktop windows narrower than this use bottom navigation temporarily.
+const double kAppDesktopSideRailMinWidth = 900;
+
+bool resolveAppUsesSideRail({
+  required double width,
+  required bool desktopPlatform,
+}) {
+  if (desktopPlatform) {
+    return width >= kAppDesktopSideRailMinWidth;
+  }
+  return width >= kAppMobileSideRailMinWidth;
+}
+
+bool resolveAppUsesMobileShell({
+  required double width,
+  required bool desktopPlatform,
+}) {
+  return !resolveAppUsesSideRail(
+    width: width,
+    desktopPlatform: desktopPlatform,
+  );
+}
+
+/// Shared metrics for [AppNavigationBar] and bottom insets (keep in sync).
+abstract final class AppNavigationChromeMetrics {
+  static const double barHeight = 56;
+  static const double barHeightShort = 44;
+  static const double barMinBottom = 6;
+  static const double barMinBottomShort = 4;
+  /// Gap between last content / FAB and the top of the nav chrome.
+  static const double contentGap = 16;
+}
+
+/// Total height occupied by the floating bottom nav (bar + safe-area bottom).
+double resolveAppNavigationBarExtent({
+  required bool shortViewport,
+  required double systemBottomInset,
+}) {
+  final barHeight = shortViewport
+      ? AppNavigationChromeMetrics.barHeightShort
+      : AppNavigationChromeMetrics.barHeight;
+  final minBottom = shortViewport
+      ? AppNavigationChromeMetrics.barMinBottomShort
+      : AppNavigationChromeMetrics.barMinBottom;
+  final bottomPad = systemBottomInset > minBottom
+      ? systemBottomInset
+      : minBottom;
+  return barHeight + bottomPad;
+}
+
+/// Scroll/FAB clearance above bottom chrome (or desktop comfort pad).
+double resolveAppContentBottomPadding({
+  required bool mobileShell,
+  required bool shortViewport,
+  required double systemBottomInset,
+}) {
+  if (!mobileShell) {
+    return KaiBrandLayout.desktopBottomPadding;
+  }
+  return resolveAppNavigationBarExtent(
+        shortViewport: shortViewport,
+        systemBottomInset: systemBottomInset,
+      ) +
+      AppNavigationChromeMetrics.contentGap;
+}
+
+/// FAB distance from the physical bottom edge.
+double resolveAppFabBottomInset({
+  required bool mobileShell,
+  required bool shortViewport,
+  required double systemBottomInset,
+  required double viewPaddingBottom,
+}) {
+  if (!mobileShell) {
+    return 24 + viewPaddingBottom;
+  }
+  return resolveAppNavigationBarExtent(
+        shortViewport: shortViewport,
+        systemBottomInset: systemBottomInset,
+      ) +
+      AppNavigationChromeMetrics.contentGap;
+}
+
+/// Usable height after system padding — phone landscape, split, tabletop fold.
+bool resolveAppIsShortViewport({
+  required double height,
+  required double paddingVertical,
+  double threshold = 480,
+}) {
+  return height - paddingVertical < threshold;
+}
+
+/// Cover grid tile max cross-axis extent; larger on open folds / tablets.
+double resolveCoverGridMaxExtent(AppWindowClass windowClass) {
+  return switch (windowClass) {
+    AppWindowClass.compact => 160,
+    AppWindowClass.medium => 176,
+    AppWindowClass.wide => 200,
+  };
+}
+
+/// Extra inset when a vertical fold/hinge bisects the window (logical px).
+/// Applied into page gutters so controls stay off the crease.
+double resolveHingeGutterBoost({
+  required Size size,
+  required List<DisplayFeature> displayFeatures,
+}) {
+  var boost = 0.0;
+  for (final feature in displayFeatures) {
+    if (feature.type != DisplayFeatureType.hinge &&
+        feature.type != DisplayFeatureType.fold) {
+      continue;
+    }
+    final bounds = feature.bounds;
+    final verticalCrease = bounds.height >= bounds.width;
+    if (!verticalCrease) continue;
+    final centerX = bounds.center.dx;
+    // Only center-ish creases (dual-pane folds), not edge bezels.
+    if (centerX < size.width * 0.28 || centerX > size.width * 0.72) {
+      continue;
+    }
+    boost = boost < bounds.width + 12 ? bounds.width + 12 : boost;
+  }
+  return boost;
 }
 
 extension AppComponentProfileTokens on AppComponentProfile {
@@ -284,9 +444,7 @@ extension AppThemeContext on BuildContext {
 
   Color get appMutedText => appGlass.mutedText;
 
-  Color get appChromeSurface {
-    return appGlass.strongSurface.withValues(alpha: appChromeSurfaceOpacity);
-  }
+  Color get appChromeSurface => appGlass.chromeSurface;
 
   /// Skin overlay ramp — theme maps it to [ColorScheme.surfaceContainerHigh].
   Color get appOverlay => appColors.surfaceContainerHigh;
@@ -297,19 +455,10 @@ extension AppThemeContext on BuildContext {
 
   AppWindowClass get appWindowClass {
     final size = MediaQuery.sizeOf(this);
-    if (appUsesDesktopPlatform) {
-      return size.width < KaiBrandLayout.desktopBreakpoint
-          ? AppWindowClass.medium
-          : AppWindowClass.wide;
-    }
-    if (size.width <= KaiBrandLayout.compactWidth ||
-        size.height < KaiBrandLayout.compactHeight) {
-      return AppWindowClass.compact;
-    }
-    if (size.width < KaiBrandLayout.mobileWideBreakpoint) {
-      return AppWindowClass.medium;
-    }
-    return AppWindowClass.wide;
+    return resolveAppWindowClass(
+      width: size.width,
+      desktopPlatform: appUsesDesktopPlatform,
+    );
   }
 
   bool get appIsCompact => appWindowClass == AppWindowClass.compact;
@@ -321,33 +470,58 @@ extension AppThemeContext on BuildContext {
     return size.width > size.height;
   }
 
-  /// Short usable height (phone landscape, split-screen, small fold).
-  /// Chrome / bottom bar / tool panels should compress.
+  /// Short usable height (phone landscape, split-screen, tabletop fold).
+  /// Chrome / bottom bar / tool panels should compress — does not change
+  /// [appWindowClass] gutters or density.
   bool get appIsShortViewport {
     final size = MediaQuery.sizeOf(this);
     final padding = MediaQuery.paddingOf(this);
-    final usable = size.height - padding.vertical;
-    return usable < 480;
+    return resolveAppIsShortViewport(
+      height: size.height,
+      paddingVertical: padding.vertical,
+    );
   }
 
-  /// Touch-first navigation (bottom bar). Desktop never uses mobile shell.
+  /// Bottom navigation shell (phone, most folds, narrow desktop windows).
+  /// Exclusive with [appUsesSideRail] — always exactly one chrome path.
   bool get appUsesMobileShell {
-    if (appUsesDesktopPlatform) return false;
     final size = MediaQuery.sizeOf(this);
-    return size.width < KaiBrandLayout.mobileShellWidth ||
-        size.height < KaiBrandLayout.compactHeight;
+    return resolveAppUsesMobileShell(
+      width: size.width,
+      desktopPlatform: appUsesDesktopPlatform,
+    );
   }
 
-  /// Persistent side rail: desktop always; mobile only when wide (≥1000).
-  bool get appUsesSideRail =>
-      appUsesDesktopPlatform ||
-      MediaQuery.sizeOf(this).width >= KaiBrandLayout.mobileWideBreakpoint;
+  /// Persistent side rail when width can host rail + usable content.
+  bool get appUsesSideRail {
+    final size = MediaQuery.sizeOf(this);
+    return resolveAppUsesSideRail(
+      width: size.width,
+      desktopPlatform: appUsesDesktopPlatform,
+    );
+  }
 
-  double get appPageGutter => switch (appWindowClass) {
-    AppWindowClass.compact => KaiBrandLayout.compactGutter,
-    AppWindowClass.medium => KaiBrandLayout.mediumGutter,
-    AppWindowClass.wide => KaiBrandLayout.wideGutter,
-  };
+  /// Roomier **content** density (not phone-narrow). Orthogonal to nav chrome:
+  /// open folds are often [appContentWide] + [appUsesMobileShell].
+  bool get appContentWide => !appIsCompact;
+
+  double get appPageGutter {
+    final base = switch (appWindowClass) {
+      AppWindowClass.compact => KaiBrandLayout.compactGutter,
+      AppWindowClass.medium => KaiBrandLayout.mediumGutter,
+      AppWindowClass.wide => KaiBrandLayout.wideGutter,
+    };
+    final hinge = resolveHingeGutterBoost(
+      size: MediaQuery.sizeOf(this),
+      displayFeatures: MediaQuery.displayFeaturesOf(this),
+    );
+    // Split hinge boost across both gutters so content clears the crease.
+    return base + hinge / 2;
+  }
+
+  /// Max tile width for library / collection cover grids (fold-adaptive).
+  double get appCoverGridMaxExtent =>
+      resolveCoverGridMaxExtent(appWindowClass);
 
   double get appPageTitleSize => appComponentProfile.pageTitleSize;
 
@@ -378,30 +552,51 @@ extension AppThemeContext on BuildContext {
 
   double get appCaptionSmallSize => appComponentProfile.captionSmallSize;
 
-  /// Scroll padding so last rows clear the overlaid bottom bar (`extendBody`).
+  /// Scroll padding so last rows clear overlaid bottom chrome (`extendBody`).
+  /// Derived from real nav bar metrics + system inset (not a fixed 140/88).
   double get appContentBottomPadding {
-    if (!appUsesMobileShell) return KaiBrandLayout.desktopBottomPadding;
-    // Short landscape: bar is thinner and often icon-only.
-    if (appIsShortViewport) return 88;
-    return KaiBrandLayout.mobileBottomPadding;
+    return resolveAppContentBottomPadding(
+      mobileShell: appUsesMobileShell,
+      shortViewport: appIsShortViewport,
+      systemBottomInset: MediaQuery.paddingOf(this).bottom,
+    );
+  }
+
+  /// Floating action (e.g. library import) distance from the bottom edge.
+  double get appFabBottomInset {
+    final viewPad = MediaQuery.viewPaddingOf(this);
+    return resolveAppFabBottomInset(
+      mobileShell: appUsesMobileShell,
+      shortViewport: appIsShortViewport,
+      systemBottomInset: MediaQuery.paddingOf(this).bottom,
+      viewPaddingBottom: viewPad.bottom,
+    );
+  }
+
+  /// Floating action trailing inset (gutter + system edge + hinge boost).
+  double get appFabTrailingInset {
+    return appPageGutter + MediaQuery.viewPaddingOf(this).right;
   }
 
   /// Max fraction of viewport height for reader tool-strip expand panels.
   double get appReaderToolPanelMaxHeightFraction =>
       appIsShortViewport ? 0.38 : 0.48;
 
-  double get appSidebarWidth => switch (appWindowClass) {
-    AppWindowClass.compact => 0,
-    AppWindowClass.medium => KaiBrandLayout.mediumSidebarWidth,
-    AppWindowClass.wide => KaiBrandLayout.wideSidebarWidth,
-  };
+  double get appSidebarWidth {
+    if (!appUsesSideRail) return 0;
+    return switch (appWindowClass) {
+      AppWindowClass.compact => KaiBrandLayout.mediumSidebarWidth,
+      AppWindowClass.medium => KaiBrandLayout.mediumSidebarWidth,
+      AppWindowClass.wide => KaiBrandLayout.wideSidebarWidth,
+    };
+  }
 
   ButtonStyle get appDestructiveButtonStyle {
     final error = appColors.error;
     return ButtonStyle(
       foregroundColor: WidgetStateProperty.resolveWith<Color>((states) {
         if (states.contains(WidgetState.disabled)) {
-          return error.withValues(alpha: 0.38);
+          return error.withValues(alpha: appDisabledForegroundOpacity);
         }
         return error;
       }),
