@@ -16,6 +16,7 @@ import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
 import '../widgets/cover_card_ink.dart';
 import '../widgets/selection_action_sheet.dart';
+import '../widgets/settings_components.dart';
 
 /// 合集 directory (book-cover-sized collage cards).
 class CollectionsScreen extends StatelessWidget {
@@ -39,7 +40,7 @@ class CollectionsScreen extends StatelessWidget {
     ComicReadingPreferences? readingPreferences,
     BookReadingPreferences? bookReadingPreferences,
   }) {
-    return Navigator.of(context, rootNavigator: true).push<void>(
+    return Navigator.of(context).push<void>(
       appPageRoute<void>(
         (_) => CollectionsScreen(
           brand: brand,
@@ -70,109 +71,113 @@ class CollectionsScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SafeArea(
-            bottom: false,
-            child: Padding(
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppSettingsContent(
               padding: EdgeInsets.fromLTRB(
-                4,
-                context.appIsCompact ? 8 : 12,
-                8,
-                4,
+                hPad,
+                AppSettingsMetrics.pageTop(context),
+                hPad,
+                AppSpacing.x3,
               ),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: '返回',
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    icon: Icon(
-                      KaijuanIcons.back,
-                      weight: 300,
-                      color: context.appPrimaryText,
-                    ),
-                  ),
-                  Text(
-                    '合集',
-                    style: TextStyle(
-                      fontSize: context.appPageTitleSize,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
-                      color: context.appPrimaryText,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: '新建合集',
+              child: AppSettingsPageHeader(
+                title: '合集',
+                onBack: () => Navigator.of(context).maybePop(),
+                actions: [
+                  OutlinedButton.icon(
                     onPressed: () => _create(context),
-                    icon: Icon(
-                      KaijuanIcons.add,
-                      weight: 300,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                    icon: const Icon(KaijuanIcons.add),
+                    label: const Text('新建合集'),
                   ),
                 ],
               ),
             ),
-          ),
-          Expanded(
-            child: StreamBuilder<List<CollectionSummary>>(
-              stream: controller.watchCollections(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return AppEmptyState(
-                    icon: KaijuanIcons.error,
-                    title: '合集加载失败',
-                    message: '返回书库后再试一次。',
-                    actionLabel: '返回书库',
-                    onAction: () => Navigator.of(context).maybePop(),
-                  );
-                }
-                final list = snapshot.data ?? const <CollectionSummary>[];
-                if (list.isEmpty) {
-                  return AppEmptyState(
-                    icon: KaijuanIcons.collections,
-                    title: '还没有合集',
-                    message: '新建合集后，可以从书库把书加入进来。',
-                    actionLabel: '新建合集',
-                    onAction: () => _create(context),
-                  );
-                }
-                return GridView.builder(
-                  padding: EdgeInsets.fromLTRB(
-                    hPad,
-                    8,
-                    hPad,
-                    context.appContentBottomPadding,
-                  ),
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 160,
-                    mainAxisSpacing: 16,
-                    crossAxisSpacing: 16,
-                    childAspectRatio: 0.58,
-                  ),
-                  itemCount: list.length,
-                  itemBuilder: (context, i) {
-                    final s = list[i];
-                    return _CollectionGridCard(
-                      summary: s,
-                      onTap: () => CollectionDetailScreen.open(
-                        context,
-                        brand: brand,
-                        controller: controller,
-                        collection: s.collection,
-                        readingPreferences: readingPreferences,
-                        bookReadingPreferences: bookReadingPreferences,
+            Expanded(
+              child: StreamBuilder<List<CollectionSummary>>(
+                stream: controller.watchCollections(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: EdgeInsets.fromLTRB(
+                        hPad,
+                        AppSpacing.x8 * 2,
+                        hPad,
+                        context.appContentBottomPadding,
                       ),
-                      onLongPress: () => _menu(context, s),
+                      icon: KaijuanIcons.error,
+                      title: '合集加载失败',
+                      message: '返回书库后再试一次。',
+                      actionLabel: '返回书库',
+                      onAction: () => Navigator.of(context).maybePop(),
                     );
-                  },
-                );
-              },
+                  }
+                  final list = snapshot.data ?? const <CollectionSummary>[];
+                  if (list.isEmpty) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: EdgeInsets.fromLTRB(
+                        hPad,
+                        AppSpacing.x8 * 2,
+                        hPad,
+                        context.appContentBottomPadding,
+                      ),
+                      icon: KaijuanIcons.collections,
+                      title: '还没有合集',
+                      message: '新建合集后，可以从书库把书加入进来。',
+                      actionLabel: '新建合集',
+                      onAction: () => _create(context),
+                    );
+                  }
+                  return Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: AppSettingsMetrics.maxContentWidth,
+                      ),
+                      child: GridView.builder(
+                        padding: EdgeInsets.fromLTRB(
+                          hPad,
+                          AppSpacing.x3,
+                          hPad,
+                          context.appContentBottomPadding,
+                        ),
+                        gridDelegate:
+                            SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent:
+                                  context.appCoverGridMaxExtent,
+                              mainAxisSpacing: AppSpacing.x6,
+                              crossAxisSpacing: AppSpacing.x4,
+                              childAspectRatio: 0.65,
+                            ),
+                        itemCount: list.length,
+                        itemBuilder: (context, i) {
+                          final summary = list[i];
+                          return _CollectionGridCard(
+                            summary: summary,
+                            onTap: () => CollectionDetailScreen.open(
+                              context,
+                              brand: brand,
+                              controller: controller,
+                              collection: summary.collection,
+                              readingPreferences: readingPreferences,
+                              bookReadingPreferences: bookReadingPreferences,
+                            ),
+                            onLongPress: () => _menu(context, summary),
+                            onMore: () => _menu(context, summary),
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -194,6 +199,7 @@ class CollectionsScreen extends StatelessWidget {
                     context,
                     title: '重命名合集',
                     initial: s.collection.name,
+                    confirmLabel: '保存',
                   );
                   if (name == null || name.isEmpty) return;
                   await controller.renameCollection(s.collection.id, name);
@@ -222,7 +228,7 @@ class CollectionsScreen extends StatelessWidget {
                     context,
                     title: '删除合集？',
                     message: '删除「${s.collection.name}」不会删除书库里的条目。',
-                    confirmLabel: '删除',
+                    confirmLabel: '删除合集',
                     destructive: true,
                   );
                   if (ok == true) {
@@ -244,48 +250,65 @@ class _CollectionGridCard extends StatelessWidget {
     required this.summary,
     required this.onTap,
     required this.onLongPress,
+    required this.onMore,
   });
 
   final CollectionSummary summary;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final VoidCallback onMore;
 
   @override
   Widget build(BuildContext context) {
     return CoverCardInk(
       onTap: onTap,
       onLongPress: onLongPress,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppProductRadii.cover),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(child: CollectionCover(coverPaths: summary.coverPaths)),
           const SizedBox(height: 8),
           SizedBox(
-            // 20px title + 2px gap + 14.4px metadata line.
-            height: 38,
-            child: Column(
+            height: 40,
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  summary.collection.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.appGridTitleStyle.copyWith(
-                    color: context.appPrimaryText,
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Tooltip(
+                        message: summary.collection.name,
+                        child: Text(
+                          summary.collection.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.appGridTitleStyle.copyWith(
+                            color: context.appPrimaryText,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${summary.memberCount} 本',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: context.appCaptionSmallSize,
+                          height: 1.2,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '${summary.memberCount} 本',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: context.appCaptionSmallSize,
-                    height: 1.2,
-                    color: context.appSecondaryText,
-                  ),
+                AppIconButton(
+                  icon: KaijuanIcons.more,
+                  tooltip: '管理合集',
+                  onPressed: onMore,
+                  visualDensity: VisualDensity.compact,
                 ),
               ],
             ),
@@ -320,7 +343,7 @@ class CollectionDetailScreen extends StatefulWidget {
     ComicReadingPreferences? readingPreferences,
     BookReadingPreferences? bookReadingPreferences,
   }) {
-    return Navigator.of(context, rootNavigator: true).push<void>(
+    return Navigator.of(context).push<void>(
       appPageRoute<void>(
         (_) => CollectionDetailScreen(
           brand: brand,
@@ -340,6 +363,26 @@ class CollectionDetailScreen extends StatefulWidget {
 class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   bool _selecting = false;
   final Set<String> _selected = {};
+  late Stream<List<ReadingItem>> _membersStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _membersStream = widget.controller.watchCollectionMembers(
+      widget.collection.id,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant CollectionDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.collection.id != widget.collection.id) {
+      _membersStream = widget.controller.watchCollectionMembers(
+        widget.collection.id,
+      );
+    }
+  }
 
   void _enterSelecting([String? firstId]) {
     setState(() {
@@ -557,220 +600,223 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SafeArea(
-            bottom: false,
-            child: Padding(
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppSettingsContent(
               padding: EdgeInsets.fromLTRB(
-                4,
-                context.appIsCompact ? 8 : 12,
-                8,
-                4,
+                hPad,
+                AppSettingsMetrics.pageTop(context),
+                hPad,
+                AppSpacing.x3,
               ),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: _selecting ? '取消选择' : '返回',
-                    onPressed: _selecting
-                        ? _exitSelecting
-                        : () => Navigator.of(context).maybePop(),
-                    icon: Icon(
-                      _selecting ? KaijuanIcons.close : KaijuanIcons.back,
-                      weight: 300,
-                      color: context.appPrimaryText,
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      _selecting
-                          ? '已选 ${_selected.length}'
-                          : widget.collection.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: context.appPageTitleSize,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: -0.2,
-                        color: context.appPrimaryText,
-                      ),
-                    ),
-                  ),
+              child: AppSettingsPageHeader(
+                title: _selecting
+                    ? '已选 ${_selected.length} 本'
+                    : widget.collection.name,
+                onBack: _selecting
+                    ? _exitSelecting
+                    : () => Navigator.of(context).maybePop(),
+                actions: [
                   if (!_selecting)
-                    IconButton(
-                      tooltip: '多选',
+                    OutlinedButton.icon(
                       onPressed: () => _enterSelecting(),
-                      icon: Icon(
-                        KaijuanIcons.multiselect,
-                        weight: 300,
-                        color: context.appSecondaryText,
-                      ),
+                      icon: const Icon(KaijuanIcons.multiselect),
+                      label: const Text('多选管理'),
                     ),
                 ],
               ),
             ),
-          ),
-          Expanded(
-            child: StreamBuilder<List<ReadingItem>>(
-              stream: widget.controller.watchCollectionMembers(
-                widget.collection.id,
-              ),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return AppEmptyState(
-                    icon: KaijuanIcons.error,
-                    title: '合集内容加载失败',
-                    message: '返回书库后再试一次。',
-                    actionLabel: '返回书库',
-                    onAction: () => Navigator.of(context).maybePop(),
-                  );
-                }
-                final items = snapshot.data ?? const <ReadingItem>[];
-                if (items.isEmpty) {
-                  return AppEmptyState(
-                    icon: KaijuanIcons.collections,
-                    title: '合集里还没有书',
-                    message: '回到书库，多选书籍后加入这个合集。',
-                    actionLabel: '返回书库',
-                    onAction: () => Navigator.of(context).maybePop(),
-                  );
-                }
-                return Column(
-                  children: [
-                    Expanded(
-                      child: GridView.builder(
-                        padding: EdgeInsets.fromLTRB(
-                          hPad,
-                          8,
-                          hPad,
-                          context.appContentBottomPadding,
-                        ),
-                        gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 160,
-                              mainAxisSpacing: 16,
-                              crossAxisSpacing: 16,
-                              childAspectRatio: 0.58,
+            Expanded(
+              child: StreamBuilder<List<ReadingItem>>(
+                stream: _membersStream,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: EdgeInsets.fromLTRB(
+                        hPad,
+                        AppSpacing.x8 * 2,
+                        hPad,
+                        context.appContentBottomPadding,
+                      ),
+                      icon: KaijuanIcons.error,
+                      title: '合集内容加载失败',
+                      message: '返回书库后再试一次。',
+                      actionLabel: '返回书库',
+                      onAction: () => Navigator.of(context).maybePop(),
+                    );
+                  }
+                  final items = snapshot.data ?? const <ReadingItem>[];
+                  if (items.isEmpty) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: EdgeInsets.fromLTRB(
+                        hPad,
+                        AppSpacing.x8 * 2,
+                        hPad,
+                        context.appContentBottomPadding,
+                      ),
+                      icon: KaijuanIcons.collections,
+                      title: '合集里还没有书',
+                      message: '回到书库，多选书籍后加入这个合集。',
+                      actionLabel: '返回书库',
+                      onAction: () => Navigator.of(context).maybePop(),
+                    );
+                  }
+                  return Column(
+                    children: [
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: AppSettingsMetrics.maxContentWidth,
                             ),
-                        itemCount: items.length,
-                        itemBuilder: (context, i) {
-                          final item = items[i];
-                          final isSelected = _selected.contains(item.id);
-                          return CoverCardInk(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: () => _onTap(item),
-                            onLongPress: () => _onLongPress(item),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: SoftCoverFrame(
-                                    child: Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        item.coverPath != null
-                                            ? Image.file(
-                                                File(item.coverPath!),
-                                                fit: BoxFit.cover,
-                                                width: double.infinity,
-                                                errorBuilder: (_, _, _) =>
-                                                    ColoredBox(
-                                                      color: Theme.of(
-                                                        context,
-                                                      ).scaffoldBackgroundColor,
+                            child: GridView.builder(
+                              padding: EdgeInsets.fromLTRB(
+                                hPad,
+                                AppSpacing.x3,
+                                hPad,
+                                context.appContentBottomPadding,
+                              ),
+                              gridDelegate:
+                                  SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent:
+                                        context.appCoverGridMaxExtent,
+                                    mainAxisSpacing: AppSpacing.x6,
+                                    crossAxisSpacing: AppSpacing.x4,
+                                    childAspectRatio: 0.65,
+                                  ),
+                              itemCount: items.length,
+                              itemBuilder: (context, i) {
+                                final item = items[i];
+                                final isSelected = _selected.contains(item.id);
+                                return CoverCardInk(
+                                  borderRadius: BorderRadius.circular(
+                                    AppProductRadii.cover,
+                                  ),
+                                  onTap: () => _onTap(item),
+                                  onLongPress: () => _onLongPress(item),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: SoftCoverFrame(
+                                          child: Stack(
+                                            fit: StackFit.expand,
+                                            children: [
+                                              item.coverPath != null
+                                                  ? Image.file(
+                                                      File(item.coverPath!),
+                                                      fit: BoxFit.cover,
+                                                      width: double.infinity,
+                                                      errorBuilder: (_, _, _) =>
+                                                          const ColoredBox(
+                                                            color: AppColors
+                                                                .lightWash,
+                                                          ),
+                                                    )
+                                                  : const ColoredBox(
+                                                      color:
+                                                          AppColors.lightWash,
                                                     ),
-                                              )
-                                            : ColoredBox(
-                                                color: Theme.of(
-                                                  context,
-                                                ).scaffoldBackgroundColor,
-                                              ),
-                                        if (_selecting)
-                                          Positioned(
-                                            right: 6,
-                                            bottom: 6,
-                                            child: CoverSelectBadge(
-                                              selected: isSelected,
-                                            ),
+                                              if (_selecting)
+                                                Positioned(
+                                                  right: 6,
+                                                  bottom: 6,
+                                                  child: CoverSelectBadge(
+                                                    selected: isSelected,
+                                                  ),
+                                                ),
+                                            ],
                                           ),
-                                      ],
-                                    ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: AppSpacing.x2),
+                                      Tooltip(
+                                        message: item.title,
+                                        child: Text(
+                                          item.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: context.appGridTitleStyle
+                                              .copyWith(
+                                                color: context.appPrimaryText,
+                                              ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  height: 24,
-                                  child: Text(
-                                    item.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: context.appGridTitleStyle.copyWith(
-                                      color: context.appPrimaryText,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                                );
+                              },
                             ),
-                          );
-                        },
+                          ),
+                        ),
                       ),
-                    ),
-                    if (_selecting)
-                      SelectionActionSheet(
-                        selectedCount: _selected.length,
-                        totalVisible: items.length,
-                        onSelectAll: () => _selectAll(items),
-                        onDone: _exitSelecting,
-                        actions: [
-                          SelectionActionItem(
-                            icon: KaijuanIcons.removeFromCollection,
-                            label: '移出合集',
-                            onTap: _selected.isEmpty
-                                ? null
-                                : _batchRemoveFromCollection,
+                      if (_selecting)
+                        AppSettingsContent(
+                          child: SelectionActionSheet(
+                            selectedCount: _selected.length,
+                            totalVisible: items.length,
+                            onSelectAll: () => _selectAll(items),
+                            onDone: _exitSelecting,
+                            actions: [
+                              SelectionActionItem(
+                                icon: KaijuanIcons.removeFromCollection,
+                                label: '移出合集',
+                                onTap: _selected.isEmpty
+                                    ? null
+                                    : _batchRemoveFromCollection,
+                              ),
+                              SelectionActionItem(
+                                icon: KaijuanIcons.moveToCollection,
+                                label: '移到合集',
+                                onTap: _selected.isEmpty
+                                    ? null
+                                    : _batchMoveToCollection,
+                              ),
+                              SelectionActionItem(
+                                icon: KaijuanIcons.bookmarkAdd,
+                                label: '加入书架',
+                                onTap: _selected.isEmpty
+                                    ? null
+                                    : () => _batchShelf(onShelf: true),
+                              ),
+                              SelectionActionItem(
+                                icon: KaijuanIcons.bookmarkRemove,
+                                label: '移出书架',
+                                destructive: true,
+                                onTap: _selected.isEmpty
+                                    ? null
+                                    : () => _batchShelf(onShelf: false),
+                              ),
+                              SelectionActionItem(
+                                icon: KaijuanIcons.playlistAdd,
+                                label: '加入书单',
+                                onTap: _selected.isEmpty
+                                    ? null
+                                    : _batchAddToList,
+                              ),
+                              SelectionActionItem(
+                                icon: KaijuanIcons.delete,
+                                label: '删除',
+                                destructive: true,
+                                onTap: _selected.isEmpty ? null : _batchDelete,
+                              ),
+                            ],
                           ),
-                          SelectionActionItem(
-                            icon: KaijuanIcons.moveToCollection,
-                            label: '移到合集',
-                            onTap: _selected.isEmpty
-                                ? null
-                                : _batchMoveToCollection,
-                          ),
-                          SelectionActionItem(
-                            icon: KaijuanIcons.bookmarkAdd,
-                            label: '加入书架',
-                            onTap: _selected.isEmpty
-                                ? null
-                                : () => _batchShelf(onShelf: true),
-                          ),
-                          SelectionActionItem(
-                            icon: KaijuanIcons.bookmarkRemove,
-                            label: '移出书架',
-                            destructive: true,
-                            onTap: _selected.isEmpty
-                                ? null
-                                : () => _batchShelf(onShelf: false),
-                          ),
-                          SelectionActionItem(
-                            icon: KaijuanIcons.playlistAdd,
-                            label: '加入书单',
-                            onTap: _selected.isEmpty ? null : _batchAddToList,
-                          ),
-                          SelectionActionItem(
-                            icon: KaijuanIcons.delete,
-                            label: '删除',
-                            destructive: true,
-                            onTap: _selected.isEmpty ? null : _batchDelete,
-                          ),
-                        ],
-                      ),
-                  ],
-                );
-              },
+                        ),
+                    ],
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

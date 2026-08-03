@@ -23,12 +23,16 @@ class ShelfScreen extends StatelessWidget {
     required this.libraryController,
     this.readingPreferences,
     this.bookReadingPreferences,
+    this.onOpenLibrary,
   });
 
   final BrandConfig brand;
   final LibraryController libraryController;
   final ComicReadingPreferences? readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
+
+  /// Switches the shell to the library tab (empty-state CTA).
+  final VoidCallback? onOpenLibrary;
 
   void _openReal(BuildContext context, ReadingItem item) {
     openReadingItem(
@@ -93,11 +97,21 @@ class ShelfScreen extends StatelessWidget {
           return StreamBuilder<List<ReadingItem>>(
             stream: libraryController.watchOnShelf(),
             builder: (context, shelfSnap) {
-              final recent = recentSnap.data ?? const <ContinueReadingEntry>[];
-              final onShelf = shelfSnap.data ?? const <ReadingItem>[];
+              // Honest loading: don't flash the empty state before first emit.
+              if (!recentSnap.hasData || !shelfSnap.hasData) {
+                return const AppEmptyState(
+                  icon: KaijuanIcons.bookOpen,
+                  title: '加载中',
+                  message: '正在读取书架…',
+                  loading: true,
+                );
+              }
+
+              final recent = recentSnap.data!;
+              final onShelf = shelfSnap.data!;
 
               if (recent.isEmpty && onShelf.isEmpty) {
-                return const _EmptyShelf();
+                return _EmptyShelf(onOpenLibrary: onOpenLibrary);
               }
 
               return ListView(
@@ -115,7 +129,6 @@ class ShelfScreen extends StatelessWidget {
                       title: recent.first.item.title,
                       progress: recent.first.progressFraction ?? 0,
                       accent: accent,
-                      surface: Theme.of(context).colorScheme.surface,
                       hairline: context.appDivider,
                       muted: context.appSecondaryText,
                       cover: _FileOrFallbackCover(
@@ -133,6 +146,9 @@ class ShelfScreen extends StatelessWidget {
                         height: 200,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
+                          // End inset so the last cover can clear the edge and
+                          // the next item peeks when more remain.
+                          padding: const EdgeInsetsDirectional.only(end: 24),
                           itemCount: recent.length - 1,
                           separatorBuilder: (_, _) => const SizedBox(width: 12),
                           itemBuilder: (context, i) {
@@ -162,6 +178,7 @@ class ShelfScreen extends StatelessWidget {
                       height: 180,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsetsDirectional.only(end: 24),
                         itemCount: onShelf.length,
                         separatorBuilder: (_, _) => const SizedBox(width: 12),
                         itemBuilder: (context, i) {
@@ -179,6 +196,7 @@ class ShelfScreen extends StatelessWidget {
                             onTap: () => _openReal(context, item),
                             onLongPress: () =>
                                 _showShelfItemMenu(context, item),
+                            onRemove: () => _removeFromShelf(context, item),
                           );
                         },
                       ),
@@ -217,7 +235,6 @@ class _HeroCard extends StatelessWidget {
     required this.title,
     required this.progress,
     required this.accent,
-    required this.surface,
     required this.hairline,
     required this.muted,
     required this.cover,
@@ -227,7 +244,6 @@ class _HeroCard extends StatelessWidget {
   final String title;
   final double progress;
   final Color accent;
-  final Color surface;
   final Color hairline;
   final Color muted;
   final Widget cover;
@@ -243,70 +259,72 @@ class _HeroCard extends StatelessWidget {
         child: Semantics(
           button: true,
           label: '继续阅读$title',
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(AppRadii.card),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(width: 96, height: 128, child: cover),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: SizedBox(
-                        height: 128,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: context.appTitleSize,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: -0.15,
-                                height: 1.25,
-                              ),
+          child: CoverCardInk(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 96,
+                    height: 128,
+                    child: SoftCoverFrame(child: cover),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: SizedBox(
+                      height: 128,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: context.appTitleSize,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.15,
+                              height: 1.25,
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '继续阅读',
-                              style: TextStyle(
-                                fontSize: context.appCaptionSize,
-                                fontWeight: FontWeight.w600,
-                                color: accent,
-                                letterSpacing: 0.2,
-                              ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '继续阅读',
+                            style: TextStyle(
+                              fontSize: context.appCaptionSize,
+                              fontWeight: FontWeight.w600,
+                              color: accent,
+                              letterSpacing: 0.2,
                             ),
-                            const Spacer(),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(1),
-                              child: LinearProgressIndicator(
-                                value: p,
-                                minHeight: 2,
-                                backgroundColor: hairline,
-                                color: accent,
-                              ),
+                          ),
+                          const Spacer(),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(1),
+                            child: LinearProgressIndicator(
+                              value: p,
+                              minHeight: 2,
+                              backgroundColor: hairline,
+                              color: accent,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${(p * 100).round()}%',
-                              style: TextStyle(
-                                fontSize: context.appCaptionSmallSize,
-                                color: muted,
-                                letterSpacing: 0.2,
-                              ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${(p * 100).round()}%',
+                            style: TextStyle(
+                              fontSize: context.appCaptionSmallSize,
+                              color: muted,
+                              letterSpacing: 0.2,
+                              fontFeatures: const [FontFeature.tabularFigures()],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -324,6 +342,7 @@ class _CoverCard extends StatelessWidget {
     required this.hairline,
     required this.onTap,
     this.onLongPress,
+    this.onRemove,
     this.progress,
   });
 
@@ -334,6 +353,9 @@ class _CoverCard extends StatelessWidget {
   final Color hairline;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+
+  /// Optional cover control to remove a pinned shelf item (spec: 封面按钮).
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -349,7 +371,20 @@ class _CoverCard extends StatelessWidget {
             SizedBox(
               width: 112,
               height: 150,
-              child: SoftCoverFrame(child: cover),
+              child: SoftCoverFrame(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    cover,
+                    if (onRemove != null)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: _CoverRemoveButton(onPressed: onRemove!),
+                      ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -366,16 +401,51 @@ class _CoverCard extends StatelessWidget {
             if (progress != null) ...[
               const SizedBox(height: 4),
               ClipRRect(
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.circular(1),
                 child: LinearProgressIndicator(
                   value: progress!.clamp(0.0, 1.0),
-                  minHeight: 3,
+                  minHeight: 2,
                   backgroundColor: hairline,
                   color: accent,
                 ),
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact remove control on pinned covers (meets hit target with padding).
+class _CoverRemoveButton extends StatelessWidget {
+  const _CoverRemoveButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '移出我的书架',
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          // Absorb the tap so the parent cover onTap does not also fire.
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: const SizedBox(
+            width: 28,
+            height: 28,
+            child: Center(
+              child: Icon(
+                KaijuanIcons.bookmarkRemove,
+                size: 14,
+                color: Colors.white,
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -411,14 +481,18 @@ class _FileOrFallbackCover extends StatelessWidget {
 }
 
 class _EmptyShelf extends StatelessWidget {
-  const _EmptyShelf();
+  const _EmptyShelf({this.onOpenLibrary});
+
+  final VoidCallback? onOpenLibrary;
 
   @override
   Widget build(BuildContext context) {
-    return const AppEmptyState(
+    return AppEmptyState(
       icon: KaijuanIcons.bookOpen,
       title: '还没有阅读记录',
       message: '从书库打开一本书后，会在这里继续阅读。',
+      actionLabel: onOpenLibrary != null ? '去书库' : null,
+      onAction: onOpenLibrary,
     );
   }
 }

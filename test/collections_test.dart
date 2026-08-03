@@ -99,4 +99,33 @@ void main() {
     ];
     expect(visibleSingles, isEmpty);
   });
+
+  test('collection member stream emits after removing members', () async {
+    final a = await _cbz(temp, 'stream-a.cbz', 'a.png');
+    final b = await _cbz(temp, 'stream-b.cbz', 'b.png');
+    await controller.importPaths([a.path, b.path]);
+    final items = await controller.watchLibraryEntries().first;
+    final colId = await controller.createCollection('流刷新');
+    await controller.addItemsToCollection(
+      collectionId: colId,
+      itemIds: items.map((entry) => entry.item.id),
+    );
+
+    final events = <List<ReadingItem>>[];
+    final subscription = controller
+        .watchCollectionMembers(colId)
+        .listen(events.add);
+    addTearDown(subscription.cancel);
+    await Future<void>.delayed(Duration.zero);
+
+    await controller.removeItemsFromCollection(
+      collectionId: colId,
+      itemIds: [items.first.item.id],
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(events, isNotEmpty);
+    expect(events.last, hasLength(1));
+    expect(events.last.single.id, items[1].item.id);
+  });
 }

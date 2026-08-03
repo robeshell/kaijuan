@@ -21,12 +21,16 @@ class CollectionCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final paths = coverPaths.take(4).toList();
     final light = Theme.of(context).brightness == Brightness.light;
+    final base = light ? AppColors.lightWash : context.appColors.surface;
+    final emptySlot = light
+        ? AppColors.lightWash.withValues(alpha: 0.5)
+        : context.appColors.surfaceContainerHighest.withValues(alpha: 0.55);
 
     return SoftCoverFrame(
       key: ValueKey(paths.join('|')),
       radius: borderRadius,
       child: ColoredBox(
-        color: light ? AppColors.lightWash : context.appColors.surface,
+        color: base,
         child: paths.isEmpty
             ? Center(
                 child: Icon(
@@ -38,16 +42,20 @@ class CollectionCover extends StatelessWidget {
               )
             : paths.length == 1
             ? _thumb(context, paths[0])
-            : _grid(context, paths),
+            : _grid(context, paths, emptySlot: emptySlot),
       ),
     );
   }
 
-  Widget _grid(BuildContext context, List<String> paths) {
-    // 2×2 cells; missing slots stay wash.
+  Widget _grid(
+    BuildContext context,
+    List<String> paths, {
+    required Color emptySlot,
+  }) {
+    // 2×2 cells; missing slots stay on the surface ramp (not a light wash in dark).
     Widget cell(int i) {
       if (i >= paths.length) {
-        return ColoredBox(color: AppColors.lightWash.withValues(alpha: 0.5));
+        return ColoredBox(color: emptySlot);
       }
       return _thumb(context, paths[i]);
     }

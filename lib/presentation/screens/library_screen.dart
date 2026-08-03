@@ -131,6 +131,19 @@ class _LibraryScreenState extends State<LibraryScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Honor system reduce-motion: skip staged import-menu timing.
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    _importMenuController.duration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 420);
+    _importMenuController.reverseDuration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 260);
+  }
+
+  @override
   void dispose() {
     _importMenuController.dispose();
     _searchController.dispose();
@@ -740,13 +753,17 @@ class _LibraryScreenState extends State<LibraryScreen>
                 Builder(
                   builder: (context) {
                     final option = _importMenuOptions[index];
+                    final reduceMotion =
+                        MediaQuery.disableAnimationsOf(context);
                     final start = index * 0.1;
                     final end = 0.62 + index * 0.075;
-                    final itemProgress = Interval(
-                      start,
-                      end,
-                      curve: Curves.easeOutBack,
-                    ).transform(progress).clamp(0.0, 1.0).toDouble();
+                    final itemProgress = reduceMotion
+                        ? (progress > 0 ? 1.0 : 0.0)
+                        : Interval(
+                            start,
+                            end,
+                            curve: Curves.easeOutCubic,
+                          ).transform(progress).clamp(0.0, 1.0).toDouble();
                     final foreground = option.enabled
                         ? context.appPrimaryText
                         : context.appMutedText;
@@ -878,21 +895,25 @@ class _LibraryScreenState extends State<LibraryScreen>
                   },
                 ),
           filled: true,
-          fillColor: AppColors.lightWash,
+          // Follow theme input fill (elevated light / subtle dark), not a
+          // hard-coded light wash that breaks dark skins.
+          fillColor:
+              Theme.of(context).inputDecorationTheme.fillColor ??
+              context.appColors.surfaceContainer,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
             vertical: 8,
           ),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadii.menu),
             borderSide: BorderSide.none,
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadii.menu),
             borderSide: BorderSide.none,
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadii.menu),
             borderSide: BorderSide(color: accent, width: 1.2),
           ),
         ),
@@ -903,12 +924,15 @@ class _LibraryScreenState extends State<LibraryScreen>
   Widget _buildLibraryHeader(
     BuildContext context,
     LibraryController controller, {
-    required bool wide,
+    required bool contentWide,
     required bool showBrowseTools,
     required Color accent,
   }) {
     final hPad = context.appPageGutter;
     final muted = context.appSecondaryText;
+    // Anchored menus only when side-rail/desktop chrome; bottom-bar shells keep
+    // sheet menus for touch.
+    final anchoredMenus = !context.appUsesMobileShell;
 
     void openLists() {
       ListsScreen.open(
@@ -983,7 +1007,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     Widget filterTitle() {
       return AppMenuButton<_LibraryFilterAction>(
         tooltip: '筛选书籍',
-        forceAnchored: wide,
+        forceAnchored: anchoredMenus,
         actions: _libraryFilterActions(controller),
         onSelected: (action) =>
             unawaited(_handleLibraryFilterAction(controller, action)),
@@ -1016,7 +1040,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(hPad, wide ? 20 : 12, hPad, 0),
+        padding: EdgeInsets.fromLTRB(hPad, contentWide ? 20 : 12, hPad, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1060,7 +1084,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                 alignment: Alignment.centerLeft,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    maxWidth: wide ? 420 : double.infinity,
+                    maxWidth: contentWide ? 420 : double.infinity,
                   ),
                   child: _searchField(accent: accent),
                 ),
@@ -1085,17 +1109,40 @@ class _LibraryScreenState extends State<LibraryScreen>
         builder: (context, _) {
           final c = widget.controller;
           final importing = c.isImporting;
-          // Wide chrome = text nav labels; gutters follow window class.
-          final wide = !context.appIsCompact;
+          // Content density (gutters/search) ≠ nav chrome (bottom bar vs rail).
+          final contentWide = context.appContentWide;
           return StreamBuilder<List<CollectionSummary>>(
             stream: c.watchCollections(),
             builder: (context, colSnap) {
               return StreamBuilder<List<LibraryEntry>>(
                 stream: c.watchLibraryEntries(),
                 builder: (context, snapshot) {
-                  final entries = snapshot.data ?? const <LibraryEntry>[];
-                  final allCollections =
-                      colSnap.data ?? const <CollectionSummary>[];
+                  // Honest loading: don't flash the empty state before first emit.
+                  if (!snapshot.hasData || !colSnap.hasData) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildLibraryHeader(
+                          context,
+                          c,
+                          contentWide: contentWide,
+                          showBrowseTools: false,
+                          accent: accent,
+                        ),
+                        const Expanded(
+                          child: AppEmptyState(
+                            icon: KaijuanIcons.library,
+                            title: '加载中',
+                            message: '正在读取书库…',
+                            loading: true,
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  final entries = snapshot.data!;
+                  final allCollections = colSnap.data!;
                   final hasContent =
                       entries.isNotEmpty || allCollections.isNotEmpty;
                   // 已在合集中的单本不在书库主列表重复出现。
@@ -1222,11 +1269,10 @@ class _LibraryScreenState extends State<LibraryScreen>
                     );
                   }
 
-                  // The mobile navigation bar sits over the shell body, so
-                  // keep the compact FAB fully above its safe-area band.
-                  final fabBottom = wide
-                      ? 24.0
-                      : context.appContentBottomPadding + 16;
+                  final fabCompact =
+                      context.appIsCompact || context.appIsShortViewport;
+                  final fabBottom = context.appFabBottomInset;
+                  final fabEnd = context.appFabTrailingInset;
                   return Stack(
                     children: [
                       Column(
@@ -1235,7 +1281,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                           _buildLibraryHeader(
                             context,
                             c,
-                            wide: wide,
+                            contentWide: contentWide,
                             showBrowseTools: hasContent,
                             accent: accent,
                           ),
@@ -1245,44 +1291,65 @@ class _LibraryScreenState extends State<LibraryScreen>
                       if (!_selecting) ...[
                         _buildImportMenu(
                           fabBottom: fabBottom,
-                          fabRight: context.appPageGutter,
-                          wide: wide,
+                          fabRight: fabEnd,
+                          wide: !fabCompact,
                         ),
-                        Positioned(
-                          right: context.appPageGutter,
+                        Positioned.directional(
+                          textDirection: Directionality.of(context),
+                          end: fabEnd,
                           bottom: fabBottom,
                           child: Semantics(
                             button: true,
                             label: '导入',
-                            child: FloatingActionButton(
-                              heroTag: 'library-import',
-                              tooltip: '导入',
-                              mini: !wide,
-                              onPressed: importing
-                                  ? null
-                                  : () =>
-                                        _toggleImportMenu(importing: importing),
-                              backgroundColor: accent,
-                              foregroundColor: Colors.white,
-                              elevation: 4,
-                              child: importing
-                                  ? const SizedBox.square(
-                                      dimension: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: context.appGlass.shadow,
+                                    blurRadius:
+                                        14 *
+                                        context.appSkinEffects.shadowScale,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: FloatingActionButton(
+                                heroTag: 'library-import',
+                                tooltip: '导入',
+                                mini: fabCompact,
+                                onPressed: importing
+                                    ? null
+                                    : () => _toggleImportMenu(
+                                        importing: importing,
                                       ),
-                                    )
-                                  : RotationTransition(
-                                      turns: Tween<double>(
-                                        begin: 0,
-                                        end: 0.125,
-                                      ).animate(_importMenuController),
-                                      child: Icon(
-                                        KaijuanIcons.add,
-                                        size: wide ? 25 : 22,
+                                backgroundColor: accent,
+                                foregroundColor: Colors.white,
+                                // Theme keeps Material elevation at 0; depth
+                                // comes from the glass shadow above.
+                                elevation: 0,
+                                focusElevation: 0,
+                                hoverElevation: 0,
+                                highlightElevation: 0,
+                                child: importing
+                                    ? const SizedBox.square(
+                                        dimension: 22,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : RotationTransition(
+                                        turns: Tween<double>(
+                                          begin: 0,
+                                          end: 0.125,
+                                        ).animate(_importMenuController),
+                                        child: Icon(
+                                          KaijuanIcons.add,
+                                          size: fabCompact ? 22 : 25,
+                                        ),
                                       ),
-                                    ),
+                              ),
                             ),
                           ),
                         ),
@@ -1334,11 +1401,14 @@ class _GridBody extends StatelessWidget {
         context.appPageGutter,
         context.appContentBottomPadding,
       ),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 160,
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+        // Fold-open / tablet: slightly larger tiles so covers don't stampede.
+        maxCrossAxisExtent: context.appCoverGridMaxExtent,
         mainAxisSpacing: 16,
         crossAxisSpacing: 16,
-        childAspectRatio: 0.58,
+        // Whole cell (cover + 8 + 20 title). ~0.65 keeps cover near 3:4
+        // like shelf cards; 0.58 made books read overly tall.
+        childAspectRatio: 0.65,
       ),
       itemCount: total,
       itemBuilder: (context, i) {
@@ -1441,15 +1511,17 @@ class _ListBody extends StatelessWidget {
           leading: SizedBox(
             width: 48,
             height: 64,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: item.coverPath != null
+            child: SoftCoverFrame(
+              radius: 6,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  item.coverPath != null
                       ? Image.file(
                           File(item.coverPath!),
                           fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
                           errorBuilder: (_, _, _) => ColoredBox(
                             color: Theme.of(context).scaffoldBackgroundColor,
                           ),
@@ -1457,14 +1529,14 @@ class _ListBody extends StatelessWidget {
                       : ColoredBox(
                           color: Theme.of(context).scaffoldBackgroundColor,
                         ),
-                ),
-                if (selecting)
-                  Positioned(
-                    right: 2,
-                    bottom: 2,
-                    child: CoverSelectBadge(selected: isSelected, size: 18),
-                  ),
-              ],
+                  if (selecting)
+                    Positioned(
+                      right: 2,
+                      bottom: 2,
+                      child: CoverSelectBadge(selected: isSelected, size: 18),
+                    ),
+                ],
+              ),
             ),
           ),
           title: Text(item.title),
@@ -1486,7 +1558,7 @@ class _LibraryCollectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return CoverCardInk(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppProductRadii.cover),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1545,73 +1617,80 @@ class _GridCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final item = entry.item;
-    return CoverCardInk(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      borderRadius: BorderRadius.circular(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: SoftCoverFrame(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  item.coverPath != null
-                      ? Image.file(
-                          File(item.coverPath!),
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          errorBuilder: (_, _, _) => ColoredBox(
+    return Semantics(
+      button: true,
+      selected: selecting && isSelected,
+      label: item.title,
+      child: CoverCardInk(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(AppProductRadii.cover),
+        // Multi-select is high-frequency; keep scale for open taps only.
+        enablePressScale: !selecting,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: SoftCoverFrame(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    item.coverPath != null
+                        ? Image.file(
+                            File(item.coverPath!),
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            errorBuilder: (_, _, _) => ColoredBox(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                            ),
+                          )
+                        : ColoredBox(
                             color: Theme.of(context).scaffoldBackgroundColor,
                           ),
-                        )
-                      : ColoredBox(
-                          color: Theme.of(context).scaffoldBackgroundColor,
-                        ),
-                  if (item.onShelf && !selecting)
-                    Positioned(
-                      top: 6,
-                      left: 6,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: const Padding(
-                          padding: EdgeInsets.all(3),
-                          child: Icon(
-                            KaijuanIcons.bookmarkFilled,
-                            size: 12,
-                            color: Colors.white,
+                    if (item.onShelf && !selecting)
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.35),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(
+                              KaijuanIcons.bookmarkFilled,
+                              size: 12,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  if (selecting)
-                    Positioned(
-                      right: 6,
-                      bottom: 6,
-                      child: CoverSelectBadge(selected: isSelected),
-                    ),
-                ],
+                    if (selecting)
+                      Positioned(
+                        right: 6,
+                        bottom: 6,
+                        child: CoverSelectBadge(selected: isSelected),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          // Keep the title band fixed so grid cells stay aligned.
-          SizedBox(
-            height: 20,
-            child: Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: context.appGridTitleStyle.copyWith(
-                color: context.appPrimaryText,
+            const SizedBox(height: 8),
+            // Keep the title band fixed so grid cells stay aligned.
+            SizedBox(
+              height: 20,
+              child: Text(
+                item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.appGridTitleStyle.copyWith(
+                  color: context.appPrimaryText,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
