@@ -3,8 +3,11 @@ package com.kaijuan.reader
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -73,27 +76,40 @@ class MainActivity : FlutterActivity() {
     }
 
     val dictionary = call.method == "openDictionary"
-    var intent = if (dictionary && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      Intent(ACTION_DEFINE).apply {
-        putExtra(Intent.EXTRA_TEXT, text)
+    val candidateIntents = buildList {
+      if (dictionary && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        add(
+          Intent(ACTION_DEFINE).apply {
+            putExtra(Intent.EXTRA_TEXT, text)
+          },
+        )
       }
-    } else {
-      processTextIntent(text)
+      add(processTextIntent(text))
     }
-
-    // Some dictionary apps expose only the standard text-processing action.
-    // Fall back to it when the newer Android DEFINE action has no handler.
-    if (intent.resolveActivity(packageManager) == null && dictionary) {
-      intent = processTextIntent(text)
+    val browserPackages = browserPackages()
+    val selectedIntent = candidateIntents.firstOrNull { intent ->
+      queryLanguageHandlers(intent, browserPackages).isNotEmpty()
     }
-    if (intent.resolveActivity(packageManager) == null) {
+    if (selectedIntent == null) {
       result.success(false)
       return
     }
+    val handlers = queryLanguageHandlers(selectedIntent, browserPackages)
+    val browserComponents = browserComponents()
 
     val chooserTitle = if (dictionary) "选择词典应用" else "选择翻译应用"
+    val chooser = Intent.createChooser(selectedIntent, chooserTitle)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && browserComponents.isNotEmpty()) {
+      chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, browserComponents.toTypedArray())
+    }
     try {
-      startActivity(Intent.createChooser(intent, chooserTitle))
+      // Keep Android's native chooser UI, but never let a browser become the
+      // only visible result for a dictionary/translation action.
+      if (handlers.size == 1) {
+        startActivity(selectedIntent.setComponent(handlers.first()))
+      } else {
+        startActivity(chooser)
+      }
       result.success(true)
     } catch (_: ActivityNotFoundException) {
       result.success(false)
@@ -108,6 +124,37 @@ class MainActivity : FlutterActivity() {
       putExtra(Intent.EXTRA_PROCESS_TEXT, text)
       putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
     }
+
+  private fun queryLanguageHandlers(
+    intent: Intent,
+    browserPackages: Set<String>,
+  ): List<ComponentName> = packageManager
+    .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+    .map { info ->
+      ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+    }
+    .filter { component ->
+      component.packageName != packageName && component.packageName !in browserPackages
+    }
+    .distinct()
+
+  private fun browserPackages(): Set<String> = packageManager
+    .queryIntentActivities(
+      Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")),
+      PackageManager.MATCH_DEFAULT_ONLY,
+    )
+    .map { info -> info.activityInfo.packageName }
+    .toSet()
+
+  private fun browserComponents(): Set<ComponentName> = packageManager
+    .queryIntentActivities(
+      Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")),
+      PackageManager.MATCH_DEFAULT_ONLY,
+    )
+    .map { info ->
+      ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+    }
+    .toSet()
 
   private fun installApk(call: MethodCall, result: MethodChannel.Result) {
     val path = call.argument<String>("path")
