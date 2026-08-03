@@ -75,6 +75,10 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - `WifiTransferService` 只负责临时局域网 HTTP、会话令牌和上传临时文件；上传完成后必须以 `ImportMethod.wifi` 交给 `ImportPipeline`，不得直接写正式目录或数据库。
 - `RemoteSourceController` 负责 WebDAV / OPDS 连接记录、凭据访问、目录状态和远程导入队列；表现层不得直接持有 HTTP 客户端或安全存储。
 - WebDAV / OPDS 适配器只负责协议解析和远程字节流，必须把选中的文件转换为 `ImportCandidate`，再交给 `ImportPipeline`；不得直接写正式文件或数据库。
+- `BackupService` 负责用户自有 WebDAV 的逻辑快照、内容寻址对象和恢复合并；不得复制 SQLite 文件，也不得把备份误当成实时同步。
+- WebDAV 导入与备份共用连接和凭据，但目录选择器分流：导入只把文件送入 `ImportPipeline`，备份只返回相对 WebDAV 根目录的文件夹路径，不进入导入队列。
+- `BackupController` 是设置页唯一入口；备份页面不得直接访问 Drift、`WebDavSession` 或安全凭据。
+- 备份清单使用 `contentHash` 和相对对象路径，不得持久化本机绝对 `filePath`、WebDAV 密码或临时缓存。
 
 详细的格式矩阵与方式状态见 [specs/import.md](./specs/import.md)。
 
@@ -85,6 +89,23 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - 选区词典 / 翻译由 `BookReaderController` 调用 `BookLanguageProvider`，表现层不直接持有平台通道。
 - 默认 `PlatformBookLanguageProvider` 只调用设备已有能力：Android 使用系统 Intent 选择器，Apple 使用系统词典 / Translation framework；不内置外网词典，也不发起网络请求。
 - `BookLanguageProvider` 的请求包含 `dictionary`、`selectionTranslation`、`fullBookTranslation` 三种操作；后续 AI Provider 可替换默认实现，承载单句结果或整本书任务，不改选区菜单协议。
+
+### 表现层导航边界
+
+- `AppShell` 持有根级书架 / 书库 / 设置状态，并在内容区提供嵌套 Navigator。书单、合集、导入确认、远程来源与 WebDAV 备份等管理型子页推入内容 Navigator，宽屏侧边栏和窄屏 BottomBar 不随子页消失。
+- 点击根导航目标时先清理内容 Navigator 的子页栈，再切换根页面，避免子页被错误保留到另一 Tab。
+- 漫画与图书阅读器继续使用 root Navigator，以维持沉浸式全屏和独立阅读 chrome。
+
+### 折叠屏 / 多窗口布局
+
+- 断点实现在 `lib/core/theme/context.dart`（`resolveAppWindowClass` 等纯函数 + context getter）；**宽度**决定 compact/medium/wide，**短高度**只走 `appIsShortViewport`（压缩底栏/工具面板），不再把宽折展开误判为 compact。
+- 导航 chrome 互斥且必有其一：
+  - 移动：宽 ≥ `kAppMobileSideRailMinWidth`（840）侧栏，否则底栏。
+  - 桌面：宽 ≥ `kAppDesktopSideRailMinWidth`（900）侧栏，更窄时临时底栏，避免窄窗被 216px rail 挤扁。
+- **内容密度** `appContentWide`（非 compact）与 **导航壳** `appUsesMobileShell` 正交：展开折可以「宽内容 + 底栏」或「宽内容 + 侧栏」，禁止用同一个 `wide` 混指两者。
+- 底 inset 动态计算：`AppNavigationChromeMetrics` 与底栏高度同步，`appContentBottomPadding` / `appFabBottomInset` = 栏高 + 系统底 inset + gap（不再写死 140/88）。
+- 封面网格 `appCoverGridMaxExtent` 随窗口类放大；中央竖折痕通过 `resolveHingeGutterBoost` 加 gutter。
+- Android `resizeableActivity=true`；图书 WebView 折叠切屏恢复见上文「图书排版实现」。
 
 ### 图书排版实现
 
@@ -208,16 +229,21 @@ dart run tool/release.dart android --no-bump
 
 # 已有 drift 生成物时可跳过 codegen
 dart run tool/release.dart android --no-bump --skip-codegen
+
+# macOS 本地包会同时产出 ZIP 和 DMG；DMG 内含 /Applications 拖拽入口
+dart run tool/release.dart macos --no-bump --skip-codegen
 ```
 
 | 平台 | 产物（`dist/`） | 宿主要求 |
 |------|-----------------|----------|
 | android | `kaijuan-x.y.z-android.apk`、`.aab` | 任意 |
 | ios | `kaijuan-x.y.z-ios-unsigned.zip` | macOS |
-| macos | `kaijuan-x.y.z-macos.zip`（`开卷.app`） | macOS |
+| macos | `kaijuan-x.y.z-macos.zip`、`.dmg`（`开卷.app`） | macOS |
 | windows | `kaijuan-x.y.z-windows.zip`；可选 `.msix`、`-setup.exe` | Windows |
 
 Windows 安装包细节见 [`packaging/windows/README.md`](../packaging/windows/README.md)。MSIX 依赖 `msix` dev 包与 `msix_config`（`pubspec.yaml`）；Setup.exe 需 [Inno Setup 6](https://jrsoftware.org/isinfo.php)。
+
+macOS 本地包使用 ad-hoc 签名，产物可用于本机安装和验收；外部分发仍需 Developer ID 签名与公证。可用 `codesign --verify --deep --strict build/macos/Build/Products/Release/开卷.app` 和 `hdiutil verify dist/kaijuan-x.y.z-macos.dmg` 做验证。
 
 **GitHub Release**：推送 `vMAJOR.MINOR.PATCH` tag 触发 `.github/workflows/release.yml`，为 Android / iOS / macOS / Windows 打 unsigned 包并上传 Release（不含 MSIX / Inno，那些仅本地 `release.dart windows` 产出）。
 
@@ -226,7 +252,7 @@ Windows 安装包细节见 [`packaging/windows/README.md`](../packaging/windows/
 | 平台 | 模板 / 位置 |
 |------|-------------|
 | Android | `android/key.properties.example` → 复制为 `key.properties` + upload keystore；当前 `build.gradle.kts` release 仍用 debug 签名 |
-| Apple | Xcode 开发/分发证书；CI 产物为 `--no-codesign` |
+| Apple | 本地便携包使用 ad-hoc 签名；商店包使用 Xcode 开发/分发证书；CI 产物为 `--no-codesign` |
 | Windows MSIX | `msix_config` 测试证书 sideload；商店需 Partner Center 身份 |
 
 bump 失败时 `release.dart` 会回滚 `pubspec.yaml`。

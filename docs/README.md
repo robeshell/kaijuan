@@ -35,7 +35,9 @@ docs/
   specs/
     _TEMPLATE.md
     library.md / shelf.md / search.md / lists.md / collections.md
+    subpages.md                     ← 管理型二级/子级页面统一骨架
     reader-chrome.md / comic-reader.md / book-reader.md / wifi-transfer.md
+    webdav-backup.md              ← WebDAV 快照备份与恢复
     book-reader-tool-strip-plan.md   ← 图书底栏工具条大改（计划）
     book-tts.md                      ← 听书方案（系统 TTS，不接 AI）
   opendesign/
@@ -87,8 +89,10 @@ docs/
 | import | 导入方式与导入格式两层链路 |
 | lists | **书单**（长清单） |
 | collections | **合集**（拼贴盒） |
+| subpages | 管理型二级/子级页面的统一布局、操作与状态 |
 | reader-chrome | 共享 chrome 语言 |
 | book-reader | book reflow（主链已落地） |
+| webdav-backup | 用户自有 WebDAV 备份与恢复 |
 | book-tts | 听书方案（未实现；Foliate 切句 + 系统 TTS） |
 | settings / mobile / overlay | **待写** |
 
