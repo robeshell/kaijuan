@@ -1,4 +1,5 @@
 /// Height of the book reader's top chrome bar (icon row inside SafeArea).
+/// Same value as shared [kReaderChromeBarHeight] in reader chrome top bar.
 const double kBookReaderChromeBarHeight = 56.0;
 
 /// Approximate bottom tool-strip content height (progress + keys), excluding
@@ -67,11 +68,12 @@ enum BookReadingTheme {
   };
 
   /// Soft meta labels (chapter / progress) for page chrome.
+  /// Kept quieter than body, but ≥ ~4.5:1 against the theme background.
   int get metaColorArgb => switch (this) {
-    paper => 0xFF999999,
-    sepia => 0xFF9A8B78,
-    dark => 0xFF7A7A7A,
-    pureBlack => 0xFF6A6A6A,
+    paper => 0xFF707070,
+    sepia => 0xFF7A6B5A,
+    dark => 0xFF888888,
+    pureBlack => 0xFF8A8A8A,
   };
 
   /// Primary serif for Latin body text (CJK via [serifFontFamilyFallback]).

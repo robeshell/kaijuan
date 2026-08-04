@@ -20,10 +20,13 @@ class BookPageMetaOverlay extends StatelessWidget {
     final edge = short ? 12.0 : 20.0;
     final vPad = short ? 6.0 : 10.0;
 
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return IgnorePointer(
       child: AnimatedOpacity(
         opacity: visible ? 1 : 0,
-        duration: const Duration(milliseconds: 180),
+        duration: reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 180),
         curve: Curves.easeOut,
         child: SafeArea(
           child: Padding(

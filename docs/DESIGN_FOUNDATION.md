@@ -79,6 +79,8 @@
 
 壳层字号遵循品牌层与 Kaijuan 产品层：统一语义角色和组件角色都通过 `AppComponentProfileTokens` / `context.app*Size` 使用 `KaiBrandMobileType` 或 `KaiBrandDesktopType`，开卷特有的阅读器 chrome 角色使用 `KaiProductTokens`。输入框使用组件角色 `inputText`，封面网格标题使用组件角色 `gridTitle`；页面不得用 `body` 或 `label` 代替它们，也不直接写数字型 `fontSize`。
 
+**类型档位与窗口**：`context.appComponentProfile` 在桌面 OS 上固定 desktop 字号；在 iOS/Android 上 **仅 compact 用 mobile 字号**，**medium / wide（展开折叠屏、平板）升级为 desktop 字号**，避免全宽书库/设置仍套手机 22–28pt 页标题。Gutter / 侧栏仍由 `AppWindowClass` 单独决定。
+
 图书内容层的字号、行高、字距、段间距和字体栈由 `BookReadingPreferences` 及阅读器渲染链路控制，属于用户可调功能参数，不属于品牌或产品 chrome token；漫画内容是图像，不新增正文 `fontSize`。壳层 `TextScaler` 可访问性与内容层字号保持独立。
 
 

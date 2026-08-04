@@ -114,8 +114,9 @@ abstract final class KaiBrandMobileType {
   static const double listTitleLineHeight = 22.0;
   static const int listTitleWeight = 500;
   static const double listTitleLetterSpacing = 0.0;
-  static const double gridTitleSize = 15.0;
-  static const double gridTitleLineHeight = 22.0;
+  // Cover captions: one step under listTitle (15) so artwork stays primary.
+  static const double gridTitleSize = 14.0;
+  static const double gridTitleLineHeight = 18.0;
   static const int gridTitleWeight = 500;
   static const double gridTitleLetterSpacing = 0.0;
   static const double labelSize = 16.0;
@@ -600,7 +601,7 @@ abstract final class KaiProductTokens {
   static const double typographyReaderWaitingCover = 28.0;
   static const double typographyReaderSearchResult = 15.0;
   static const double typographyReaderThumbnailLabel = 16.0;
-  static const double typographyReaderSelectionMenu = 10.0;
+  static const double typographyReaderSelectionMenu = 12.0;
   static const double typographyReaderOverlayTitle = 15.0;
   static const double typographyReaderOverlaySubtitle = 11.0;
   static const double typographyShellBrandTitle = 17.0;

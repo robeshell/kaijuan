@@ -38,6 +38,7 @@ docs/
     subpages.md                     ← 管理型二级/子级页面统一骨架
     reader-chrome.md / comic-reader.md / book-reader.md / wifi-transfer.md
     webdav-backup.md              ← WebDAV 快照备份与恢复
+    reading-stats.md                 ← 阅读统计（洞察 + 时长 + 热力 + 备份）
     book-reader-tool-strip-plan.md   ← 图书底栏工具条大改（计划）
     book-tts.md                      ← 听书方案（系统 TTS，不接 AI）
   opendesign/

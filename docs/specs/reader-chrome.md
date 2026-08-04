@@ -33,6 +33,8 @@
 - 交互节奏：单击即时响应、200ms 面板展开、拖动松手 seek、桌面键位。  
 - **桌面**：阅读器全窗覆盖壳层标题栏时，顶 chrome 须 `platformTitleBarHeight` 下沉；macOS 额外左侧让开红绿灯（~78）。
 - 工具条大改计划与分刀见 [book-reader-tool-strip-plan.md](./book-reader-tool-strip-plan.md)。
+- **共享底栏零件**（`lib/presentation/widgets/reader/reader_tool_strip_shared.dart`）：滑轨 / 步进 / 五键 / 分段选择 / 底栏 Column 骨架；图书与漫画五键与面板内容仍分文件注入，不合并功能。
+- **共享顶栏**（`lib/presentation/widgets/reader/reader_chrome_top_bar.dart`）：交通灯留白、返回、标题/副标题、trailing 槽；图书注入书签+搜索，漫画注入书签。
 
 ## 书签 v1
 

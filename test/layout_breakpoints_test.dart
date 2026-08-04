@@ -178,6 +178,70 @@ void main() {
     });
   });
 
+  group('resolveAppComponentProfile (type density)', () {
+    test('desktop OS stays desktop type at every width', () {
+      for (final window in AppWindowClass.values) {
+        expect(
+          resolveAppComponentProfile(
+            platform: TargetPlatform.macOS,
+            windowClass: window,
+          ),
+          AppComponentProfile.desktop,
+        );
+      }
+    });
+
+    test('phone OS uses mobile type only when compact', () {
+      expect(
+        resolveAppComponentProfile(
+          platform: TargetPlatform.iOS,
+          windowClass: AppWindowClass.compact,
+        ),
+        AppComponentProfile.mobile,
+      );
+      expect(
+        resolveAppComponentProfile(
+          platform: TargetPlatform.android,
+          windowClass: AppWindowClass.compact,
+        ),
+        AppComponentProfile.mobile,
+      );
+    });
+
+    test('open fold / tablet (medium+wide) upgrades phone OS to desktop type',
+        () {
+      expect(
+        resolveAppComponentProfile(
+          platform: TargetPlatform.android,
+          windowClass: AppWindowClass.medium,
+        ),
+        AppComponentProfile.desktop,
+      );
+      expect(
+        resolveAppComponentProfile(
+          platform: TargetPlatform.iOS,
+          windowClass: AppWindowClass.wide,
+        ),
+        AppComponentProfile.desktop,
+      );
+      // Section titles shrink from mobile 22 → desktop 18.
+      expect(
+        resolveAppComponentProfile(
+          platform: TargetPlatform.android,
+          windowClass: AppWindowClass.wide,
+        ).sectionTitleSize,
+        KaiBrandDesktopType.sectionTitleSize,
+      );
+      expect(
+        resolveAppComponentProfile(
+          platform: TargetPlatform.android,
+          windowClass: AppWindowClass.compact,
+        ).sectionTitleSize,
+        KaiBrandMobileType.sectionTitleSize,
+      );
+    });
+  });
+
   group('resolveHingeGutterBoost', () {
     test('boosts when a vertical hinge sits near center', () {
       final boost = resolveHingeGutterBoost(

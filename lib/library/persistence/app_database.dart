@@ -155,6 +155,31 @@ class CollectionMembers extends Table {
   Set<Column<Object>> get primaryKey => {collectionId, itemId};
 }
 
+/// Local-calendar day rollup of foreground reading seconds (TTS excluded).
+///
+/// [day] is `yyyy-MM-dd` in the device local timezone.
+class ReadingDayStats extends Table {
+  TextColumn get day => text()();
+  IntColumn get activeSeconds => integer().withDefault(const Constant(0))();
+  IntColumn get comicSeconds => integer().withDefault(const Constant(0))();
+  IntColumn get bookSeconds => integer().withDefault(const Constant(0))();
+  IntColumn get sessionsCount => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {day};
+}
+
+/// Per-item cumulative foreground reading seconds.
+class ReadingItemTime extends Table {
+  TextColumn get itemId =>
+      text().references(ReadingItems, #id, onDelete: KeyAction.cascade)();
+  IntColumn get activeSeconds => integer().withDefault(const Constant(0))();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {itemId};
+}
+
 /// Collection row + members for collage UI and library filtering.
 class CollectionSummary {
   const CollectionSummary({
@@ -182,6 +207,8 @@ class CollectionSummary {
     ReadingListMembers,
     Collections,
     CollectionMembers,
+    ReadingDayStats,
+    ReadingItemTime,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -199,7 +226,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   // --- Reading items -------------------------------------------------------
 
@@ -466,6 +493,147 @@ class AppDatabase extends _$AppDatabase {
           (t) => t.itemId.equals(itemId) & t.cfi.equals(cfi),
         ))
         .go();
+  }
+
+  /// Library-wide bookmark count (all items).
+  Future<int> countAllBookmarks() async {
+    final countExp = bookmarks.id.count();
+    final row = await (selectOnly(bookmarks)..addColumns([countExp]))
+        .getSingle();
+    return row.read(countExp) ?? 0;
+  }
+
+  /// Library-wide highlight / note count (all items).
+  Future<int> countAllAnnotations() async {
+    final countExp = bookAnnotations.id.count();
+    final row = await (selectOnly(bookAnnotations)..addColumns([countExp]))
+        .getSingle();
+    return row.read(countExp) ?? 0;
+  }
+
+  /// Emits whenever bookmarks or annotations change (for stats totals).
+  Stream<(int bookmarks, int annotations)> watchAnnotationTotals() {
+    // Re-query totals whenever either table changes. Drift's tableUpdates
+    // keeps this cheap for the stats surface.
+    return tableUpdates(
+      TableUpdateQuery.onAllTables([bookmarks, bookAnnotations]),
+    ).asyncMap((_) async {
+      final b = await countAllBookmarks();
+      final a = await countAllAnnotations();
+      return (b, a);
+    });
+  }
+
+  // --- Reading time (foreground seconds; TTS excluded by tracker) ----------
+
+  /// Local calendar day key `yyyy-MM-dd`.
+  static String localDayKey([DateTime? at]) {
+    final local = (at ?? DateTime.now()).toLocal();
+    final y = local.year.toString().padLeft(4, '0');
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  /// Atomically add [seconds] to the day rollup and the item total.
+  Future<void> addReadingSeconds({
+    required String dayKey,
+    required String itemId,
+    required ReaderKind kind,
+    required int seconds,
+    bool countSession = false,
+  }) async {
+    if (seconds <= 0) return;
+    final comicAdd = kind == ReaderKind.comic ? seconds : 0;
+    final bookAdd = kind == ReaderKind.book ? seconds : 0;
+    final now = DateTime.now();
+    await transaction(() async {
+      final dayRow = await (select(
+        readingDayStats,
+      )..where((t) => t.day.equals(dayKey))).getSingleOrNull();
+      if (dayRow == null) {
+        await into(readingDayStats).insert(
+          ReadingDayStatsCompanion.insert(
+            day: dayKey,
+            activeSeconds: Value(seconds),
+            comicSeconds: Value(comicAdd),
+            bookSeconds: Value(bookAdd),
+            sessionsCount: Value(countSession ? 1 : 0),
+          ),
+        );
+      } else {
+        await (update(
+          readingDayStats,
+        )..where((t) => t.day.equals(dayKey))).write(
+          ReadingDayStatsCompanion(
+            activeSeconds: Value(dayRow.activeSeconds + seconds),
+            comicSeconds: Value(dayRow.comicSeconds + comicAdd),
+            bookSeconds: Value(dayRow.bookSeconds + bookAdd),
+            sessionsCount: Value(
+              dayRow.sessionsCount + (countSession ? 1 : 0),
+            ),
+          ),
+        );
+      }
+
+      final itemRow = await (select(
+        readingItemTime,
+      )..where((t) => t.itemId.equals(itemId))).getSingleOrNull();
+      if (itemRow == null) {
+        await into(readingItemTime).insert(
+          ReadingItemTimeCompanion.insert(
+            itemId: itemId,
+            activeSeconds: Value(seconds),
+            updatedAt: now,
+          ),
+        );
+      } else {
+        await (update(
+          readingItemTime,
+        )..where((t) => t.itemId.equals(itemId))).write(
+          ReadingItemTimeCompanion(
+            activeSeconds: Value(itemRow.activeSeconds + seconds),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+    });
+  }
+
+  Stream<List<ReadingDayStat>> watchAllDayStats() {
+    final query = select(readingDayStats)
+      ..orderBy([(t) => OrderingTerm.asc(t.day)]);
+    return query.watch();
+  }
+
+  Stream<List<ReadingItemTimeData>> watchAllItemTimes() {
+    return select(readingItemTime).watch();
+  }
+
+  Future<List<ReadingDayStat>> dayStatsBetween({
+    required String fromDay,
+    required String toDay,
+  }) {
+    final query = select(readingDayStats)
+      ..where((t) => t.day.isBiggerOrEqualValue(fromDay))
+      ..where((t) => t.day.isSmallerOrEqualValue(toDay))
+      ..orderBy([(t) => OrderingTerm.asc(t.day)]);
+    return query.get();
+  }
+
+  Future<int> itemReadingSeconds(String itemId) async {
+    final row = await (select(
+      readingItemTime,
+    )..where((t) => t.itemId.equals(itemId))).getSingleOrNull();
+    return row?.activeSeconds ?? 0;
+  }
+
+  /// Clears only duration tables; books and progress stay intact.
+  Future<void> clearReadingTimeData() async {
+    await transaction(() async {
+      await delete(readingDayStats).go();
+      await delete(readingItemTime).go();
+    });
   }
 
   // --- Reading lists -------------------------------------------------------
@@ -788,6 +956,10 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 5) {
         await migrator.createTable(bookAnnotations);
+      }
+      if (from < 6) {
+        await migrator.createTable(readingDayStats);
+        await migrator.createTable(readingItemTime);
       }
     },
     beforeOpen: (_) async {

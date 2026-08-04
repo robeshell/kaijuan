@@ -7,13 +7,13 @@ import '../../app/comic_reading_preferences.dart';
 import '../../brand/brand_config.dart';
 import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
-import '../../core/theme/brand_tokens.g.dart';
 import '../../library/persistence/app_database.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/open_reading_item.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/cover_card_ink.dart';
+import '../widgets/settings_components.dart';
 
 /// Shelf: 继续阅读 + 最近 + 我的书架（仅单本钉选；合集在书库展示）.
 class ShelfScreen extends StatelessWidget {
@@ -114,10 +114,15 @@ class ShelfScreen extends StatelessWidget {
                 return _EmptyShelf(onOpenLibrary: onOpenLibrary);
               }
 
+              // Phone: extra air under status bar / Dynamic Island.
+              // Tablet+desktop: same pageTop as settings (16).
+              final topPad = context.appIsCompact
+                  ? AppSpacing.x6
+                  : AppSettingsMetrics.pageTop(context);
               return ListView(
                 padding: EdgeInsets.fromLTRB(
                   context.appPageGutter,
-                  24,
+                  topPad,
                   context.appPageGutter,
                   context.appContentBottomPadding,
                 ),
@@ -150,7 +155,8 @@ class ShelfScreen extends StatelessWidget {
                           // the next item peeks when more remain.
                           padding: const EdgeInsetsDirectional.only(end: 24),
                           itemCount: recent.length - 1,
-                          separatorBuilder: (_, _) => const SizedBox(width: 12),
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(width: AppSpacing.x4),
                           itemBuilder: (context, i) {
                             final e = recent[i + 1];
                             return _CoverCard(
@@ -180,7 +186,8 @@ class ShelfScreen extends StatelessWidget {
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsetsDirectional.only(end: 24),
                         itemCount: onShelf.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 12),
+                        separatorBuilder: (_, _) =>
+                              const SizedBox(width: AppSpacing.x4),
                         itemBuilder: (context, i) {
                           final item = onShelf[i];
                           return _CoverCard(
@@ -218,13 +225,16 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Align with AppSettingsPageHeader / library page title (shared first edge).
     return Text(
       text,
       style: TextStyle(
-        fontSize: KaiProductTokens.typographyShelfSectionTitle,
+        fontSize: context.appSectionTitleSize,
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.2,
-        height: 1.2,
+        letterSpacing: -0.1,
+        height: 1.15,
+        leadingDistribution: TextLeadingDistribution.even,
+        color: context.appPrimaryText,
       ),
     );
   }
@@ -388,13 +398,15 @@ class _CoverCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             SizedBox(
-              height: 20,
+              height: context.appGridTitleSize * 1.3,
               child: Text(
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: context.appGridTitleStyle.copyWith(
                   color: context.appPrimaryText,
+                  height: 1.2,
+                  leadingDistribution: TextLeadingDistribution.even,
                 ),
               ),
             ),

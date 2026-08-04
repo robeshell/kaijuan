@@ -193,6 +193,8 @@ class BackupService {
           'annotations': exported.records.annotations.length,
           'readingLists': exported.records.readingLists.length,
           'collections': exported.records.collections.length,
+          'dayStats': exported.records.dayStats.length,
+          'itemTime': exported.records.itemTime.length,
         },
         databaseSchemaVersion: database.schemaVersion,
       );
@@ -615,6 +617,94 @@ class BackupService {
                 addedAt: _date(raw['addedAt']) ?? now,
               ),
             );
+      }
+
+      // Duration tables: merge by taking the larger cumulative seconds so
+      // neither device loses "more reading time" on restore.
+      for (final raw in records.dayStats) {
+        final day = _string(raw['day']);
+        if (day == null || day.isEmpty) continue;
+        final remoteActive = _int(raw['activeSeconds']) ?? 0;
+        final remoteComic = _int(raw['comicSeconds']) ?? 0;
+        final remoteBook = _int(raw['bookSeconds']) ?? 0;
+        final remoteSessions = _int(raw['sessionsCount']) ?? 0;
+        final local = await (database.select(
+          database.readingDayStats,
+        )..where((t) => t.day.equals(day))).getSingleOrNull();
+        if (local == null) {
+          await database
+              .into(database.readingDayStats)
+              .insert(
+                ReadingDayStatsCompanion.insert(
+                  day: day,
+                  activeSeconds: Value(remoteActive),
+                  comicSeconds: Value(remoteComic),
+                  bookSeconds: Value(remoteBook),
+                  sessionsCount: Value(remoteSessions),
+                ),
+              );
+        } else {
+          await (database.update(
+            database.readingDayStats,
+          )..where((t) => t.day.equals(day))).write(
+            ReadingDayStatsCompanion(
+              activeSeconds: Value(
+                local.activeSeconds > remoteActive
+                    ? local.activeSeconds
+                    : remoteActive,
+              ),
+              comicSeconds: Value(
+                local.comicSeconds > remoteComic
+                    ? local.comicSeconds
+                    : remoteComic,
+              ),
+              bookSeconds: Value(
+                local.bookSeconds > remoteBook
+                    ? local.bookSeconds
+                    : remoteBook,
+              ),
+              sessionsCount: Value(
+                local.sessionsCount > remoteSessions
+                    ? local.sessionsCount
+                    : remoteSessions,
+              ),
+            ),
+          );
+        }
+      }
+
+      for (final raw in records.itemTime) {
+        final itemId = itemIds[_string(raw['contentHash'])];
+        final remoteSeconds = _int(raw['activeSeconds']) ?? 0;
+        if (itemId == null || remoteSeconds <= 0) continue;
+        final local = await (database.select(
+          database.readingItemTime,
+        )..where((t) => t.itemId.equals(itemId))).getSingleOrNull();
+        final remoteUpdated = _date(raw['updatedAt']) ?? now;
+        if (local == null) {
+          await database
+              .into(database.readingItemTime)
+              .insert(
+                ReadingItemTimeCompanion.insert(
+                  itemId: itemId,
+                  activeSeconds: Value(remoteSeconds),
+                  updatedAt: remoteUpdated,
+                ),
+              );
+        } else if (remoteSeconds > local.activeSeconds) {
+          await (database.update(
+            database.readingItemTime,
+          )..where((t) => t.itemId.equals(itemId))).write(
+            ReadingItemTimeCompanion(
+              activeSeconds: Value(remoteSeconds),
+              updatedAt: Value(
+                remoteUpdated.isAfter(local.updatedAt)
+                    ? remoteUpdated
+                    : local.updatedAt,
+              ),
+            ),
+          );
+        }
       }
     });
     onProgress?.call(

@@ -84,6 +84,8 @@ abstract final class KaijuanIcons {
   static const IconData scan = FluentIcons.scan_24_regular;
   static const IconData settings = FluentIcons.settings_24_regular;
   static const IconData settingsFilled = FluentIcons.settings_24_filled;
+  static const IconData stats = FluentIcons.data_histogram_24_regular;
+  static const IconData statsFilled = FluentIcons.data_histogram_24_filled;
   static const IconData share = FluentIcons.share_ios_24_regular;
   static const IconData sort = FluentIcons.arrow_sort_24_regular;
   static const IconData stop = FluentIcons.stop_24_regular;

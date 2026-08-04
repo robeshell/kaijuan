@@ -16,7 +16,9 @@ import '../library/import/wifi_transfer_service.dart';
 import '../library/remote/remote_source_controller.dart';
 import 'controllers/library_controller.dart';
 import 'controllers/backup_controller.dart';
+import 'navigation/app_page_route.dart';
 import 'screens/library_screen.dart';
+import 'screens/reading_stats_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shelf_screen.dart';
 import 'widgets/app_components.dart';
@@ -56,6 +58,8 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
+  /// Content-navigator subpage for 阅读统计 (not a root tab index).
+  bool _readingStatsOpen = false;
   final GlobalKey<NavigatorState> _contentNavigatorKey =
       GlobalKey<NavigatorState>();
   final ValueNotifier<int> _contentIndex = ValueNotifier<int>(0);
@@ -103,6 +107,8 @@ class _AppShellState extends State<AppShell> {
         themePreferences: widget.themePreferences,
         backupController: widget.backupController,
         libraryController: widget.libraryController,
+        comicReadingPreferences: widget.readingPreferences,
+        bookReadingPreferences: widget.bookReadingPreferences,
       ),
     ];
     _rootContent = ValueListenableBuilder<int>(
@@ -125,9 +131,39 @@ class _AppShellState extends State<AppShell> {
 
   void _selectDestination(int index) {
     _contentNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    if (_readingStatsOpen) {
+      setState(() => _readingStatsOpen = false);
+    }
     if (_index == index) return;
     _contentIndex.value = index;
     setState(() => _index = index);
+  }
+
+  /// Pushes library-insight stats onto the content navigator (not a root tab).
+  void _openReadingStats() {
+    final nav = _contentNavigatorKey.currentState;
+    if (nav == null) return;
+    // Replace any nested management stack so sidebar "阅读统计" feels root-level.
+    nav.popUntil((route) => route.isFirst);
+    setState(() => _readingStatsOpen = true);
+    unawaited(
+      nav
+          .push<void>(
+            appPageRoute<void>(
+              (_) => ReadingStatsScreen(
+                libraryController: widget.libraryController,
+                comicReadingPreferences: widget.readingPreferences,
+                bookReadingPreferences: widget.bookReadingPreferences,
+              ),
+            ),
+          )
+          .whenComplete(() {
+            if (!mounted) return;
+            if (_readingStatsOpen) {
+              setState(() => _readingStatsOpen = false);
+            }
+          }),
+    );
   }
 
   Route<void> _rootContentRoute(RouteSettings settings) {
@@ -160,7 +196,9 @@ class _AppShellState extends State<AppShell> {
             children: [
               _SideRail(
                 index: _index,
+                readingStatsActive: _readingStatsOpen,
                 onSelect: _selectDestination,
+                onOpenReadingStats: _openReadingStats,
                 brandName: widget.brand.displayName,
               ),
               Expanded(
@@ -233,25 +271,27 @@ double _sidebarWidthOf(BuildContext context) => context.appSidebarWidth;
 ///
 /// Groups (product IA):
 /// - 浏览: 书架 / 书库
-/// - 我的: 设置（阅读统计等后续加这里）
+/// - 我的: 统计 / 设置
 class _SideRail extends StatelessWidget {
   const _SideRail({
     required this.index,
+    required this.readingStatsActive,
     required this.onSelect,
+    required this.onOpenReadingStats,
     required this.brandName,
   });
 
   final int index;
+  /// True while the content navigator hosts [ReadingStatsScreen].
+  final bool readingStatsActive;
   final ValueChanged<int> onSelect;
+  final VoidCallback onOpenReadingStats;
   final String brandName;
 
   /// Indices aligned with [AppShell._destinations] / `_screens`.
   static const _browse = <(int, IconData, String)>[
     (0, KaijuanIcons.open, '书架'),
     (1, KaijuanIcons.grid, '书库'),
-  ];
-  static const _mine = <(int, IconData, String)>[
-    (2, KaijuanIcons.settings, '设置'),
   ];
 
   @override
@@ -321,17 +361,24 @@ class _SideRail extends StatelessWidget {
                           _SidebarRow(
                             label: item.$3,
                             icon: item.$2,
-                            active: index == item.$1,
+                            // Stats subpage covers content; only one rail row active.
+                            active: !readingStatsActive && index == item.$1,
                             onTap: () => onSelect(item.$1),
                           ),
                         const _SidebarHeading('我的'),
-                        for (final item in _mine)
-                          _SidebarRow(
-                            label: item.$3,
-                            icon: item.$2,
-                            active: index == item.$1,
-                            onTap: () => onSelect(item.$1),
-                          ),
+                        _SidebarRow(
+                          label: '统计',
+                          icon: KaijuanIcons.stats,
+                          active: readingStatsActive,
+                          onTap: onOpenReadingStats,
+                        ),
+                        _SidebarRow(
+                          label: '设置',
+                          icon: KaijuanIcons.settings,
+                          // Settings tab only when stats subpage is not covering content.
+                          active: index == 2 && !readingStatsActive,
+                          onTap: () => onSelect(2),
+                        ),
                       ],
                     ),
                   ),

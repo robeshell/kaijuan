@@ -31,7 +31,8 @@ abstract final class AppRadii {
 
 /// Product-level shape tokens for book/comic content frames.
 abstract final class AppProductRadii {
-  static const double cover = KaiProductTokens.coverRadius;
+  /// Square covers read as print / 实体书; shell cards keep [AppRadii].
+  static const double cover = 0;
 }
 
 /// Disabled foreground: secondary × this alpha (brand `derivedAlphas.disabledForeground`).

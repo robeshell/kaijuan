@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../core/kaijuan_icons.dart';
 import '../../core/platform_window.dart';
+import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
+import '../../library/stats/reading_time_tracker.dart';
 import '../../readers/comic/comic_models.dart';
 import '../controllers/comic_reader_controller.dart';
 import '../widgets/reader/comic_reader_body.dart';
@@ -61,6 +63,7 @@ class ComicReaderScreen extends StatefulWidget {
 class _ComicReaderScreenState extends State<ComicReaderScreen>
     with SingleTickerProviderStateMixin {
   late final ComicReaderController _controller;
+  late final ReadingTimeTracker _timeTracker;
   final _focusNode = FocusNode();
   late final AnimationController _reveal;
   bool _showReveal = true;
@@ -74,10 +77,16 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
       item: widget.item,
       readingPreferences: widget.readingPreferences,
     )..open();
+    _timeTracker = ReadingTimeTracker(
+      database: widget.database,
+      itemId: widget.item.id,
+      kind: ReaderKind.comic,
+    )..attach();
     // Phase A (~first half): cover dissolves into reading backdrop.
     // Phase B (~second half): backdrop eases away into the pages.
     _reveal = AnimationController(
       vsync: this,
+      // May shrink to zero under reduce-motion (see [didChangeDependencies]).
       duration: const Duration(milliseconds: 420),
     );
     _reveal.addStatusListener((status) {
@@ -88,7 +97,16 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    _reveal.duration =
+        reduceMotion ? Duration.zero : const Duration(milliseconds: 420);
+  }
+
+  @override
   void dispose() {
+    unawaited(_timeTracker.detach());
     _reveal.dispose();
     _focusNode.dispose();
     _controller.dispose();
@@ -173,12 +191,15 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
       builder: (context, _) {
         final bg = Color(_controller.readingTheme.backgroundArgb);
 
+        final theme = _controller.readingTheme;
+
         if (_controller.openError != null) {
           return Scaffold(
             backgroundColor: bg,
             body: _ErrorBody(
-              message: _controller.openError.toString(),
+              detail: _controller.openError.toString(),
               onBack: _exitReader,
+              theme: theme,
             ),
           );
         }
@@ -190,6 +211,11 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
             _maybeStartReveal();
           });
         }
+
+        final reduceMotion = MediaQuery.disableAnimationsOf(context);
+        final chromeAnim = reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 200);
 
         return Focus(
           focusNode: _focusNode,
@@ -227,6 +253,10 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
                         final pageT = Curves.easeInOut.transform(
                           const Interval(0.48, 1).transform(_reveal.value),
                         );
+                        final coverChild = ReaderWaitingCover(
+                          coverPath: widget.item.coverPath,
+                          title: widget.item.title,
+                        );
                         return Stack(
                           fit: StackFit.expand,
                           children: [
@@ -236,14 +266,13 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
                             ),
                             Opacity(
                               opacity: (1 - coverT).clamp(0.0, 1.0),
-                              child: Transform.scale(
-                                scale: 1 + 0.1 * coverT,
-                                filterQuality: FilterQuality.low,
-                                child: ReaderWaitingCover(
-                                  coverPath: widget.item.coverPath,
-                                  title: widget.item.title,
-                                ),
-                              ),
+                              child: reduceMotion
+                                  ? coverChild
+                                  : Transform.scale(
+                                      scale: 1 + 0.1 * coverT,
+                                      filterQuality: FilterQuality.low,
+                                      child: coverChild,
+                                    ),
                             ),
                           ],
                         );
@@ -255,7 +284,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
                     ignoring: !_controller.chromeVisible,
                     child: AnimatedOpacity(
                       opacity: _controller.chromeVisible ? 1 : 0,
-                      duration: const Duration(milliseconds: 200),
+                      duration: chromeAnim,
                       curve: Curves.easeOut,
                       child: ComicReaderChrome(
                         controller: _controller,
@@ -273,16 +302,25 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
 }
 
 class _ErrorBody extends StatelessWidget {
-  const _ErrorBody({required this.message, required this.onBack});
+  const _ErrorBody({
+    required this.detail,
+    required this.onBack,
+    required this.theme,
+  });
 
-  final String message;
+  final String detail;
   final VoidCallback onBack;
+  final ComicReadingTheme theme;
 
   @override
   Widget build(BuildContext context) {
     final macLead = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
         ? 78.0
         : 0.0;
+    final fg = Color(theme.foregroundArgb);
+    final fgMuted = Color(theme.metaColorArgb);
+    final trimmed = detail.trim();
+
     // Top inset from app MediaQuery; left clears traffic lights on macOS.
     return SafeArea(
       minimum: EdgeInsets.only(left: macLead),
@@ -292,13 +330,37 @@ class _ErrorBody extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(KaijuanIcons.error, size: 48, color: Colors.white70),
+              Icon(KaijuanIcons.error, size: 48, color: fgMuted),
               const SizedBox(height: 16),
               Text(
-                message,
+                '无法打开此漫画',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70),
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
+              const SizedBox(height: 8),
+              Text(
+                '文件可能已损坏、已移动，或格式不受支持。',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: fgMuted, height: 1.4),
+              ),
+              if (trimmed.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  trimmed,
+                  textAlign: TextAlign.center,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: fgMuted.withValues(alpha: 0.85),
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               FilledButton(onPressed: onBack, child: const Text('返回')),
             ],

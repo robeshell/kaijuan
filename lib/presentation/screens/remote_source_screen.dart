@@ -219,14 +219,6 @@ class _RemoteEmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(
-              type == RemoteSourceType.webDav
-                  ? KaijuanIcons.cloud
-                  : KaijuanIcons.globe,
-              size: 36,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 14),
             Text(
               '还没有$label连接',
               textAlign: TextAlign.center,
@@ -249,10 +241,9 @@ class _RemoteEmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-            OutlinedButton.icon(
+            OutlinedButton(
               onPressed: onAdd,
-              icon: const Icon(KaijuanIcons.add),
-              label: Text('添加$label'),
+              child: Text('添加$label'),
             ),
           ],
         ),
@@ -301,16 +292,14 @@ class _RemoteSourceSectionHeader extends StatelessWidget {
           ),
         ),
         if (context.appIsCompact)
-          AppIconButton(
-            icon: KaijuanIcons.add,
-            tooltip: '添加连接',
+          TextButton(
             onPressed: onAdd,
+            child: const Text('添加'),
           )
         else
-          OutlinedButton.icon(
+          OutlinedButton(
             onPressed: onAdd,
-            icon: const Icon(KaijuanIcons.add),
-            label: const Text('添加连接'),
+            child: const Text('添加连接'),
           ),
       ],
     );
@@ -356,12 +345,6 @@ class _ConnectionRow extends StatelessWidget {
       RemoteConnectionStatus.unreachable => '无法连接',
       RemoteConnectionStatus.error => '连接异常',
     };
-    final statusIcon = switch (connection.status) {
-      RemoteConnectionStatus.connected => KaijuanIcons.checkCircle,
-      RemoteConnectionStatus.checking => KaijuanIcons.refresh,
-      RemoteConnectionStatus.idle => KaijuanIcons.circle,
-      _ => KaijuanIcons.error,
-    };
     final statusColor = switch (connection.status) {
       RemoteConnectionStatus.authenticationFailed ||
       RemoteConnectionStatus.unreachable ||
@@ -378,24 +361,6 @@ class _ConnectionRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
         child: Row(
           children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: context.appDivider),
-                borderRadius: BorderRadius.circular(AppRadii.menu),
-              ),
-              child: SizedBox(
-                width: 48,
-                height: 48,
-                child: Icon(
-                  connection.type == RemoteSourceType.webDav
-                      ? KaijuanIcons.cloud
-                      : KaijuanIcons.globe,
-                  color: Theme.of(context).colorScheme.primary,
-                  size: 24,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -424,32 +389,33 @@ class _ConnectionRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(statusIcon, size: 14, color: statusColor),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          '$statusLabel · $checkedLabel',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: statusColor,
-                            fontSize: context.appBodySecondarySize,
-                          ),
-                        ),
-                      ),
-                    ],
+                  Text(
+                    '$statusLabel · $checkedLabel',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: context.appBodySecondarySize,
+                    ),
                   ),
                 ],
               ),
             ),
-            AppIconButton(
-              icon: KaijuanIcons.more,
-              tooltip: '更多操作',
+            TextButton(
               onPressed: onMore,
+              child: Text(
+                '更多',
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  color: context.settingsSecondary,
+                ),
+              ),
             ),
-            const Icon(KaijuanIcons.chevronRight),
+            Icon(
+              KaijuanIcons.chevronRight,
+              size: 18,
+              color: context.settingsMuted,
+            ),
           ],
         ),
       ),
@@ -727,25 +693,12 @@ class _RemoteConnectionFormScreenState
             ],
             if (_testError case final error?) ...[
               const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    KaijuanIcons.error,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      error,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: context.appBodySecondarySize,
-                      ),
-                    ),
-                  ),
-                ],
+              Text(
+                error,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontSize: context.appBodySecondarySize,
+                ),
               ),
             ],
           ],
@@ -756,24 +709,22 @@ class _RemoteConnectionFormScreenState
         child: Row(
           children: [
             Expanded(
-              child: OutlinedButton.icon(
+              child: OutlinedButton(
                 onPressed: _testing || _saving ? null : _test,
-                icon: _testing
+                child: _testing
                     ? const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(KaijuanIcons.check),
-                label: Text(_testing ? '测试中' : '测试连接'),
+                    : Text(_testing ? '测试中' : '测试连接'),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: FilledButton.icon(
+              child: FilledButton(
                 onPressed: _saving || _testing || !_tested ? null : _save,
-                icon: const Icon(KaijuanIcons.check),
-                label: Text(_saving ? '保存中' : '保存连接'),
+                child: Text(_saving ? '保存中' : '保存连接'),
               ),
             ),
           ],

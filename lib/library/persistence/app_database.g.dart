@@ -3370,6 +3370,658 @@ class CollectionMembersCompanion extends UpdateCompanion<CollectionMember> {
   }
 }
 
+class $ReadingDayStatsTable extends ReadingDayStats
+    with TableInfo<$ReadingDayStatsTable, ReadingDayStat> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ReadingDayStatsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _dayMeta = const VerificationMeta('day');
+  @override
+  late final GeneratedColumn<String> day = GeneratedColumn<String>(
+    'day',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _activeSecondsMeta = const VerificationMeta(
+    'activeSeconds',
+  );
+  @override
+  late final GeneratedColumn<int> activeSeconds = GeneratedColumn<int>(
+    'active_seconds',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _comicSecondsMeta = const VerificationMeta(
+    'comicSeconds',
+  );
+  @override
+  late final GeneratedColumn<int> comicSeconds = GeneratedColumn<int>(
+    'comic_seconds',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _bookSecondsMeta = const VerificationMeta(
+    'bookSeconds',
+  );
+  @override
+  late final GeneratedColumn<int> bookSeconds = GeneratedColumn<int>(
+    'book_seconds',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _sessionsCountMeta = const VerificationMeta(
+    'sessionsCount',
+  );
+  @override
+  late final GeneratedColumn<int> sessionsCount = GeneratedColumn<int>(
+    'sessions_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    day,
+    activeSeconds,
+    comicSeconds,
+    bookSeconds,
+    sessionsCount,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'reading_day_stats';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReadingDayStat> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('day')) {
+      context.handle(
+        _dayMeta,
+        day.isAcceptableOrUnknown(data['day']!, _dayMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_dayMeta);
+    }
+    if (data.containsKey('active_seconds')) {
+      context.handle(
+        _activeSecondsMeta,
+        activeSeconds.isAcceptableOrUnknown(
+          data['active_seconds']!,
+          _activeSecondsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('comic_seconds')) {
+      context.handle(
+        _comicSecondsMeta,
+        comicSeconds.isAcceptableOrUnknown(
+          data['comic_seconds']!,
+          _comicSecondsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('book_seconds')) {
+      context.handle(
+        _bookSecondsMeta,
+        bookSeconds.isAcceptableOrUnknown(
+          data['book_seconds']!,
+          _bookSecondsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sessions_count')) {
+      context.handle(
+        _sessionsCountMeta,
+        sessionsCount.isAcceptableOrUnknown(
+          data['sessions_count']!,
+          _sessionsCountMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {day};
+  @override
+  ReadingDayStat map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReadingDayStat(
+      day: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}day'],
+      )!,
+      activeSeconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}active_seconds'],
+      )!,
+      comicSeconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}comic_seconds'],
+      )!,
+      bookSeconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}book_seconds'],
+      )!,
+      sessionsCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sessions_count'],
+      )!,
+    );
+  }
+
+  @override
+  $ReadingDayStatsTable createAlias(String alias) {
+    return $ReadingDayStatsTable(attachedDatabase, alias);
+  }
+}
+
+class ReadingDayStat extends DataClass implements Insertable<ReadingDayStat> {
+  final String day;
+  final int activeSeconds;
+  final int comicSeconds;
+  final int bookSeconds;
+  final int sessionsCount;
+  const ReadingDayStat({
+    required this.day,
+    required this.activeSeconds,
+    required this.comicSeconds,
+    required this.bookSeconds,
+    required this.sessionsCount,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['day'] = Variable<String>(day);
+    map['active_seconds'] = Variable<int>(activeSeconds);
+    map['comic_seconds'] = Variable<int>(comicSeconds);
+    map['book_seconds'] = Variable<int>(bookSeconds);
+    map['sessions_count'] = Variable<int>(sessionsCount);
+    return map;
+  }
+
+  ReadingDayStatsCompanion toCompanion(bool nullToAbsent) {
+    return ReadingDayStatsCompanion(
+      day: Value(day),
+      activeSeconds: Value(activeSeconds),
+      comicSeconds: Value(comicSeconds),
+      bookSeconds: Value(bookSeconds),
+      sessionsCount: Value(sessionsCount),
+    );
+  }
+
+  factory ReadingDayStat.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReadingDayStat(
+      day: serializer.fromJson<String>(json['day']),
+      activeSeconds: serializer.fromJson<int>(json['activeSeconds']),
+      comicSeconds: serializer.fromJson<int>(json['comicSeconds']),
+      bookSeconds: serializer.fromJson<int>(json['bookSeconds']),
+      sessionsCount: serializer.fromJson<int>(json['sessionsCount']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'day': serializer.toJson<String>(day),
+      'activeSeconds': serializer.toJson<int>(activeSeconds),
+      'comicSeconds': serializer.toJson<int>(comicSeconds),
+      'bookSeconds': serializer.toJson<int>(bookSeconds),
+      'sessionsCount': serializer.toJson<int>(sessionsCount),
+    };
+  }
+
+  ReadingDayStat copyWith({
+    String? day,
+    int? activeSeconds,
+    int? comicSeconds,
+    int? bookSeconds,
+    int? sessionsCount,
+  }) => ReadingDayStat(
+    day: day ?? this.day,
+    activeSeconds: activeSeconds ?? this.activeSeconds,
+    comicSeconds: comicSeconds ?? this.comicSeconds,
+    bookSeconds: bookSeconds ?? this.bookSeconds,
+    sessionsCount: sessionsCount ?? this.sessionsCount,
+  );
+  ReadingDayStat copyWithCompanion(ReadingDayStatsCompanion data) {
+    return ReadingDayStat(
+      day: data.day.present ? data.day.value : this.day,
+      activeSeconds: data.activeSeconds.present
+          ? data.activeSeconds.value
+          : this.activeSeconds,
+      comicSeconds: data.comicSeconds.present
+          ? data.comicSeconds.value
+          : this.comicSeconds,
+      bookSeconds: data.bookSeconds.present
+          ? data.bookSeconds.value
+          : this.bookSeconds,
+      sessionsCount: data.sessionsCount.present
+          ? data.sessionsCount.value
+          : this.sessionsCount,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReadingDayStat(')
+          ..write('day: $day, ')
+          ..write('activeSeconds: $activeSeconds, ')
+          ..write('comicSeconds: $comicSeconds, ')
+          ..write('bookSeconds: $bookSeconds, ')
+          ..write('sessionsCount: $sessionsCount')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(day, activeSeconds, comicSeconds, bookSeconds, sessionsCount);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReadingDayStat &&
+          other.day == this.day &&
+          other.activeSeconds == this.activeSeconds &&
+          other.comicSeconds == this.comicSeconds &&
+          other.bookSeconds == this.bookSeconds &&
+          other.sessionsCount == this.sessionsCount);
+}
+
+class ReadingDayStatsCompanion extends UpdateCompanion<ReadingDayStat> {
+  final Value<String> day;
+  final Value<int> activeSeconds;
+  final Value<int> comicSeconds;
+  final Value<int> bookSeconds;
+  final Value<int> sessionsCount;
+  final Value<int> rowid;
+  const ReadingDayStatsCompanion({
+    this.day = const Value.absent(),
+    this.activeSeconds = const Value.absent(),
+    this.comicSeconds = const Value.absent(),
+    this.bookSeconds = const Value.absent(),
+    this.sessionsCount = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ReadingDayStatsCompanion.insert({
+    required String day,
+    this.activeSeconds = const Value.absent(),
+    this.comicSeconds = const Value.absent(),
+    this.bookSeconds = const Value.absent(),
+    this.sessionsCount = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : day = Value(day);
+  static Insertable<ReadingDayStat> custom({
+    Expression<String>? day,
+    Expression<int>? activeSeconds,
+    Expression<int>? comicSeconds,
+    Expression<int>? bookSeconds,
+    Expression<int>? sessionsCount,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (day != null) 'day': day,
+      if (activeSeconds != null) 'active_seconds': activeSeconds,
+      if (comicSeconds != null) 'comic_seconds': comicSeconds,
+      if (bookSeconds != null) 'book_seconds': bookSeconds,
+      if (sessionsCount != null) 'sessions_count': sessionsCount,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ReadingDayStatsCompanion copyWith({
+    Value<String>? day,
+    Value<int>? activeSeconds,
+    Value<int>? comicSeconds,
+    Value<int>? bookSeconds,
+    Value<int>? sessionsCount,
+    Value<int>? rowid,
+  }) {
+    return ReadingDayStatsCompanion(
+      day: day ?? this.day,
+      activeSeconds: activeSeconds ?? this.activeSeconds,
+      comicSeconds: comicSeconds ?? this.comicSeconds,
+      bookSeconds: bookSeconds ?? this.bookSeconds,
+      sessionsCount: sessionsCount ?? this.sessionsCount,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (day.present) {
+      map['day'] = Variable<String>(day.value);
+    }
+    if (activeSeconds.present) {
+      map['active_seconds'] = Variable<int>(activeSeconds.value);
+    }
+    if (comicSeconds.present) {
+      map['comic_seconds'] = Variable<int>(comicSeconds.value);
+    }
+    if (bookSeconds.present) {
+      map['book_seconds'] = Variable<int>(bookSeconds.value);
+    }
+    if (sessionsCount.present) {
+      map['sessions_count'] = Variable<int>(sessionsCount.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReadingDayStatsCompanion(')
+          ..write('day: $day, ')
+          ..write('activeSeconds: $activeSeconds, ')
+          ..write('comicSeconds: $comicSeconds, ')
+          ..write('bookSeconds: $bookSeconds, ')
+          ..write('sessionsCount: $sessionsCount, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ReadingItemTimeTable extends ReadingItemTime
+    with TableInfo<$ReadingItemTimeTable, ReadingItemTimeData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ReadingItemTimeTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _itemIdMeta = const VerificationMeta('itemId');
+  @override
+  late final GeneratedColumn<String> itemId = GeneratedColumn<String>(
+    'item_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES reading_items (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _activeSecondsMeta = const VerificationMeta(
+    'activeSeconds',
+  );
+  @override
+  late final GeneratedColumn<int> activeSeconds = GeneratedColumn<int>(
+    'active_seconds',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [itemId, activeSeconds, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'reading_item_time';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReadingItemTimeData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('item_id')) {
+      context.handle(
+        _itemIdMeta,
+        itemId.isAcceptableOrUnknown(data['item_id']!, _itemIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_itemIdMeta);
+    }
+    if (data.containsKey('active_seconds')) {
+      context.handle(
+        _activeSecondsMeta,
+        activeSeconds.isAcceptableOrUnknown(
+          data['active_seconds']!,
+          _activeSecondsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {itemId};
+  @override
+  ReadingItemTimeData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReadingItemTimeData(
+      itemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}item_id'],
+      )!,
+      activeSeconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}active_seconds'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $ReadingItemTimeTable createAlias(String alias) {
+    return $ReadingItemTimeTable(attachedDatabase, alias);
+  }
+}
+
+class ReadingItemTimeData extends DataClass
+    implements Insertable<ReadingItemTimeData> {
+  final String itemId;
+  final int activeSeconds;
+  final DateTime updatedAt;
+  const ReadingItemTimeData({
+    required this.itemId,
+    required this.activeSeconds,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['item_id'] = Variable<String>(itemId);
+    map['active_seconds'] = Variable<int>(activeSeconds);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  ReadingItemTimeCompanion toCompanion(bool nullToAbsent) {
+    return ReadingItemTimeCompanion(
+      itemId: Value(itemId),
+      activeSeconds: Value(activeSeconds),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory ReadingItemTimeData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReadingItemTimeData(
+      itemId: serializer.fromJson<String>(json['itemId']),
+      activeSeconds: serializer.fromJson<int>(json['activeSeconds']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'itemId': serializer.toJson<String>(itemId),
+      'activeSeconds': serializer.toJson<int>(activeSeconds),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  ReadingItemTimeData copyWith({
+    String? itemId,
+    int? activeSeconds,
+    DateTime? updatedAt,
+  }) => ReadingItemTimeData(
+    itemId: itemId ?? this.itemId,
+    activeSeconds: activeSeconds ?? this.activeSeconds,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  ReadingItemTimeData copyWithCompanion(ReadingItemTimeCompanion data) {
+    return ReadingItemTimeData(
+      itemId: data.itemId.present ? data.itemId.value : this.itemId,
+      activeSeconds: data.activeSeconds.present
+          ? data.activeSeconds.value
+          : this.activeSeconds,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReadingItemTimeData(')
+          ..write('itemId: $itemId, ')
+          ..write('activeSeconds: $activeSeconds, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(itemId, activeSeconds, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReadingItemTimeData &&
+          other.itemId == this.itemId &&
+          other.activeSeconds == this.activeSeconds &&
+          other.updatedAt == this.updatedAt);
+}
+
+class ReadingItemTimeCompanion extends UpdateCompanion<ReadingItemTimeData> {
+  final Value<String> itemId;
+  final Value<int> activeSeconds;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const ReadingItemTimeCompanion({
+    this.itemId = const Value.absent(),
+    this.activeSeconds = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ReadingItemTimeCompanion.insert({
+    required String itemId,
+    this.activeSeconds = const Value.absent(),
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : itemId = Value(itemId),
+       updatedAt = Value(updatedAt);
+  static Insertable<ReadingItemTimeData> custom({
+    Expression<String>? itemId,
+    Expression<int>? activeSeconds,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (itemId != null) 'item_id': itemId,
+      if (activeSeconds != null) 'active_seconds': activeSeconds,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ReadingItemTimeCompanion copyWith({
+    Value<String>? itemId,
+    Value<int>? activeSeconds,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return ReadingItemTimeCompanion(
+      itemId: itemId ?? this.itemId,
+      activeSeconds: activeSeconds ?? this.activeSeconds,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (itemId.present) {
+      map['item_id'] = Variable<String>(itemId.value);
+    }
+    if (activeSeconds.present) {
+      map['active_seconds'] = Variable<int>(activeSeconds.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReadingItemTimeCompanion(')
+          ..write('itemId: $itemId, ')
+          ..write('activeSeconds: $activeSeconds, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3387,6 +4039,12 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $CollectionsTable collections = $CollectionsTable(this);
   late final $CollectionMembersTable collectionMembers =
       $CollectionMembersTable(this);
+  late final $ReadingDayStatsTable readingDayStats = $ReadingDayStatsTable(
+    this,
+  );
+  late final $ReadingItemTimeTable readingItemTime = $ReadingItemTimeTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3400,6 +4058,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     readingListMembers,
     collections,
     collectionMembers,
+    readingDayStats,
+    readingItemTime,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -3451,6 +4111,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('collection_members', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'reading_items',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('reading_item_time', kind: UpdateKind.delete)],
     ),
   ]);
 }
@@ -3590,6 +4257,26 @@ final class $$ReadingItemsTableReferences
 
     final cache = $_typedResult.readTableOrNull(
       _collectionMembersRefsTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$ReadingItemTimeTable, List<ReadingItemTimeData>>
+  _readingItemTimeRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.readingItemTime,
+    aliasName: 'reading_items__id__reading_item_time__item_id',
+  );
+
+  $$ReadingItemTimeTableProcessedTableManager get readingItemTimeRefs {
+    final manager = $$ReadingItemTimeTableTableManager(
+      $_db,
+      $_db.readingItemTime,
+    ).filter((f) => f.itemId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _readingItemTimeRefsTable($_db),
     );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
@@ -3792,6 +4479,31 @@ class $$ReadingItemsTableFilterComposer
           }) => $$CollectionMembersTableFilterComposer(
             $db: $db,
             $table: $db.collectionMembers,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> readingItemTimeRefs(
+    Expression<bool> Function($$ReadingItemTimeTableFilterComposer f) f,
+  ) {
+    final $$ReadingItemTimeTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.readingItemTime,
+      getReferencedColumn: (t) => t.itemId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ReadingItemTimeTableFilterComposer(
+            $db: $db,
+            $table: $db.readingItemTime,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -4067,6 +4779,31 @@ class $$ReadingItemsTableAnnotationComposer
         );
     return f(composer);
   }
+
+  Expression<T> readingItemTimeRefs<T extends Object>(
+    Expression<T> Function($$ReadingItemTimeTableAnnotationComposer a) f,
+  ) {
+    final $$ReadingItemTimeTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.readingItemTime,
+      getReferencedColumn: (t) => t.itemId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ReadingItemTimeTableAnnotationComposer(
+            $db: $db,
+            $table: $db.readingItemTime,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$ReadingItemsTableTableManager
@@ -4088,6 +4825,7 @@ class $$ReadingItemsTableTableManager
             bool bookAnnotationsRefs,
             bool readingListMembersRefs,
             bool collectionMembersRefs,
+            bool readingItemTimeRefs,
           })
         > {
   $$ReadingItemsTableTableManager(_$AppDatabase db, $ReadingItemsTable table)
@@ -4184,6 +4922,7 @@ class $$ReadingItemsTableTableManager
                 bookAnnotationsRefs = false,
                 readingListMembersRefs = false,
                 collectionMembersRefs = false,
+                readingItemTimeRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
@@ -4193,6 +4932,7 @@ class $$ReadingItemsTableTableManager
                     if (bookAnnotationsRefs) db.bookAnnotations,
                     if (readingListMembersRefs) db.readingListMembers,
                     if (collectionMembersRefs) db.collectionMembers,
+                    if (readingItemTimeRefs) db.readingItemTime,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -4302,6 +5042,27 @@ class $$ReadingItemsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (readingItemTimeRefs)
+                        await $_getPrefetchedData<
+                          ReadingItem,
+                          $ReadingItemsTable,
+                          ReadingItemTimeData
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ReadingItemsTableReferences
+                              ._readingItemTimeRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ReadingItemsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).readingItemTimeRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.itemId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -4328,6 +5089,7 @@ typedef $$ReadingItemsTableProcessedTableManager =
         bool bookAnnotationsRefs,
         bool readingListMembersRefs,
         bool collectionMembersRefs,
+        bool readingItemTimeRefs,
       })
     >;
 typedef $$ReadingProgressTableCreateCompanionBuilder =
@@ -6762,6 +7524,514 @@ typedef $$CollectionMembersTableProcessedTableManager =
       CollectionMember,
       PrefetchHooks Function({bool collectionId, bool itemId})
     >;
+typedef $$ReadingDayStatsTableCreateCompanionBuilder =
+    ReadingDayStatsCompanion Function({
+      required String day,
+      Value<int> activeSeconds,
+      Value<int> comicSeconds,
+      Value<int> bookSeconds,
+      Value<int> sessionsCount,
+      Value<int> rowid,
+    });
+typedef $$ReadingDayStatsTableUpdateCompanionBuilder =
+    ReadingDayStatsCompanion Function({
+      Value<String> day,
+      Value<int> activeSeconds,
+      Value<int> comicSeconds,
+      Value<int> bookSeconds,
+      Value<int> sessionsCount,
+      Value<int> rowid,
+    });
+
+class $$ReadingDayStatsTableFilterComposer
+    extends Composer<_$AppDatabase, $ReadingDayStatsTable> {
+  $$ReadingDayStatsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get day => $composableBuilder(
+    column: $table.day,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get activeSeconds => $composableBuilder(
+    column: $table.activeSeconds,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get comicSeconds => $composableBuilder(
+    column: $table.comicSeconds,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get bookSeconds => $composableBuilder(
+    column: $table.bookSeconds,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sessionsCount => $composableBuilder(
+    column: $table.sessionsCount,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ReadingDayStatsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ReadingDayStatsTable> {
+  $$ReadingDayStatsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get day => $composableBuilder(
+    column: $table.day,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get activeSeconds => $composableBuilder(
+    column: $table.activeSeconds,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get comicSeconds => $composableBuilder(
+    column: $table.comicSeconds,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get bookSeconds => $composableBuilder(
+    column: $table.bookSeconds,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sessionsCount => $composableBuilder(
+    column: $table.sessionsCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ReadingDayStatsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ReadingDayStatsTable> {
+  $$ReadingDayStatsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get day =>
+      $composableBuilder(column: $table.day, builder: (column) => column);
+
+  GeneratedColumn<int> get activeSeconds => $composableBuilder(
+    column: $table.activeSeconds,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get comicSeconds => $composableBuilder(
+    column: $table.comicSeconds,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get bookSeconds => $composableBuilder(
+    column: $table.bookSeconds,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get sessionsCount => $composableBuilder(
+    column: $table.sessionsCount,
+    builder: (column) => column,
+  );
+}
+
+class $$ReadingDayStatsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ReadingDayStatsTable,
+          ReadingDayStat,
+          $$ReadingDayStatsTableFilterComposer,
+          $$ReadingDayStatsTableOrderingComposer,
+          $$ReadingDayStatsTableAnnotationComposer,
+          $$ReadingDayStatsTableCreateCompanionBuilder,
+          $$ReadingDayStatsTableUpdateCompanionBuilder,
+          (
+            ReadingDayStat,
+            BaseReferences<
+              _$AppDatabase,
+              $ReadingDayStatsTable,
+              ReadingDayStat
+            >,
+          ),
+          ReadingDayStat,
+          PrefetchHooks Function()
+        > {
+  $$ReadingDayStatsTableTableManager(
+    _$AppDatabase db,
+    $ReadingDayStatsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ReadingDayStatsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ReadingDayStatsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ReadingDayStatsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> day = const Value.absent(),
+                Value<int> activeSeconds = const Value.absent(),
+                Value<int> comicSeconds = const Value.absent(),
+                Value<int> bookSeconds = const Value.absent(),
+                Value<int> sessionsCount = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReadingDayStatsCompanion(
+                day: day,
+                activeSeconds: activeSeconds,
+                comicSeconds: comicSeconds,
+                bookSeconds: bookSeconds,
+                sessionsCount: sessionsCount,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String day,
+                Value<int> activeSeconds = const Value.absent(),
+                Value<int> comicSeconds = const Value.absent(),
+                Value<int> bookSeconds = const Value.absent(),
+                Value<int> sessionsCount = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReadingDayStatsCompanion.insert(
+                day: day,
+                activeSeconds: activeSeconds,
+                comicSeconds: comicSeconds,
+                bookSeconds: bookSeconds,
+                sessionsCount: sessionsCount,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ReadingDayStatsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ReadingDayStatsTable,
+      ReadingDayStat,
+      $$ReadingDayStatsTableFilterComposer,
+      $$ReadingDayStatsTableOrderingComposer,
+      $$ReadingDayStatsTableAnnotationComposer,
+      $$ReadingDayStatsTableCreateCompanionBuilder,
+      $$ReadingDayStatsTableUpdateCompanionBuilder,
+      (
+        ReadingDayStat,
+        BaseReferences<_$AppDatabase, $ReadingDayStatsTable, ReadingDayStat>,
+      ),
+      ReadingDayStat,
+      PrefetchHooks Function()
+    >;
+typedef $$ReadingItemTimeTableCreateCompanionBuilder =
+    ReadingItemTimeCompanion Function({
+      required String itemId,
+      Value<int> activeSeconds,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$ReadingItemTimeTableUpdateCompanionBuilder =
+    ReadingItemTimeCompanion Function({
+      Value<String> itemId,
+      Value<int> activeSeconds,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$ReadingItemTimeTableReferences
+    extends
+        BaseReferences<
+          _$AppDatabase,
+          $ReadingItemTimeTable,
+          ReadingItemTimeData
+        > {
+  $$ReadingItemTimeTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $ReadingItemsTable _itemIdTable(_$AppDatabase db) => db.readingItems
+      .createAlias('reading_item_time__item_id__reading_items__id');
+
+  $$ReadingItemsTableProcessedTableManager get itemId {
+    final $_column = $_itemColumn<String>('item_id')!;
+
+    final manager = $$ReadingItemsTableTableManager(
+      $_db,
+      $_db.readingItems,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_itemIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$ReadingItemTimeTableFilterComposer
+    extends Composer<_$AppDatabase, $ReadingItemTimeTable> {
+  $$ReadingItemTimeTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get activeSeconds => $composableBuilder(
+    column: $table.activeSeconds,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$ReadingItemsTableFilterComposer get itemId {
+    final $$ReadingItemsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.itemId,
+      referencedTable: $db.readingItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ReadingItemsTableFilterComposer(
+            $db: $db,
+            $table: $db.readingItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$ReadingItemTimeTableOrderingComposer
+    extends Composer<_$AppDatabase, $ReadingItemTimeTable> {
+  $$ReadingItemTimeTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get activeSeconds => $composableBuilder(
+    column: $table.activeSeconds,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$ReadingItemsTableOrderingComposer get itemId {
+    final $$ReadingItemsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.itemId,
+      referencedTable: $db.readingItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ReadingItemsTableOrderingComposer(
+            $db: $db,
+            $table: $db.readingItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$ReadingItemTimeTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ReadingItemTimeTable> {
+  $$ReadingItemTimeTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get activeSeconds => $composableBuilder(
+    column: $table.activeSeconds,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$ReadingItemsTableAnnotationComposer get itemId {
+    final $$ReadingItemsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.itemId,
+      referencedTable: $db.readingItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ReadingItemsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.readingItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$ReadingItemTimeTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ReadingItemTimeTable,
+          ReadingItemTimeData,
+          $$ReadingItemTimeTableFilterComposer,
+          $$ReadingItemTimeTableOrderingComposer,
+          $$ReadingItemTimeTableAnnotationComposer,
+          $$ReadingItemTimeTableCreateCompanionBuilder,
+          $$ReadingItemTimeTableUpdateCompanionBuilder,
+          (ReadingItemTimeData, $$ReadingItemTimeTableReferences),
+          ReadingItemTimeData,
+          PrefetchHooks Function({bool itemId})
+        > {
+  $$ReadingItemTimeTableTableManager(
+    _$AppDatabase db,
+    $ReadingItemTimeTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ReadingItemTimeTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ReadingItemTimeTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ReadingItemTimeTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> itemId = const Value.absent(),
+                Value<int> activeSeconds = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReadingItemTimeCompanion(
+                itemId: itemId,
+                activeSeconds: activeSeconds,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String itemId,
+                Value<int> activeSeconds = const Value.absent(),
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => ReadingItemTimeCompanion.insert(
+                itemId: itemId,
+                activeSeconds: activeSeconds,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$ReadingItemTimeTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({itemId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (itemId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.itemId,
+                                referencedTable:
+                                    $$ReadingItemTimeTableReferences
+                                        ._itemIdTable(db),
+                                referencedColumn:
+                                    $$ReadingItemTimeTableReferences
+                                        ._itemIdTable(db)
+                                        .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$ReadingItemTimeTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ReadingItemTimeTable,
+      ReadingItemTimeData,
+      $$ReadingItemTimeTableFilterComposer,
+      $$ReadingItemTimeTableOrderingComposer,
+      $$ReadingItemTimeTableAnnotationComposer,
+      $$ReadingItemTimeTableCreateCompanionBuilder,
+      $$ReadingItemTimeTableUpdateCompanionBuilder,
+      (ReadingItemTimeData, $$ReadingItemTimeTableReferences),
+      ReadingItemTimeData,
+      PrefetchHooks Function({bool itemId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6782,4 +8052,8 @@ class $AppDatabaseManager {
       $$CollectionsTableTableManager(_db, _db.collections);
   $$CollectionMembersTableTableManager get collectionMembers =>
       $$CollectionMembersTableTableManager(_db, _db.collectionMembers);
+  $$ReadingDayStatsTableTableManager get readingDayStats =>
+      $$ReadingDayStatsTableTableManager(_db, _db.readingDayStats);
+  $$ReadingItemTimeTableTableManager get readingItemTime =>
+      $$ReadingItemTimeTableTableManager(_db, _db.readingItemTime);
 }

@@ -52,71 +52,96 @@ Future<void> showComicThumbnailsSheet(
                     ),
                   ),
                   Expanded(
-                    child: GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.x3,
-                        0,
-                        AppSpacing.x3,
-                        AppSpacing.x4,
-                      ),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            mainAxisSpacing: AppSpacing.x2,
-                            crossAxisSpacing: AppSpacing.x2,
-                            childAspectRatio: 0.7,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // More columns on wider sheets; keep thumbs tappable.
+                        final crossAxisCount = constraints.maxWidth >= 720
+                            ? 5
+                            : constraints.maxWidth >= 480
+                            ? 4
+                            : 3;
+                        return GridView.builder(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.x3,
+                            0,
+                            AppSpacing.x3,
+                            AppSpacing.x4,
                           ),
-                      itemCount: count,
-                      itemBuilder: (context, index) {
-                        final selected = index == current;
-                        return Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              controller.jumpTo(index);
-                              Navigator.of(context).pop();
-                            },
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: selected
-                                      ? Theme.of(context).colorScheme.primary
-                                      : fg.withValues(alpha: 0.2),
-                                  width: selected ? 2 : 1,
-                                ),
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                mainAxisSpacing: AppSpacing.x2,
+                                crossAxisSpacing: AppSpacing.x2,
+                                childAspectRatio: 0.7,
                               ),
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  ComicPageImage(
-                                    controller: controller,
-                                    pageIndex: index,
-                                    fit: BoxFit.cover,
-                                  ),
-                                  Align(
-                                    alignment: Alignment.bottomCenter,
-                                    child: ColoredBox(
-                                      color: Colors.black54,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 2,
-                                          horizontal: 4,
-                                        ),
-                                        child: Text(
-                                          '${index + 1}',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize:
-                                                context.appCaptionSmallSize,
-                                          ),
-                                        ),
+                          itemCount: count,
+                          itemBuilder: (context, index) {
+                            final selected = index == current;
+                            final pageNo = index + 1;
+                            return Semantics(
+                              button: true,
+                              selected: selected,
+                              label: selected
+                                  ? '第 $pageNo 页，当前页'
+                                  : '第 $pageNo 页',
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () {
+                                    controller.jumpTo(index);
+                                    Navigator.of(context).pop();
+                                  },
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: selected
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.primary
+                                            : fg.withValues(alpha: 0.2),
+                                        width: selected ? 2 : 1,
                                       ),
                                     ),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        ComicPageImage(
+                                          controller: controller,
+                                          pageIndex: index,
+                                          fit: BoxFit.cover,
+                                        ),
+                                        Align(
+                                          alignment: Alignment.bottomCenter,
+                                          child: ColoredBox(
+                                            color: Colors.black54,
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 2,
+                                                    horizontal: 4,
+                                                  ),
+                                              child: Text(
+                                                '$pageNo',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: context
+                                                      .appCaptionSmallSize,
+                                                  fontFeatures: const [
+                                                    FontFeature
+                                                        .tabularFigures(),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ],
+                                ),
                               ),
-                            ),
-                          ),
+                            );
+                          },
                         );
                       },
                     ),

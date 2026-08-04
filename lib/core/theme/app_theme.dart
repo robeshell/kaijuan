@@ -89,7 +89,12 @@ abstract final class AppTheme {
     final baseTextTheme = ThemeData(
       brightness: brightness,
     ).textTheme.apply(bodyColor: foreground, displayColor: foreground);
-    final componentProfile = resolveAppComponentProfile(defaultTargetPlatform);
+    // ThemeData is platform-scoped (no MediaQuery width). Product chrome
+    // titles use [BuildContext.appComponentProfile] which upgrades on fold /
+    // tablet widths — prefer context.appSectionTitleSize over Theme textTheme.
+    final componentProfile = resolveAppComponentProfile(
+      platform: defaultTargetPlatform,
+    );
     final textTheme = componentProfile.applyTypeScale(
       baseTextTheme,
       foreground: foreground,

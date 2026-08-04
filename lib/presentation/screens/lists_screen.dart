@@ -154,10 +154,9 @@ class ListsScreen extends StatelessWidget {
                 title: '书单',
                 onBack: () => Navigator.of(context).maybePop(),
                 actions: [
-                  OutlinedButton.icon(
+                  OutlinedButton(
                     onPressed: () => _create(context),
-                    icon: const Icon(KaijuanIcons.add),
-                    label: const Text('新建书单'),
+                    child: const Text('新建书单'),
                   ),
                 ],
               ),

@@ -339,7 +339,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
   }
 }
 
-class _ActionsCard extends StatelessWidget {
+class _ActionsCard extends StatefulWidget {
   const _ActionsCard({
     required this.placeAbove,
     required this.caretX,
@@ -363,39 +363,124 @@ class _ActionsCard extends StatelessWidget {
   final VoidCallback onExcerpt;
 
   @override
+  State<_ActionsCard> createState() => _ActionsCardState();
+}
+
+class _ActionsCardState extends State<_ActionsCard> {
+  /// Compact phones: primary row +「更多」for secondary actions.
+  /// Tablet / desktop list every action in one row.
+  var _showMore = false;
+
+  @override
   Widget build(BuildContext context) {
+    // Prefer window class over bubble width — preferred menu width is ~304,
+    // which would always look "wide" even on phones.
+    final compact = context.appIsCompact;
+
+    // Wide: all seven actions. Compact primary: 划线·笔记·复制·搜索·更多.
+    // Compact more: 词典·翻译·书摘·收起 (keeps row density under control).
+    final List<Widget> items;
+    if (!compact) {
+      items = [
+        _ActionItem(
+          icon: KaijuanIcons.underline,
+          label: '划线',
+          onPressed: widget.onUnderline,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.edit,
+          label: '笔记',
+          onPressed: widget.onNote,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.copy,
+          label: '复制',
+          onPressed: widget.onCopy,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.open,
+          label: '词典',
+          onPressed: widget.onDict,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.translate,
+          label: '翻译',
+          onPressed: widget.onTranslate,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.search,
+          label: '搜索',
+          onPressed: widget.onSearch,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.quote,
+          label: '书摘',
+          onPressed: widget.onExcerpt,
+        ),
+      ];
+    } else if (_showMore) {
+      items = [
+        _ActionItem(
+          icon: KaijuanIcons.open,
+          label: '词典',
+          onPressed: widget.onDict,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.translate,
+          label: '翻译',
+          onPressed: widget.onTranslate,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.quote,
+          label: '书摘',
+          onPressed: widget.onExcerpt,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.chevronLeft,
+          label: '收起',
+          onPressed: () => setState(() => _showMore = false),
+        ),
+      ];
+    } else {
+      items = [
+        _ActionItem(
+          icon: KaijuanIcons.underline,
+          label: '划线',
+          onPressed: widget.onUnderline,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.edit,
+          label: '笔记',
+          onPressed: widget.onNote,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.copy,
+          label: '复制',
+          onPressed: widget.onCopy,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.search,
+          label: '搜索',
+          onPressed: widget.onSearch,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.more,
+          label: '更多',
+          onPressed: () => setState(() => _showMore = true),
+        ),
+      ];
+    }
+
     final body = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-      child: Row(
-        children: [
-          _ActionItem(
-            icon: KaijuanIcons.underline,
-            label: '划线',
-            onPressed: onUnderline,
-          ),
-          _ActionItem(icon: KaijuanIcons.edit, label: '笔记', onPressed: onNote),
-          _ActionItem(icon: KaijuanIcons.copy, label: '复制', onPressed: onCopy),
-          _ActionItem(icon: KaijuanIcons.open, label: '词典', onPressed: onDict),
-          _ActionItem(
-            icon: KaijuanIcons.translate,
-            label: '翻译',
-            onPressed: onTranslate,
-          ),
-          _ActionItem(
-            icon: KaijuanIcons.search,
-            label: '搜索',
-            onPressed: onSearch,
-          ),
-          _ActionItem(
-            icon: KaijuanIcons.quote,
-            label: '书摘',
-            onPressed: onExcerpt,
-          ),
-        ],
-      ),
+      child: Row(children: items),
     );
 
-    return _Bubble(placeAbove: placeAbove, caretX: caretX, child: body);
+    return _Bubble(
+      placeAbove: widget.placeAbove,
+      caretX: widget.caretX,
+      child: body,
+    );
   }
 }
 
@@ -437,18 +522,21 @@ class _MarkupCard extends StatelessWidget {
       child: Row(
         children: [
           _StyleChip(
+            label: '实线划线',
             selected: activeType == BookAnnotationType.underline,
             child: const Icon(KaijuanIcons.underline, size: 18),
             onPressed: () => onStyle(BookAnnotationType.underline, activeColor),
           ),
           const SizedBox(width: 6),
           _StyleChip(
+            label: '波浪线',
             selected: activeType == BookAnnotationType.wavy,
             child: const Icon(KaijuanIcons.wavy, size: 18),
             onPressed: () => onStyle(BookAnnotationType.wavy, activeColor),
           ),
           const SizedBox(width: 6),
           _StyleChip(
+            label: '高亮',
             selected: activeType == BookAnnotationType.highlight,
             child: const Icon(KaijuanIcons.highlight, size: 18),
             onPressed: () => onStyle(BookAnnotationType.highlight, activeColor),
@@ -462,6 +550,7 @@ class _MarkupCard extends StatelessWidget {
             Padding(
               padding: EdgeInsets.only(left: i == 0 ? 0 : 6),
               child: _ColorDot(
+                label: BookSelectionMenuOverlay._markupColors[i].label,
                 color: Color(BookSelectionMenuOverlay._markupColors[i].argb),
                 selected:
                     activeColor == BookSelectionMenuOverlay._markupColors[i],
@@ -638,29 +727,40 @@ class _ActionItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final fg = context.appPrimaryText;
     return Expanded(
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (_) => onPressed(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 20, color: fg),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: KaiProductTokens.typographyReaderSelectionMenu,
-                  height: 1.1,
-                  color: fg,
-                  fontWeight: FontWeight.w500,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onPressed,
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 20, color: fg),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize:
+                            KaiProductTokens.typographyReaderSelectionMenu,
+                        height: 1.15,
+                        color: fg,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -670,11 +770,13 @@ class _ActionItem extends StatelessWidget {
 
 class _StyleChip extends StatelessWidget {
   const _StyleChip({
+    required this.label,
     required this.selected,
     required this.child,
     required this.onPressed,
   });
 
+  final String label;
   final bool selected;
   final Widget child;
   final VoidCallback onPressed;
@@ -682,25 +784,39 @@ class _StyleChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = context.appColors.primary;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => onPressed(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: 32,
-        height: 32,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected
-              ? accent.withValues(alpha: 0.09)
-              : context.appTint(0.025),
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-        ),
-        child: IconTheme(
-          data: IconThemeData(
-            color: selected ? accent : context.appSecondaryText,
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            customBorder: const CircleBorder(),
+            child: AnimatedContainer(
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 120),
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected
+                    ? accent.withValues(alpha: 0.09)
+                    : context.appTint(0.025),
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+              ),
+              child: IconTheme(
+                data: IconThemeData(
+                  color: selected ? accent : context.appSecondaryText,
+                ),
+                child: child,
+              ),
+            ),
           ),
-          child: child,
         ),
       ),
     );
@@ -709,41 +825,61 @@ class _StyleChip extends StatelessWidget {
 
 class _ColorDot extends StatelessWidget {
   const _ColorDot({
+    required this.label,
     required this.color,
     required this.selected,
     required this.onPressed,
   });
 
+  final String label;
   final Color color;
   final bool selected;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => onPressed(),
-      child: SizedBox(
-        width: 26,
-        height: 26,
-        child: Center(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            width: 18,
-            height: 18,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              border: Border.all(
-                color: selected
-                    ? context.appPrimaryText
-                    : const Color(0x22000000),
-                width: selected ? 2 : 1,
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$label色',
+      child: Tooltip(
+        message: '$label色',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            customBorder: const CircleBorder(),
+            child: SizedBox(
+              width: 32,
+              height: 32,
+              child: Center(
+                child: AnimatedContainer(
+                  duration: reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 120),
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color,
+                    border: Border.all(
+                      color: selected
+                          ? context.appPrimaryText
+                          : const Color(0x22000000),
+                      width: selected ? 2 : 1,
+                    ),
+                  ),
+                  child: selected
+                      ? const Icon(
+                          KaijuanIcons.check,
+                          size: 11,
+                          color: Colors.white,
+                        )
+                      : null,
+                ),
               ),
             ),
-            child: selected
-                ? const Icon(KaijuanIcons.check, size: 11, color: Colors.white)
-                : null,
           ),
         ),
       ),

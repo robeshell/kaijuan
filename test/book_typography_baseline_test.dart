@@ -14,7 +14,7 @@ void main() {
   test('paper theme matches WeChat off-white / charcoal', () {
     expect(BookReadingTheme.paper.backgroundArgb, 0xFFF7F7F7);
     expect(BookReadingTheme.paper.foregroundArgb, 0xFF333333);
-    expect(BookReadingTheme.paper.metaColorArgb, 0xFF999999);
+    expect(BookReadingTheme.paper.metaColorArgb, 0xFF707070);
   });
 
   test('book reading defaults match Kaika baseline rhythm', () {

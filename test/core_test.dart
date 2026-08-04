@@ -42,7 +42,7 @@ void main() {
 
   test('snackbar feedback uses the compact caption type role', () {
     final theme = AppTheme.light(AppColors.defaultAccent);
-    final profile = resolveAppComponentProfile(defaultTargetPlatform);
+    final profile = resolveAppComponentProfile(platform: defaultTargetPlatform);
 
     expect(theme.snackBarTheme.contentTextStyle?.fontSize, profile.captionSize);
     expect(theme.snackBarTheme.backgroundColor, Colors.transparent);

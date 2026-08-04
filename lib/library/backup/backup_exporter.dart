@@ -44,6 +44,8 @@ class BackupExporter {
       final collectionMembers = await database
           .select(database.collectionMembers)
           .get();
+      final dayStats = await database.select(database.readingDayStats).get();
+      final itemTime = await database.select(database.readingItemTime).get();
       return _DatabaseSnapshot(
         items: items,
         progress: progress,
@@ -53,6 +55,8 @@ class BackupExporter {
         readingListMembers: readingListMembers,
         collections: collections,
         collectionMembers: collectionMembers,
+        dayStats: dayStats,
+        itemTime: itemTime,
       );
     });
 
@@ -147,6 +151,25 @@ class BackupExporter {
               'contentHash': hash,
               'sortOrder': row.sortOrder,
               'addedAt': _date(row.addedAt),
+            },
+      ],
+      dayStats: [
+        for (final row in snapshot.dayStats)
+          {
+            'day': row.day,
+            'activeSeconds': row.activeSeconds,
+            'comicSeconds': row.comicSeconds,
+            'bookSeconds': row.bookSeconds,
+            'sessionsCount': row.sessionsCount,
+          },
+      ],
+      itemTime: [
+        for (final row in snapshot.itemTime)
+          if (hashById[row.itemId] case final hash?)
+            {
+              'contentHash': hash,
+              'activeSeconds': row.activeSeconds,
+              'updatedAt': _date(row.updatedAt),
             },
       ],
     );
@@ -251,6 +274,8 @@ class _DatabaseSnapshot {
     required this.readingListMembers,
     required this.collections,
     required this.collectionMembers,
+    required this.dayStats,
+    required this.itemTime,
   });
 
   final List<ReadingItem> items;
@@ -261,4 +286,6 @@ class _DatabaseSnapshot {
   final List<ReadingListMember> readingListMembers;
   final List<Collection> collections;
   final List<CollectionMember> collectionMembers;
+  final List<ReadingDayStat> dayStats;
+  final List<ReadingItemTimeData> itemTime;
 }

@@ -87,10 +87,9 @@ class CollectionsScreen extends StatelessWidget {
                 title: '合集',
                 onBack: () => Navigator.of(context).maybePop(),
                 actions: [
-                  OutlinedButton.icon(
+                  OutlinedButton(
                     onPressed: () => _create(context),
-                    icon: const Icon(KaijuanIcons.add),
-                    label: const Text('新建合集'),
+                    child: const Text('新建合集'),
                   ),
                 ],
               ),

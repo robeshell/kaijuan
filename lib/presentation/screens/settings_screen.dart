@@ -5,15 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../app/book_reading_preferences.dart';
+import '../../app/comic_reading_preferences.dart';
 import '../../app/theme_preferences.dart';
 import '../controllers/backup_controller.dart';
 import '../controllers/library_controller.dart';
 import '../navigation/app_page_route.dart';
 import 'backup_settings_screen.dart';
+import 'reading_stats_screen.dart';
 import '../../app_update/app_update_service.dart';
 import '../../app_update/app_update_ui.dart';
 import '../../core/kaijuan_icons.dart';
-import '../../core/pipeline_diagnostics.dart';
 import '../../core/theme.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/settings_components.dart';
@@ -24,11 +26,15 @@ class SettingsScreen extends StatelessWidget {
     required this.themePreferences,
     required this.backupController,
     required this.libraryController,
+    this.comicReadingPreferences,
+    this.bookReadingPreferences,
   });
 
   final ThemePreferences themePreferences;
   final BackupController backupController;
   final LibraryController libraryController;
+  final ComicReadingPreferences? comicReadingPreferences;
+  final BookReadingPreferences? bookReadingPreferences;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +45,9 @@ class SettingsScreen extends StatelessWidget {
       body: ListenableBuilder(
         listenable: Listenable.merge([themePreferences, backupController]),
         builder: (context, _) {
+          // Full content width like shelf / library (only page gutters).
           return AppSettingsScrollView(
+            maxWidth: double.infinity,
             padding: EdgeInsets.fromLTRB(
               hPad,
               AppSettingsMetrics.pageTop(context),
@@ -112,12 +120,28 @@ class SettingsScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: AppSettingsMetrics.sectionGap),
+              const _SectionLabel('阅读'),
+              const SizedBox(height: 12),
+              AppSettingsGroup(
+                children: [
+                  _SettingsActionRow(
+                    label: '阅读统计',
+                    description: '在读、已读完与馆藏概览',
+                    onTap: () => ReadingStatsScreen.open(
+                      context,
+                      libraryController: libraryController,
+                      comicReadingPreferences: comicReadingPreferences,
+                      bookReadingPreferences: bookReadingPreferences,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSettingsMetrics.sectionGap),
               const _SectionLabel('数据与备份'),
               const SizedBox(height: 12),
               AppSettingsGroup(
                 children: [
                   _SettingsActionRow(
-                    icon: Icons.cloud_upload_outlined,
                     label: 'WebDAV 备份',
                     description:
                         backupController.settings.lastSuccessfulAt == null
@@ -153,13 +177,11 @@ class SettingsScreen extends StatelessWidget {
 
 class _SettingsActionRow extends StatelessWidget {
   const _SettingsActionRow({
-    required this.icon,
     required this.label,
     required this.description,
     required this.onTap,
   });
 
-  final IconData icon;
   final String label;
   final String description;
   final VoidCallback onTap;
@@ -174,8 +196,6 @@ class _SettingsActionRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              Icon(icon, size: 20, color: context.appSecondaryText),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -198,7 +218,11 @@ class _SettingsActionRow extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, size: 20, color: context.settingsMuted),
+              Icon(
+                KaijuanIcons.chevronRight,
+                size: 18,
+                color: context.settingsMuted,
+              ),
             ],
           ),
         ),
@@ -430,34 +454,16 @@ class _AboutBlockState extends State<_AboutBlock> {
         final version = info == null
             ? '…'
             : '${info.version} (${info.buildNumber})';
-        final rows = <(String, String, VoidCallback?)>[
-          (
-            '版本',
-            version,
-            info == null ? null : () => _copy(context, version, '已复制版本号'),
-          ),
-          (
-            '诊断',
-            '导入 / 打开耗时',
-            () => _copy(
-              context,
-              PipelineDiagnostics.instance.exportText(),
-              '已复制诊断',
-            ),
-          ),
-        ];
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (var i = 0; i < rows.length; i++) ...[
-              if (i > 0)
-                Divider(height: 1, indent: 14, color: context.settingsHairline),
-              _AboutRow(
-                label: rows[i].$1,
-                value: rows[i].$2,
-                onCopy: rows[i].$3,
-              ),
-            ],
+            _AboutRow(
+              label: '版本',
+              value: version,
+              onCopy: info == null
+                  ? null
+                  : () => _copy(context, version, '已复制版本号'),
+            ),
             if (!kIsWeb) ...[
               Divider(height: 1, indent: 14, color: context.settingsHairline),
               _AboutRow(
@@ -507,6 +513,7 @@ class _AboutRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = onTap ?? onCopy;
     final row = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 46),
       child: Padding(
@@ -524,7 +531,7 @@ class _AboutRow extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: onTap == null
+              child: interactive == null
                   ? SelectableText(
                       value,
                       style: TextStyle(
@@ -537,31 +544,21 @@ class _AboutRow extends StatelessWidget {
                       style: TextStyle(
                         fontSize: context.appCaptionSize,
                         fontWeight: FontWeight.w500,
-                        color: Theme.of(context).colorScheme.primary,
+                        // Update action uses accent; copy keeps neutral text.
+                        color: onTap != null
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
                       ),
                     ),
             ),
-            if (onCopy != null) ...[
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: '复制',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                icon: Icon(
-                  KaijuanIcons.copy,
-                  size: 15,
-                  weight: 300,
-                  color: context.settingsMuted,
-                ),
-                onPressed: onCopy,
-              ),
-            ],
           ],
         ),
       ),
     );
-    if (onTap == null) return row;
-    return InkWell(onTap: onTap, child: row);
+    if (interactive == null) return row;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(onTap: interactive, child: row),
+    );
   }
 }

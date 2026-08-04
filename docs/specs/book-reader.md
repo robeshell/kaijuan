@@ -131,7 +131,7 @@ EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版�
 
 #### ① 选区动作条
 
-- 单行横条：图标 + 文案；右侧可「›」进更多（超过容量时）。
+- 单行横条：图标 + 文案；标签 ≥12pt；compact 窗口用「更多」折叠次要槽。
 - **不**附带色板、线型条。
 
 | 槽 | 状态 | 行为 |
@@ -146,7 +146,9 @@ EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版�
 | 朗读 | **隐藏** | 跟听书 |
 | 分享 / AI | **本程不做** | — |
 
-① 默认露出：划线 · 笔记 · 复制 · 词典 · 翻译 · **搜索** · 书摘（书摘置末）。无后端的槽可短提示，由产品点将决定是否隐藏。
+① 槽位全集：划线 · 笔记 · 复制 · 词典 · 翻译 · **搜索** · 书摘（书摘置末）。  
+**compact（手机）**：默认露出 划线 · 笔记 · 复制 · 搜索 · **更多**；更多内为 词典 · 翻译 · 书摘 · 收起。  
+**medium/wide（平板/桌面）**：一次露出全部七槽。无后端的槽可短提示，由产品点将决定是否隐藏。
 
 **笔记列表**（底栏「目录」抽屉 ·「笔记」段）：
 
@@ -346,7 +348,7 @@ markup
 
 ### Chrome 几何
 
-- 顶栏内容高：`kBookReaderChromeBarHeight`（56）。  
+- 顶栏内容高：`kReaderChromeBarHeight` / 兼容名 `kBookReaderChromeBarHeight`（56）。  
 - 底栏内容高：`kBookReaderChromeBottomHeight`（padding + IconButton）。  
 - 上述尺寸只用于悬浮 Chrome 自身，不参与正文 `pageSize`；正文使用“页面上下留白”中的稳定平台 inset。
 

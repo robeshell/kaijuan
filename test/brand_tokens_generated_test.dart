@@ -10,11 +10,16 @@ void main() {
       KaiBrandMobileType.inputTextSize,
       lessThan(KaiBrandMobileType.bodySize),
     );
-    expect(KaiBrandMobileType.gridTitleSize, 15);
+    expect(KaiBrandMobileType.gridTitleSize, 14);
+    expect(
+      KaiBrandMobileType.gridTitleSize,
+      lessThan(KaiBrandMobileType.listTitleSize),
+    );
     expect(KaiBrandMobileType.listTitleSize, 15);
     expect(AppSpacing.x4, KaiBrandSpacing.x4);
     expect(AppRadii.card, KaiBrandRadii.card);
-    expect(AppProductRadii.cover, KaiProductTokens.coverRadius);
+    // Product divergence: square covers (print-like), not brand default 12.
+    expect(AppProductRadii.cover, 0);
     expect(AppProductRadii.cover, lessThan(AppRadii.card));
     expect(AppSkins.standard.canvas, KaiBrandDefaultSkin.canvas);
     expect(

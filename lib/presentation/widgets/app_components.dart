@@ -776,7 +776,7 @@ class AppMenuAction<T> {
   const AppMenuAction({
     required this.value,
     required this.label,
-    required this.icon,
+    this.icon,
     this.subtitle,
     this.selected = false,
     this.enabled = true,
@@ -786,7 +786,9 @@ class AppMenuAction<T> {
 
   final T value;
   final String label;
-  final IconData icon;
+
+  /// Optional; settings-style menus omit leading icons.
+  final IconData? icon;
   final String? subtitle;
   final bool selected;
   final bool enabled;
@@ -1121,15 +1123,17 @@ class _AppMenuActionRow<T> extends StatelessWidget {
               padding: EdgeInsets.symmetric(horizontal: compact ? 20 : 12),
               child: Row(
                 children: [
-                  SizedBox(
-                    width: compact ? 24 : 22,
-                    child: Icon(
-                      action.icon,
-                      size: compact ? 19 : 17,
-                      color: foreground,
+                  if (action.icon case final icon?) ...[
+                    SizedBox(
+                      width: compact ? 24 : 22,
+                      child: Icon(
+                        icon,
+                        size: compact ? 19 : 17,
+                        color: foreground,
+                      ),
                     ),
-                  ),
-                  SizedBox(width: compact ? 12 : 10),
+                    SizedBox(width: compact ? 12 : 10),
+                  ],
                   Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,

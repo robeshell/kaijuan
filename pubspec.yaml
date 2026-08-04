@@ -1,7 +1,7 @@
 name: kaijuan
 description: "开卷 — a local reader for page-image and reflow content."
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.1.1+2
 
 environment:
   sdk: ^3.12.2
@@ -60,7 +60,7 @@ msix_config:
   publisher_display_name: com.kaijuan.reader
   identity_name: com.kaijuan.reader
   publisher: CN=com.kaijuan.reader
-  msix_version: 0.1.0.1
+  msix_version: 0.1.1.0
   logo_path: macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
   capabilities: internetClient, privateNetworkClientServer
   languages: zh-cn, en-us

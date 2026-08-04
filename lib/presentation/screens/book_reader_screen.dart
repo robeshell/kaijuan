@@ -7,6 +7,7 @@ import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
+import '../../library/stats/reading_time_tracker.dart';
 import '../../library/storage/library_paths.dart';
 import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
@@ -72,10 +73,12 @@ class _BookReaderScreenState extends State<BookReaderScreen>
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   late final BookReaderController _controller;
   late final FoliateJsBookEngineAdapter _engine;
+  late final ReadingTimeTracker _timeTracker;
   late final FocusNode _focusNode;
   late final AnimationController _reveal;
   bool _showReveal = true;
   bool _revealStarted = false;
+  bool _lastTtsPlaying = false;
 
   @override
   void initState() {
@@ -96,11 +99,19 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     }
     _engine = FoliateJsBookEngineAdapter(readerController: _controller);
     _controller.onOpenNoteEditor = _presentNoteEditor;
+    _controller.addListener(_onBookControllerTick);
+    _timeTracker = ReadingTimeTracker(
+      database: widget.database,
+      itemId: widget.item.id,
+      kind: ReaderKind.book,
+    )..attach();
     _focusNode = FocusNode();
     // Phase A (~first half): cover dissolves into reading backdrop.
     // Phase B (~second half): backdrop eases away into the text.
     _reveal = AnimationController(
       vsync: this,
+      // Duration may shrink to zero when reduce-motion is on
+      // (see [didChangeDependencies]).
       duration: const Duration(milliseconds: 420),
     );
     _reveal.addStatusListener((status) {
@@ -110,6 +121,22 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     });
     _engine.attach();
     unawaited(_openBookFile());
+  }
+
+  /// TTS playback must not accumulate reading time (PRODUCT §4.8).
+  void _onBookControllerTick() {
+    final playing = _controller.ttsPlaying;
+    if (playing == _lastTtsPlaying) return;
+    _lastTtsPlaying = playing;
+    _timeTracker.setCountingEnabled(!playing);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    _reveal.duration =
+        reduceMotion ? Duration.zero : const Duration(milliseconds: 420);
   }
 
   Future<void> _openBookFile() async {
@@ -269,6 +296,11 @@ class _BookReaderScreenState extends State<BookReaderScreen>
               });
             }
 
+            final reduceMotion = MediaQuery.disableAnimationsOf(context);
+            final chromeAnim = reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 200);
+
             return Focus(
               focusNode: _focusNode,
               autofocus: _controller.isReady && !_showReveal,
@@ -306,6 +338,10 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                             final pageT = Curves.easeInOut.transform(
                               const Interval(0.48, 1).transform(_reveal.value),
                             );
+                            final coverChild = ReaderWaitingCover(
+                              coverPath: widget.item.coverPath,
+                              title: widget.item.title,
+                            );
                             return Stack(
                               fit: StackFit.expand,
                               children: [
@@ -317,14 +353,13 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                                 ),
                                 Opacity(
                                   opacity: (1 - coverT).clamp(0.0, 1.0),
-                                  child: Transform.scale(
-                                    scale: 1 + 0.1 * coverT,
-                                    filterQuality: FilterQuality.low,
-                                    child: ReaderWaitingCover(
-                                      coverPath: widget.item.coverPath,
-                                      title: widget.item.title,
-                                    ),
-                                  ),
+                                  child: reduceMotion
+                                      ? coverChild
+                                      : Transform.scale(
+                                          scale: 1 + 0.1 * coverT,
+                                          filterQuality: FilterQuality.low,
+                                          child: coverChild,
+                                        ),
                                 ),
                               ],
                             );
@@ -338,7 +373,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                         ignoring: !_controller.chromeVisible,
                         child: AnimatedOpacity(
                           opacity: _controller.chromeVisible ? 1 : 0,
-                          duration: const Duration(milliseconds: 200),
+                          duration: chromeAnim,
                           curve: Curves.easeOut,
                           child: BookReaderChrome(
                             controller: _controller,
@@ -364,6 +399,8 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   @override
   void dispose() {
+    _controller.removeListener(_onBookControllerTick);
+    unawaited(_timeTracker.detach());
     _controller.onOpenNoteEditor = null;
     _reveal.dispose();
     _focusNode.dispose();
@@ -386,9 +423,11 @@ class _ErrorBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final fg = Color(theme.foregroundArgb);
     final fgMuted = theme.isDark
         ? const Color(0x99F2F2F4)
         : const Color(0x991C1C1E);
+    final detail = error.trim();
 
     return SafeArea(
       child: Center(
@@ -398,10 +437,34 @@ class _ErrorBody extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                error,
+                '无法打开此书',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: fgMuted),
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
+              const SizedBox(height: 8),
+              Text(
+                '文件可能已损坏、已移动，或格式不受支持。',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: fgMuted, height: 1.4),
+              ),
+              if (detail.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  detail,
+                  textAlign: TextAlign.center,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: fgMuted.withValues(alpha: 0.75),
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               FilledButton(onPressed: onBack, child: const Text('返回')),
             ],

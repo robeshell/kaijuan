@@ -18,13 +18,30 @@ enum AppWindowClass { compact, medium, wide }
 
 enum AppComponentProfile { mobile, desktop }
 
-AppComponentProfile resolveAppComponentProfile(TargetPlatform platform) {
-  return switch (platform) {
+/// Shell **type density** for page titles / list chrome.
+///
+/// - Desktop OS → always [AppComponentProfile.desktop] (pointer-first scale).
+/// - Phone OS → [AppComponentProfile.mobile] only while [windowClass] is
+///   compact; **medium / wide** (open fold, tablet, large landscape) upgrades
+///   to desktop type so full-width 设置 / 统计 / 书库 titles are not stuck at
+///   phone 22–28pt across a dual-pane surface.
+///
+/// Gutters and cover grids still use [AppWindowClass] separately; chrome
+/// (rail vs bottom bar) uses [resolveAppUsesSideRail].
+AppComponentProfile resolveAppComponentProfile({
+  required TargetPlatform platform,
+  AppWindowClass windowClass = AppWindowClass.compact,
+}) {
+  final desktopOs = switch (platform) {
     TargetPlatform.macOS ||
     TargetPlatform.windows ||
-    TargetPlatform.linux => AppComponentProfile.desktop,
-    TargetPlatform.iOS || TargetPlatform.android => AppComponentProfile.mobile,
-    _ => AppComponentProfile.mobile,
+    TargetPlatform.linux => true,
+    _ => false,
+  };
+  if (desktopOs) return AppComponentProfile.desktop;
+  return switch (windowClass) {
+    AppWindowClass.compact => AppComponentProfile.mobile,
+    AppWindowClass.medium || AppWindowClass.wide => AppComponentProfile.desktop,
   };
 }
 
@@ -525,8 +542,11 @@ extension AppThemeContext on BuildContext {
 
   double get appPageTitleSize => appComponentProfile.pageTitleSize;
 
-  AppComponentProfile get appComponentProfile =>
-      resolveAppComponentProfile(defaultTargetPlatform);
+  /// Width-aware type profile (fold / tablet upgrade mobile OS → desktop type).
+  AppComponentProfile get appComponentProfile => resolveAppComponentProfile(
+    platform: defaultTargetPlatform,
+    windowClass: appWindowClass,
+  );
 
   double get appSectionTitleSize => appComponentProfile.sectionTitleSize;
 

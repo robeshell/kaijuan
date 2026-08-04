@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
@@ -11,6 +9,7 @@ import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/book_theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
+import 'reader_tool_strip_shared.dart';
 
 enum BookToolStripPanel { brightness, typography, readingMode, tts }
 
@@ -71,136 +70,87 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
           1.0,
         );
 
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              alignment: Alignment.bottomCenter,
-              child: _panel == null
-                  ? const SizedBox(width: double.infinity)
-                  : Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        AppSpacing.x4,
-                        context.appIsShortViewport
-                            ? AppSpacing.x2
-                            : AppSpacing.x3,
-                        AppSpacing.x4,
-                        AppSpacing.x2,
-                      ),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxHeight:
-                              MediaQuery.sizeOf(context).height *
-                              context.appReaderToolPanelMaxHeightFraction,
-                        ),
-                        child: SingleChildScrollView(child: _buildPanel()),
-                      ),
-                    ),
+        final pageMode = controller.hasPageMode;
+        final stepBackLabel = pageMode ? '上一页' : '上一节';
+        final stepForwardLabel = pageMode ? '下一页' : '下一节';
+        final progressPct = (fraction * 100).toStringAsFixed(1);
+
+        return ReaderToolStripLayout(
+          fgMuted: widget.fgMuted,
+          panel: _panel == null ? null : _buildPanel(),
+          progress: ReaderProgressScrubber(
+            fraction: fraction,
+            fgMuted: widget.fgMuted,
+            accent: widget.accent,
+            stepBackLabel: stepBackLabel,
+            stepForwardLabel: stepForwardLabel,
+            semanticValue: '$progressPct%',
+            onStepBack: () {
+              if (controller.hasPageMode) {
+                controller.goPreviousPage();
+              } else {
+                controller.goPreviousSection();
+              }
+            },
+            onStepForward: () {
+              if (controller.hasPageMode) {
+                controller.goNextPage();
+              } else {
+                controller.goNextSection();
+              }
+            },
+            onDragStart: (value) => setState(() => _dragFraction = value),
+            onDragUpdate: (value) => setState(() => _dragFraction = value),
+            onDragEnd: (value) {
+              setState(() => _dragFraction = null);
+              controller.seekToFraction(value);
+            },
+          ),
+          toolKeys: [
+            ReaderToolKey(
+              tooltip: '目录',
+              icon: KaijuanIcons.toc,
+              fg: widget.fg,
+              accent: widget.accent,
+              selected: false,
+              onTap: widget.onOpenToc,
             ),
-            if (_panel != null)
-              Divider(
-                height: 1,
-                thickness: 1,
-                color: widget.fgMuted.withValues(alpha: 0.18),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.x4,
-                AppSpacing.x3,
-                AppSpacing.x4,
-                AppSpacing.x2,
-              ),
-              child: _ProgressScrubber(
-                fraction: fraction,
-                fg: widget.fg,
-                fgMuted: widget.fgMuted,
-                accent: widget.accent,
-                onStepBack: () {
-                  if (controller.hasPageMode) {
-                    controller.goPreviousPage();
-                  } else {
-                    controller.goPreviousSection();
-                  }
-                },
-                onStepForward: () {
-                  if (controller.hasPageMode) {
-                    controller.goNextPage();
-                  } else {
-                    controller.goNextSection();
-                  }
-                },
-                onDragStart: (value) => setState(() => _dragFraction = value),
-                onDragUpdate: (value) => setState(() => _dragFraction = value),
-                onDragEnd: (value) {
-                  setState(() => _dragFraction = null);
-                  controller.seekToFraction(value);
-                },
-              ),
+            ReaderToolKey(
+              tooltip: controller.ttsPlaying
+                  ? '听书中'
+                  : (controller.ttsPaused ? '听书已暂停' : '听书'),
+              icon: controller.ttsActive
+                  ? KaijuanIcons.headphonesFilled
+                  : KaijuanIcons.headphones,
+              fg: widget.fg,
+              accent: widget.accent,
+              selected:
+                  _panel == BookToolStripPanel.tts || controller.ttsActive,
+              onTap: _onListenTap,
             ),
-            Divider(
-              height: 1,
-              thickness: 1,
-              color: widget.fgMuted.withValues(alpha: 0.18),
+            ReaderToolKey(
+              tooltip: '亮度',
+              icon: KaijuanIcons.sunny,
+              fg: widget.fg,
+              accent: widget.accent,
+              selected: _panel == BookToolStripPanel.brightness,
+              onTap: () => _togglePanel(BookToolStripPanel.brightness),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.x2,
-                AppSpacing.x2,
-                AppSpacing.x2,
-                AppSpacing.x3,
-              ),
-              child: Row(
-                children: [
-                  _ToolKey(
-                    tooltip: '目录',
-                    icon: KaijuanIcons.toc,
-                    fg: widget.fg,
-                    accent: widget.accent,
-                    selected: false,
-                    onTap: widget.onOpenToc,
-                  ),
-                  _ToolKey(
-                    tooltip: controller.ttsPlaying
-                        ? '听书中'
-                        : (controller.ttsPaused ? '听书已暂停' : '听书'),
-                    icon: controller.ttsActive
-                        ? KaijuanIcons.headphonesFilled
-                        : KaijuanIcons.headphones,
-                    fg: widget.fg,
-                    accent: widget.accent,
-                    selected:
-                        _panel == BookToolStripPanel.tts ||
-                        controller.ttsActive,
-                    onTap: _onListenTap,
-                  ),
-                  _ToolKey(
-                    tooltip: '亮度',
-                    icon: KaijuanIcons.sunny,
-                    fg: widget.fg,
-                    accent: widget.accent,
-                    selected: _panel == BookToolStripPanel.brightness,
-                    onTap: () => _togglePanel(BookToolStripPanel.brightness),
-                  ),
-                  _ToolKey(
-                    tooltip: '字体排版',
-                    icon: KaijuanIcons.typography,
-                    fg: widget.fg,
-                    accent: widget.accent,
-                    selected: _panel == BookToolStripPanel.typography,
-                    onTap: () => _togglePanel(BookToolStripPanel.typography),
-                  ),
-                  _ToolKey(
-                    tooltip: '阅读模式',
-                    icon: KaijuanIcons.tune,
-                    fg: widget.fg,
-                    accent: widget.accent,
-                    selected: _panel == BookToolStripPanel.readingMode,
-                    onTap: () => _togglePanel(BookToolStripPanel.readingMode),
-                  ),
-                ],
-              ),
+            ReaderToolKey(
+              tooltip: '字体排版',
+              icon: KaijuanIcons.typography,
+              fg: widget.fg,
+              accent: widget.accent,
+              selected: _panel == BookToolStripPanel.typography,
+              onTap: () => _togglePanel(BookToolStripPanel.typography),
+            ),
+            ReaderToolKey(
+              tooltip: '阅读模式',
+              icon: KaijuanIcons.tune,
+              fg: widget.fg,
+              accent: widget.accent,
+              selected: _panel == BookToolStripPanel.readingMode,
+              onTap: () => _togglePanel(BookToolStripPanel.readingMode),
             ),
           ],
         );
@@ -419,311 +369,15 @@ class _TtsRateChip extends StatelessWidget {
   }
 }
 
-class _ToolKey extends StatelessWidget {
-  const _ToolKey({
-    required this.tooltip,
-    required this.icon,
-    required this.fg,
-    required this.accent,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final Color fg;
-  final Color accent;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? accent : fg;
-    return Expanded(
-      child: Tooltip(
-        message: tooltip,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(AppRadii.menu),
-            child: SizedBox(
-              height: 48,
-              child: Icon(icon, color: color, size: 22, weight: 300),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+/// Human-readable band for continuous margin scrubbers (窄 / 中 / 宽).
+String _marginBandLabel(double value, double min, double max) {
+  if (max <= min) return '中';
+  final t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+  if (t < 1 / 3) return '窄';
+  if (t < 2 / 3) return '中';
+  return '宽';
 }
 
-class _ProgressScrubber extends StatelessWidget {
-  const _ProgressScrubber({
-    required this.fraction,
-    required this.fg,
-    required this.fgMuted,
-    required this.accent,
-    required this.onStepBack,
-    required this.onStepForward,
-    required this.onDragStart,
-    required this.onDragUpdate,
-    required this.onDragEnd,
-  });
-
-  final double fraction;
-  final Color fg;
-  final Color fgMuted;
-  final Color accent;
-  final VoidCallback onStepBack;
-  final VoidCallback onStepForward;
-  final ValueChanged<double> onDragStart;
-  final ValueChanged<double> onDragUpdate;
-  final ValueChanged<double> onDragEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _StepButton(
-          icon: KaijuanIcons.chevronLeft,
-          color: fgMuted,
-          onTap: onStepBack,
-        ),
-        Expanded(
-          child: _CustomFractionTrack(
-            fraction: fraction,
-            trackColor: fgMuted.withValues(alpha: 0.22),
-            fillColor: accent,
-            thumbColor: accent,
-            onDragStart: onDragStart,
-            onDragUpdate: onDragUpdate,
-            onDragEnd: onDragEnd,
-          ),
-        ),
-        _StepButton(
-          icon: KaijuanIcons.chevronRight,
-          color: fgMuted,
-          onTap: onStepForward,
-        ),
-      ],
-    );
-  }
-}
-
-class _StepButton extends StatelessWidget {
-  const _StepButton({
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.control),
-        child: SizedBox(
-          width: 36,
-          height: 28,
-          child: Icon(icon, size: 22, color: color, weight: 300),
-        ),
-      ),
-    );
-  }
-}
-
-class _CustomFractionTrack extends StatelessWidget {
-  const _CustomFractionTrack({
-    required this.fraction,
-    required this.trackColor,
-    required this.fillColor,
-    required this.thumbColor,
-    required this.onDragStart,
-    required this.onDragUpdate,
-    required this.onDragEnd,
-  });
-
-  final double fraction;
-  final Color trackColor;
-  final Color fillColor;
-  final Color thumbColor;
-  final ValueChanged<double> onDragStart;
-  final ValueChanged<double> onDragUpdate;
-  final ValueChanged<double> onDragEnd;
-
-  double _valueFor(Offset local, double width) {
-    if (width <= 0) return 0;
-    return (local.dx / width).clamp(0.0, 1.0);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final x = fraction * width;
-        return SizedBox(
-          height: 28,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragStart: (details) {
-              onDragStart(_valueFor(details.localPosition, width));
-            },
-            onHorizontalDragUpdate: (details) {
-              onDragUpdate(_valueFor(details.localPosition, width));
-            },
-            onHorizontalDragEnd: (_) => onDragEnd(fraction),
-            onTapDown: (details) {
-              final value = _valueFor(details.localPosition, width);
-              onDragStart(value);
-              onDragEnd(value);
-            },
-            child: Stack(
-              alignment: Alignment.centerLeft,
-              children: [
-                Center(
-                  child: Container(
-                    height: 2,
-                    decoration: BoxDecoration(
-                      color: trackColor,
-                      borderRadius: BorderRadius.circular(1),
-                    ),
-                  ),
-                ),
-                Center(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      width: math.max(0, x),
-                      height: 2,
-                      decoration: BoxDecoration(
-                        color: fillColor,
-                        borderRadius: BorderRadius.circular(1),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: (x - 7).clamp(0.0, math.max(0.0, width - 14)),
-                  child: Transform.rotate(
-                    angle: math.pi / 4,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: thumbColor,
-                        borderRadius: BorderRadius.circular(2),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x33000000),
-                            blurRadius: 4,
-                            offset: Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _SegmentedChoices<T> extends StatelessWidget {
-  const _SegmentedChoices({
-    required this.values,
-    required this.labels,
-    required this.selected,
-    required this.onSelected,
-    required this.fg,
-    required this.fgMuted,
-    required this.accent,
-  });
-
-  final List<T> values;
-  final List<String> labels;
-  final T selected;
-  final ValueChanged<T> onSelected;
-  final Color fg;
-  final Color fgMuted;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.menu),
-        border: Border.all(color: fgMuted.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < values.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                height: 36,
-                color: fgMuted.withValues(alpha: 0.18),
-              ),
-            Expanded(
-              child: Material(
-                color: values[i] == selected
-                    ? accent.withValues(alpha: 0.14)
-                    : Colors.transparent,
-                child: InkWell(
-                  onTap: () => onSelected(values[i]),
-                  child: SizedBox(
-                    height: 36,
-                    child: Center(
-                      child: Text(
-                        labels[i],
-                        style: TextStyle(
-                          fontSize: KaiProductTokens.typographyReaderToolValue,
-                          fontWeight: values[i] == selected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                          color: values[i] == selected ? accent : fg,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _PanelLabel extends StatelessWidget {
-  const _PanelLabel(this.text, this.color);
-
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: KaiProductTokens.typographyReaderToolValue,
-        color: color,
-      ),
-    );
-  }
-}
 
 class _BrightnessPanel extends StatefulWidget {
   const _BrightnessPanel({
@@ -766,18 +420,20 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _PanelLabel('亮度', widget.fgMuted),
+        ReaderToolPanelLabel('亮度', widget.fgMuted),
         const SizedBox(height: AppSpacing.x2),
         Row(
           children: [
             Icon(KaijuanIcons.brightnessLow, size: 18, color: widget.fgMuted),
             const SizedBox(width: AppSpacing.x2),
             Expanded(
-              child: _CustomFractionTrack(
+              child: ReaderFractionTrack(
                 fraction: t,
                 trackColor: widget.fgMuted.withValues(alpha: 0.22),
                 fillColor: widget.accent,
                 thumbColor: widget.accent,
+                semanticLabel: '亮度',
+                semanticValue: '${(t * 100).round()}%',
                 onDragStart: (v) {
                   _dragging = true;
                   final next =
@@ -1006,108 +662,123 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           },
         ),
         const SizedBox(height: AppSpacing.x3),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _PrefScrubberRow(
-                title: '水平页边距',
-                icon: KaijuanIcons.swapHorizontal,
-                valueLabel:
-                    ((_previewMargin - BookReadingPreferences.minMargin) / 8)
-                        .round()
-                        .clamp(0, 5)
-                        .toString(),
-                fraction: _t(
-                  _previewMargin,
-                  BookReadingPreferences.minMargin,
-                  BookReadingPreferences.maxMargin,
-                ),
-                accent: widget.accent,
-                fgMuted: widget.fgMuted,
-                onDragStart: (t) {
-                  _dragging = 'hMargin';
-                  setState(() {
-                    _previewMargin = _lerp(
+        Builder(
+          builder: (context) {
+            final stackMargins =
+                context.appIsCompact || context.appIsShortViewport;
+            final hMargin = _PrefScrubberRow(
+              title: '水平页边距',
+              icon: KaijuanIcons.swapHorizontal,
+              valueLabel: _marginBandLabel(
+                _previewMargin,
+                BookReadingPreferences.minMargin,
+                BookReadingPreferences.maxMargin,
+              ),
+              fraction: _t(
+                _previewMargin,
+                BookReadingPreferences.minMargin,
+                BookReadingPreferences.maxMargin,
+              ),
+              accent: widget.accent,
+              fgMuted: widget.fgMuted,
+              onDragStart: (t) {
+                _dragging = 'hMargin';
+                setState(() {
+                  _previewMargin = _lerp(
+                    BookReadingPreferences.minMargin,
+                    BookReadingPreferences.maxMargin,
+                    t,
+                  );
+                });
+              },
+              onDragUpdate: (t) {
+                setState(() {
+                  _previewMargin = _lerp(
+                    BookReadingPreferences.minMargin,
+                    BookReadingPreferences.maxMargin,
+                    t,
+                  );
+                });
+              },
+              onDragEnd: (t) {
+                _dragging = null;
+                unawaited(
+                  controller.setMargin(
+                    _lerp(
                       BookReadingPreferences.minMargin,
                       BookReadingPreferences.maxMargin,
                       t,
-                    );
-                  });
-                },
-                onDragUpdate: (t) {
-                  setState(() {
-                    _previewMargin = _lerp(
-                      BookReadingPreferences.minMargin,
-                      BookReadingPreferences.maxMargin,
-                      t,
-                    );
-                  });
-                },
-                onDragEnd: (t) {
-                  _dragging = null;
-                  unawaited(
-                    controller.setMargin(
-                      _lerp(
-                        BookReadingPreferences.minMargin,
-                        BookReadingPreferences.maxMargin,
-                        t,
-                      ),
                     ),
-                  );
-                },
+                  ),
+                );
+              },
+            );
+            final vMargin = _PrefScrubberRow(
+              title: '垂直页边距',
+              icon: KaijuanIcons.swapVertical,
+              valueLabel: _marginBandLabel(
+                _previewVerticalMargin,
+                BookReadingPreferences.minVerticalMargin,
+                BookReadingPreferences.maxVerticalMargin,
               ),
-            ),
-            const SizedBox(width: AppSpacing.x3),
-            Expanded(
-              child: _PrefScrubberRow(
-                title: '垂直页边距',
-                icon: KaijuanIcons.swapVertical,
-                valueLabel: (_previewVerticalMargin / 6)
-                    .round()
-                    .clamp(0, 8)
-                    .toString(),
-                fraction: _t(
-                  _previewVerticalMargin,
-                  BookReadingPreferences.minVerticalMargin,
-                  BookReadingPreferences.maxVerticalMargin,
-                ),
-                accent: widget.accent,
-                fgMuted: widget.fgMuted,
-                onDragStart: (t) {
-                  _dragging = 'vMargin';
-                  setState(() {
-                    _previewVerticalMargin = _lerp(
+              fraction: _t(
+                _previewVerticalMargin,
+                BookReadingPreferences.minVerticalMargin,
+                BookReadingPreferences.maxVerticalMargin,
+              ),
+              accent: widget.accent,
+              fgMuted: widget.fgMuted,
+              onDragStart: (t) {
+                _dragging = 'vMargin';
+                setState(() {
+                  _previewVerticalMargin = _lerp(
+                    BookReadingPreferences.minVerticalMargin,
+                    BookReadingPreferences.maxVerticalMargin,
+                    t,
+                  );
+                });
+              },
+              onDragUpdate: (t) {
+                setState(() {
+                  _previewVerticalMargin = _lerp(
+                    BookReadingPreferences.minVerticalMargin,
+                    BookReadingPreferences.maxVerticalMargin,
+                    t,
+                  );
+                });
+              },
+              onDragEnd: (t) {
+                _dragging = null;
+                unawaited(
+                  controller.setVerticalMargin(
+                    _lerp(
                       BookReadingPreferences.minVerticalMargin,
                       BookReadingPreferences.maxVerticalMargin,
                       t,
-                    );
-                  });
-                },
-                onDragUpdate: (t) {
-                  setState(() {
-                    _previewVerticalMargin = _lerp(
-                      BookReadingPreferences.minVerticalMargin,
-                      BookReadingPreferences.maxVerticalMargin,
-                      t,
-                    );
-                  });
-                },
-                onDragEnd: (t) {
-                  _dragging = null;
-                  unawaited(
-                    controller.setVerticalMargin(
-                      _lerp(
-                        BookReadingPreferences.minVerticalMargin,
-                        BookReadingPreferences.maxVerticalMargin,
-                        t,
-                      ),
                     ),
-                  );
-                },
-              ),
-            ),
-          ],
+                  ),
+                );
+              },
+            );
+            if (stackMargins) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  hMargin,
+                  const SizedBox(height: AppSpacing.x3),
+                  vMargin,
+                ],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: hMargin),
+                const SizedBox(width: AppSpacing.x3),
+                Expanded(child: vMargin),
+              ],
+            );
+          },
         ),
         const SizedBox(height: AppSpacing.x3),
         Row(
@@ -1170,12 +841,18 @@ class _SubPanelHeader extends StatelessWidget {
           leadingAction!,
         ],
         const Spacer(),
-        GestureDetector(
-          onTap: onClose,
-          behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.x1),
-            child: Icon(KaijuanIcons.chevronDown, size: 22, color: fgMuted),
+        Tooltip(
+          message: '关闭',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onClose,
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.x1),
+                child: Icon(KaijuanIcons.chevronDown, size: 22, color: fgMuted),
+              ),
+            ),
           ),
         ),
       ],
@@ -1543,39 +1220,66 @@ class _UserFontTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        height: 44,
-        padding: const EdgeInsets.only(
-          left: AppSpacing.x3,
-          right: AppSpacing.x1,
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return AnimatedContainer(
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 120),
+      height: 44,
+      padding: const EdgeInsets.only(
+        left: AppSpacing.x3,
+        right: AppSpacing.x1,
+      ),
+      decoration: BoxDecoration(
+        color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadii.menu),
+        border: Border.all(
+          color: selected ? accent : fgMuted.withValues(alpha: 0.22),
+          width: selected ? 1.5 : 1,
         ),
-        decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadii.menu),
-          border: Border.all(
-            color: selected ? accent : fgMuted.withValues(alpha: 0.22),
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                font.displayName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: context.appLabelSize,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: fg,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: onTap,
+              behavior: HitTestBehavior.opaque,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  font.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: context.appLabelSize,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: fg,
+                  ),
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+          Tooltip(
+            message: '删除字体',
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onDelete,
+                borderRadius: BorderRadius.circular(AppRadii.control),
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Icon(
+                    KaijuanIcons.delete,
+                    size: 18,
+                    color: fgMuted,
+                    weight: 300,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1646,11 +1350,12 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
           onClose: widget.onClose,
         ),
         const SizedBox(height: AppSpacing.x3),
-        _PanelLabel('词间距', widget.fgMuted),
+        ReaderToolPanelLabel('字间距', widget.fgMuted),
         const SizedBox(height: AppSpacing.x1),
         _PrefScrubberRow(
           icon: KaijuanIcons.letterSpacing,
           valueLabel: _fmt(_previewLetter),
+          semanticLabel: '字间距',
           fraction: _t(
             _previewLetter,
             BookReadingPreferences.minLetterSpacing,
@@ -1691,11 +1396,12 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
           },
         ),
         const SizedBox(height: AppSpacing.x3),
-        _PanelLabel('段间距', widget.fgMuted),
+        ReaderToolPanelLabel('段间距', widget.fgMuted),
         const SizedBox(height: AppSpacing.x1),
         _PrefScrubberRow(
           icon: KaijuanIcons.paragraphSpacing,
           valueLabel: _fmt(_previewParagraph),
+          semanticLabel: '段间距',
           fraction: _t(
             _previewParagraph,
             BookReadingPreferences.minParagraphSpacing,
@@ -1736,7 +1442,7 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
           },
         ),
         const SizedBox(height: AppSpacing.x3),
-        _PanelLabel('对齐方式', widget.fgMuted),
+        ReaderToolPanelLabel('对齐方式', widget.fgMuted),
         const SizedBox(height: AppSpacing.x2),
         _AlignToggle(
           selected: c.textAlign,
@@ -1784,6 +1490,7 @@ class _AlignToggle extends StatelessWidget {
       children: [
         _AlignChip(
           icon: KaijuanIcons.alignLeft,
+          label: '左对齐',
           selected: selected == BookTextAlign.start,
           accent: accent,
           fgMuted: fgMuted,
@@ -1792,6 +1499,7 @@ class _AlignToggle extends StatelessWidget {
         const SizedBox(width: AppSpacing.x2),
         _AlignChip(
           icon: KaijuanIcons.alignJustify,
+          label: '两端对齐',
           selected: selected == BookTextAlign.justify,
           accent: accent,
           fgMuted: fgMuted,
@@ -1805,6 +1513,7 @@ class _AlignToggle extends StatelessWidget {
 class _AlignChip extends StatelessWidget {
   const _AlignChip({
     required this.icon,
+    required this.label,
     required this.selected,
     required this.accent,
     required this.fgMuted,
@@ -1812,6 +1521,7 @@ class _AlignChip extends StatelessWidget {
   });
 
   final IconData icon;
+  final String label;
   final bool selected;
   final Color accent;
   final Color fgMuted;
@@ -1819,21 +1529,34 @@ class _AlignChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: 48,
-        height: 36,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.control),
-          border: Border.all(
-            color: selected ? accent : fgMuted.withValues(alpha: 0.22),
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 120),
+            width: 48,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              border: Border.all(
+                color: selected ? accent : fgMuted.withValues(alpha: 0.22),
+              ),
+              color: selected
+                  ? accent.withValues(alpha: 0.12)
+                  : Colors.transparent,
+            ),
+            child: Icon(icon, size: 20, color: selected ? accent : fgMuted),
           ),
-          color: selected ? accent.withValues(alpha: 0.12) : Colors.transparent,
         ),
-        child: Icon(icon, size: 20, color: selected ? accent : fgMuted),
       ),
     );
   }
@@ -1856,48 +1579,57 @@ class _PrefToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: context.appLabelSize,
-              fontWeight: FontWeight.w500,
-              color: fg,
-            ),
-          ),
-        ),
-        GestureDetector(
-          onTap: () => onChanged(!value),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            width: 48,
-            height: 28,
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadii.control),
-              color: value ? accent : fg.withValues(alpha: 0.18),
-            ),
-            alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(4),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x22000000),
-                    blurRadius: 2,
-                    offset: Offset(0, 1),
-                  ),
-                ],
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return Semantics(
+      label: label,
+      toggled: value,
+      button: true,
+      onTap: () => onChanged(!value),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: context.appLabelSize,
+                fontWeight: FontWeight.w500,
+                color: fg,
               ),
             ),
           ),
-        ),
-      ],
+          GestureDetector(
+            onTap: () => onChanged(!value),
+            child: AnimatedContainer(
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 140),
+              width: 48,
+              height: 28,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadii.control),
+                color: value ? accent : fg.withValues(alpha: 0.18),
+              ),
+              alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(4),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x22000000),
+                      blurRadius: 2,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2001,10 +1733,12 @@ class _PrefScrubberRow extends StatelessWidget {
     required this.onDragUpdate,
     required this.onDragEnd,
     this.title,
+    this.semanticLabel,
     this.trailing,
   });
 
   final String? title;
+  final String? semanticLabel;
   final IconData icon;
   final String valueLabel;
   final double fraction;
@@ -2017,16 +1751,21 @@ class _PrefScrubberRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final label = semanticLabel ?? title;
+    // Chinese band labels (窄/中/宽) need a bit more room than digits.
+    final valueWidth = valueLabel.runes.length > 1 ? 36.0 : 28.0;
     final row = Row(
       children: [
         Icon(icon, size: 18, color: fgMuted),
         const SizedBox(width: AppSpacing.x2),
         Expanded(
-          child: _CustomFractionTrack(
+          child: ReaderFractionTrack(
             fraction: fraction,
             trackColor: fgMuted.withValues(alpha: 0.22),
             fillColor: accent,
             thumbColor: accent,
+            semanticLabel: label,
+            semanticValue: valueLabel,
             onDragStart: onDragStart,
             onDragUpdate: onDragUpdate,
             onDragEnd: onDragEnd,
@@ -2034,7 +1773,7 @@ class _PrefScrubberRow extends StatelessWidget {
         ),
         const SizedBox(width: AppSpacing.x2),
         SizedBox(
-          width: 28,
+          width: valueWidth,
           child: Text(
             valueLabel,
             textAlign: TextAlign.right,
@@ -2085,27 +1824,40 @@ class _BoldToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: 32,
-        height: 32,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.control),
-          border: Border.all(
-            color: selected ? accent : fg.withValues(alpha: 0.22),
-            width: selected ? 1.5 : 1,
-          ),
-          color: selected ? accent.withValues(alpha: 0.12) : Colors.transparent,
-        ),
-        child: Text(
-          'B',
-          style: TextStyle(
-            fontSize: KaiProductTokens.typographyReaderOverlayTitle,
-            fontWeight: FontWeight.w600,
-            color: selected ? accent : fg,
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return Tooltip(
+      message: selected ? '取消粗体' : '粗体',
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: '粗体',
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 120),
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              border: Border.all(
+                color: selected ? accent : fg.withValues(alpha: 0.22),
+                width: selected ? 1.5 : 1,
+              ),
+              color: selected
+                  ? accent.withValues(alpha: 0.12)
+                  : Colors.transparent,
+            ),
+            child: Text(
+              'B',
+              style: TextStyle(
+                fontSize: KaiProductTokens.typographyReaderOverlayTitle,
+                fontWeight: FontWeight.w600,
+                color: selected ? accent : fg,
+              ),
+            ),
           ),
         ),
       ),
@@ -2180,9 +1932,9 @@ class _ReadingModePanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (controller.scrollModeEnabled) ...[
-          _PanelLabel('阅读模式', fgMuted),
+          ReaderToolPanelLabel('阅读模式', fgMuted),
           const SizedBox(height: AppSpacing.x2),
-          _SegmentedChoices<BookReadingMode>(
+          ReaderSegmentedChoices<BookReadingMode>(
             values: modes,
             labels: [for (final m in modes) m.label],
             selected: controller.readingMode,
@@ -2194,9 +1946,9 @@ class _ReadingModePanel extends StatelessWidget {
           const SizedBox(height: AppSpacing.x3),
         ],
         if (controller.readingMode == BookReadingMode.page) ...[
-          _PanelLabel('翻页效果', fgMuted),
+          ReaderToolPanelLabel('翻页效果', fgMuted),
           const SizedBox(height: AppSpacing.x2),
-          _SegmentedChoices<BookPageTurnEffect>(
+          ReaderSegmentedChoices<BookPageTurnEffect>(
             values: BookPageTurnEffect.values,
             labels: [for (final e in BookPageTurnEffect.values) e.label],
             selected: controller.pageTurnEffect,

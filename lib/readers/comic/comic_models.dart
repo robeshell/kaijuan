@@ -91,7 +91,13 @@ enum ComicReadingTheme {
   int get foregroundArgb => isDark ? 0xFFF2F2F4 : 0xFF1C1C1E;
 
   /// Secondary chrome text (page label, captions).
-  int get metaColorArgb => isDark ? 0x99F2F2F4 : 0x991C1C1E;
+  /// Opaque solids so contrast stays stable on each theme background (~≥4.5:1).
+  int get metaColorArgb => switch (this) {
+        ComicReadingTheme.paper => 0xFF707070,
+        ComicReadingTheme.sepia => 0xFF6E675C,
+        ComicReadingTheme.dark => 0xFFA1A1A6,
+        ComicReadingTheme.pureBlack => 0xFF8A8A8A,
+      };
 
   String get label => switch (this) {
         ComicReadingTheme.paper => '纸白',

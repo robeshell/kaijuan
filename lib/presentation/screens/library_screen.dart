@@ -20,6 +20,7 @@ import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
 import '../widgets/cover_card_ink.dart';
 import '../widgets/selection_action_sheet.dart';
+import '../widgets/settings_components.dart';
 import '../widgets/wifi_transfer_sheet.dart';
 import 'collections_screen.dart';
 import 'lists_screen.dart';
@@ -995,14 +996,27 @@ class _LibraryScreenState extends State<LibraryScreen>
               openCollections();
           }
         },
-        child: SizedBox.square(
-          dimension: 44,
+        // Keep hit target usable without forcing the title row to 44px tall
+        // (that was vertically centering the page title lower than 设置).
+        child: SizedBox(
+          width: 36,
+          height: 28,
           child: Center(
-            child: Icon(KaijuanIcons.more, size: 25, weight: 300, color: muted),
+            child: Icon(KaijuanIcons.more, size: 22, weight: 300, color: muted),
           ),
         ),
       );
     }
+
+    /// Same type recipe as [AppSettingsPageHeader] so first-line baselines match.
+    TextStyle pageTitleStyle() => TextStyle(
+      fontSize: context.appSectionTitleSize,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.1,
+      height: 1.15,
+      leadingDistribution: TextLeadingDistribution.even,
+      color: context.appPrimaryText,
+    );
 
     Widget filterTitle() {
       return AppMenuButton<_LibraryFilterAction>(
@@ -1012,23 +1026,18 @@ class _LibraryScreenState extends State<LibraryScreen>
         onSelected: (action) =>
             unawaited(_handleLibraryFilterAction(controller, action)),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          padding: const EdgeInsetsDirectional.only(end: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 _libraryFilterLabel(controller),
-                style: TextStyle(
-                  fontSize: context.appSectionTitleSize,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.1,
-                  color: context.appPrimaryText,
-                ),
+                style: pageTitleStyle(),
               ),
               const SizedBox(width: 5),
               Icon(
                 KaijuanIcons.caretDown,
-                size: 18,
+                size: 16,
                 color: context.appSecondaryText,
               ),
             ],
@@ -1037,62 +1046,65 @@ class _LibraryScreenState extends State<LibraryScreen>
       );
     }
 
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(hPad, contentWide ? 20 : 12, hPad, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                if (_selecting) ...[
-                  IconButton(
+    // Phone: roomier top under status bar (matches shelf). Wider layouts keep
+    // settings pageTop so desktop titles stay optically aligned.
+    final topPad = context.appIsCompact
+        ? AppSpacing.x6
+        : AppSettingsMetrics.pageTop(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        hPad,
+        topPad,
+        hPad,
+        0,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Title row height follows text, not the 44px icon chrome.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (_selecting) ...[
+                SizedBox(
+                  width: 36,
+                  height: 28,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
                     tooltip: '取消选择',
                     onPressed: _exitSelecting,
-                    icon: const Icon(KaijuanIcons.close),
+                    icon: const Icon(KaijuanIcons.close, size: 20),
                   ),
-                  Text(
-                    '已选 ${_selected.length}',
-                    style: TextStyle(
-                      fontSize: context.appPageTitleSize,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
-                      color: context.appPrimaryText,
-                    ),
-                  ),
-                ] else ...[
-                  if (showBrowseTools)
-                    filterTitle()
-                  else
-                    Text(
-                      '书库',
-                      style: TextStyle(
-                        fontSize: context.appSectionTitleSize,
-                        fontWeight: FontWeight.w600,
-                        color: context.appPrimaryText,
-                      ),
-                    ),
-                  const Spacer(),
-                  if (showBrowseTools) moreButton(),
-                ],
-              ],
-            ),
-            if (showBrowseTools && !_selecting) ...[
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: contentWide ? 420 : double.infinity,
-                  ),
-                  child: _searchField(accent: accent),
                 ),
-              ),
-              const SizedBox(height: 10),
+                const SizedBox(width: 4),
+                Text(
+                  '已选 ${_selected.length}',
+                  style: pageTitleStyle(),
+                ),
+              ] else ...[
+                if (showBrowseTools)
+                  filterTitle()
+                else
+                  Text('书库', style: pageTitleStyle()),
+                const Spacer(),
+                if (showBrowseTools) moreButton(),
+              ],
             ],
+          ),
+          if (showBrowseTools && !_selecting) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: contentWide ? 420 : double.infinity,
+                ),
+                child: _searchField(accent: accent),
+              ),
+            ),
+            const SizedBox(height: 10),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1404,8 +1416,8 @@ class _GridBody extends StatelessWidget {
       gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
         // Fold-open / tablet: slightly larger tiles so covers don't stampede.
         maxCrossAxisExtent: context.appCoverGridMaxExtent,
-        mainAxisSpacing: 16,
-        crossAxisSpacing: 16,
+        mainAxisSpacing: AppSpacing.x6,
+        crossAxisSpacing: AppSpacing.x6,
         // Whole cell (cover + 8 + 20 title). ~0.65 keeps cover near 3:4
         // like shelf cards; 0.58 made books read overly tall.
         childAspectRatio: 0.65,
@@ -1512,7 +1524,6 @@ class _ListBody extends StatelessWidget {
             width: 48,
             height: 64,
             child: SoftCoverFrame(
-              radius: 6,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -1565,8 +1576,8 @@ class _LibraryCollectionCard extends StatelessWidget {
           Expanded(child: CollectionCover(coverPaths: summary.coverPaths)),
           const SizedBox(height: 8),
           SizedBox(
-            // 20px title + 2px gap + 14.4px metadata line.
-            height: 38,
+            // Title line + gap + metadata; scales with type profile.
+            height: context.appGridTitleSize * 1.3 + 2 + 16,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1577,6 +1588,8 @@ class _LibraryCollectionCard extends StatelessWidget {
                   style: context.appGridTitleStyle.copyWith(
                     color: context.appPrimaryText,
                     fontWeight: FontWeight.w600,
+                    height: 1.2,
+                    leadingDistribution: TextLeadingDistribution.even,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -1587,6 +1600,7 @@ class _LibraryCollectionCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: context.appCaptionSmallSize,
                     height: 1.2,
+                    leadingDistribution: TextLeadingDistribution.even,
                     color: context.appSecondaryText,
                   ),
                 ),
@@ -1677,15 +1691,17 @@ class _GridCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            // Keep the title band fixed so grid cells stay aligned.
+            // Title band ≥ gridTitle line height (mobile 18 / desktop 20).
             SizedBox(
-              height: 20,
+              height: context.appGridTitleSize * 1.3,
               child: Text(
                 item.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: context.appGridTitleStyle.copyWith(
                   color: context.appPrimaryText,
+                  height: 1.2,
+                  leadingDistribution: TextLeadingDistribution.even,
                 ),
               ),
             ),

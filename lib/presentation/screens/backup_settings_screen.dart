@@ -112,7 +112,6 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
 
     final connectionRow = connections.isEmpty
         ? _BackupNavigationRow(
-            icon: KaijuanIcons.cloud,
             title: 'WebDAV 连接',
             value: '尚未添加连接',
             detail: '添加连接后即可选择远程备份目录',
@@ -127,7 +126,6 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
                   value: connection.id,
                   label: connection.displayName,
                   subtitle: connection.url,
-                  icon: KaijuanIcons.cloud,
                   selected: connection.id == controller.settings.connectionId,
                 ),
             ],
@@ -136,7 +134,6 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
             forceAnchored: appUsesDesktopPlatform,
             enabled: !controller.isBusy,
             child: _BackupNavigationRow(
-              icon: KaijuanIcons.cloud,
               title: 'WebDAV 连接',
               value: selectedConnection?.displayName ?? '选择连接',
               detail: selectedConnection?.url,
@@ -149,7 +146,6 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
       children: [
         connectionRow,
         _BackupNavigationRow(
-          icon: KaijuanIcons.folder,
           title: '备份目录',
           value: _path.text.trim().isEmpty ? '选择远程目录' : _path.text,
           detail: selectedConnection == null ? '请先选择 WebDAV 连接' : null,
@@ -190,15 +186,6 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
                     color: Theme.of(context).colorScheme.primary,
                     width: 2,
                   ),
-                ),
-                suffixIconConstraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
-                suffixIcon: Icon(
-                  KaijuanIcons.edit,
-                  size: 18,
-                  color: context.settingsMuted,
                 ),
               ),
             ),
@@ -248,7 +235,7 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
         spacing: 12,
         runSpacing: 10,
         children: [
-          FilledButton.icon(
+          FilledButton(
             onPressed: controller.isBusy ? null : () => unawaited(_runBackup()),
             style: FilledButton.styleFrom(
               backgroundColor: colors.primary,
@@ -257,10 +244,9 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
               disabledForegroundColor:
                   colors.primary.withValues(alpha: appDisabledForegroundOpacity),
             ),
-            icon: const Icon(KaijuanIcons.cloud),
-            label: const Text('立即备份'),
+            child: const Text('立即备份'),
           ),
-          OutlinedButton.icon(
+          OutlinedButton(
             onPressed: controller.isBusy
                 ? null
                 : () => unawaited(_openRestore()),
@@ -269,8 +255,7 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
               backgroundColor: Colors.transparent,
               side: BorderSide(color: context.settingsHairline),
             ),
-            icon: const Icon(KaijuanIcons.history),
-            label: const Text('从备份恢复'),
+            child: const Text('从备份恢复'),
           ),
         ],
       ),
@@ -293,17 +278,11 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
     final statusColor = status == BackupUiStatus.error
         ? context.appColors.error
         : context.settingsSecondary;
-    final statusIcon = switch (status) {
-      BackupUiStatus.error => KaijuanIcons.error,
-      BackupUiStatus.success => KaijuanIcons.checkCircle,
-      BackupUiStatus.idle => KaijuanIcons.cloud,
-      BackupUiStatus.running => null,
-    };
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
-          if (status == BackupUiStatus.running)
+          if (status == BackupUiStatus.running) ...[
             SizedBox(
               width: 18,
               height: 18,
@@ -311,10 +290,9 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
                 strokeWidth: 2,
                 value: progress?.fraction,
               ),
-            )
-          else
-            Icon(statusIcon, size: 18, color: statusColor),
-          const SizedBox(width: 10),
+            ),
+            const SizedBox(width: 10),
+          ],
           Expanded(
             child: Text(
               statusText,
@@ -516,7 +494,6 @@ class _BackupSectionHeader extends StatelessWidget {
 
 class _BackupNavigationRow extends StatelessWidget {
   const _BackupNavigationRow({
-    required this.icon,
     required this.title,
     required this.value,
     required this.trailing,
@@ -525,7 +502,6 @@ class _BackupNavigationRow extends StatelessWidget {
     this.onTap,
   });
 
-  final IconData icon;
   final String title;
   final String value;
   final String? detail;
@@ -545,8 +521,6 @@ class _BackupNavigationRow extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 13, 14, 13),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: secondary),
-          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -694,7 +668,6 @@ class _SnapshotSheet extends StatelessWidget {
                     final manifest = snapshots[index];
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.history_outlined),
                       title: Text(
                         _formatDate(manifest.createdAt),
                         style: TextStyle(
@@ -709,7 +682,11 @@ class _SnapshotSheet extends StatelessWidget {
                           fontSize: context.appCaptionSize,
                         ),
                       ),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: Icon(
+                        KaijuanIcons.chevronRight,
+                        size: 18,
+                        color: context.settingsMuted,
+                      ),
                       onTap: () => onSelect(manifest),
                     );
                   },

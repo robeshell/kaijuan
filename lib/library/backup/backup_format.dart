@@ -244,6 +244,8 @@ class BackupRecords {
     required this.readingListMembers,
     required this.collections,
     required this.collectionMembers,
+    this.dayStats = const [],
+    this.itemTime = const [],
   });
 
   final List<Map<String, Object?>> items;
@@ -254,6 +256,13 @@ class BackupRecords {
   final List<Map<String, Object?>> readingListMembers;
   final List<Map<String, Object?>> collections;
   final List<Map<String, Object?>> collectionMembers;
+
+  /// Local-day reading duration rows (`reading_day_stats`). Optional for v1
+  /// snapshots written before duration export existed.
+  final List<Map<String, Object?>> dayStats;
+
+  /// Per-item cumulative seconds (`reading_item_time`), keyed by contentHash.
+  final List<Map<String, Object?>> itemTime;
 
   Map<String, Object?> toJson() => {
     'format': KaijuanBackupFormat.id,
@@ -266,6 +275,8 @@ class BackupRecords {
     'readingListMembers': readingListMembers,
     'collections': collections,
     'collectionMembers': collectionMembers,
+    'dayStats': dayStats,
+    'itemTime': itemTime,
   };
 
   String encode() => jsonEncode(toJson());
@@ -290,6 +301,12 @@ class BackupRecords {
       return result;
     }
 
+    /// Present list, empty when key omitted (older snapshots).
+    List<Map<String, Object?>>? optionalList(String key) {
+      if (!raw.containsKey(key) || raw[key] == null) return const [];
+      return list(key);
+    }
+
     final items = list('items');
     final progress = list('progress');
     final bookmarks = list('bookmarks');
@@ -298,6 +315,8 @@ class BackupRecords {
     final readingListMembers = list('readingListMembers');
     final collections = list('collections');
     final collectionMembers = list('collectionMembers');
+    final dayStats = optionalList('dayStats');
+    final itemTime = optionalList('itemTime');
     if (items == null ||
         progress == null ||
         bookmarks == null ||
@@ -305,7 +324,9 @@ class BackupRecords {
         readingLists == null ||
         readingListMembers == null ||
         collections == null ||
-        collectionMembers == null) {
+        collectionMembers == null ||
+        dayStats == null ||
+        itemTime == null) {
       return null;
     }
     return BackupRecords(
@@ -317,6 +338,8 @@ class BackupRecords {
       readingListMembers: readingListMembers,
       collections: collections,
       collectionMembers: collectionMembers,
+      dayStats: dayStats,
+      itemTime: itemTime,
     );
   }
 }

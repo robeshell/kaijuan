@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,9 +6,11 @@ import 'package:flutter/material.dart';
 import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../../library/persistence/app_database.dart';
+import '../../library/stats/reading_stats.dart';
 import '../controllers/library_controller.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
+import '../widgets/cover_card_ink.dart';
 
 /// Detail / manage sheet for one library item (rename, shelf, lists, delete).
 Future<void> showItemDetailSheet({
@@ -62,12 +65,21 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
   late ReadingItem _item;
   late final TextEditingController _titleController;
   var _savingTitle = false;
+  int? _readingSeconds;
 
   @override
   void initState() {
     super.initState();
     _item = widget.item;
     _titleController = TextEditingController(text: _item.title);
+    unawaited(_loadReadingSeconds());
+  }
+
+  Future<void> _loadReadingSeconds() async {
+    final seconds =
+        await widget.controller.database.itemReadingSeconds(_item.id);
+    if (!mounted) return;
+    setState(() => _readingSeconds = seconds);
   }
 
   @override
@@ -333,15 +345,16 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 88,
-                      height: 118,
+                  SizedBox(
+                    width: 88,
+                    height: 118,
+                    child: SoftCoverFrame(
                       child: _item.coverPath != null
                           ? Image.file(
                               File(_item.coverPath!),
                               fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: double.infinity,
                               errorBuilder: (_, _, _) => ColoredBox(
                                 color: Theme.of(
                                   context,
@@ -399,6 +412,16 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
                           const SizedBox(height: 4),
                           Text(
                             '进度 ${(progress * 100).round()}%',
+                            style: TextStyle(
+                              fontSize: context.appCaptionSize,
+                              color: context.appSecondaryText,
+                            ),
+                          ),
+                        ],
+                        if (_readingSeconds != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            '累计阅读 ${formatReadingDuration(_readingSeconds!)}',
                             style: TextStyle(
                               fontSize: context.appCaptionSize,
                               color: context.appSecondaryText,
