@@ -34,10 +34,6 @@ enum _LibraryMoreAction { toggleLayout, sort, lists, collections }
 enum _LibraryFilterAction {
   all,
   kind,
-  author,
-  collections,
-  series,
-  starred,
   read,
 }
 
@@ -553,6 +549,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   List<AppMenuAction<_LibraryFilterAction>> _libraryFilterActions(
     LibraryController controller,
   ) {
+    // Only ship filters that are wired; hide unfinished placeholders.
     return [
       AppMenuAction(
         value: _LibraryFilterAction.all,
@@ -565,34 +562,6 @@ class _LibraryScreenState extends State<LibraryScreen>
         label: '类型',
         icon: KaijuanIcons.category,
         selected: controller.kindFilter != LibraryKindFilter.all,
-      ),
-      const AppMenuAction(
-        value: _LibraryFilterAction.author,
-        label: '作者',
-        icon: KaijuanIcons.bookOpen,
-        enabled: false,
-        subtitle: '即将支持',
-      ),
-      const AppMenuAction(
-        value: _LibraryFilterAction.collections,
-        label: '合集',
-        icon: KaijuanIcons.collections,
-        enabled: false,
-        subtitle: '即将支持',
-      ),
-      const AppMenuAction(
-        value: _LibraryFilterAction.series,
-        label: '丛书系列',
-        icon: KaijuanIcons.playlists,
-        enabled: false,
-        subtitle: '即将支持',
-      ),
-      const AppMenuAction(
-        value: _LibraryFilterAction.starred,
-        label: '星标',
-        icon: KaijuanIcons.bookmark,
-        enabled: false,
-        subtitle: '即将支持',
       ),
       AppMenuAction(
         value: _LibraryFilterAction.read,
@@ -616,11 +585,6 @@ class _LibraryScreenState extends State<LibraryScreen>
         await _openKindFilterMenu(controller);
       case _LibraryFilterAction.read:
         await _openReadFilterMenu(controller);
-      case _LibraryFilterAction.author ||
-          _LibraryFilterAction.collections ||
-          _LibraryFilterAction.series ||
-          _LibraryFilterAction.starred:
-        break;
     }
   }
 
@@ -871,51 +835,62 @@ class _LibraryScreenState extends State<LibraryScreen>
   }
 
   Widget _searchField({required Color accent}) {
-    return SizedBox(
-      height: 40,
-      child: AppTextField(
-        controller: _searchController,
-        onChanged: (value) => setState(() => _query = value),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: '搜索标题…',
-          hintStyle: TextStyle(color: context.appSecondaryText),
-          prefixIcon: Icon(
-            KaijuanIcons.search,
-            size: 18,
-            color: context.appSecondaryText,
-          ),
-          suffixIcon: _query.isEmpty
-              ? null
-              : IconButton(
-                  tooltip: '清除',
-                  icon: const Icon(KaijuanIcons.close, size: 16),
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() => _query = '');
-                  },
-                ),
-          filled: true,
-          // Follow theme input fill (elevated light / subtle dark), not a
-          // hard-coded light wash that breaks dark skins.
-          fillColor:
-              Theme.of(context).inputDecorationTheme.fillColor ??
-              context.appColors.surfaceContainer,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 8,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.menu),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.menu),
-            borderSide: BorderSide.none,
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.menu),
-            borderSide: BorderSide(color: accent, width: 1.2),
+    // Keep ≥16 on compact so iOS does not zoom the page on focus.
+    final searchStyle = TextStyle(
+      fontSize: context.appIsCompact ? 16 : context.appLabelSize,
+      color: context.appPrimaryText,
+      height: 1.25,
+    );
+    return Semantics(
+      textField: true,
+      label: '搜索标题',
+      child: SizedBox(
+        height: 40,
+        child: AppTextField(
+          controller: _searchController,
+          onChanged: (value) => setState(() => _query = value),
+          style: searchStyle,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: '搜索标题…',
+            hintStyle: TextStyle(color: context.appSecondaryText),
+            prefixIcon: Icon(
+              KaijuanIcons.search,
+              size: 18,
+              color: context.appSecondaryText,
+            ),
+            suffixIcon: _query.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: '清除',
+                    icon: const Icon(KaijuanIcons.close, size: 16),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() => _query = '');
+                    },
+                  ),
+            filled: true,
+            // Follow theme input fill (elevated light / subtle dark), not a
+            // hard-coded light wash that breaks dark skins.
+            fillColor:
+                Theme.of(context).inputDecorationTheme.fillColor ??
+                context.appColors.surfaceContainer,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 8,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadii.menu),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadii.menu),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadii.menu),
+              borderSide: BorderSide(color: accent, width: 1.2),
+            ),
           ),
         ),
       ),
@@ -1189,6 +1164,10 @@ class _LibraryScreenState extends State<LibraryScreen>
                       icon: KaijuanIcons.library,
                       title: '书库还是空的',
                       message: '导入图书或漫画文件后会显示在这里。',
+                      actionLabel: '导入',
+                      onAction: importing
+                          ? null
+                          : () => _toggleImportMenu(importing: importing),
                     );
                   } else if (filtered.isEmpty && collections.isEmpty) {
                     content = AppEmptyState(
@@ -1351,15 +1330,25 @@ class _LibraryScreenState extends State<LibraryScreen>
                                           color: Colors.white,
                                         ),
                                       )
-                                    : RotationTransition(
-                                        turns: Tween<double>(
-                                          begin: 0,
-                                          end: 0.125,
-                                        ).animate(_importMenuController),
-                                        child: Icon(
-                                          KaijuanIcons.add,
-                                          size: fabCompact ? 22 : 25,
-                                        ),
+                                    : Builder(
+                                        builder: (context) {
+                                          final reduceMotion =
+                                              MediaQuery.disableAnimationsOf(
+                                                context,
+                                              );
+                                          final icon = Icon(
+                                            KaijuanIcons.add,
+                                            size: fabCompact ? 22 : 25,
+                                          );
+                                          if (reduceMotion) return icon;
+                                          return RotationTransition(
+                                            turns: Tween<double>(
+                                              begin: 0,
+                                              end: 0.125,
+                                            ).animate(_importMenuController),
+                                            child: icon,
+                                          );
+                                        },
                                       ),
                               ),
                             ),

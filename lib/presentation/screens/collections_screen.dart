@@ -98,32 +98,38 @@ class CollectionsScreen extends StatelessWidget {
               child: StreamBuilder<List<CollectionSummary>>(
                 stream: controller.watchCollections(),
                 builder: (context, snapshot) {
+                  final pad = EdgeInsets.fromLTRB(
+                    hPad,
+                    AppSpacing.x8 * 2,
+                    hPad,
+                    context.appContentBottomPadding,
+                  );
                   if (snapshot.hasError) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.error,
                       title: '合集加载失败',
-                      message: '返回书库后再试一次。',
-                      actionLabel: '返回书库',
+                      message: '请返回后重试。',
+                      actionLabel: '返回',
                       onAction: () => Navigator.of(context).maybePop(),
                     );
                   }
-                  final list = snapshot.data ?? const <CollectionSummary>[];
+                  if (!snapshot.hasData) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: pad,
+                      icon: KaijuanIcons.collections,
+                      title: '加载中',
+                      message: '正在读取合集…',
+                      loading: true,
+                    );
+                  }
+                  final list = snapshot.data!;
                   if (list.isEmpty) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.collections,
                       title: '还没有合集',
                       message: '新建合集后，可以从书库把书加入进来。',
@@ -259,60 +265,66 @@ class _CollectionGridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CoverCardInk(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      borderRadius: BorderRadius.circular(AppProductRadii.cover),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(child: CollectionCover(coverPaths: summary.coverPaths)),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 40,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Tooltip(
-                        message: summary.collection.name,
-                        child: Text(
-                          summary.collection.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: context.appGridTitleStyle.copyWith(
-                            color: context.appPrimaryText,
-                            fontWeight: FontWeight.w600,
+    final name = summary.collection.name;
+    final count = summary.memberCount;
+    return Semantics(
+      button: true,
+      label: '$name，$count 本',
+      child: CoverCardInk(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(AppProductRadii.cover),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: CollectionCover(coverPaths: summary.coverPaths)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 40,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Tooltip(
+                          message: name,
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.appGridTitleStyle.copyWith(
+                              color: context.appPrimaryText,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${summary.memberCount} 本',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: context.appCaptionSmallSize,
-                          height: 1.2,
-                          color: context.appSecondaryText,
+                        const SizedBox(height: 2),
+                        Text(
+                          '$count 本',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: context.appCaptionSmallSize,
+                            height: 1.2,
+                            color: context.appSecondaryText,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                AppIconButton(
-                  icon: KaijuanIcons.more,
-                  tooltip: '管理合集',
-                  onPressed: onMore,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ],
+                  AppIconButton(
+                    icon: KaijuanIcons.more,
+                    tooltip: '管理合集',
+                    onPressed: onMore,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -632,36 +644,42 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
               child: StreamBuilder<List<ReadingItem>>(
                 stream: _membersStream,
                 builder: (context, snapshot) {
+                  final pad = EdgeInsets.fromLTRB(
+                    hPad,
+                    AppSpacing.x8 * 2,
+                    hPad,
+                    context.appContentBottomPadding,
+                  );
                   if (snapshot.hasError) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.error,
                       title: '合集内容加载失败',
-                      message: '返回书库后再试一次。',
-                      actionLabel: '返回书库',
+                      message: '请返回后重试。',
+                      actionLabel: '返回',
                       onAction: () => Navigator.of(context).maybePop(),
                     );
                   }
-                  final items = snapshot.data ?? const <ReadingItem>[];
+                  if (!snapshot.hasData) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: pad,
+                      icon: KaijuanIcons.collections,
+                      title: '加载中',
+                      message: '正在读取合集内容…',
+                      loading: true,
+                    );
+                  }
+                  final items = snapshot.data!;
                   if (items.isEmpty) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.collections,
                       title: '合集里还没有书',
                       message: '回到书库，多选书籍后加入这个合集。',
-                      actionLabel: '返回书库',
+                      actionLabel: '返回',
                       onAction: () => Navigator.of(context).maybePop(),
                     );
                   }
@@ -693,62 +711,72 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                               itemBuilder: (context, i) {
                                 final item = items[i];
                                 final isSelected = _selected.contains(item.id);
-                                return CoverCardInk(
-                                  borderRadius: BorderRadius.circular(
-                                    AppProductRadii.cover,
-                                  ),
-                                  onTap: () => _onTap(item),
-                                  onLongPress: () => _onLongPress(item),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        child: SoftCoverFrame(
-                                          child: Stack(
-                                            fit: StackFit.expand,
-                                            children: [
-                                              item.coverPath != null
-                                                  ? Image.file(
-                                                      File(item.coverPath!),
-                                                      fit: BoxFit.cover,
-                                                      width: double.infinity,
-                                                      errorBuilder: (_, _, _) =>
-                                                          const ColoredBox(
-                                                            color: AppColors
-                                                                .lightWash,
-                                                          ),
-                                                    )
-                                                  : const ColoredBox(
-                                                      color:
-                                                          AppColors.lightWash,
+                                final fallback = Theme.of(
+                                  context,
+                                ).scaffoldBackgroundColor;
+                                return Semantics(
+                                  button: true,
+                                  selected: _selecting && isSelected,
+                                  label: item.title,
+                                  child: CoverCardInk(
+                                    borderRadius: BorderRadius.circular(
+                                      AppProductRadii.cover,
+                                    ),
+                                    onTap: () => _onTap(item),
+                                    onLongPress: () => _onLongPress(item),
+                                    enablePressScale: !_selecting,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: SoftCoverFrame(
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                item.coverPath != null
+                                                    ? Image.file(
+                                                        File(item.coverPath!),
+                                                        fit: BoxFit.cover,
+                                                        width: double.infinity,
+                                                        errorBuilder:
+                                                            (_, _, _) =>
+                                                                ColoredBox(
+                                                                  color:
+                                                                      fallback,
+                                                                ),
+                                                      )
+                                                    : ColoredBox(
+                                                        color: fallback,
+                                                      ),
+                                                if (_selecting)
+                                                  Positioned(
+                                                    right: 6,
+                                                    bottom: 6,
+                                                    child: CoverSelectBadge(
+                                                      selected: isSelected,
                                                     ),
-                                              if (_selecting)
-                                                Positioned(
-                                                  right: 6,
-                                                  bottom: 6,
-                                                  child: CoverSelectBadge(
-                                                    selected: isSelected,
                                                   ),
-                                                ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      const SizedBox(height: AppSpacing.x2),
-                                      Tooltip(
-                                        message: item.title,
-                                        child: Text(
-                                          item.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: context.appGridTitleStyle
-                                              .copyWith(
-                                                color: context.appPrimaryText,
-                                              ),
+                                        const SizedBox(height: AppSpacing.x2),
+                                        Tooltip(
+                                          message: item.title,
+                                          child: Text(
+                                            item.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: context.appGridTitleStyle
+                                                .copyWith(
+                                                  color:
+                                                      context.appPrimaryText,
+                                                ),
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 );
                               },

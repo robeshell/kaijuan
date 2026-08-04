@@ -268,7 +268,7 @@ class _HeroCard extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 560),
         child: Semantics(
           button: true,
-          label: '继续阅读$title',
+          label: '继续阅读$title，已读 ${(p * 100).round()}%',
           child: CoverCardInk(
             onTap: onTap,
             borderRadius: BorderRadius.circular(AppRadii.card),
@@ -369,60 +369,68 @@ class _CoverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pct = progress?.clamp(0.0, 1.0);
+    final semanticLabel = pct == null
+        ? title
+        : '$title，已读 ${(pct * 100).round()}%';
     return SizedBox(
       width: 112,
-      child: CoverCardInk(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(AppProductRadii.cover),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 112,
-              height: 150,
-              child: SoftCoverFrame(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    cover,
-                    if (onRemove != null)
-                      Positioned(
-                        top: 4,
-                        right: 4,
-                        child: _CoverRemoveButton(onPressed: onRemove!),
-                      ),
-                  ],
+      child: Semantics(
+        button: true,
+        label: semanticLabel,
+        child: CoverCardInk(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          borderRadius: BorderRadius.circular(AppProductRadii.cover),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 112,
+                height: 150,
+                child: SoftCoverFrame(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      cover,
+                      if (onRemove != null)
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: _CoverRemoveButton(onPressed: onRemove!),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: context.appGridTitleSize * 1.3,
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.appGridTitleStyle.copyWith(
-                  color: context.appPrimaryText,
-                  height: 1.2,
-                  leadingDistribution: TextLeadingDistribution.even,
+              const SizedBox(height: 8),
+              SizedBox(
+                height: context.appGridTitleSize * 1.3,
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.appGridTitleStyle.copyWith(
+                    color: context.appPrimaryText,
+                    height: 1.2,
+                    leadingDistribution: TextLeadingDistribution.even,
+                  ),
                 ),
               ),
-            ),
-            if (progress != null) ...[
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(1),
-                child: LinearProgressIndicator(
-                  value: progress!.clamp(0.0, 1.0),
-                  minHeight: 2,
-                  backgroundColor: hairline,
-                  color: accent,
+              if (pct != null) ...[
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(1),
+                  child: LinearProgressIndicator(
+                    value: pct,
+                    minHeight: 2,
+                    backgroundColor: hairline,
+                    color: accent,
+                  ),
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -441,20 +449,30 @@ class _CoverRemoveButton extends StatelessWidget {
       button: true,
       label: '移出我的书架',
       child: Material(
-        color: Colors.black.withValues(alpha: 0.42),
-        borderRadius: BorderRadius.circular(6),
+        color: Colors.transparent,
         child: InkWell(
           // Absorb the tap so the parent cover onTap does not also fire.
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(6),
-          child: const SizedBox(
-            width: 28,
-            height: 28,
+          customBorder: const CircleBorder(),
+          // 40×40 hit target; visual chip stays compact.
+          child: SizedBox(
+            width: 40,
+            height: 40,
             child: Center(
-              child: Icon(
-                KaijuanIcons.bookmarkRemove,
-                size: 14,
-                color: Colors.white,
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.42),
+                borderRadius: BorderRadius.circular(6),
+                child: const SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: Center(
+                    child: Icon(
+                      KaijuanIcons.bookmarkRemove,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

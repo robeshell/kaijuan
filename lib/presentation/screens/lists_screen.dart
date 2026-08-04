@@ -165,32 +165,39 @@ class ListsScreen extends StatelessWidget {
               child: StreamBuilder<List<ReadingListSummary>>(
                 stream: controller.watchReadingLists(),
                 builder: (context, snapshot) {
+                  final pad = EdgeInsets.fromLTRB(
+                    hPad,
+                    AppSpacing.x8 * 2,
+                    hPad,
+                    context.appContentBottomPadding,
+                  );
                   if (snapshot.hasError) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.error,
                       title: '书单加载失败',
-                      message: '返回书库后再试一次。',
-                      actionLabel: '返回书库',
+                      message: '请返回后重试。',
+                      actionLabel: '返回',
                       onAction: () => Navigator.of(context).maybePop(),
                     );
                   }
-                  final lists = snapshot.data ?? const <ReadingListSummary>[];
+                  // Honest loading: avoid flashing the empty state before first emit.
+                  if (!snapshot.hasData) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: pad,
+                      icon: KaijuanIcons.playlists,
+                      title: '加载中',
+                      message: '正在读取书单…',
+                      loading: true,
+                    );
+                  }
+                  final lists = snapshot.data!;
                   if (lists.isEmpty) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.playlistAdd,
                       title: '还没有书单',
                       message: '新建书单后，可以从书库把书加入进来。',
@@ -339,36 +346,42 @@ class _ListDetailScreen extends StatelessWidget {
               child: StreamBuilder<List<ReadingItem>>(
                 stream: controller.watchListMembers(list.id),
                 builder: (context, snapshot) {
+                  final pad = EdgeInsets.fromLTRB(
+                    hPad,
+                    AppSpacing.x8 * 2,
+                    hPad,
+                    context.appContentBottomPadding,
+                  );
                   if (snapshot.hasError) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.error,
                       title: '书单内容加载失败',
-                      message: '返回书库后再试一次。',
-                      actionLabel: '返回书库',
+                      message: '请返回后重试。',
+                      actionLabel: '返回',
                       onAction: () => Navigator.of(context).maybePop(),
                     );
                   }
-                  final items = snapshot.data ?? const <ReadingItem>[];
+                  if (!snapshot.hasData) {
+                    return AppEmptyState(
+                      alignment: Alignment.topCenter,
+                      padding: pad,
+                      icon: KaijuanIcons.playlists,
+                      title: '加载中',
+                      message: '正在读取书单内容…',
+                      loading: true,
+                    );
+                  }
+                  final items = snapshot.data!;
                   if (items.isEmpty) {
                     return AppEmptyState(
                       alignment: Alignment.topCenter,
-                      padding: EdgeInsets.fromLTRB(
-                        hPad,
-                        AppSpacing.x8 * 2,
-                        hPad,
-                        context.appContentBottomPadding,
-                      ),
+                      padding: pad,
                       icon: KaijuanIcons.playlistAdd,
                       title: '书单里还没有书',
                       message: '回到书库，多选书籍后加入这个书单。',
-                      actionLabel: '返回书库',
+                      actionLabel: '返回',
                       onAction: () => Navigator.of(context).maybePop(),
                     );
                   }
@@ -407,11 +420,13 @@ class _ListDetailScreen extends StatelessWidget {
                                               fit: BoxFit.cover,
                                               errorBuilder: (_, _, _) =>
                                                   ColoredBox(
-                                                    color: AppColors.lightWash,
+                                                    color: Theme.of(context)
+                                                        .scaffoldBackgroundColor,
                                                   ),
                                             )
-                                          : const ColoredBox(
-                                              color: AppColors.lightWash,
+                                          : ColoredBox(
+                                              color: Theme.of(context)
+                                                  .scaffoldBackgroundColor,
                                             ),
                                     ),
                                   ),
@@ -420,12 +435,14 @@ class _ListDetailScreen extends StatelessWidget {
                                     item.kind == 'comic' ? '漫画' : '图书',
                                   ),
                                   trailing: AppIconButton(
-                                    icon: KaijuanIcons.more,
-                                    tooltip: '管理条目',
-                                    onPressed: () => _removeItem(context, item),
+                                    icon: KaijuanIcons.bookmarkRemove,
+                                    tooltip: '移出书单',
+                                    onPressed: () =>
+                                        _removeItem(context, item),
                                   ),
                                   onTap: () => openItem(context, item),
-                                  onLongPress: () => _removeItem(context, item),
+                                  onLongPress: () =>
+                                      _removeItem(context, item),
                                 ),
                             ],
                           ),

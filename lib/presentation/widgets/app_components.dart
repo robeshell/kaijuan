@@ -57,18 +57,19 @@ class AppTextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokenStyle = context.appInputTextStyle;
+    final resolvedSize = style?.fontSize ?? tokenStyle.fontSize;
     final inputStyle = tokenStyle.copyWith(
       color: style?.color ?? context.appPrimaryText,
       fontWeight: style?.fontWeight ?? tokenStyle.fontWeight,
-      fontSize: tokenStyle.fontSize,
-      height: tokenStyle.height,
-      letterSpacing: tokenStyle.letterSpacing,
+      fontSize: resolvedSize,
+      height: style?.height ?? tokenStyle.height,
+      letterSpacing: style?.letterSpacing ?? tokenStyle.letterSpacing,
     );
     final resolvedDecoration = decoration?.copyWith(
       hintStyle: (decoration?.hintStyle ?? tokenStyle).copyWith(
         color: decoration?.hintStyle?.color ?? context.appSecondaryText,
-        fontSize: tokenStyle.fontSize,
-        height: tokenStyle.height,
+        fontSize: decoration?.hintStyle?.fontSize ?? resolvedSize,
+        height: decoration?.hintStyle?.height ?? tokenStyle.height,
         fontWeight: decoration?.hintStyle?.fontWeight ?? tokenStyle.fontWeight,
         letterSpacing: tokenStyle.letterSpacing,
       ),
