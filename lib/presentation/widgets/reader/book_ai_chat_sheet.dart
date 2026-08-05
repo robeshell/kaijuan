@@ -24,6 +24,7 @@ import '../../screens/ai_settings_screen.dart';
 import '../app_components.dart';
 import '../app_overlays.dart';
 import 'ai_result_body.dart';
+import 'book_ai_graph_view.dart';
 
 /// Book-scoped AI chat (M2). Session is isolated by contentHash.
 ///
@@ -100,6 +101,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool _outlineOverviewExpanded = false;
   _AiGraphFilter _graphFilter = _AiGraphFilter.all;
   final String _graphQuery = '';
+  String? _graphHighlighted;
+  Timer? _graphHighlightTimer;
+  final _graphEntityKeys = <String, GlobalKey>{};
 
   /// Attached highlight; null when cleared by user.
   String? _selection;
@@ -233,17 +237,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     });
   }
 
+  /// Focus the composer. Order matters on macOS: request Flutter focus first
+  /// (the engine makes its TextInputPlugin first responder while the field is
+  /// active), then ask the WebView to drop native focus. The engine-side
+  /// clearFocus only moves first responder away from the WebView itself, so it
+  /// can never steal text input back from a focused field.
   Future<void> _focusComposer() async {
-    await _c.clearPlatformFocus();
-    if (!mounted) return;
     _focus.requestFocus();
-
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
     await _c.clearPlatformFocus();
-    if (mounted) {
-      _focus.requestFocus();
-    }
   }
 
   Future<void> _persist() => _c.saveChatSession(_session);
@@ -1445,6 +1446,28 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
           ),
         ],
+        if (!generating && visibleEntities.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          BookAiGraphView(
+            entities: graph.entities
+                .where(
+                  (entity) =>
+                      !gateByProgress || entity.firstSection <= readThrough,
+                )
+                .toList(growable: false),
+            relations: graph.relations,
+            onVertexTap: _onGraphVertexTap,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '点击节点可定位下方实体',
+            style: TextStyle(
+              fontSize: context.appCaptionSize,
+              color: context.appSecondaryText,
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
         const SizedBox(height: 12),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -1490,9 +1513,45 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           )
         else
           for (final entity in visibleEntities)
-            _buildGraphEntityTile(context, entity, gateByProgress, readThrough),
+            KeyedSubtree(
+              key: _graphEntityKeys.putIfAbsent(
+                entity.name,
+                () => GlobalKey(),
+              ),
+              child: _buildGraphEntityTile(
+                context,
+                entity,
+                gateByProgress,
+                readThrough,
+              ),
+            ),
       ],
     );
+  }
+
+  void _onGraphVertexTap(String name) {
+    setState(() => _graphHighlighted = name);
+    _graphHighlightTimer?.cancel();
+    _graphHighlightTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _graphHighlighted = null);
+    });
+    final ctx = _graphEntityKeys[name]?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 250),
+        alignment: 0.2,
+      );
+    }
+  }
+
+  Color _graphTypeColor(BuildContext context, AiGraphEntityType type) {
+    final colors = context.appColors;
+    return switch (type) {
+      AiGraphEntityType.person => colors.primary,
+      AiGraphEntityType.location => Colors.teal,
+      AiGraphEntityType.event => Colors.amber.shade700,
+    };
   }
 
   Widget _buildGraphEntityTile(
@@ -1516,15 +1575,41 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       0,
       (sum, value) => sum + value,
     );
+    final typeColor = _graphTypeColor(context, entity.type);
+    final highlighted = _graphHighlighted == entity.name;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      color: highlighted
+          ? typeColor.withValues(alpha: 0.08)
+          : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: highlighted
+              ? typeColor.withValues(alpha: 0.6)
+              : context.appColors.outlineVariant,
+          width: highlighted ? 1.4 : 1,
+        ),
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => _showEntityDetails(entity),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           child: Row(
             children: [
+              // Type rail: one colored bar per entity kind, matching the
+              // graph view's tag colors.
+              Container(
+                width: 3,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: typeColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1542,11 +1627,21 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                           ),
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          _graphFilterLabelFor(entity.type),
-                          style: TextStyle(
-                            fontSize: context.appCaptionSize,
-                            color: context.appSecondaryText,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: typeColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            _graphFilterLabelFor(entity.type),
+                            style: TextStyle(
+                              fontSize: context.appCaptionSize,
+                              color: typeColor,
+                            ),
                           ),
                         ),
                       ],
@@ -1555,7 +1650,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       const SizedBox(height: 2),
                       Text(
                         entity.description,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: context.appCaptionSize,
@@ -1566,14 +1661,28 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '出现 $occurrences 次 · 关系 $relationCount',
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  color: context.appSecondaryText,
-                ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '$occurrences 次',
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$relationCount 关系',
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(width: 6),
               Icon(
                 KaijuanIcons.chevronRight,
                 size: 16,
@@ -1812,6 +1921,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _input.dispose();
     _graphQueryController.dispose();
+    _graphHighlightTimer?.cancel();
     _scroll.dispose();
     _focus.dispose();
     _tabs
