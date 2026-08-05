@@ -101,7 +101,6 @@ class BookAiGraphView extends StatelessWidget {
 
     final options = Options()
       ..enableHit = true
-      ..panelDelay = const Duration(milliseconds: 250)
       ..graphStyle = (GraphStyle()
         ..tagColorByIndex = [
           colors.primary.withValues(alpha: 0.85),
@@ -115,60 +114,6 @@ class BookAiGraphView extends StatelessWidget {
         ))
       ..vertexShape = VertexCircleShape()
       ..edgeShape = EdgeLineShape()
-      ..vertexPanelBuilder = (hoverVertex) {
-        final c = hoverVertex.g!.options!.localToGlobal(hoverVertex.position);
-        final data = Map<String, Object?>.from(hoverVertex.data as Map);
-        return Stack(
-          children: [
-            Positioned(
-              left: c.x + hoverVertex.radius + 6,
-              top: c.y - 26,
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: 190,
-                  padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(10),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x33000000),
-                        blurRadius: 8,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${data['id']}（${data['tag']}）',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: colors.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        '出现 ${data['freq']} 次 · 关系 ${data['relations']}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      }
       ..onVertexTapUp = (vertex, _) {
         // Deferred: mutating state inside the pointer-event dispatch trips
         // Flutter's MouseTracker debug assertion on macOS (and onVertexTapDown
