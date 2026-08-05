@@ -2183,7 +2183,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
       children: [
         Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 4),
+          padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 16, 4),
           child: Text(
             '知识图谱',
             style: TextStyle(
@@ -2236,7 +2236,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final graph = _c.bookGraph!;
     final range = graph.includesUnread ? '全书' : '已读';
     return ListTile(
-      contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 8, 2),
+      contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 4, 2),
       leading: Icon(
         KaijuanIcons.collections,
         size: 18,
@@ -2251,16 +2251,30 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ),
       ),
       subtitle: Text(
-        '$range · 已生成',
+        range,
         style: TextStyle(
           fontSize: context.appCaptionSize,
           color: context.appSecondaryText,
         ),
       ),
-      trailing: Icon(
-        KaijuanIcons.chevronRight,
-        size: 16,
-        color: colors.onSurfaceVariant,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '已生成',
+            style: TextStyle(
+              fontSize: context.appCaptionSize,
+              fontWeight: FontWeight.w600,
+              color: colors.primary,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Icon(
+            KaijuanIcons.chevronRight,
+            size: 16,
+            color: colors.onSurfaceVariant,
+          ),
+        ],
       ),
       onTap: () => _c.openWholeBookGraph(),
     );
@@ -2296,7 +2310,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
         ),
         subtitle: Text(
-          ready ? '$range · 已生成' : range,
+          range,
           style: TextStyle(
             fontSize: context.appCaptionSize,
             color: context.appSecondaryText,
