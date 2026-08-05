@@ -3190,7 +3190,10 @@ window.getBookPlainText = async (opts = {}) => {
   const tocLabels = tocItems.map(item => item.label)
   const tocStarts = await tocSectionStarts(book, tocItems)
   const tocStartsBySection = new Map(tocStarts.map(item => [item.index, item]))
-  const useTocTargets = tocStarts.length >= 2
+  // toc:false opts out of TOC grouping — the graph pipeline wants one piece
+  // per spine section so evidence quotes resolve to the exact section, not
+  // the start of a multi-section work/chapter.
+  const useTocTargets = opts?.toc !== false && tocStarts.length >= 2
   const tocPieces = []
   let activeTocPiece = null
   const flushTocPiece = () => {

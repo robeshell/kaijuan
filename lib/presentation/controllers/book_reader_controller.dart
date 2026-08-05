@@ -272,7 +272,7 @@ class BookReaderController extends ChangeNotifier {
   Future<String> Function()? _getSelectedText;
   Future<String> Function()? _getChapterText;
   Future<String> Function(int maxChars)? _getReadSoFarText;
-  Future<String> Function(int maxChars)? _getBookPlainText;
+  Future<String> Function(int maxChars, {bool toc})? _getBookPlainText;
   Future<List<AiBookOutlineCandidate>> Function({
     required int startSectionIndex,
     required int? endSectionIndexExclusive,
@@ -321,6 +321,8 @@ class BookReaderController extends ChangeNotifier {
   /// Cached multi-section plain text for book chat (per open).
   String? _cachedBookPlainText;
   int _cachedBookPlainTextBudget = 0;
+  String? _cachedGraphPlainText;
+  int _cachedGraphPlainTextBudget = 0;
   void Function(String query)? _runSearch;
   VoidCallback? _clearSearch;
   Future<String?> Function()? _ttsHere;
@@ -619,7 +621,7 @@ class BookReaderController extends ChangeNotifier {
     required void Function(bool open) setMenuOpen,
     Future<String> Function()? getChapterText,
     Future<String> Function(int maxChars)? getReadSoFarText,
-    Future<String> Function(int maxChars)? getBookPlainText,
+    Future<String> Function(int maxChars, {bool toc})? getBookPlainText,
     Future<List<AiBookOutlineCandidate>> Function({
       required int startSectionIndex,
       required int? endSectionIndexExclusive,
@@ -699,6 +701,8 @@ class BookReaderController extends ChangeNotifier {
     _setMenuOpen = null;
     _cachedBookPlainText = null;
     _cachedBookPlainTextBudget = 0;
+    _cachedGraphPlainText = null;
+    _cachedGraphPlainTextBudget = 0;
   }
 
   /// Load or create the chat session for this book (isolated by contentHash).
@@ -1366,7 +1370,7 @@ class BookReaderController extends ChangeNotifier {
     final service = _aiOutline;
     if (service == null || !canUseAiChat) return null;
     try {
-      final body = await _loadBookPlainTextCached(
+      final body = await _loadBookGraphPlainTextCached(
         AiBookOutlineService.maxBookBodyChars,
       );
       var sections = AiChatBookCorpus.parseSections(body);
@@ -1445,7 +1449,7 @@ class BookReaderController extends ChangeNotifier {
     _bookGraphCancel = cancel;
     if (!_disposed) notifyListeners();
     try {
-      final body = await _loadBookPlainTextCached(
+      final body = await _loadBookGraphPlainTextCached(
         AiBookGraphService.maxBookBodyChars,
       );
       var sections = AiChatBookCorpus.parseSections(body);
@@ -1593,6 +1597,27 @@ class BookReaderController extends ChangeNotifier {
     } catch (_) {
       return AiChatContextBundle(chapterTitle: currentChapterTitle);
     }
+  }
+
+  /// Graph-pipeline corpus: one piece per spine section (toc:false), cached
+  /// separately from the outline/chat piece-level cache. Evidence quotes then
+  /// resolve to the exact section instead of a multi-section work's start.
+  Future<String> _loadBookGraphPlainTextCached(int maxChars) async {
+    final budget = maxChars.clamp(2000, 1500000);
+    final cached = _cachedGraphPlainText;
+    if (cached != null &&
+        cached.isNotEmpty &&
+        _cachedGraphPlainTextBudget >= budget) {
+      return cached.length > budget ? cached.substring(0, budget) : cached;
+    }
+    final loaded =
+        ((await _getBookPlainText?.call(budget, toc: false)) ?? '').trim();
+    if (loaded.isNotEmpty) {
+      _cachedGraphPlainText = loaded;
+      _cachedGraphPlainTextBudget = budget;
+      return loaded;
+    }
+    return ((await _getChapterText?.call()) ?? '').trim();
   }
 
   Future<String> _loadBookPlainTextCached(int maxChars) async {

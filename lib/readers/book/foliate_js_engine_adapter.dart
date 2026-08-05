@@ -367,7 +367,7 @@ try {
     return raw?.toString() ?? '';
   }
 
-  Future<String> _getBookPlainText(int maxChars) async {
+  Future<String> _getBookPlainText(int maxChars, {bool toc = true}) async {
     // Corpus-level cap (whole book), not per-prompt: see AiChatService.
     final n = maxChars.clamp(2000, 1500000);
     if (!_webReady) return '';
@@ -380,7 +380,7 @@ try {
       final result = await controller.callAsyncJavaScript(
         functionBody: '''
 try {
-  return await window.getBookPlainText({maxChars: $n});
+  return await window.getBookPlainText({maxChars: $n, toc: $toc});
 } catch (e) {
   console.error('[Kaika] getBookPlainText failed', e);
   return '';

@@ -2236,8 +2236,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final graph = _c.bookGraph!;
     final range = graph.includesUnread ? '全书' : '已读';
     return ListTile(
-      contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
-      minVerticalPadding: 0,
+      contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 8, 2),
       leading: Icon(
         KaijuanIcons.collections,
         size: 18,
@@ -2280,8 +2279,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return Opacity(
       opacity: dimmed ? 0.55 : 1,
       child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 4, 0),
-        minVerticalPadding: 0,
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 4, 2),
         leading: Icon(
           KaijuanIcons.collections,
           size: 18,
