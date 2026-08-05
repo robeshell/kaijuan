@@ -107,6 +107,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String? _graphHighlighted;
   Timer? _graphHighlightTimer;
   final _graphEntityKeys = <String, GlobalKey>{};
+  int _graphListEpoch = 0;
 
   /// Attached highlight; null when cleared by user.
   String? _selection;
@@ -213,15 +214,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // the workspace changes, which feels like a stalled tab switch.
     if (_activeTab.index == _tabs.index) return;
     setState(() => _activeTab = _BookAiWorkspaceTab.values[_tabs.index]);
-    // TabBarView keeps visited pages alive; reset the graph list to the top
-    // so reopening the tab does not land mid-list.
-    if (_activeTab == _BookAiWorkspaceTab.graph &&
-        _graphScrollController.hasClients) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_graphScrollController.hasClients) {
-          _graphScrollController.jumpTo(0);
-        }
-      });
+    // TabBarView keeps visited pages alive; bump the graph list epoch so the
+    // ListView is rebuilt fresh (landing at the top) instead of restoring its
+    // previous scroll position.
+    if (_activeTab == _BookAiWorkspaceTab.graph) {
+      _graphListEpoch++;
     }
   }
 
@@ -1349,6 +1346,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         .length;
 
     return ListView(
+      key: ValueKey<int>(_graphListEpoch),
       controller: _graphScrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [

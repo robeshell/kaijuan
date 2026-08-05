@@ -50,6 +50,7 @@ class BookAiGraphFullscreen extends StatelessWidget {
             entities: entities,
             relations: relations,
             onVertexTap: (name) => _showVertexCard(context, name),
+            scrollZoomEnabled: true,
           ),
         ),
       ),

@@ -19,6 +19,7 @@ class BookAiGraphView extends StatelessWidget {
     required this.relations,
     required this.onVertexTap,
     this.height,
+    this.scrollZoomEnabled = false,
   });
 
   final List<AiGraphEntity> entities;
@@ -29,6 +30,12 @@ class BookAiGraphView extends StatelessWidget {
 
   /// Fixed graph area height; null lets the parent constrain it (fullscreen).
   final double? height;
+
+  /// When false (tab embed), the wheel is left to the surrounding list:
+  /// flutter_graph_view's default scroll-to-zoom consumes the pointer event
+  /// and mutates scale inside pointer dispatch, tripping Flutter's
+  /// MouseTracker debug assertion on macOS. Fullscreen enables it.
+  final bool scrollZoomEnabled;
 
   static const int _maxVertices = 60;
 
@@ -168,7 +175,8 @@ class BookAiGraphView extends StatelessWidget {
         // is never invoked by this package — TapUp is the live callback).
         final name = vertex.id as String;
         Future.microtask(() => onVertexTap(name));
-      };
+      }
+      ..onPointerSignal = scrollZoomEnabled ? null : (PointerSignalEvent _) {};
 
     final graphArea = ClipRRect(
       borderRadius: BorderRadius.circular(14),
