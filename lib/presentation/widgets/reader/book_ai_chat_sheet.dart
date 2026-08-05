@@ -24,6 +24,7 @@ import '../../screens/ai_settings_screen.dart';
 import '../app_components.dart';
 import '../app_overlays.dart';
 import 'ai_result_body.dart';
+import 'ai_relation_row.dart';
 import 'book_ai_graph_fullscreen.dart';
 import 'book_ai_graph_view.dart';
 
@@ -1822,14 +1823,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
               const SizedBox(height: 6),
               for (final relation in relations)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    relation.source == entity.name
-                        ? '${relation.source} —${relation.type}→ ${relation.target}'
-                        : '${relation.source} —${relation.type}→ ${relation.target}',
-                    style: TextStyle(fontSize: _panelBodySize(context)),
-                  ),
+                AiRelationRow(
+                  relation: relation,
+                  selfName: entity.name,
                 ),
             ],
             if (evidence.isNotEmpty) ...[

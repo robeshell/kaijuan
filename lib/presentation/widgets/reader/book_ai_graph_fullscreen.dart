@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../ai/ai_graph.dart';
+import 'ai_relation_row.dart';
 import 'book_ai_graph_view.dart';
 
 /// Fullscreen knowledge-graph explorer: a large force-directed view with the
@@ -124,15 +125,9 @@ class BookAiGraphFullscreen extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               for (final r in relations.take(12))
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    '${r.source} —${r.type}→ ${r.target}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
+                AiRelationRow(
+                  relation: r,
+                  selfName: entity.name,
                 ),
               if (relations.length > 12)
                 Padding(
