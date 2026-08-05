@@ -266,6 +266,7 @@ class AiBookGraph {
   const AiBookGraph({
     required this.contentHash,
     this.generatedAt,
+    this.generationSeconds,
     this.model = '',
     this.includesUnread = false,
     this.coveredSections = const [],
@@ -277,6 +278,9 @@ class AiBookGraph {
 
   final String contentHash;
   final DateTime? generatedAt;
+
+  /// Wall-clock seconds of the latest generation run (shown in the UI).
+  final int? generationSeconds;
   final String model;
 
   /// True when the graph was generated over the whole book (allowUnread on).
@@ -290,6 +294,7 @@ class AiBookGraph {
   AiBookGraph copyWith({
     String? contentHash,
     DateTime? generatedAt,
+    int? generationSeconds,
     String? model,
     bool? includesUnread,
     List<int>? coveredSections,
@@ -299,6 +304,7 @@ class AiBookGraph {
     return AiBookGraph(
       contentHash: contentHash ?? this.contentHash,
       generatedAt: generatedAt ?? this.generatedAt,
+      generationSeconds: generationSeconds ?? this.generationSeconds,
       model: model ?? this.model,
       includesUnread: includesUnread ?? this.includesUnread,
       coveredSections: coveredSections ?? this.coveredSections,
@@ -313,6 +319,7 @@ class AiBookGraph {
     'version': currentVersion,
     'contentHash': contentHash,
     if (generatedAt != null) 'generatedAt': generatedAt!.toUtc().toIso8601String(),
+    if (generationSeconds != null) 'generationSeconds': generationSeconds,
     'model': model,
     'includesUnread': includesUnread,
     'coveredSections': coveredSections,
@@ -354,6 +361,7 @@ class AiBookGraph {
     return AiBookGraph(
       contentHash: hash,
       generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
+      generationSeconds: json['generationSeconds'] as int?,
       model: json['model'] as String? ?? '',
       includesUnread: json['includesUnread'] as bool? ?? false,
       coveredSections: rawCovered is List

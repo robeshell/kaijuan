@@ -1398,6 +1398,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             color: context.appSecondaryText,
           ),
         ),
+        if (graph.generatedAt != null || graph.generationSeconds != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              _graphGenerationSummary(graph),
+              style: TextStyle(
+                fontSize: context.appCaptionSize,
+                color: context.appSecondaryText,
+              ),
+            ),
+          ),
         if (generating) ...[
           const SizedBox(height: 10),
           LinearProgressIndicator(
@@ -1764,6 +1775,20 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
     if (confirmed != true || !mounted) return;
     await _c.deleteBookGraph();
+  }
+
+  String _graphGenerationSummary(AiBookGraph graph) {
+    final time = graph.generatedAt?.toLocal();
+    final timeText = time == null
+        ? ''
+        : '生成于 ${time.hour.toString().padLeft(2, '0')}:'
+              '${time.minute.toString().padLeft(2, '0')}';
+    final seconds = graph.generationSeconds;
+    final durationText = seconds == null
+        ? ''
+        : '用时 ${seconds >= 60 ? '${seconds ~/ 60} 分 ${seconds % 60} 秒' : '$seconds 秒'}';
+    final parts = [if (timeText.isNotEmpty) timeText, if (durationText.isNotEmpty) durationText];
+    return parts.join(' · ');
   }
 
   String _graphFilterLabel(_AiGraphFilter filter) => switch (filter) {

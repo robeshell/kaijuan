@@ -90,6 +90,7 @@ class AiBookGraphService {
     if (provider == null) {
       throw const AiGraphGenerationException('AI 未启用或未配置');
     }
+    final sw = Stopwatch()..start();
 
     try {
       cancelToken?.throwIfCancelled();
@@ -213,6 +214,7 @@ class AiBookGraphService {
           covered: covered,
           entities: entities,
           relations: relations,
+          generationSeconds: sw.elapsed.inSeconds,
         ),
       );
     } on AiGraphGenerationException {
@@ -227,6 +229,7 @@ class AiBookGraphService {
           covered: covered,
           entities: entities,
           relations: relations,
+          generationSeconds: sw.elapsed.inSeconds,
         ),
       );
     }
@@ -236,6 +239,7 @@ class AiBookGraphService {
     return AiBookGraph(
       contentHash: existing?.contentHash ?? '',
       generatedAt: DateTime.now().toUtc(),
+      generationSeconds: sw.elapsed.inSeconds,
       model: _settings().resolvedModel,
       includesUnread: includesUnread,
       coveredSections: covered,
@@ -251,6 +255,7 @@ class AiBookGraphService {
     required List<int> covered,
     required List<AiGraphEntity> entities,
     required List<AiGraphRelation> relations,
+    required int? generationSeconds,
   }) {
     final dirty =
         covered.length != (existing?.coveredSections.length ?? 0) ||
@@ -260,6 +265,7 @@ class AiBookGraphService {
     return AiBookGraph(
       contentHash: contentHash,
       generatedAt: DateTime.now().toUtc(),
+      generationSeconds: generationSeconds,
       model: _settings().resolvedModel,
       includesUnread: includesUnread,
       coveredSections: covered,
