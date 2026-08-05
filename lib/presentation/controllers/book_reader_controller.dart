@@ -1491,12 +1491,12 @@ class BookReaderController extends ChangeNotifier {
       final graphSections = _graphEligibleSections(
         _filterOutlineSections(titled),
       );
-      final scoped = only == null
+      final scoped = work == null
           ? graphSections
           : graphSections
                 .where(
                   (section) =>
-                      only.contains(section.sourceSectionIndex ?? section.index),
+                      work.contains(section.sourceSectionIndex ?? section.index),
                 )
                 .toList(growable: false);
       if (scoped.isEmpty) {
