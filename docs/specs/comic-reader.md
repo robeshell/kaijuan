@@ -2,7 +2,7 @@
 
 > 状态与是否做：只改 [../PRODUCT.md](../PRODUCT.md)，此处不维护第二份状态表。
 
-**PRODUCT**：§4.6  
+**PRODUCT**：[§5.6](../PRODUCT.md)
 **视觉**：[../DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md)  
 **相关 spec**：[reader-chrome.md](./reader-chrome.md)
 

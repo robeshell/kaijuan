@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **PRODUCT** | [§4.2](../PRODUCT.md) · [§4.4a 整理三概念](../PRODUCT.md) |
+| **PRODUCT** | [§5.2](../PRODUCT.md) · [§4.3 整理三概念](../PRODUCT.md) |
 | **视觉** | [DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md) |
 | **相关** | [search.md](./search.md)、[lists.md](./lists.md)、[collections.md](./collections.md) |
 

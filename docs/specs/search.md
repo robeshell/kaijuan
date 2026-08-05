@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **PRODUCT** | [§4.3](../PRODUCT.md) |
+| **PRODUCT** | [§5.2](../PRODUCT.md) |
 | **相关** | [library.md](./library.md) |
 
 ## 目标

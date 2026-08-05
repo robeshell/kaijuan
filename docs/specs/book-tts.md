@@ -4,7 +4,7 @@
 |--|--|
 | **状态** | **T1 MVP 已接线**（系统 TTS；云端 AI 音色仍不做） |
 | **日期** | 2026-07-23 |
-| **PRODUCT** | [§4.6](../PRODUCT.md) · [§7](../PRODUCT.md) |
+| **PRODUCT** | [§5.7](../PRODUCT.md) · [§10](../PRODUCT.md) |
 | **相关** | [book-reader.md](./book-reader.md)、[book-reader-next-plan.md](./book-reader-next-plan.md)、[book-reader-tool-strip-plan.md](./book-reader-tool-strip-plan.md) |
 | **引擎** | Foliate `tts.js` + 系统 TTS（不接云端 AI） |
 
@@ -197,7 +197,7 @@ paused
 
 ## 10. 文档回写清单（落地后）
 
-- [ ] `PRODUCT.md` §4.6：听书标 **已有**（或分 MVP/完整）  
+- [x] `PRODUCT.md` §5.7：听书标 **已有（MVP）**
 - [ ] `book-reader.md`：听书占位 → 行为；非目标去掉「TTS」或改为云端 TTS  
 - [ ] `book-reader-next-plan.md`：P5 TTS → 已有 / 进行中  
 - [ ] 本页状态 → **已有**

@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **PRODUCT** | [§4.6](../PRODUCT.md) · [§8 格式矩阵](../PRODUCT.md) |
+| **PRODUCT** | [§5.7](../PRODUCT.md) · [§7 格式矩阵](../PRODUCT.md) |
 | **相关** | [reader-chrome.md](./reader-chrome.md)、[library.md](./library.md) |
 | **状态** | 规格 + **reflow 已落地**（Kaika controller + Anx Reader foliate-js/WebView） |
 
@@ -300,7 +300,7 @@ markup
 - 外链经 `onExternalLink` bridge 用系统浏览器 / 邮件客户端打开（仅 `http` / `https` / `mailto`）。
 - **书内搜索**：顶栏搜索键 / 选区「搜索」打开面板；`window.search` → `onSearch` 流式结果（章节分组）；点行 `goToCfi`；关面板 `clearSearch` 清高亮。默认全书范围、不区分大小写。
 - **看大图**：正文图点击 → `onImageClick`（data URL）→ 全屏查看（缩放/拖动）；点空白或返回关闭。
-- **导航抽屉**（底栏「目录」键）：分段 **目录 \| 书签 \| 笔记**；点行关闭抽屉并跳转。目录跳 TOC；书签跳 locator；笔记跳标注 CFI 并打开编辑 sheet（列表删 = 清 note）。打开恢复上次分段；「笔记」Tab 显示条数。
+- **导航抽屉**（底栏「目录」键）：分段 **目录 \| 书签 \| 笔记**；点行关闭抽屉并跳转。目录跳 TOC；书签跳 locator；笔记跳标注 CFI 并打开编辑 sheet（列表删 = 清 note）。打开恢复上次分段；「笔记」Tab 显示条数。抽屉只观察目录、书签、笔记和当前章节；阅读位置、选区、听书等无关状态不得触发其列表重建。
 
 ### 脚注
 

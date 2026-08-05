@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **PRODUCT** | [§4.4](../PRODUCT.md) · [§4.4a 整理三概念](../PRODUCT.md) |
+| **PRODUCT** | [§5.3](../PRODUCT.md) · [§4.3 整理三概念](../PRODUCT.md) |
 | **相关** | [library.md](./library.md)、[shelf.md](./shelf.md)、[collections.md](./collections.md) |
 
 ## 目标

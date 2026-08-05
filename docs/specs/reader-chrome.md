@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **PRODUCT** | [§4.6](../PRODUCT.md) |
+| **PRODUCT** | [§5.6 / §5.7](../PRODUCT.md) |
 | **视觉** | [DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md) |
 
 ## 目标

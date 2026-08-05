@@ -116,6 +116,42 @@ class MainFlutterWindow: NSWindow {
       }
     }
 
+    // Full-screen readers host a Platform View (WKWebView) that eats mouse
+    // events, so isMovableByWindowBackground no longer moves the window.
+    // Flutter title-band widgets call startDrag → performDrag.
+    let windowChannel = FlutterMethodChannel(
+      name: "com.kaijuan.reader/window",
+      binaryMessenger: flutterViewController.engine.binaryMessenger)
+    windowChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(nil)
+        return
+      }
+      switch call.method {
+      case "startDrag":
+        if let event = NSApp.currentEvent {
+          self.performDrag(with: event)
+        }
+        result(nil)
+      case "isMaximized":
+        result(self.isZoomed)
+      case "minimize":
+        self.miniaturize(nil)
+        result(nil)
+      case "maximize":
+        if !self.isZoomed { self.zoom(nil) }
+        result(nil)
+      case "restore":
+        if self.isZoomed { self.zoom(nil) }
+        result(nil)
+      case "close":
+        self.close()
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
     super.awakeFromNib()
   }
 

@@ -4,7 +4,7 @@
 |--|--|
 | **状态** | **已完成**（刀 A–F 已落地；后续见 [book-reader-next-plan.md](./book-reader-next-plan.md)） |
 | **日期** | 2026-07-22 |
-| **PRODUCT** | [§4.6](../PRODUCT.md) |
+| **PRODUCT** | [§5.7](../PRODUCT.md) |
 | **相关** | [reader-chrome.md](./reader-chrome.md)、[book-reader.md](./book-reader.md) |
 | **参照** | 微信读书底栏：进度条 + 五键 + 上方展开面板 |
 
@@ -98,7 +98,7 @@
 | `lib/presentation/widgets/reader/book_reader_settings_sheet.dart` | 拆成排版/模式子面板，或改为由 tool strip 内嵌 |
 | `lib/presentation/controllers/book_reader_controller.dart` | 已有 `progressFraction`；必要时补 `seekToFraction` |
 | `docs/specs/reader-chrome.md` / `book-reader.md` | 回写底栏契约 |
-| `docs/PRODUCT.md` §4.6 | 标记图书 chrome 工具条状态 |
+| `docs/PRODUCT.md` §5.7 | 标记图书 chrome 工具条状态 |
 
 表现层仍只经 controller；不直连 drift / Foliate。
 

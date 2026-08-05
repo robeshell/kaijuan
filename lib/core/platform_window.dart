@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
@@ -65,26 +66,34 @@ class DesktopTitleBarMediaQuery extends StatelessWidget {
   }
 }
 
-/// A thin, invisible drag handle positioned at the top of a full-screen
-/// reader so the window can be moved on Windows (custom chrome, no native
-/// caption). macOS uses `isMovableByWindowBackground` and does not need this.
+/// Thin title-band drag strip for full-screen readers.
 ///
-/// Should be placed in a [Stack] at the very top, above all other content,
-/// with [Positioned] or similar.
+/// - **Windows**: custom caption is hidden; this is the only way to move the
+///   window while chrome is hidden.
+/// - **macOS**: `isMovableByWindowBackground` fails over a full-screen
+///   Platform View (book WebView); this strip calls native `performDrag`.
+///
+/// Place in a [Stack] **above** the engine/WebView. A nearly-opaque hit fill
+/// is required so the layer wins over the platform view.
 class ReaderWindowDragHandle extends StatelessWidget {
   const ReaderWindowDragHandle({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (!supportsCustomWindowChrome) return const SizedBox.shrink();
+    final height = platformTitleBarHeight;
+    if (height <= 0) return const SizedBox.shrink();
 
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onPanStart: (_) {
-        // Fire-and-forget; user is already dragging.
-        startWindowDrag();
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (_) {
+        // Fire-and-forget; user is already pressing.
+        unawaited(startWindowDrag());
       },
-      child: SizedBox(height: platformTitleBarHeight),
+      // Platform views ignore fully transparent Flutter siblings for hit tests.
+      child: ColoredBox(
+        color: const Color(0x01000000),
+        child: SizedBox(height: height, width: double.infinity),
+      ),
     );
   }
 }

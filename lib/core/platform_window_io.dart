@@ -64,7 +64,10 @@ Future<bool> isWindowMaximized() async {
 }
 
 Future<void> startWindowDrag() async {
-  if (!_supportsWindowControls) return;
+  // Windows: custom caption → WM_NCLBUTTONDOWN.
+  // macOS: fullSizeContentView + WebView platform view eats background
+  // drag; native performDrag via the same channel.
+  if (!_supportsWindowDrag) return;
   await _invokeOrIgnore('startDrag');
 }
 
@@ -77,6 +80,10 @@ Stream<bool> get windowMaximizedChanges {
 }
 
 bool get _supportsWindowControls => !kIsWeb && Platform.isWindows;
+
+/// Window can be moved from a Flutter drag strip (caption or title band).
+bool get _supportsWindowDrag =>
+    !kIsWeb && (Platform.isWindows || Platform.isMacOS);
 
 /// Keep in sync with native title-bar metrics.
 double get platformTitleBarHeight {

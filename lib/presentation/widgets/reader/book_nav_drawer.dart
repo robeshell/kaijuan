@@ -30,6 +30,11 @@ class BookNavDrawer extends StatefulWidget {
 class _BookNavDrawerState extends State<BookNavDrawer>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
+  late List<BookTocEntry> _tocEntries;
+  late List<ReaderBookmark> _bookmarks;
+  late List<BookAnnotation> _annotations;
+  late List<BookAnnotation> _notes;
+  late int _sectionIndex;
 
   BookReaderController get _controller => widget.controller;
 
@@ -42,16 +47,58 @@ class _BookNavDrawerState extends State<BookNavDrawer>
       initialIndex: _controller.navDrawerTabIndex.clamp(0, 2),
     );
     _tabs.addListener(_onTabChanged);
+    _takeControllerSnapshot();
+    _controller.addListener(_onControllerChanged);
   }
 
   void _onTabChanged() {
-    if (_tabs.indexIsChanging) return;
+    // TabController updates its index at the start of the indicator motion.
+    // Waiting for indexIsChanging=false makes the panel content appear to lag.
+    if (_controller.navDrawerTabIndex == _tabs.index) return;
     _controller.setNavDrawerTabIndex(_tabs.index);
     setState(() {});
   }
 
+  void _takeControllerSnapshot() {
+    _tocEntries = _controller.tocEntries;
+    _bookmarks = _controller.bookmarks;
+    _annotations = _controller.annotations;
+    _notes = _controller.notes;
+    _sectionIndex = _controller.sectionIndex;
+  }
+
+  void _onControllerChanged() {
+    final tocEntries = _controller.tocEntries;
+    final bookmarks = _controller.bookmarks;
+    final annotations = _controller.annotations;
+    final sectionIndex = _controller.sectionIndex;
+    final tocChanged = !identical(tocEntries, _tocEntries);
+    final bookmarksChanged = !identical(bookmarks, _bookmarks);
+    final annotationsChanged = !identical(annotations, _annotations);
+    final sectionChanged = sectionIndex != _sectionIndex;
+    if (!tocChanged &&
+        !bookmarksChanged &&
+        !annotationsChanged &&
+        !sectionChanged) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      if (tocChanged) _tocEntries = tocEntries;
+      if (bookmarksChanged) _bookmarks = bookmarks;
+      if (annotationsChanged) {
+        _annotations = annotations;
+        // The controller derives notes from annotations. Do that work only
+        // when the annotation stream itself changes, not on every progress tick.
+        _notes = _controller.notes;
+      }
+      if (sectionChanged) _sectionIndex = sectionIndex;
+    });
+  }
+
   @override
   void dispose() {
+    _controller.removeListener(_onControllerChanged);
     _tabs.removeListener(_onTabChanged);
     _tabs.dispose();
     super.dispose();
@@ -66,82 +113,75 @@ class _BookNavDrawerState extends State<BookNavDrawer>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ListenableBuilder(
-              listenable: _controller,
-              builder: (context, _) {
-                final noteCount = _controller.notes.length;
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                  child: TabBar(
-                    controller: _tabs,
-                    labelColor: accent,
-                    unselectedLabelColor: context.appPrimaryText.withValues(
-                      alpha: 0.55,
-                    ),
-                    indicatorColor: accent,
-                    dividerColor: context.appDivider,
-                    labelStyle: TextStyle(
-                      fontSize: KaiProductTokens.typographyReaderOverlayTitle,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    unselectedLabelStyle: TextStyle(
-                      fontSize: KaiProductTokens.typographyReaderOverlayTitle,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    tabs: [
-                      const Tab(text: '目录'),
-                      const Tab(text: '书签'),
-                      Tab(text: noteCount > 0 ? '笔记 ($noteCount)' : '笔记'),
-                    ],
-                  ),
-                );
-              },
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: TabBar(
+                controller: _tabs,
+                labelColor: accent,
+                unselectedLabelColor: context.appPrimaryText.withValues(
+                  alpha: 0.55,
+                ),
+                indicatorColor: accent,
+                dividerColor: context.appDivider,
+                labelStyle: TextStyle(
+                  fontSize: KaiProductTokens.typographyReaderOverlayTitle,
+                  fontWeight: FontWeight.w600,
+                ),
+                unselectedLabelStyle: TextStyle(
+                  fontSize: KaiProductTokens.typographyReaderOverlayTitle,
+                  fontWeight: FontWeight.w500,
+                ),
+                tabs: [
+                  const Tab(text: '目录'),
+                  const Tab(text: '书签'),
+                  Tab(text: _notes.isNotEmpty ? '笔记 (${_notes.length})' : '笔记'),
+                ],
+              ),
             ),
             Expanded(
-              child: ListenableBuilder(
-                listenable: _controller,
-                builder: (context, _) {
-                  return TabBarView(
-                    controller: _tabs,
-                    children: [
-                      _TocList(
-                        entries: _controller.tocEntries,
-                        currentIndex: _controller.sectionIndex,
-                        accent: accent,
-                        textPrimary: context.appPrimaryText,
-                        onOpen: (entry) {
-                          Navigator.of(context).pop();
-                          widget.onOpenTocEntry(entry);
-                        },
-                      ),
-                      _BookmarksList(
-                        bookmarks: _controller.bookmarks,
-                        labelFor: _controller.bookmarkLabel,
-                        onOpen: (bookmark) {
-                          Navigator.of(context).pop();
-                          _controller.goToBookmark(bookmark);
-                        },
-                        onRemove: _controller.removeBookmark,
-                      ),
-                      _NotesList(
-                        notes: _controller.notes,
-                        labelFor: _controller.noteLabel,
-                        subtitleFor: _controller.noteListSubtitle,
-                        onOpen: (annotation) {
-                          Navigator.of(context).pop();
-                          widget.onOpenNote(annotation);
-                        },
-                        onClearNote: _controller.clearAnnotationNote,
-                      ),
-                    ],
-                  );
-                },
-              ),
+              // Keep the drawer's raster cache stable while Scaffold moves it
+              // over the platform WebView. Build only the selected list; a
+              // TabBarView eagerly lays out neighboring pages on first open.
+              child: RepaintBoundary(child: _buildActiveTab(accent)),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildActiveTab(Color accent) {
+    return switch (_tabs.index) {
+      0 => _TocList(
+        entries: _tocEntries,
+        currentIndex: _sectionIndex,
+        accent: accent,
+        textPrimary: context.appPrimaryText,
+        onOpen: (entry) {
+          Navigator.of(context).pop();
+          widget.onOpenTocEntry(entry);
+        },
+      ),
+      1 => _BookmarksList(
+        bookmarks: _bookmarks,
+        labelFor: _controller.bookmarkLabel,
+        onOpen: (bookmark) {
+          Navigator.of(context).pop();
+          _controller.goToBookmark(bookmark);
+        },
+        onRemove: _controller.removeBookmark,
+      ),
+      _ => _NotesList(
+        notes: _notes,
+        labelFor: _controller.noteLabel,
+        subtitleFor: _controller.noteListSubtitle,
+        onOpen: (annotation) {
+          Navigator.of(context).pop();
+          widget.onOpenNote(annotation);
+        },
+        onClearNote: _controller.clearAnnotationNote,
+      ),
+    };
   }
 }
 

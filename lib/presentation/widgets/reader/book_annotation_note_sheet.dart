@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
@@ -125,15 +126,20 @@ class _BookAnnotationNoteSheetState extends State<_BookAnnotationNoteSheet> {
                 ),
               ],
               const SizedBox(height: 14),
-              TextField(
+              withDesktopTextEditingShortcuts(
                 controller: _text,
-                autofocus: widget.autofocus,
-                maxLines: 6,
-                minLines: 4,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText: '写下想法…',
-                  border: OutlineInputBorder(),
+                TextField(
+                  controller: _text,
+                  autofocus: widget.autofocus,
+                  maxLines: 6,
+                  minLines: 4,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  enableInteractiveSelection: true,
+                  decoration: const InputDecoration(
+                    hintText: '写下想法…',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/kaijuan_icons.dart';
+import '../../../core/platform_window.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import 'glass_bar.dart';
@@ -70,44 +73,51 @@ class ReaderChromeTopBar extends StatelessWidget {
                   icon: Icon(KaijuanIcons.back, color: fg, weight: 300),
                 ),
                 Expanded(
-                  child: short
-                      ? Text(
-                          '$title  ·  $subtitle',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: fg,
-                            fontSize:
-                                KaiProductTokens.typographyReaderOverlayTitle,
-                            fontWeight: FontWeight.w600,
+                  // Title band doubles as window drag when chrome is open
+                  // (drag handle under chrome is covered). Buttons stay outside.
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onPanStart: (_) => unawaited(startWindowDrag()),
+                    child: short
+                        ? Text(
+                            '$title  ·  $subtitle',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: fg,
+                              fontSize: KaiProductTokens
+                                  .typographyReaderOverlayTitle,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          )
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: fg,
+                                  fontSize: KaiProductTokens
+                                      .typographyReaderOverlayTitle,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                subtitle,
+                                style: TextStyle(
+                                  color: fgMuted,
+                                  fontSize: KaiProductTokens
+                                      .typographyReaderOverlaySubtitle,
+                                ),
+                              ),
+                            ],
                           ),
-                        )
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: fg,
-                                fontSize: KaiProductTokens
-                                    .typographyReaderOverlayTitle,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(
-                              subtitle,
-                              style: TextStyle(
-                                color: fgMuted,
-                                fontSize: KaiProductTokens
-                                    .typographyReaderOverlaySubtitle,
-                              ),
-                            ),
-                          ],
-                        ),
+                  ),
                 ),
                 ...trailing,
                 if (leadingClearance > 0)

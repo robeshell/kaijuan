@@ -4,7 +4,7 @@
 |--|--|
 | **状态** | 刀 ①②③④ + 书摘 + 系统词典/翻译已落地 · AI Provider 预留 |
 | **日期** | 2026-07-23 |
-| **PRODUCT** | [§4.6](../PRODUCT.md) · [§7 阶段](../PRODUCT.md) |
+| **PRODUCT** | [§5.7](../PRODUCT.md) · [§10](../PRODUCT.md) |
 | **相关** | [book-reader.md](./book-reader.md)、[book-tts.md](./book-tts.md)、[reader-chrome.md](./reader-chrome.md)、[book-reader-tool-strip-plan.md](./book-reader-tool-strip-plan.md) |
 | **前提** | Foliate 主链 + 微信式底栏工具条已落地；仿真翻页 **搁置** |
 
@@ -88,7 +88,7 @@
 |------|------|
 | `book-reader.md` | **选区菜单规范**（结构 / 槽位 / 出现收起 / 光标） |
 | 本页 | 刀序与状态 |
-| `PRODUCT.md` §4.6 | 选区划线标已有 |
+| `PRODUCT.md` §5.7 | 选区划线标已有 |
 
 ---
 

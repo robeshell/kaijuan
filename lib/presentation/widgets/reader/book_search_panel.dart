@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/kaijuan_icons.dart';
+import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/foliate_js_bridge.dart';
@@ -73,40 +74,44 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
                     icon: Icon(KaijuanIcons.close, color: fg, weight: 300),
                   ),
                   Expanded(
-                    child: TextField(
+                    child: withDesktopTextEditingShortcuts(
                       controller: _text,
-                      focusNode: _focus,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (_) => _submit(),
-                      style: TextStyle(
-                        color: fg,
-                        fontSize: KaiProductTokens.typographyReaderBookTitle,
-                      ),
-                      cursorColor: accent,
-                      decoration: InputDecoration(
-                        hintText: '搜索书中内容',
-                        hintStyle: TextStyle(color: muted),
-                        isDense: true,
-                        border: InputBorder.none,
-                        suffixIcon: _text.text.isEmpty
-                            ? null
-                            : IconButton(
-                                tooltip: '清除',
-                                onPressed: () {
-                                  _text.clear();
-                                  _controller.submitSearch('');
-                                  setState(() {});
-                                  _focus.requestFocus();
-                                },
-                                icon: Icon(
-                                  KaijuanIcons.close,
-                                  color: muted,
-                                  size: 18,
-                                  weight: 300,
+                      TextField(
+                        controller: _text,
+                        focusNode: _focus,
+                        textInputAction: TextInputAction.search,
+                        enableInteractiveSelection: true,
+                        onSubmitted: (_) => _submit(),
+                        style: TextStyle(
+                          color: fg,
+                          fontSize: KaiProductTokens.typographyReaderBookTitle,
+                        ),
+                        cursorColor: accent,
+                        decoration: InputDecoration(
+                          hintText: '搜索书中内容',
+                          hintStyle: TextStyle(color: muted),
+                          isDense: true,
+                          border: InputBorder.none,
+                          suffixIcon: _text.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: '清除',
+                                  onPressed: () {
+                                    _text.clear();
+                                    _controller.submitSearch('');
+                                    setState(() {});
+                                    _focus.requestFocus();
+                                  },
+                                  icon: Icon(
+                                    KaijuanIcons.close,
+                                    color: muted,
+                                    size: 18,
+                                    weight: 300,
+                                  ),
                                 ),
-                              ),
+                        ),
+                        onChanged: (_) => setState(() {}),
                       ),
-                      onChanged: (_) => setState(() {}),
                     ),
                   ),
                   TextButton(

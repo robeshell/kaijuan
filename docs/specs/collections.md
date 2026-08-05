@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **PRODUCT** | [§4.4b](../PRODUCT.md) · [§4.4a 整理三概念](../PRODUCT.md) |
+| **PRODUCT** | [§5.4](../PRODUCT.md) · [§4.3 整理三概念](../PRODUCT.md) |
 | **相关** | [library.md](./library.md)、[shelf.md](./shelf.md)、[lists.md](./lists.md) |
 | **状态** | **已有**（comic）：表 + 拼贴卡 + **书库**最前混排 |
 

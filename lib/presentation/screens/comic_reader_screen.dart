@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../app/comic_reading_preferences.dart';
 import '../../core/kaijuan_icons.dart';
 import '../../core/platform_window.dart';
+import '../../core/text_editing_focus.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../library/stats/reading_time_tracker.dart';
@@ -148,6 +149,14 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary != null &&
+        primary != node &&
+        focusIsTextEditing(primary)) {
+      return KeyEventResult.ignored;
+    }
+
     final key = event.logicalKey;
     final rtl = _controller.direction == ComicReadDirection.rtl;
 
@@ -228,12 +237,6 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
               children: [
                 ColoredBox(color: bg),
                 if (contentReady) ComicReaderBody(controller: _controller),
-                const Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: ReaderWindowDragHandle(),
-                ),
                 if (contentReady && _controller.brightness < 0.999)
                   IgnorePointer(
                     child: ColoredBox(
@@ -292,6 +295,13 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
                       ),
                     ),
                   ),
+                // Above body/chrome so title-band drag works over platform views.
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: ReaderWindowDragHandle(),
+                ),
               ],
             ),
           ),

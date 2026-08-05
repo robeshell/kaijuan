@@ -2621,7 +2621,21 @@ if(window.\(JavaScriptBridgeJS.get_JAVASCRIPT_BRIDGE_NAME())[\(_callHandlerID)] 
     }
     
     public func clearFocus() -> Bool {
-        return (self.superview?.window ?? self.window)?.makeFirstResponder(nil) ?? false
+        guard let window = self.superview?.window ?? self.window else {
+            return false
+        }
+        var candidate: NSView? = self.superview
+        while let view = candidate {
+            let name = NSStringFromClass(type(of: view))
+            if name.contains("FlutterView") {
+                return window.makeFirstResponder(view)
+            }
+            candidate = view.superview
+        }
+        if let content = window.contentView {
+            return window.makeFirstResponder(content)
+        }
+        return window.makeFirstResponder(nil)
     }
 
     public func requestFocus() -> Bool {

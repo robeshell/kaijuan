@@ -1,6 +1,6 @@
 # 阅读统计设计规范
 
-**PRODUCT**：[§4.8](../PRODUCT.md)  
+**PRODUCT**：[§5.9](../PRODUCT.md)  
 **视觉**：[../DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md)  
 **相关**：[subpages.md](./subpages.md)、[shelf.md](./shelf.md)、[library.md](./library.md)
 
