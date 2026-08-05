@@ -2148,14 +2148,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
           const SizedBox(height: 6),
         ],
-        // Legacy whole-book graph (pre per-work files) stays reachable.
+        // Core: one native ListTile per work, no separators — spacing and
+        // the shared leading edge carry the structure (outline-tab language).
+        for (final work in works) _buildGraphWorkRow(context, work),
+        // Legacy whole-book graph ($hash.json, pre-per-work files) is a
+        // fallback row, kept last per importance ordering.
         if (_c.bookGraph != null) ...[
+          const SizedBox(height: 8),
           _buildWholeBookGraphRow(context),
-          const Divider(height: 1),
-        ],
-        for (final work in works) ...[
-          _buildGraphWorkRow(context, work),
-          const Divider(height: 1),
         ],
       ],
     );
