@@ -365,17 +365,27 @@ class AiBookGraphService {
         final typeRaw = map['type'];
         if (name is! String || name.trim().isEmpty) continue;
         final type = AiGraphEntityType.fromWireName(typeRaw);
-        final canonicalName = _resolveCanonical(canonical, type, name) ??
+        final originalName = name.trim();
+        final canonicalName = _resolveCanonical(
+          canonical,
+          type,
+          originalName,
+        ) ??
             _resolveAliases(canonical, type, map['aliases']) ??
-            name;
+            originalName;
 
         final bucket = canonical.putIfAbsent(type, () => {});
         bucket[canonicalName] = canonicalName;
         // Immutable chain: never mutate the _stringList result, which can be
         // a const [] (fixed-length) when the model omits the aliases field.
+        // When this entity's own name resolved to an existing canonical, the
+        // original name must survive as an alias (e.g. 三哥 → 张三).
         final aliases = _stringList(
           map['aliases'],
         ).where((alias) => alias != canonicalName).toList();
+        if (originalName != canonicalName && !aliases.contains(originalName)) {
+          aliases.add(originalName);
+        }
         for (final alias in aliases) {
           bucket[alias] = canonicalName;
         }
@@ -591,20 +601,23 @@ class AiBookGraphService {
   ) {
     if (raw is! List) return const [];
     final out = <AiGraphEvidence>[];
+    final seen = <String>{};
     for (final item in raw) {
       if (item is! Map) continue;
       final map = Map<String, dynamic>.from(item);
       final quote = map['quote'];
       if (quote is! String || quote.trim().isEmpty) continue;
+      final quoteText = quote.trim();
+      if (!seen.add(quoteText)) continue;
       final rawSection = map['section'];
       final section = rawSection is int
           ? rawSection
           : int.tryParse('$rawSection') ?? sectionIndex;
-      final progress = _resolveQuote(sectionText, quote);
+      final progress = _resolveQuote(sectionText, quoteText);
       out.add(
         AiGraphEvidence(
           sectionIndex: section,
-          quote: quote.trim(),
+          quote: quoteText,
           progressInSection: progress,
           spanResolved: progress != null,
         ),
