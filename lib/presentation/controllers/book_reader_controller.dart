@@ -10,6 +10,8 @@ import '../../ai/ai_chat.dart';
 import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_chat_service.dart';
 import '../../ai/ai_chat_tools.dart';
+import '../../ai/ai_graph.dart';
+import '../../ai/ai_graph_service.dart';
 import '../../ai/ai_log.dart';
 import '../../ai/ai_language_service.dart';
 import '../../ai/ai_models.dart';
@@ -110,7 +112,8 @@ class BookReaderController extends ChangeNotifier {
     if (identical(_aiSettings, aiSettings) &&
         (aiSettings == null) == (_aiLanguage == null) &&
         (aiSettings == null) == (_aiChat == null) &&
-        (aiSettings == null) == (_aiOutline == null)) {
+        (aiSettings == null) == (_aiOutline == null) &&
+        (aiSettings == null) == (_aiGraph == null)) {
       return;
     }
     _aiSettings = aiSettings;
@@ -133,6 +136,13 @@ class BookReaderController extends ChangeNotifier {
     _aiOutline = aiSettings == null
         ? null
         : AiBookOutlineService(
+            isAvailable: () => aiSettings.isReadyForRequests,
+            openProvider: () => aiSettings.openProvider(),
+            settings: () => aiSettings.settings,
+          );
+    _aiGraph = aiSettings == null
+        ? null
+        : AiBookGraphService(
             isAvailable: () => aiSettings.isReadyForRequests,
             openProvider: () => aiSettings.openProvider(),
             settings: () => aiSettings.settings,
@@ -275,12 +285,19 @@ class BookReaderController extends ChangeNotifier {
   void Function(bool open)? _setMenuOpen;
   AiChatService? _aiChat;
   AiBookOutlineService? _aiOutline;
+  AiBookGraphService? _aiGraph;
   AiChatHistoryStore? _chatHistoryStore;
+  AiGraphStore? _aiGraphStore;
   AiBookOutline? _bookOutline;
   AiOutlineProgress? _bookOutlineProgress;
   String? _bookOutlineError;
   CancelToken? _bookOutlineCancel;
   Future<void>? _bookOutlineGeneration;
+  AiBookGraph? _bookGraph;
+  AiGraphProgress? _bookGraphProgress;
+  String? _bookGraphError;
+  CancelToken? _bookGraphCancel;
+  Future<void>? _bookGraphGeneration;
   final Map<String, Future<void>> _bookOutlineDetailGenerations = {};
   final Map<String, CancelToken> _bookOutlineDetailCancels = {};
   final Map<String, AiOutlineProgress> _bookOutlineDetailProgress = {};
@@ -615,6 +632,11 @@ class BookReaderController extends ChangeNotifier {
   /// Optional chat history store (per contentHash). Null → memory-only session.
   void attachChatHistoryStore(AiChatHistoryStore? store) {
     _chatHistoryStore = store;
+  }
+
+  /// Optional graph cache store (per contentHash under `ai_graph/`).
+  void attachAiGraphStore(AiGraphStore? store) {
+    _aiGraphStore = store;
   }
 
   void attachSearchBridge({
@@ -1136,6 +1158,143 @@ class BookReaderController extends ChangeNotifier {
     for (final cancel in _bookOutlineDetailCancels.values) {
       cancel.cancel();
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Book knowledge graph (AI M5) — see docs/specs/ai-graph.md
+  // ------------------------------------------------------------------
+
+  AiBookGraph? get bookGraph => _bookGraph;
+  AiGraphProgress? get bookGraphProgress => _bookGraphProgress;
+  String? get bookGraphError => _bookGraphError;
+  bool get isGeneratingBookGraph => _bookGraphGeneration != null;
+
+  /// Loads the cached graph for this book (no model calls).
+  Future<void> loadBookGraph() async {
+    final store = _aiGraphStore;
+    if (store == null) return;
+    final graph = await store.read(item.contentHash);
+    if (graph != null && !identical(graph, _bookGraph)) {
+      _bookGraph = graph;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> generateBookGraph() {
+    final active = _bookGraphGeneration;
+    if (active != null) return active;
+    final done = Completer<void>();
+    _bookGraphGeneration = done.future;
+    unawaited(() async {
+      try {
+        await _generateBookGraph();
+        done.complete();
+      } catch (error, stackTrace) {
+        done.completeError(error, stackTrace);
+      }
+    }());
+    unawaited(
+      done.future.whenComplete(() {
+        _bookGraphGeneration = null;
+        _bookGraphCancel = null;
+        if (!_disposed) notifyListeners();
+      }),
+    );
+    return done.future;
+  }
+
+  Future<void> _generateBookGraph() async {
+    final service = _aiGraph;
+    if (service == null || !canUseAiChat) {
+      _bookGraphError = 'AI 未启用或未配置';
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    _bookGraphError = null;
+    final cancel = CancelToken();
+    _bookGraphCancel = cancel;
+    if (!_disposed) notifyListeners();
+    try {
+      final body = await _loadBookPlainTextCached(
+        AiBookGraphService.maxBookBodyChars,
+      );
+      var sections = AiChatBookCorpus.parseSections(body);
+      if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
+      final allowUnread = _aiSettings?.settings.allowUnreadContext ?? true;
+      final titled = [
+        for (final section in sections)
+          AiBookSectionSlice(
+            index: section.index,
+            label: section.label.trim().isNotEmpty
+                ? section.label.trim()
+                : _titleForOutlineSection(section.index),
+            text: section.text,
+            sourceSectionIndex: section.sourceSectionIndex,
+            isNavigationUnit: section.isNavigationUnit,
+          ),
+      ];
+      final graphSections = _filterOutlineSections(titled);
+      if (graphSections.isEmpty) {
+        throw AiProviderException('没有可用于生成图谱的正文');
+      }
+      final graph = await service.generate(
+        bookTitle: item.title,
+        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        sections: graphSections,
+        includesUnread: allowUnread,
+        readThroughSection: allowUnread ? null : sectionIndex + 1,
+        existing: _bookGraph,
+        cancelToken: cancel,
+        onProgress: (progress) {
+          _bookGraphProgress = progress;
+          if (!_disposed) notifyListeners();
+        },
+      );
+      _bookGraph = graph;
+      _bookGraphProgress = null;
+      await _saveBookGraph(graph);
+      if (!_disposed) notifyListeners();
+    } on AiGraphGenerationException catch (error) {
+      _bookGraphProgress = null;
+      if (!cancel.isCancelled) {
+        final partial = error.partial;
+        if (partial != null &&
+            partial.contentHash == item.contentHash &&
+            !identical(partial, _bookGraph)) {
+          _bookGraph = partial;
+          await _saveBookGraph(partial);
+        }
+        _bookGraphError = error.message;
+      }
+      if (!_disposed) notifyListeners();
+    } catch (_) {
+      _bookGraphProgress = null;
+      if (!cancel.isCancelled) {
+        _bookGraphError = '生成图谱失败，请稍后重试';
+      }
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<void> _saveBookGraph(AiBookGraph graph) async {
+    final store = _aiGraphStore;
+    if (store == null) return;
+    await store.write(graph.copyWith(contentHash: item.contentHash));
+  }
+
+  Future<void> deleteBookGraph() async {
+    if (isGeneratingBookGraph) return;
+    final store = _aiGraphStore;
+    if (store != null) {
+      await store.delete(item.contentHash);
+    }
+    _bookGraph = null;
+    _bookGraphError = null;
+    if (!_disposed) notifyListeners();
+  }
+
+  void cancelBookGraphGeneration() {
+    _bookGraphCancel?.cancel();
   }
 
   /// Text for AI chat attachment: menu first, then live WebView selection.
@@ -2416,6 +2575,7 @@ class BookReaderController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _bookOutlineCancel?.cancel();
+    _bookGraphCancel?.cancel();
     _attachGeneration++;
     _ttsGeneration++;
     _prefs?.fontStore.removeListener(_onFontStoreChanged);

@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:thinking_orbs/thinking_orbs.dart';
 
 import '../../../ai/ai_chat.dart';
+import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_log.dart';
 import '../../../ai/ai_models.dart';
 import '../../../ai/ai_outline.dart';
@@ -42,6 +43,8 @@ Future<void> showBookAiChatSheet(
           : Directory(p.join(root.path, brand.storageNamespace));
       final dir = Directory(p.join(support.path, 'ai_chat'));
       controller.attachChatHistoryStore(JsonAiChatHistoryStore(dir));
+      final graphDir = Directory(p.join(support.path, 'ai_graph'));
+      controller.attachAiGraphStore(AiGraphStore(graphDir));
     } catch (_) {}
   }
 
@@ -79,9 +82,12 @@ enum _BookAiWorkspaceTab { chat, outline, graph }
 
 enum _OutlineAction { delete }
 
+enum _AiGraphFilter { all, person, location, event }
+
 class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
+  final _graphQueryController = TextEditingController();
   final _scroll = ScrollController();
   final _focus = FocusNode();
   late final TabController _tabs;
@@ -92,6 +98,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   final _expandedOutlineDetails = <String>{};
   final _outlineChildrenKeys = <String, GlobalKey>{};
   bool _outlineOverviewExpanded = false;
+  _AiGraphFilter _graphFilter = _AiGraphFilter.all;
+  final String _graphQuery = '';
 
   /// Attached highlight; null when cleared by user.
   String? _selection;
@@ -209,6 +217,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // The outline shares the same session JSON; avoid decoding it twice while
     // the side sheet is animating in.
     await _c.loadBookOutline(session: session);
+    await _c.loadBookGraph();
     if (!mounted) return;
     setState(() {
       _session = session;
@@ -1213,40 +1222,562 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return null;
   }
 
+  bool get _allowUnread =>
+      _c.aiSettingsController?.settings.allowUnreadContext ?? true;
+
   Widget _buildGraphTab(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final colors = context.appColors;
+    final graph = _c.bookGraph;
+    final progress = _c.bookGraphProgress;
+    final generating = _c.isGeneratingBookGraph;
+    final error = _c.bookGraphError;
+    if (!_ready) {
+      return _AiUnavailable(
+        message: '添加 API Key 后，就可以生成本书的人物、地点与事件图谱。',
+        onOpenSettings: () => unawaited(_openSettings()),
+      );
+    }
+    if (graph == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                KaijuanIcons.collections,
+                size: 34,
+                color: context.appSecondaryText,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                generating ? '正在生成知识图谱' : '知识图谱',
+                style: TextStyle(
+                  fontSize: _panelTitleSize(context),
+                  fontWeight: FontWeight.w600,
+                  color: context.appPrimaryText,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                progress?.label ??
+                    (_allowUnread
+                        ? '将分析全书，抽取人物、地点与事件及它们的关系。'
+                        : '默认只分析已读章节（防剧透）；开启「允许未读上下文」可分析全书。'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: _panelBodySize(context),
+                  height: 1.45,
+                  color: context.appSecondaryText,
+                ),
+              ),
+              if (generating) ...[
+                const SizedBox(height: 16),
+                LinearProgressIndicator(
+                  value: progress == null || progress.total == 0
+                      ? null
+                      : progress.completed / progress.total,
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _c.cancelBookGraphGeneration,
+                  icon: const Icon(KaijuanIcons.stop, size: 18),
+                  label: const Text('停止'),
+                ),
+              ] else ...[
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    error,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: colors.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () => unawaited(_generateGraph()),
+                  icon: const Icon(KaijuanIcons.collections, size: 18),
+                  label: const Text('生成图谱'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    final readThrough = _c.sectionIndex + 1;
+    final gateByProgress = !_allowUnread && graph.includesUnread;
+    final visibleEntities = graph.entities.where((entity) {
+      if (gateByProgress && entity.firstSection > readThrough) return false;
+      if (_graphFilter != _AiGraphFilter.all &&
+          entity.type.name != _graphFilter.name) {
+        return false;
+      }
+      if (_graphQuery.trim().isNotEmpty) {
+        final query = _graphQuery.trim();
+        final hit = entity.name.contains(query) ||
+            entity.aliases.any((alias) => alias.contains(query));
+        if (!hit) return false;
+      }
+      return true;
+    }).toList(growable: false);
+
+    final personCount = graph.entities
+        .where(
+          (entity) =>
+              entity.type == AiGraphEntityType.person &&
+              (!gateByProgress || entity.firstSection <= readThrough),
+        )
+        .length;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      children: [
+        Row(
           children: [
-            Icon(
-              KaijuanIcons.collections,
-              size: 34,
-              color: context.appSecondaryText,
-            ),
-            const SizedBox(height: 14),
-            Text(
-              '知识图谱',
-              style: TextStyle(
-                fontSize: context.appTitleSize,
-                fontWeight: FontWeight.w600,
-                color: context.appPrimaryText,
+            Expanded(
+              child: Text(
+                graph.includesUnread ? '全书图谱' : '已读章节图谱',
+                style: TextStyle(
+                  fontSize: _panelTitleSize(context),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              '即将支持',
+            if (!_allowUnread && graph.includesUnread)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '按进度展示',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: colors.primary,
+                  ),
+                ),
+              ),
+            IconButton(
+              tooltip: '重新生成图谱',
+              onPressed: generating
+                  ? null
+                  : () => unawaited(_generateGraph(force: true)),
+              icon: const Icon(KaijuanIcons.refresh, size: 20),
+            ),
+            PopupMenuButton<_OutlineAction>(
+              tooltip: '更多',
+              enabled: !generating,
+              onSelected: (action) {
+                if (action == _OutlineAction.delete) {
+                  unawaited(_deleteGraph());
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: _OutlineAction.delete,
+                  child: Text('删除图谱'),
+                ),
+              ],
+            ),
+          ],
+        ),
+        Text(
+          '人物 $personCount · 实体 ${visibleEntities.length} · '
+          '关系 ${graph.relations.length}',
+          style: TextStyle(
+            fontSize: context.appCaptionSize,
+            color: context.appSecondaryText,
+          ),
+        ),
+        if (generating) ...[
+          const SizedBox(height: 10),
+          LinearProgressIndicator(
+            value: progress == null || progress.total == 0
+                ? null
+                : progress.completed / progress.total,
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  progress?.label ?? '正在生成…',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _c.cancelBookGraphGeneration,
+                icon: const Icon(KaijuanIcons.stop, size: 16),
+                label: const Text('停止'),
+              ),
+            ],
+          ),
+        ] else if (error != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            error,
+            style: TextStyle(
+              fontSize: context.appCaptionSize,
+              color: colors.error,
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final filter in _AiGraphFilter.values)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(_graphFilterLabel(filter)),
+                    selected: _graphFilter == filter,
+                    onSelected: (_) => setState(() => _graphFilter = filter),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _graphQueryController,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            hintText: '搜索人物 / 地点 / 事件',
+            isDense: true,
+            prefixIcon: const Icon(KaijuanIcons.search, size: 18),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (visibleEntities.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Text(
+              '没有匹配的实体。',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: _panelBodySize(context),
                 color: context.appSecondaryText,
               ),
             ),
+          )
+        else
+          for (final entity in visibleEntities)
+            _buildGraphEntityTile(context, entity, gateByProgress, readThrough),
+      ],
+    );
+  }
+
+  Widget _buildGraphEntityTile(
+    BuildContext context,
+    AiGraphEntity entity,
+    bool gateByProgress,
+    int readThrough,
+  ) {
+    final graph = _c.bookGraph;
+    final relationCount = graph == null
+        ? 0
+        : graph.relations
+            .where(
+              (r) =>
+                  (r.source == entity.name || r.target == entity.name) &&
+                  (!gateByProgress ||
+                      r.evidence.any((e) => e.sectionIndex <= readThrough)),
+            )
+            .length;
+    final occurrences = entity.chapterFreq.values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _showEntityDetails(entity),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            entity.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: _panelBodySize(context),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _graphFilterLabelFor(entity.type),
+                          style: TextStyle(
+                            fontSize: context.appCaptionSize,
+                            color: context.appSecondaryText,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (entity.description.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        entity.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: context.appCaptionSize,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '出现 $occurrences 次 · 关系 $relationCount',
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  color: context.appSecondaryText,
+                ),
+              ),
+              Icon(
+                KaijuanIcons.chevronRight,
+                size: 16,
+                color: context.appSecondaryText,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEntityDetails(AiGraphEntity entity) {
+    final graph = _c.bookGraph;
+    if (graph == null) return;
+    final readThrough = _c.sectionIndex + 1;
+    final gateByProgress = !_allowUnread && graph.includesUnread;
+    final relations = graph.relations
+        .where(
+          (r) =>
+              (r.source == entity.name || r.target == entity.name) &&
+              (!gateByProgress ||
+                  r.evidence.any((e) => e.sectionIndex <= readThrough)),
+        )
+        .toList(growable: false);
+    final evidence = entity.evidence
+        .where((e) => !gateByProgress || e.sectionIndex <= readThrough)
+        .toList(growable: false);
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    entity.name,
+                    style: TextStyle(
+                      fontSize: _panelTitleSize(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  _graphFilterLabelFor(entity.type),
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ],
+            ),
+            if (entity.aliases.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                '别名：${entity.aliases.join('、')}',
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  color: context.appSecondaryText,
+                ),
+              ),
+            ],
+            if (entity.description.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                entity.description,
+                style: TextStyle(
+                  fontSize: _panelBodySize(context),
+                  height: 1.5,
+                ),
+              ),
+            ],
+            if (relations.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                '关系（${relations.length}）',
+                style: TextStyle(
+                  fontSize: _panelBodySize(context),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              for (final relation in relations)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    relation.source == entity.name
+                        ? '${relation.source} —${relation.type}→ ${relation.target}'
+                        : '${relation.source} —${relation.type}→ ${relation.target}',
+                    style: TextStyle(fontSize: _panelBodySize(context)),
+                  ),
+                ),
+            ],
+            if (evidence.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                '出处（${evidence.length}）',
+                style: TextStyle(
+                  fontSize: _panelBodySize(context),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              for (final item in evidence)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      _goToGraphEvidence(item);
+                    },
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            '第 ${item.sectionIndex} 节',
+                            style: TextStyle(
+                              fontSize: context.appCaptionSize,
+                              color: context.appColors.primary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            item.quote,
+                            style: TextStyle(
+                              fontSize: context.appCaptionSize,
+                              height: 1.4,
+                              color: item.spanResolved
+                                  ? context.appPrimaryText
+                                  : context.appSecondaryText,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          KaijuanIcons.forward,
+                          size: 14,
+                          color: context.appSecondaryText,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+            if (relations.isEmpty && evidence.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  '该实体暂无可见内容。',
+                  style: TextStyle(
+                    fontSize: _panelBodySize(context),
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
+
+  void _goToGraphEvidence(AiGraphEvidence evidence) {
+    final index = evidence.sectionIndex - 1;
+    if (index < 0 || index >= _c.sectionCount) return;
+    _c.goToSection(index, progressInSection: evidence.progressInSection ?? 0);
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _generateGraph({bool force = false}) async {
+    if (!_ready || _c.isGeneratingBookGraph) return;
+    if (force && _c.bookGraph != null) {
+      final confirmed = await showAppConfirmDialog(
+        context,
+        title: '重新生成图谱？',
+        message: '将重新请求 AI，并替换当前保存的图谱。',
+        confirmLabel: '重新生成',
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    await _c.generateBookGraph();
+  }
+
+  Future<void> _deleteGraph() async {
+    if (_c.bookGraph == null || _c.isGeneratingBookGraph) return;
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: '删除图谱？',
+      message: '只删除这本书保存的 AI 图谱，不影响对话与大纲。',
+      confirmLabel: '删除图谱',
+      destructive: true,
+    );
+    if (confirmed != true || !mounted) return;
+    await _c.deleteBookGraph();
+  }
+
+  String _graphFilterLabel(_AiGraphFilter filter) => switch (filter) {
+    _AiGraphFilter.all => '全部',
+    _AiGraphFilter.person => '人物',
+    _AiGraphFilter.location => '地点',
+    _AiGraphFilter.event => '事件',
+  };
+
+  String _graphFilterLabelFor(AiGraphEntityType type) => switch (type) {
+    AiGraphEntityType.person => '人物',
+    AiGraphEntityType.location => '地点',
+    AiGraphEntityType.event => '事件',
+  };
 
   @override
   void dispose() {
@@ -1255,6 +1786,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _suggestionCancel?.cancel();
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _input.dispose();
+    _graphQueryController.dispose();
     _scroll.dispose();
     _focus.dispose();
     _tabs

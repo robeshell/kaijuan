@@ -16,6 +16,7 @@
 | 图书听书（TTS） | [specs/book-tts.md](./specs/book-tts.md)（T1 MVP 已有；不接云端 AI 音色） |
 | 本书 AI 智能体 | [specs/ai.md](./specs/ai.md)（BYOK / 词典译 / 对话…） |
 | AI 翻译偏好与选区译 | [specs/ai-translation.md](./specs/ai-translation.md)（设计定稿） |
+| 本书知识图谱 | [specs/ai-graph.md](./specs/ai-graph.md)（M5 规格；实体/关系/出处，章级增量） |
 | 给 Open Design | [opendesign/HANDOFF.md](./opendesign/HANDOFF.md) |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
 | 会话交接（易过期） | [dev-handoff.md](./dev-handoff.md) |
@@ -43,6 +44,7 @@ docs/
     book-tts.md
     ai.md                            ← 本书 AI 智能体
     ai-translation.md                ← AI 翻译偏好与选区译（设计定稿）
+    ai-graph.md                      ← 本书知识图谱（M5 规格）
   opendesign/
     HANDOFF.md / CONTEXT.md / DESIGN.md / BRIEFS.md
 ```

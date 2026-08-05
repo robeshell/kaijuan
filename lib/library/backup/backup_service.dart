@@ -8,6 +8,7 @@ import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 
 import '../../ai/ai_chat.dart';
+import '../../ai/ai_graph.dart';
 import '../../domain/reader_models.dart';
 import '../import/import_pipeline.dart';
 import '../import/import_sources.dart';
@@ -60,6 +61,7 @@ class BackupRestorePreview {
     required this.bookmarkRows,
     required this.annotationRows,
     required this.aiChatRows,
+    required this.aiGraphRows,
   });
 
   final BackupSnapshotManifest manifest;
@@ -69,6 +71,7 @@ class BackupRestorePreview {
   final int bookmarkRows;
   final int annotationRows;
   final int aiChatRows;
+  final int aiGraphRows;
 }
 
 class BackupRestoreResult {
@@ -81,6 +84,7 @@ class BackupRestoreResult {
     required this.restoredLists,
     required this.restoredCollections,
     required this.restoredAiChats,
+    required this.restoredAiGraphs,
   });
 
   final int addedBooks;
@@ -91,6 +95,7 @@ class BackupRestoreResult {
   final int restoredLists;
   final int restoredCollections;
   final int restoredAiChats;
+  final int restoredAiGraphs;
 }
 
 /// Orchestrates logical snapshots. It knows the database and import pipeline,
@@ -201,6 +206,7 @@ class BackupService {
           'dayStats': exported.records.dayStats.length,
           'itemTime': exported.records.itemTime.length,
           'aiChats': exported.records.aiChats.length,
+          'aiGraphs': exported.records.aiGraphs.length,
         },
         databaseSchemaVersion: database.schemaVersion,
       );
@@ -306,6 +312,7 @@ class BackupService {
         bookmarkRows: records.bookmarks.length,
         annotationRows: records.annotations.length,
         aiChatRows: records.aiChats.length,
+        aiGraphRows: records.aiGraphs.length,
       );
     });
   }
@@ -410,6 +417,7 @@ class BackupService {
     var restoredLists = 0;
     var restoredCollections = 0;
     var restoredAiChats = 0;
+    var restoredAiGraphs = 0;
 
     final itemIds = <String, String>{};
     await database.transaction(() async {
@@ -714,6 +722,7 @@ class BackupService {
       }
     });
     restoredAiChats = await _mergeAiChats(records.aiChats, itemIds);
+    restoredAiGraphs = await _mergeAiGraphs(records.aiGraphs, itemIds);
     onProgress?.call(
       const BackupProgress(
         phase: BackupPhase.restoring,
@@ -731,7 +740,37 @@ class BackupService {
       restoredLists: restoredLists,
       restoredCollections: restoredCollections,
       restoredAiChats: restoredAiChats,
+      restoredAiGraphs: restoredAiGraphs,
     );
+  }
+
+  Future<int> _mergeAiGraphs(
+    List<Map<String, Object?>> rows,
+    Map<String, String> itemIds,
+  ) async {
+    var restored = 0;
+    final directory = Directory(p.join(supportDirectory.path, 'ai_graph'));
+    for (final raw in rows) {
+      final hash = _string(raw['contentHash']);
+      final graphRaw = raw['graph'];
+      if (hash == null ||
+          !KaijuanBackupFormat.isSha256(hash) ||
+          !itemIds.containsKey(hash) ||
+          graphRaw is! Map) {
+        continue;
+      }
+      final remote = AiBookGraph.fromJson(Map<String, dynamic>.from(graphRaw));
+      if (remote == null) continue;
+      final file = File(p.join(directory.path, '$hash.json'));
+      if (await file.exists()) {
+        // Local graph wins; restore never overwrites local content.
+        continue;
+      }
+      await directory.create(recursive: true);
+      await file.writeAsString(jsonEncode(remote.toJson()), flush: true);
+      restored++;
+    }
+    return restored;
   }
 
   Future<int> _mergeAiChats(

@@ -247,6 +247,7 @@ class BackupRecords {
     this.dayStats = const [],
     this.itemTime = const [],
     this.aiChats = const [],
+    this.aiGraphs = const [],
   });
 
   final List<Map<String, Object?>> items;
@@ -269,6 +270,10 @@ class BackupRecords {
   /// provider credentials are never part of this payload.
   final List<Map<String, Object?>> aiChats;
 
+  /// Book knowledge graphs, keyed by contentHash (see specs/ai-graph.md).
+  /// Never contains API keys or provider credentials.
+  final List<Map<String, Object?>> aiGraphs;
+
   Map<String, Object?> toJson() => {
     'format': KaijuanBackupFormat.id,
     'version': KaijuanBackupFormat.version,
@@ -283,6 +288,7 @@ class BackupRecords {
     'dayStats': dayStats,
     'itemTime': itemTime,
     'aiChats': aiChats,
+    'aiGraphs': aiGraphs,
   };
 
   String encode() => jsonEncode(toJson());
@@ -324,6 +330,7 @@ class BackupRecords {
     final dayStats = optionalList('dayStats');
     final itemTime = optionalList('itemTime');
     final aiChats = optionalList('aiChats');
+    final aiGraphs = optionalList('aiGraphs');
     if (items == null ||
         progress == null ||
         bookmarks == null ||
@@ -334,7 +341,8 @@ class BackupRecords {
         collectionMembers == null ||
         dayStats == null ||
         itemTime == null ||
-        aiChats == null) {
+        aiChats == null ||
+        aiGraphs == null) {
       return null;
     }
     return BackupRecords(
@@ -349,6 +357,7 @@ class BackupRecords {
       dayStats: dayStats,
       itemTime: itemTime,
       aiChats: aiChats,
+      aiGraphs: aiGraphs,
     );
   }
 }

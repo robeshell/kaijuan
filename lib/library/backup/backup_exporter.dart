@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../../ai/ai_chat.dart';
+import '../../ai/ai_graph.dart';
 import '../persistence/app_database.dart';
 import '../storage/library_paths.dart';
 import 'backup_format.dart';
@@ -175,6 +176,7 @@ class BackupExporter {
             },
       ],
       aiChats: await _readAiChats(),
+      aiGraphs: await _readAiGraphs(),
     );
 
     final paths = LibraryPaths(supportDirectory);
@@ -191,6 +193,30 @@ class BackupExporter {
       objects.add(BackupObjectExport(descriptor: descriptor, file: file));
     }
     return BackupExport(records: records, objects: objects);
+  }
+
+  Future<List<Map<String, Object?>>> _readAiGraphs() async {
+    final directory = Directory(p.join(supportDirectory.path, 'ai_graph'));
+    if (!await directory.exists()) return const [];
+    final result = <Map<String, Object?>>[];
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      try {
+        final raw = jsonDecode(await entity.readAsString());
+        if (raw is! Map) continue;
+        final graph = AiBookGraph.fromJson(Map<String, dynamic>.from(raw));
+        if (graph == null || !KaijuanBackupFormat.isSha256(graph.contentHash)) {
+          continue;
+        }
+        result.add({
+          'contentHash': graph.contentHash,
+          'graph': graph.toJson(),
+        });
+      } catch (_) {
+        // A damaged graph file must not make the entire library backup fail.
+      }
+    }
+    return result;
   }
 
   Future<List<Map<String, Object?>>> _readAiChats() async {

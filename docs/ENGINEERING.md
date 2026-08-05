@@ -94,7 +94,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 ### AI 边界（BYOK）
 
 - 产品范围见 [PRODUCT.md §6](./PRODUCT.md) 与 [specs/ai.md](./specs/ai.md)。
-- `lib/ai/`：`AiProvider`（OpenAI 兼容 / Anthropic Messages）、`AiSettings`（非机密 JSON）、`SecureAiCredentialStore`（模型 Key + 搜索 Key 分槽）、选区语言 `AiLanguageService`、本书对话 `AiChatService`（**轻量 tool 循环**，非 LangChain；`get_toc` / `get_chapter` / `search_book` / `sample_book`）、`AiBookOutlineService`（模型先依据 spine 标题与短样本生成并校验结构计划，再按单元分批结构化大纲与全书汇总）、可选联网 `AiWebSearchService`（Tavily / Brave）+ `ai_chat/` 会话文件（按 contentHash；保存对话与大纲，用户主动快照时可备份，永不备份 Key）。
+- `lib/ai/`：`AiProvider`（OpenAI 兼容 / Anthropic Messages）、`AiSettings`（非机密 JSON）、`SecureAiCredentialStore`（模型 Key + 搜索 Key 分槽）、选区语言 `AiLanguageService`、本书对话 `AiChatService`（**轻量 tool 循环**，非 LangChain；`get_toc` / `get_chapter` / `search_book` / `sample_book`）、`AiBookOutlineService`（模型先依据 spine 标题与短样本生成并校验结构计划，再按单元分批结构化大纲与全书汇总）、`AiBookGraphService` + `AiGraphStore`（人物/地点/事件与关系抽取：章级增量、fenced JSON、quote 回填、顺序增量共指消解；`ai_graph/` 按 contentHash 缓存，用户主动快照时可备份，永不备份 Key；规格见 specs/ai-graph.md）、可选联网 `AiWebSearchService`（Tavily / Brave）+ `ai_chat/` 会话文件（按 contentHash；保存对话与大纲，用户主动快照时可备份，永不备份 Key）。
 - 预设服务商：OpenAI、Anthropic、DeepSeek；另支持「自定义（OpenAI 兼容）」端点。
 - 表现层只经 `AiSettingsController`；Widget **不得**持有 `http.Client`、不得读写安全存储、不得拼装供应商请求体。
 - API Key（模型与搜索）**不得**写入 `ai_settings.json`、WebDAV 备份清单或调试导出。

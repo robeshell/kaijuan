@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:kaijuan/library/backup/backup_service.dart';
 import 'package:kaijuan/library/backup/backup_store.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
+import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/library/import/book_import_service.dart';
@@ -189,6 +190,44 @@ void main() {
       ),
     );
 
+    final aiGraphDirectory = Directory(p.join(sourceDir.path, 'ai_graph'));
+    await aiGraphDirectory.create(recursive: true);
+    await File(
+      p.join(aiGraphDirectory.path, '${item.contentHash}.json'),
+    ).writeAsString(
+      jsonEncode(
+        AiBookGraph(
+          contentHash: item.contentHash,
+          generatedAt: DateTime.utc(2026, 8, 3, 12, 30),
+          model: 'backup-test',
+          includesUnread: false,
+          coveredSections: const [1],
+          entities: const [
+            AiGraphEntity(
+              name: '张三',
+              type: AiGraphEntityType.person,
+              description: '远端实体描述。',
+              evidence: [
+                AiGraphEvidence(sectionIndex: 1, quote: '张三出场'),
+              ],
+              firstSection: 1,
+              lastSection: 1,
+            ),
+          ],
+          relations: const [
+            AiGraphRelation(
+              source: '张三',
+              target: '李四',
+              type: 'meet',
+              evidence: [
+                AiGraphEvidence(sectionIndex: 1, quote: '张三与李四相遇'),
+              ],
+            ),
+          ],
+        ).toJson(),
+      ),
+    );
+
     sourceConnections = MemoryRemoteConnectionStore();
     sourceCredentials = MemoryRemoteCredentialStore();
     final connection = _connection();
@@ -230,6 +269,7 @@ void main() {
       final first = await sourceBackup.backup();
       expect(first.manifest.objects, hasLength(1));
       expect(first.manifest.counts['aiChats'], 1);
+      expect(first.manifest.counts['aiGraphs'], 1);
       expect(first.uploadedObjects, 1);
       expect(
         server.files.keys.any((key) => key.endsWith('/manifest.json')),
@@ -299,6 +339,7 @@ void main() {
     expect(restored.restoredBookmarks, 1);
     expect(restored.restoredAnnotations, 1);
     expect(restored.restoredAiChats, 1);
+    expect(restored.restoredAiGraphs, 1);
     expect(restored.restoredLists, 1);
     expect(restored.restoredCollections, 1);
     expect(
@@ -323,6 +364,19 @@ void main() {
     expect(restoredChat.messages, hasLength(2));
     expect(restoredChat.outline?.overview, '远端大纲概览。');
     expect(restoredChat.outline?.chapters.single.title, '第一节');
+
+    final restoredGraph = AiBookGraph.fromJson(
+      jsonDecode(
+            await File(
+              p.join(targetDir.path, 'ai_graph', '$targetHash.json'),
+            ).readAsString(),
+          )
+          as Map<String, dynamic>,
+    );
+    expect(restoredGraph, isNotNull);
+    expect(restoredGraph!.entities.single.name, '张三');
+    expect(restoredGraph.relations.single.type, 'meet');
+    expect(restoredGraph.coveredSections, [1]);
   });
 }
 
