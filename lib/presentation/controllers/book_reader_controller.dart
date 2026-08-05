@@ -1289,19 +1289,24 @@ class BookReaderController extends ChangeNotifier {
   Future<void> _migrateLegacyWholeBookGraph(AiBookGraph graph) async {
     final store = _aiGraphStore;
     if (store == null) return;
-    final works = graphWorkCandidates;
-    if (works == null || works.length < 2) return;
-    final target = _matchingWorkForGraph(works, graph);
-    if (target == null) return;
-    final key = workKeyFor(target);
-    if (_workGraphs.containsKey(key)) return; // already migrated
-    await store.write(
-      graph.copyWith(contentHash: item.contentHash),
-      workKey: key,
-    );
-    await store.delete(item.contentHash);
-    _workGraphs[key] = graph;
-    _bookGraph = null;
+    try {
+      final works = graphWorkCandidates;
+      if (works == null || works.length < 2) return;
+      final target = _matchingWorkForGraph(works, graph);
+      if (target == null) return;
+      final key = workKeyFor(target);
+      if (_workGraphs.containsKey(key)) return; // already migrated
+      await store.write(
+        graph.copyWith(contentHash: item.contentHash),
+        workKey: key,
+      );
+      await store.delete(item.contentHash);
+      _workGraphs[key] = graph;
+      _bookGraph = null;
+    } catch (_) {
+      // A failed migration must never break loading the sheet: the legacy
+      // whole-book row keeps the graph reachable instead.
+    }
   }
 
   /// The single work whose spine range covers the whole graph's entity span
@@ -1524,9 +1529,9 @@ class BookReaderController extends ChangeNotifier {
       _bookGraphProgress = null;
       if (!cancel.isCancelled) {
         final partial = error.partial;
-        if (partial != null &&
-            partial.contentHash == item.contentHash &&
-            !identical(partial, _bookGraph)) {
+        if (partial != null && !identical(partial, _bookGraph)) {
+          // contentHash is re-stamped by _saveBookGraph; on a first
+          // generation the partial carries an empty hash.
           _bookGraph = partial;
           await _saveBookGraph(partial, workKey: workKey);
         }

@@ -870,10 +870,10 @@ class AiBookGraphService {
       if (quote is! String || quote.trim().isEmpty) continue;
       final quoteText = quote.trim();
       if (!seen.add(quoteText)) continue;
-      final rawSection = map['section'];
-      final section = rawSection is int
-          ? rawSection
-          : int.tryParse('$rawSection') ?? sectionIndex;
+      // Evidence always belongs to the section being extracted; ignore any
+      // `section` the model echoes back (a hallucinated number would skew
+      // progress gating, legacy attribution and quote jumps).
+      final section = sectionIndex;
       final progress = _resolveQuote(sectionText, quoteText);
       out.add(
         AiGraphEvidence(
