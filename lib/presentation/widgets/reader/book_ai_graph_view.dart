@@ -176,7 +176,7 @@ class BookAiGraphView extends StatelessWidget {
         final name = vertex.id as String;
         Future.microtask(() => onVertexTap(name));
       }
-      ..onPointerSignal = scrollZoomEnabled ? null : (PointerSignalEvent _) {};
+      ..onPointerSignal = scrollZoomEnabled ? null : (event) {};
 
     final graphArea = ClipRRect(
       borderRadius: BorderRadius.circular(14),
