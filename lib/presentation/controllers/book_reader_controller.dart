@@ -1254,16 +1254,60 @@ class BookReaderController extends ChangeNotifier {
     final store = _aiGraphStore;
     if (store == null) return;
     final graph = await store.read(item.contentHash);
+    final works = await store.readAllFor(item.contentHash);
+    _workGraphs = works;
     if (graph != null && !identical(graph, _bookGraph)) {
       _bookGraph = graph;
       _activeGraphWork = null;
+      // Legacy: the pre-per-work dialog-era graph lives in $hash.json. If it
+      // demonstrably covers a single work, migrate it to that work's file so
+      // the picker shows it as that work's 已生成 instead of a bogus
+      // whole-book graph.
+      await _migrateLegacyWholeBookGraph(graph);
       if (!_disposed) notifyListeners();
     }
-    final works = await store.readAllFor(item.contentHash);
-    if (works.length != _workGraphs.length) {
-      _workGraphs = works;
-      if (!_disposed) notifyListeners();
+  }
+
+  /// Moves a legacy whole-book graph file to its owning work's per-work file,
+  /// when the outline lets us attribute it. Leaves the file untouched when
+  /// the graph spans multiple works (a real whole-book graph) or the outline
+  /// is unavailable.
+  Future<void> _migrateLegacyWholeBookGraph(AiBookGraph graph) async {
+    final store = _aiGraphStore;
+    if (store == null) return;
+    final works = graphWorkCandidates;
+    if (works == null || works.length < 2) return;
+    final target = _matchingWorkForGraph(works, graph);
+    if (target == null) return;
+    final key = workKeyFor(target);
+    if (_workGraphs.containsKey(key)) return; // already migrated
+    await store.write(
+      graph.copyWith(contentHash: item.contentHash),
+      workKey: key,
+    );
+    await store.delete(item.contentHash);
+    _workGraphs[key] = graph;
+    _bookGraph = null;
+  }
+
+  /// The single work whose spine range covers the whole graph's entity span
+  /// (min..max first/last section). Null when the span crosses works or is
+  /// ambiguous — those stay whole-book.
+  AiGraphWorkCandidate? _matchingWorkForGraph(
+    List<AiGraphWorkCandidate> works,
+    AiBookGraph graph,
+  ) {
+    if (works.length < 2 || graph.entities.isEmpty) return null;
+    var first = graph.entities.first.firstSection;
+    var last = graph.entities.first.lastSection;
+    for (final entity in graph.entities.skip(1)) {
+      if (entity.firstSection < first) first = entity.firstSection;
+      if (entity.lastSection > last) last = entity.lastSection;
     }
+    final candidates = works
+        .where((work) => work.contains(first) && work.contains(last))
+        .toList(growable: false);
+    return candidates.length == 1 ? candidates.single : null;
   }
 
   Future<void> generateBookGraph({AiGraphWorkCandidate? only}) {
