@@ -759,13 +759,26 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 ),
               ),
               if (generating) ...[
-                const SizedBox(height: 16),
-                LinearProgressIndicator(
-                  value: progress == null || progress.total == 0
-                      ? null
-                      : progress.completed / progress.total,
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _thinkingOrb(context),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        progress?.label ?? '正在生成…',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: _panelBodySize(context),
+                          height: 1.45,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 TextButton.icon(
                   onPressed: _c.cancelBookOutlineGeneration,
                   icon: const Icon(KaijuanIcons.stop, size: 18),
@@ -868,12 +881,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               fontSize: context.appCaptionSize,
               color: context.appSecondaryText,
             ),
-          ),
-          const SizedBox(height: 6),
-          LinearProgressIndicator(
-            value: progress == null || progress.total == 0
-                ? null
-                : progress.completed / progress.total,
           ),
           Align(
             alignment: Alignment.centerRight,
@@ -1028,10 +1035,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           if (loadingChildren)
             Row(
               children: [
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: _thinkingOrb(context),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1288,23 +1295,25 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
               if (generating) ...[
                 const SizedBox(height: 14),
-                if (progress?.label case final label?)
-                  Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: _panelBodySize(context),
-                      height: 1.45,
-                      color: context.appSecondaryText,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _thinkingOrb(context),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        progress?.label ?? '正在生成图谱…',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: _panelBodySize(context),
+                          height: 1.45,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
                     ),
-                  ),
-                const SizedBox(height: 12),
-                LinearProgressIndicator(
-                  value: progress == null || progress.total == 0
-                      ? null
-                      : progress.completed / progress.total,
+                  ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 TextButton.icon(
                   onPressed: _c.cancelBookGraphGeneration,
                   icon: const Icon(KaijuanIcons.stop, size: 18),
@@ -1445,14 +1454,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
         if (generating) ...[
           const SizedBox(height: 10),
-          LinearProgressIndicator(
-            value: progress == null || progress.total == 0
-                ? null
-                : progress.completed / progress.total,
-          ),
-          const SizedBox(height: 6),
           Row(
             children: [
+              _thinkingOrb(context),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   progress?.label ?? '正在生成…',
@@ -2025,11 +2030,21 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ),
         if (generating) ...[
           Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 10),
-            child: LinearProgressIndicator(
-              value: progress == null || progress.total == 0
-                  ? null
-                  : progress.completed / progress.total,
+            padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 16, 10),
+            child: Row(
+              children: [
+                _thinkingOrb(context),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    progress?.label ?? '正在生成…',
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -2071,10 +2086,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
         ),
         trailing: generatingThis
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+            ? SizedBox(
+                width: 20,
+                height: 20,
+                child: _thinkingOrb(context),
               )
             : Text(
                 ready ? '已生成' : '生成',
@@ -2104,6 +2119,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       icon: const Icon(KaijuanIcons.back, size: 16),
       label: const Text('全部著作'),
     ),
+  );
+
+  /// Inline thinking indicator, same animation family as the chat bubbles.
+  Widget _thinkingOrb(BuildContext context) => ThinkingOrb(
+    state: OrbState.working,
+    size: OrbSize.size20,
+    theme: Theme.of(context).brightness == Brightness.dark
+        ? OrbTheme.dark
+        : OrbTheme.light,
   );
 
   String _graphFilterLabel(_AiGraphFilter filter) => switch (filter) {
@@ -2252,11 +2276,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         else ...[
           Expanded(
             child: _loadingSession
-                ? const Center(
+                ? Center(
                     child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      width: 64,
+                      height: 64,
+                      child: ThinkingOrb(
+                        state: OrbState.working,
+                        size: OrbSize.size64,
+                        theme: Theme.of(context).brightness == Brightness.dark
+                            ? OrbTheme.dark
+                            : OrbTheme.light,
+                      ),
                     ),
                   )
                 : ListView(
