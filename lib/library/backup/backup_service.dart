@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 
+import '../../ai/ai_chat.dart';
 import '../../domain/reader_models.dart';
 import '../import/import_pipeline.dart';
 import '../import/import_sources.dart';
@@ -58,6 +59,7 @@ class BackupRestorePreview {
     required this.progressRows,
     required this.bookmarkRows,
     required this.annotationRows,
+    required this.aiChatRows,
   });
 
   final BackupSnapshotManifest manifest;
@@ -66,6 +68,7 @@ class BackupRestorePreview {
   final int progressRows;
   final int bookmarkRows;
   final int annotationRows;
+  final int aiChatRows;
 }
 
 class BackupRestoreResult {
@@ -77,6 +80,7 @@ class BackupRestoreResult {
     required this.restoredAnnotations,
     required this.restoredLists,
     required this.restoredCollections,
+    required this.restoredAiChats,
   });
 
   final int addedBooks;
@@ -86,6 +90,7 @@ class BackupRestoreResult {
   final int restoredAnnotations;
   final int restoredLists;
   final int restoredCollections;
+  final int restoredAiChats;
 }
 
 /// Orchestrates logical snapshots. It knows the database and import pipeline,
@@ -195,6 +200,7 @@ class BackupService {
           'collections': exported.records.collections.length,
           'dayStats': exported.records.dayStats.length,
           'itemTime': exported.records.itemTime.length,
+          'aiChats': exported.records.aiChats.length,
         },
         databaseSchemaVersion: database.schemaVersion,
       );
@@ -299,6 +305,7 @@ class BackupService {
         progressRows: records.progress.length,
         bookmarkRows: records.bookmarks.length,
         annotationRows: records.annotations.length,
+        aiChatRows: records.aiChats.length,
       );
     });
   }
@@ -402,6 +409,7 @@ class BackupService {
     var restoredAnnotations = 0;
     var restoredLists = 0;
     var restoredCollections = 0;
+    var restoredAiChats = 0;
 
     final itemIds = <String, String>{};
     await database.transaction(() async {
@@ -659,9 +667,7 @@ class BackupService {
                     : remoteComic,
               ),
               bookSeconds: Value(
-                local.bookSeconds > remoteBook
-                    ? local.bookSeconds
-                    : remoteBook,
+                local.bookSeconds > remoteBook ? local.bookSeconds : remoteBook,
               ),
               sessionsCount: Value(
                 local.sessionsCount > remoteSessions
@@ -707,6 +713,7 @@ class BackupService {
         }
       }
     });
+    restoredAiChats = await _mergeAiChats(records.aiChats, itemIds);
     onProgress?.call(
       const BackupProgress(
         phase: BackupPhase.restoring,
@@ -723,7 +730,76 @@ class BackupService {
       restoredAnnotations: restoredAnnotations,
       restoredLists: restoredLists,
       restoredCollections: restoredCollections,
+      restoredAiChats: restoredAiChats,
     );
+  }
+
+  Future<int> _mergeAiChats(
+    List<Map<String, Object?>> rows,
+    Map<String, String> itemIds,
+  ) async {
+    var restored = 0;
+    final directory = Directory(p.join(supportDirectory.path, 'ai_chat'));
+    for (final raw in rows) {
+      final hash = _string(raw['contentHash']);
+      final messagesRaw = raw['messages'];
+      final outlineRaw = raw['outline'];
+      if (hash == null ||
+          !KaijuanBackupFormat.isSha256(hash) ||
+          !itemIds.containsKey(hash) ||
+          (messagesRaw is! List && outlineRaw is! Map)) {
+        continue;
+      }
+      final remote = AiChatSession.fromJson({
+        'contentHash': hash,
+        'messages': messagesRaw is List ? messagesRaw : const [],
+        if (outlineRaw is Map) 'outline': outlineRaw,
+      });
+      if (remote.messages.isEmpty && remote.outline == null) continue;
+      final file = File(p.join(directory.path, '$hash.json'));
+      AiChatSession local = AiChatSession(contentHash: hash, itemId: '');
+      if (await file.exists()) {
+        try {
+          final decoded = jsonDecode(await file.readAsString());
+          if (decoded is Map) {
+            local = AiChatSession.fromJson(Map<String, dynamic>.from(decoded));
+          }
+        } catch (_) {}
+      }
+      final seen = <String>{
+        for (final message in local.messages) jsonEncode(message.toJson()),
+      };
+      final merged = <AiChatMessage>[...local.messages];
+      for (final message in remote.messages) {
+        final key = jsonEncode(message.toJson());
+        if (seen.add(key)) merged.add(message);
+      }
+      final bounded = merged.length > 100
+          ? merged.sublist(merged.length - 100)
+          : merged;
+      final outline = local.outline ?? remote.outline;
+      final messagesChanged =
+          jsonEncode([for (final message in bounded) message.toJson()]) !=
+          jsonEncode([for (final message in local.messages) message.toJson()]);
+      final outlineChanged = local.outline == null && remote.outline != null;
+      if (!messagesChanged && !outlineChanged) {
+        continue;
+      }
+      await directory.create(recursive: true);
+      await file.writeAsString(
+        jsonEncode(
+          AiChatSession(
+            contentHash: hash,
+            itemId: '',
+            messages: bounded,
+            outline: outline,
+          ).toJson(),
+        ),
+        flush: true,
+      );
+      restored++;
+    }
+    return restored;
   }
 
   Future<(WebDavBackupStore, RemoteConnection, RemoteCredentials)>

@@ -246,6 +246,7 @@ class BackupRecords {
     required this.collectionMembers,
     this.dayStats = const [],
     this.itemTime = const [],
+    this.aiChats = const [],
   });
 
   final List<Map<String, Object?>> items;
@@ -264,6 +265,10 @@ class BackupRecords {
   /// Per-item cumulative seconds (`reading_item_time`), keyed by contentHash.
   final List<Map<String, Object?>> itemTime;
 
+  /// User-authored book chat history, keyed by contentHash. API keys and
+  /// provider credentials are never part of this payload.
+  final List<Map<String, Object?>> aiChats;
+
   Map<String, Object?> toJson() => {
     'format': KaijuanBackupFormat.id,
     'version': KaijuanBackupFormat.version,
@@ -277,6 +282,7 @@ class BackupRecords {
     'collectionMembers': collectionMembers,
     'dayStats': dayStats,
     'itemTime': itemTime,
+    'aiChats': aiChats,
   };
 
   String encode() => jsonEncode(toJson());
@@ -317,6 +323,7 @@ class BackupRecords {
     final collectionMembers = list('collectionMembers');
     final dayStats = optionalList('dayStats');
     final itemTime = optionalList('itemTime');
+    final aiChats = optionalList('aiChats');
     if (items == null ||
         progress == null ||
         bookmarks == null ||
@@ -326,7 +333,8 @@ class BackupRecords {
         collections == null ||
         collectionMembers == null ||
         dayStats == null ||
-        itemTime == null) {
+        itemTime == null ||
+        aiChats == null) {
       return null;
     }
     return BackupRecords(
@@ -340,6 +348,7 @@ class BackupRecords {
       collectionMembers: collectionMembers,
       dayStats: dayStats,
       itemTime: itemTime,
+      aiChats: aiChats,
     );
   }
 }

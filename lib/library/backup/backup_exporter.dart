@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../../ai/ai_chat.dart';
 import '../persistence/app_database.dart';
 import '../storage/library_paths.dart';
 import 'backup_format.dart';
@@ -172,6 +174,7 @@ class BackupExporter {
               'updatedAt': _date(row.updatedAt),
             },
       ],
+      aiChats: await _readAiChats(),
     );
 
     final paths = LibraryPaths(supportDirectory);
@@ -188,6 +191,31 @@ class BackupExporter {
       objects.add(BackupObjectExport(descriptor: descriptor, file: file));
     }
     return BackupExport(records: records, objects: objects);
+  }
+
+  Future<List<Map<String, Object?>>> _readAiChats() async {
+    final directory = Directory(p.join(supportDirectory.path, 'ai_chat'));
+    if (!await directory.exists()) return const [];
+    final result = <Map<String, Object?>>[];
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      try {
+        final raw = jsonDecode(await entity.readAsString());
+        if (raw is! Map) continue;
+        final session = AiChatSession.fromJson(Map<String, dynamic>.from(raw));
+        if (!KaijuanBackupFormat.isSha256(session.contentHash)) continue;
+        result.add({
+          'contentHash': session.contentHash,
+          'messages': [
+            for (final message in session.messages) message.toJson(),
+          ],
+          if (session.outline != null) 'outline': session.outline!.toJson(),
+        });
+      } catch (_) {
+        // A damaged chat file must not make the entire library backup fail.
+      }
+    }
+    return result;
   }
 
   Future<BackupObjectDescriptor> _describe(

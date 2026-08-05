@@ -191,7 +191,7 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
             ),
           ),
         ),
-        _SwitchRow(
+        AppSettingsSwitchRow(
           title: '自动备份',
           subtitle: '每天启动时自动备份',
           value: controller.settings.autoBackup,
@@ -241,8 +241,9 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
               backgroundColor: colors.primary,
               foregroundColor: colors.onPrimary,
               disabledBackgroundColor: colors.primary.withValues(alpha: 0.12),
-              disabledForegroundColor:
-                  colors.primary.withValues(alpha: appDisabledForegroundOpacity),
+              disabledForegroundColor: colors.primary.withValues(
+                alpha: appDisabledForegroundOpacity,
+              ),
             ),
             child: const Text('立即备份'),
           ),
@@ -399,7 +400,7 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
         content: Text(
           '${_formatDate(manifest.createdAt)} · ${manifest.deviceName}\n'
           '新增书籍 ${preview.newBooks} 本，已有书籍 ${preview.existingBooks} 本\n'
-          '将合并进度、书签、划线、笔记和书单；不会删除本地内容。',
+          '将合并进度、书签、划线、笔记、书单和 ${preview.aiChatRows} 项 AI 内容；不会删除本地内容。',
           style: TextStyle(
             color: context.settingsSecondary,
             fontSize: context.appBodySecondarySize,
@@ -422,7 +423,10 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
     final result = await controller.restore(manifest);
     if (!mounted) return;
     if (result != null) {
-      showAppSnackBar(context, '恢复完成，新增 ${result.addedBooks} 本书');
+      final chatText = result.restoredAiChats == 0
+          ? ''
+          : '，恢复 ${result.restoredAiChats} 项 AI 内容';
+      showAppSnackBar(context, '恢复完成，新增 ${result.addedBooks} 本书$chatText');
     } else if (controller.message != null) {
       showAppSnackBar(context, controller.message!);
     }
@@ -576,52 +580,6 @@ class _BackupNavigationRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _SwitchRow extends StatelessWidget {
-  const _SwitchRow({
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
-    child: Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: context.appListTitleSize,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  color: context.settingsSecondary,
-                  fontSize: context.appCaptionSize,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Switch(value: value, onChanged: onChanged),
-      ],
-    ),
-  );
 }
 
 class _SnapshotSheet extends StatelessWidget {

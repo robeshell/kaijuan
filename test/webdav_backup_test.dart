@@ -10,6 +10,9 @@ import 'package:path/path.dart' as p;
 
 import 'package:kaijuan/library/backup/backup_service.dart';
 import 'package:kaijuan/library/backup/backup_store.dart';
+import 'package:kaijuan/ai/ai_chat.dart';
+import 'package:kaijuan/ai/ai_models.dart';
+import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/library/import/book_import_service.dart';
 import 'package:kaijuan/library/import/comic_import_service.dart';
 import 'package:kaijuan/library/import/import_pipeline.dart';
@@ -147,6 +150,44 @@ void main() {
       collectionId: collectionId,
       itemId: item.id,
     );
+    final aiDirectory = Directory(p.join(sourceDir.path, 'ai_chat'));
+    await aiDirectory.create(recursive: true);
+    await File(
+      p.join(aiDirectory.path, '${item.contentHash}.json'),
+    ).writeAsString(
+      jsonEncode(
+        AiChatSession(
+          contentHash: item.contentHash,
+          itemId: item.id,
+          messages: [
+            AiChatMessage(
+              role: AiMessageRole.user,
+              content: '这本书的主线是什么？',
+              createdAt: DateTime.utc(2026, 8, 3, 11),
+            ),
+            AiChatMessage(
+              role: AiMessageRole.assistant,
+              content: '先看主要人物和关键转折。',
+              createdAt: DateTime.utc(2026, 8, 3, 11, 1),
+            ),
+          ],
+          outline: AiBookOutline(
+            createdAt: DateTime.utc(2026, 8, 3, 12),
+            model: 'backup-test',
+            includesUnread: true,
+            overview: '远端大纲概览。',
+            themes: const ['主题'],
+            chapters: const [
+              AiBookOutlineChapter(
+                sectionIndex: 1,
+                title: '第一节',
+                summary: '远端章节摘要。',
+              ),
+            ],
+          ),
+        ).toJson(),
+      ),
+    );
 
     sourceConnections = MemoryRemoteConnectionStore();
     sourceCredentials = MemoryRemoteCredentialStore();
@@ -188,6 +229,7 @@ void main() {
     () async {
       final first = await sourceBackup.backup();
       expect(first.manifest.objects, hasLength(1));
+      expect(first.manifest.counts['aiChats'], 1);
       expect(first.uploadedObjects, 1);
       expect(
         server.files.keys.any((key) => key.endsWith('/manifest.json')),
@@ -256,6 +298,7 @@ void main() {
     expect(restored.restoredProgress, 1);
     expect(restored.restoredBookmarks, 1);
     expect(restored.restoredAnnotations, 1);
+    expect(restored.restoredAiChats, 1);
     expect(restored.restoredLists, 1);
     expect(restored.restoredCollections, 1);
     expect(
@@ -267,6 +310,19 @@ void main() {
       (await targetDb.select(targetDb.bookAnnotations).get()),
       hasLength(1),
     );
+    final targetHash =
+        (await targetDb.select(targetDb.readingItems).get()).single.contentHash;
+    final restoredChat = AiChatSession.fromJson(
+      jsonDecode(
+            await File(
+              p.join(targetDir.path, 'ai_chat', '$targetHash.json'),
+            ).readAsString(),
+          )
+          as Map<String, dynamic>,
+    );
+    expect(restoredChat.messages, hasLength(2));
+    expect(restoredChat.outline?.overview, '远端大纲概览。');
+    expect(restoredChat.outline?.chapters.single.title, '第一节');
   });
 }
 
