@@ -91,7 +91,7 @@ class BookAiGraphFullscreen extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '出现 $occurrences 次',
+                  '$occurrences 次',
                   style: TextStyle(fontSize: 13, color: colors.onSurfaceVariant),
                 ),
               ],

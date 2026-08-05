@@ -1369,13 +1369,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       children: [
         if (_c.activeGraphWork != null) ...[
           _graphBackRow(),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
         ],
         Row(
           children: [
             Expanded(
               child: Text(
-                graph.includesUnread ? '全书图谱' : '已读章节图谱',
+                _c.activeGraphWork != null
+                    ? '《${_c.activeGraphWork!.title}》图谱'
+                    : (graph.includesUnread ? '全书图谱' : '已读章节图谱'),
                 style: TextStyle(
                   fontSize: _panelTitleSize(context),
                   fontWeight: FontWeight.w600,
@@ -1511,7 +1513,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
             '点击节点可定位下方实体',
             style: TextStyle(
@@ -1554,14 +1556,30 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         const SizedBox(height: 8),
         if (visibleEntities.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 32),
-            child: Text(
-              '没有匹配的实体。',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: _panelBodySize(context),
-                color: context.appSecondaryText,
-              ),
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              children: [
+                Text(
+                  _graphQuery.trim().isEmpty
+                      ? '没有匹配的实体。'
+                      : '没有匹配“${_graphQuery.trim()}”的实体。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: _panelBodySize(context),
+                    color: context.appSecondaryText,
+                  ),
+                ),
+                if (_graphQuery.trim().isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: () {
+                      _graphQueryController.clear();
+                      setState(() {});
+                    },
+                    child: const Text('清除搜索'),
+                  ),
+                ],
+              ],
             ),
           )
         else
@@ -1606,6 +1624,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => BookAiGraphFullscreen(
+          title: _c.activeGraphWork != null
+              ? '《${_c.activeGraphWork!.title}》图谱'
+              : '知识图谱',
           entities: graph.entities
               .where(
                 (entity) =>
@@ -1667,6 +1688,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
+        canRequestFocus: true,
         onTap: () => _showEntityDetails(entity),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
@@ -2010,7 +2032,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ),
         const SizedBox(height: 4),
         Text(
-          '这部书包含多部著作。选择一部生成它的图谱；已生成的可以直接查看。',
+          '这本书包含多部著作，可以逐部生成图谱。已生成的著作可直接点开查看。',
           style: TextStyle(
             fontSize: _panelBodySize(context),
             height: 1.45,
@@ -2050,107 +2072,140 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final generatingThis = generatingWork != null &&
         BookReaderController.workKeyFor(generatingWork) == key;
     final busy = generatingThis || _c.isGeneratingBookGraph;
+    final dimmed = busy && !generatingThis;
+    final actionLabel = ready ? '查看《${work.title}》图谱' : '生成《${work.title}》图谱';
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
+      child: Opacity(
+        opacity: dimmed ? 0.55 : 1,
+        child: Material(
+          color: colors.surfaceContainerLow,
           borderRadius: BorderRadius.circular(12),
-          onTap: busy
-              ? null
-              : () {
-                  if (ready) {
-                    _c.openWorkGraph(work);
-                  } else {
-                    unawaited(_c.generateBookGraph(only: work));
-                  }
-                },
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: colors.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Icon(
-                    KaijuanIcons.collections,
-                    size: 17,
-                    color: colors.primary,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        work.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: colors.onSurface,
-                        ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            canRequestFocus: true,
+            onTap: busy
+                ? null
+                : () {
+                    if (ready) {
+                      _c.openWorkGraph(work);
+                    } else {
+                      unawaited(_c.generateBookGraph(only: work));
+                    }
+                  },
+            child: Semantics(
+              button: true,
+              enabled: !busy,
+              label: actionLabel,
+              excludeSemantics: true,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: colors.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(9),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        work.isOpenEnded
-                            ? '至书末'
-                            : '${work.sectionCount} 节',
-                        style: TextStyle(
-                          fontSize: context.appCaptionSize,
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (generatingThis)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else if (ready)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colors.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      '已生成',
-                      style: TextStyle(
-                        fontSize: context.appCaptionSize,
+                      child: Icon(
+                        KaijuanIcons.collections,
+                        size: 17,
                         color: colors.primary,
                       ),
                     ),
-                  )
-                else
-                  Text(
-                    '未生成',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: colors.onSurfaceVariant,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            work.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: colors.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            work.isOpenEnded
+                                ? '至书末'
+                                : '${work.sectionCount} 节',
+                            style: TextStyle(
+                              fontSize: context.appCaptionSize,
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                const SizedBox(width: 2),
-                Icon(
-                  KaijuanIcons.chevronRight,
-                  size: 16,
-                  color: colors.onSurfaceVariant,
+                    const SizedBox(width: 8),
+                    // Fixed-width status zone keeps the trailing chevron on
+                    // one shared edge regardless of badge/text/spinner width.
+                    SizedBox(
+                      width: 64,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (generatingThis) ...[
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '生成中',
+                              style: TextStyle(
+                                fontSize: context.appCaptionSize,
+                                color: colors.onSurfaceVariant,
+                              ),
+                            ),
+                          ] else if (ready)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colors.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '已生成',
+                                style: TextStyle(
+                                  fontSize: context.appCaptionSize,
+                                  color: colors.primary,
+                                ),
+                              ),
+                            )
+                          else
+                            Text(
+                              '生成',
+                              style: TextStyle(
+                                fontSize: context.appCaptionSize,
+                                fontWeight: FontWeight.w600,
+                                color: colors.primary,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(
+                      KaijuanIcons.chevronRight,
+                      size: 16,
+                      color: ready
+                          ? colors.onSurfaceVariant
+                          : colors.primary,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
