@@ -371,7 +371,11 @@ class AiBookGraphService {
 
         final bucket = canonical.putIfAbsent(type, () => {});
         bucket[canonicalName] = canonicalName;
-        final aliases = _stringList(map['aliases'])..remove(canonicalName);
+        // Immutable chain: never mutate the _stringList result, which can be
+        // a const [] (fixed-length) when the model omits the aliases field.
+        final aliases = _stringList(
+          map['aliases'],
+        ).where((alias) => alias != canonicalName).toList();
         for (final alias in aliases) {
           bucket[alias] = canonicalName;
         }
