@@ -299,6 +299,26 @@ class AiBookGraphService {
       );
     }
 
+    // Metadata entities (the book's author / preface writers) are not story
+    // entities: drop them and any edge that only touches them.
+    final metaNames = <String>{
+      bookTitle.trim(),
+      if (bookAuthor != null && bookAuthor!.trim().isNotEmpty)
+        bookAuthor!.trim(),
+    };
+    if (metaNames.isNotEmpty) {
+      final storyNames = <String>{};
+      entities.removeWhere((e) {
+        final drop = metaNames.contains(e.name) ||
+            e.aliases.any(metaNames.contains);
+        if (!drop) storyNames.add(e.name);
+        return drop;
+      });
+      relations.removeWhere(
+        (r) => !storyNames.contains(r.source) || !storyNames.contains(r.target),
+      );
+    }
+
     entities.sort(_byFrequencyThenName);
     relations.sort((a, b) => b.evidence.length.compareTo(a.evidence.length));
     return AiBookGraph(
@@ -529,6 +549,8 @@ class AiBookGraphService {
             'quote 必须逐字来自以下正文；evidence 至少 1 条；'
             'type 取值仅限 person/location/event；'
             '关系类型仅限以下中文：${relationTypes.join('、')}，用最贴切的一个；'
+            '不要抽取书作者、作序者、编者、译者等元信息人物，'
+            '除非他们作为故事角色实际登场；'
             '本章无实体或关系时对应数组输出 []。\n\n'
             '正文：\n$chunkText',
       ),
