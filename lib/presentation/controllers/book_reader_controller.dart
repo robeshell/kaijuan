@@ -1504,10 +1504,20 @@ class BookReaderController extends ChangeNotifier {
                       work.contains(section.sourceSectionIndex ?? section.index),
                 )
                 .toList(growable: false);
+      // One spine section can yield several logical sections (a document is
+      // split on headings); dedupe so the progress count and the picker's
+      // spine-based section count (44 vs 55) agree, and each spine is
+      // extracted once.
+      final seenSpines = <int>{};
+      final deduped = <AiBookSectionSlice>[
+        for (final section in scoped)
+          if (seenSpines.add(section.originSectionIndex)) section,
+      ];
       AiLog.d(
         'graph generate scope: work=${work?.title ?? 'whole-book'} '
         'range=${work == null ? '-' : '${work.startSection}..${work.endSectionExclusive}'} '
-        'sections=${graphSections.length} scoped=${scoped.length}',
+        'sections=${graphSections.length} scoped=${scoped.length} '
+        'deduped=${deduped.length}',
       );
       if (scoped.isEmpty) {
         throw AiProviderException('所选著作没有可用于生成图谱的正文');
@@ -1515,7 +1525,7 @@ class BookReaderController extends ChangeNotifier {
       final graph = await service.generate(
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        sections: scoped,
+        sections: deduped,
         includesUnread: allowUnread,
         readThroughSection: allowUnread ? null : sectionIndex + 1,
         existing: existing,
