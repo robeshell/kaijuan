@@ -26,16 +26,21 @@ class AiGraphWorkCandidate {
   /// Inclusive 1-based spine section where the work starts.
   final int startSection;
 
-  /// Exclusive 1-based spine endpoint of the work.
-  final int endSectionExclusive;
+  /// Exclusive 1-based spine endpoint of the work. Null for the last work in
+  /// the outline: its end is the book's tail, only known at generation time.
+  final int? endSectionExclusive;
 
   /// Outline summary sample, used as the dialog subtitle.
   final String sample;
 
-  int get sectionCount => endSectionExclusive - startSection;
+  int get sectionCount =>
+      endSectionExclusive == null ? 0 : endSectionExclusive! - startSection;
+
+  bool get isOpenEnded => endSectionExclusive == null;
 
   bool contains(int spineSection) =>
-      spineSection >= startSection && spineSection < endSectionExclusive;
+      spineSection >= startSection &&
+      (isOpenEnded || spineSection < endSectionExclusive!);
 }
 
 /// Entity kinds extracted for v1. `organization / item / concept` are

@@ -1929,7 +1929,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             AppDialogChoice(
               value: work,
               label: work.title,
-              subtitle: '${work.sectionCount} 节'
+              subtitle: '${work.isOpenEnded ? '至书末' : '${work.sectionCount} 节'}'
                   '${work.sample.isEmpty ? '' : ' · ${work.sample.length > 42 ? '${work.sample.substring(0, 42)}…' : work.sample}'}',
             ),
         ],

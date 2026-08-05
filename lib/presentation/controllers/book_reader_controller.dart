@@ -894,8 +894,11 @@ class BookReaderController extends ChangeNotifier {
         .toList(growable: false);
   }
 
-  bool _isGraphAppendixSection(AiBookSectionSlice section) {
-    final label = section.label.trim().replaceAll(RegExp(r'\s+'), '');
+  bool _isGraphAppendixSection(AiBookSectionSlice section) =>
+      _isGraphAppendixLabel(section.label);
+
+  bool _isGraphAppendixLabel(String raw) {
+    final label = raw.trim().replaceAll(RegExp(r'\s+'), '');
     return RegExp(
       r'^(附录|参考书目|参考文献|索引|致谢|后记|跋|注释|年表|'
       r'前言|序言|序|自序|代序|凡例|出版说明|编者按|导读|题记)',
@@ -1227,16 +1230,27 @@ class BookReaderController extends ChangeNotifier {
   /// at least two outline units each spanning multiple spine sections
   /// (a plain book's chapters are one-section units). Each candidate is one
   /// work the user can generate the graph for; the sheet shows a picker.
+  ///
+  /// The outline does not persist `endSectionIndexExclusive` for every unit
+  /// (see real collection caches), so a work's end is derived from the next
+  /// unit's start; the last work is open-ended (spans to the book's tail).
   List<AiGraphWorkCandidate>? get graphWorkCandidates {
     final outline = _bookOutline;
     if (outline == null) return null;
+    final byStart = <(int, AiBookOutlineChapter)>[
+      for (final chapter in outline.chapters)
+        if (chapter.sourceSectionIndex != null)
+          (chapter.sourceSectionIndex!, chapter),
+    ]..sort((a, b) => a.$1.compareTo(b.$1));
     final works = <AiGraphWorkCandidate>[];
-    for (final chapter in outline.chapters) {
-      final start = chapter.sourceSectionIndex;
-      final end = chapter.endSectionIndexExclusive;
-      if (start == null || end == null || end - start < 2) continue;
+    for (var i = 0; i < byStart.length; i++) {
+      final (start, chapter) = byStart[i];
+      final end = chapter.endSectionIndexExclusive ??
+          (i + 1 < byStart.length ? byStart[i + 1].$1 : null);
+      if (end != null && end - start < 2) continue;
       final title = chapter.title.trim();
-      if (title.isEmpty) continue;
+      if (title.isEmpty || _isGraphAppendixLabel(title)) continue;
+      if (_isOutlineMetadataTitle(title)) continue;
       works.add(
         AiGraphWorkCandidate(
           title: title,
@@ -1247,7 +1261,6 @@ class BookReaderController extends ChangeNotifier {
       );
     }
     if (works.length < 2) return null;
-    works.sort((a, b) => a.startSection.compareTo(b.startSection));
     return works;
   }
 
