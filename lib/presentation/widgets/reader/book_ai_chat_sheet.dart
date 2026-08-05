@@ -2071,6 +2071,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final sync = _c.graphWorkCandidates;
     if (sync != null) {
       setState(() => _graphWorks = sync);
+      unawaited(_c.loadGraphActualSectionCounts());
       return;
     }
     if (_c.bookOutline != null) return; // has outline, not a collection
@@ -2080,6 +2081,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _graphWorksLoading = false;
     if (resolved != null && resolved.isNotEmpty) {
       setState(() => _graphWorks = resolved);
+      unawaited(_c.loadGraphActualSectionCounts());
     }
   }
 
@@ -2247,7 +2249,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         BookReaderController.workKeyFor(generatingWork) == key;
     final busy = generatingThis || _c.isGeneratingBookGraph;
     final dimmed = busy && !generatingThis;
-    final range = work.isOpenEnded ? '至书末' : '${work.sectionCount} 节';
+    final range = work.isOpenEnded
+        ? '至书末'
+        : '${_c.graphActualSectionCounts?[key] ?? work.sectionCount} 节';
     return Opacity(
       opacity: dimmed ? 0.55 : 1,
       child: ListTile(

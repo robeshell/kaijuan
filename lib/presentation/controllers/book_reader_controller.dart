@@ -1367,6 +1367,41 @@ class BookReaderController extends ChangeNotifier {
   /// unit's start; the last work is open-ended (spans to the book's tail).
 
 
+  /// Actual extractable section count per work (after metadata/empty-section
+  /// filtering), so the picker and the generation progress agree. Loaded
+  /// lazily from the graph corpus; null until loaded.
+  Map<String, int>? _graphActualSectionCounts;
+
+  Map<String, int>? get graphActualSectionCounts => _graphActualSectionCounts;
+
+  Future<void> loadGraphActualSectionCounts() async {
+    if (_graphActualSectionCounts != null) return;
+    try {
+      final body = await _loadBookGraphPlainTextCached(
+        AiBookGraphService.maxBookBodyChars,
+      );
+      final sections = AiChatBookCorpus.parseSections(body);
+      final works = graphWorkCandidates ?? const [];
+      final counts = <String, int>{};
+      for (final work in works) {
+        final seenSpines = <int>{};
+        var count = 0;
+        for (final section in sections) {
+          if (!seenSpines.add(section.originSectionIndex)) continue;
+          if (!work.contains(section.sourceSectionIndex ?? section.index)) {
+            continue;
+          }
+          count++;
+        }
+        counts[workKeyFor(work)] = count;
+      }
+      _graphActualSectionCounts = counts;
+      if (!_disposed) notifyListeners();
+    } catch (_) {
+      // Counts are cosmetic; fall back to the spine-range estimate.
+    }
+  }
+
   List<AiGraphWorkCandidate>? get graphWorkCandidates {
     final outline = _bookOutline;
     if (outline == null) return null;
