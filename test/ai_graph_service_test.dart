@@ -348,6 +348,23 @@ void main() {
       expect(graph.coveredSections, [1]);
     });
   });
+
+  group('normalizeRelationType', () {
+    test('maps English NER tags to the Chinese vocabulary', () {
+      expect(AiBookGraphService.normalizeRelationType('trusts'), '信任');
+      expect(AiBookGraphService.normalizeRelationType('teacher_student'), '师生');
+      expect(AiBookGraphService.normalizeRelationType('served'), '效力');
+      expect(AiBookGraphService.normalizeRelationType('replaced'), '更替');
+      expect(AiBookGraphService.normalizeRelationType('mediated'), '调停');
+    });
+
+    test('keeps Chinese vocabulary and collapses unknown to the fallback', () {
+      expect(AiBookGraphService.normalizeRelationType('弹劾'), '弹劾');
+      expect(AiBookGraphService.normalizeRelationType(' TRUSTS '), '信任');
+      expect(AiBookGraphService.normalizeRelationType('???'), '相关');
+      expect(AiBookGraphService.normalizeRelationType(''), '相关');
+    });
+  });
 }
 
 class _GraphProvider implements AiProvider {

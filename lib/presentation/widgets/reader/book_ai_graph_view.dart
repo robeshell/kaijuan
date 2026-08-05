@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter_graph_view/flutter_graph_view.dart';
 
@@ -120,8 +121,33 @@ class BookAiGraphView extends StatelessWidget {
         // is never invoked by this package — TapUp is the live callback).
         final name = vertex.id as String;
         Future.microtask(() => onVertexTap(name));
-      }
-      ..onPointerSignal = scrollZoomEnabled ? null : (event) {};
+      };
+
+    // Set outside the cascade: the handler needs to read options.scale/offset,
+    // and Dart forbids referencing the cascade target inside its own chain.
+    options.onPointerSignal = (event) {
+      if (!scrollZoomEnabled) return;
+      if (event is! PointerScrollEvent) return;
+      // 4x the package default (0.05/notch): one wheel notch is now a
+      // visible step instead of an imperceptible 5%.
+      final zoomDelta =
+          event.scrollDelta.dy.sign * options.zoomPerScrollUnit * 4;
+      if (options.scale.value + zoomDelta <= 0) return;
+      // Deferred: mutating scale inside the pointer dispatch re-enters
+      // setState through the scale listener and trips Flutter's
+      // MouseTracker debug assertion (same trap as onVertexTapUp).
+      Future.microtask(() {
+        final oz = options.scale.value;
+        options.scale.value += zoomDelta;
+        options.keepCenter(
+          oz,
+          options.scale.value,
+          options.size.value,
+          event.localPosition,
+          options.offset,
+        );
+      });
+    };
 
     final graphArea = ClipRRect(
       borderRadius: BorderRadius.circular(14),

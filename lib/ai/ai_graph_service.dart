@@ -61,6 +61,71 @@ class AiBookGraphService {
   /// Overlap between adjacent chunks so relations spanning a cut survive.
   static const int chunkOverlapChars = 200;
 
+  /// Curated Chinese relation-type vocabulary. The extraction prompt asks the
+  /// model to pick from these; [normalizeRelationType] folds anything else
+  /// (English NER tags, free-form words) back into this set, so the UI never
+  /// shows raw model output (e.g. "trusts", "teacher_student").
+  static const Set<String> relationTypes = {
+    '信任', '效力', '敌对', '弹劾', '师生', '师徒', '同僚', '亲属', '更替',
+    '调停', '协助', '隶属', '婚配', '爱慕', '仇视', '追随', '举荐', '主从',
+    '同盟', '竞争', '仰慕', '忌惮', '庇护', '提携', '投靠', '反目', '和解',
+    '嫌隙', '知遇', '共事', '打压', '倚重',
+  };
+
+  /// English NER / free-form relation tags the model may emit despite the
+  /// prompt; mapped to the Chinese vocabulary at merge time.
+  static const Map<String, String> relationTypeAliases = {
+    'trust': '信任', 'trusts': '信任', 'trusted': '信任',
+    'serve': '效力', 'serves': '效力', 'served': '效力', 'servant': '效力',
+    'works_for': '效力', 'work_for': '效力', 'worked_for': '效力',
+    'employer': '效力', 'employee': '效力',
+    'teacher_student': '师生', 'teacher': '师生', 'student': '师生',
+    'mentor': '师生', 'mentee': '师生', 'apprentice': '师徒',
+    'master': '师徒', 'master_apprentice': '师徒', 'disciple': '师徒',
+    'married': '婚配', 'marriage': '婚配', 'married_to': '婚配',
+    'spouse': '婚配', 'wife': '婚配', 'husband': '婚配', 'lover': '爱慕',
+    'love': '爱慕', 'loves': '爱慕', 'romance': '爱慕', 'affair': '爱慕',
+    'parent': '亲属', 'father': '亲属', 'mother': '亲属', 'son': '亲属',
+    'daughter': '亲属', 'child': '亲属', 'family': '亲属',
+    'relative': '亲属', 'brother': '亲属', 'sister': '亲属',
+    'friend': '同盟', 'friends': '同盟', 'friend_of': '同盟',
+    'allied': '同盟', 'allies': '同盟', 'alliance': '同盟',
+    'enemy': '敌对', 'enemies': '敌对', 'enemy_of': '敌对',
+    'rival': '敌对', 'rivals': '敌对', 'rivalry': '敌对',
+    'conflict': '敌对', 'conflicts': '敌对', 'attacked': '敌对',
+    'impeached': '弹劾', 'accused': '弹劾', 'impeachment': '弹劾',
+    'replaced': '更替', 'replaces': '更替', 'replace': '更替',
+    'succeeded': '更替', 'successor': '更替', 'succession': '更替',
+    'mediated': '调停', 'mediator': '调停', 'mediate': '调停',
+    'helped': '协助', 'helps': '协助', 'helped_by': '协助',
+    'assisted': '协助', 'supports': '协助', 'supported': '协助',
+    'recommended': '举荐', 'recommend': '举荐', 'recommendation': '举荐',
+    'colleague': '同僚', 'colleagues': '同僚', 'worked_with': '同僚',
+    'coworker': '同僚',
+    'subordinate': '隶属', 'subordinates': '隶属', 'under': '隶属',
+    'followed': '追随', 'follower': '追随', 'followers': '追随',
+    'fear': '忌惮', 'fears': '忌惮', 'feared': '忌惮',
+    'protects': '庇护', 'protected': '庇护', 'patron': '庇护',
+    'patronage': '庇护', 'promoted': '提携', 'promote': '提携',
+    'collaborates': '共事', 'collaborated': '共事',
+    'worked_together': '共事', 'collaborator': '共事',
+  };
+
+  /// Maps any raw relation-type string (Chinese or English NER tag) into the
+  /// curated Chinese vocabulary. Unknown values collapse to [relationFallback].
+  static String normalizeRelationType(String raw) {
+    final key = raw.trim().toLowerCase().replaceAll(' ', '_');
+    if (key.isEmpty) return relationFallback;
+    final aliased = relationTypeAliases[key];
+    if (aliased != null) return aliased;
+    if (relationTypes.contains(key)) return key;
+    return relationFallback;
+  }
+
+  /// Fallback for unrecognised relation types; keeps the edge (and its
+  /// evidence) instead of silently dropping the model's finding.
+  static const String relationFallback = '相关';
+
   /// Max sections extracted in parallel per batch. Extraction is independent
   /// per section; merge stays sequential to keep co-reference deterministic.
   /// 5 keeps deepseek-class endpoints saturated without tripping rate limits.
@@ -462,7 +527,8 @@ class AiBookGraphService {
             '规则：name 用书中最常见称呼；aliases 含其余称呼、不超过 3 个；'
             'description 用 1-2 句，紧扣证据；'
             'quote 必须逐字来自以下正文；evidence 至少 1 条；'
-            'type 取值仅限 person/location/event；关系类型用小写 snake_case；'
+            'type 取值仅限 person/location/event；'
+            '关系类型仅限以下中文：${relationTypes.join('、')}，用最贴切的一个；'
             '本章无实体或关系时对应数组输出 []。\n\n'
             '正文：\n$chunkText',
       ),
@@ -622,7 +688,7 @@ class AiBookGraphService {
         final target =
             _resolveCanonical(canonical, targetType, targetRaw.trim()) ??
             targetRaw.trim();
-        final type = typeRaw.trim().toLowerCase().replaceAll(' ', '_');
+        final type = normalizeRelationType(typeRaw);
         if (source.isEmpty || target.isEmpty || source == target) continue;
 
         final key = '$source\u0000$target\u0000$type';
