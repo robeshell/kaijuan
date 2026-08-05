@@ -4,6 +4,7 @@
 *.pyc
 *.swp
 .DS_Store
+.reasonix/
 .atom/
 .build/
 .buildlog/
@@ -46,3 +47,4 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 .gradle-home/
+reasonix.toml

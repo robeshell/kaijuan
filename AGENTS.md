@@ -62,14 +62,12 @@ lib/
 
 ## 进度摘要
 
-- **已有（comic）**：导入 CBZ/ZIP/页图 EPUB；书库管理；合集/书单；四模式阅读；双页贴合；页内缩放；缩略图跳页；亮度遮罩；纵向真实宽高比；进度与书架；偏好；桌面壳。  
-- **已有（book）**：Foliate reflow 主链（CFI/目录/划线笔记/搜索/看大图/书摘/听书 T1/字体三源）；底栏工具条；桌面仅翻页。  
-- **已有（合并）**：单入口/单库混排；类型筛选；EPUB 自动探测；整理三概念（书架 · 书单 · 合集）。  
-- **已有（统计）**：阅读统计 M1–M3：书库洞察、前台时长、近 7 日柱、12 周热力、连续天数、清除、单本累计、WebDAV 时长备份；侧栏选中态 + 设置入口；见 `docs/specs/reading-stats.md`。  
-- **结构债（已知）**：Book god-controller；readers→presentation 依赖；见 architecture review。  
-- **下一刀**：听书 T2 / 合集书单体验 / 结构债拆分（见 `docs/specs/book-reader-next-plan.md`）。仿真翻页搁置。统计热力图可选。
+全表以 **`docs/PRODUCT.md`** 为准（已按当前基线重写）。摘要：
 
-全表以 **PRODUCT.md** 为准。
+- **已有**：单入口双引擎；本地/扫描/WiFi/WebDAV/OPDS 导入；多格式 book+comic；整理三概念；漫画四模式；图书 Foliate 主链；阅读统计；WebDAV 备份；**AI M0–M3**（BYOK + 选区 AI 词典/翻译 + 本书对话 + 大纲；对话随 WebDAV 快照备份，Key 不进备份）。  
+- **下一程（产品）**：AI M4+（整本译 → 知识图谱 → Obsidian 导出），见 PRODUCT §6 / `docs/specs/ai.md`。  
+
+- **结构债（工程）**：Book god-controller；readers→presentation 依赖；仿真翻页搁置。
 
 ## 验证
 
