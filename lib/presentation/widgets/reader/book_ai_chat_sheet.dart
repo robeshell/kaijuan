@@ -1286,21 +1286,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   color: context.appPrimaryText,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                progress?.label ??
-                    (_allowUnread
-                        ? '将分析全书，抽取人物、地点与事件及它们的关系。'
-                        : '默认只分析已读章节（防剧透）；开启「允许未读上下文」可分析全书。'),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: _panelBodySize(context),
-                  height: 1.45,
-                  color: context.appSecondaryText,
-                ),
-              ),
               if (generating) ...[
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
+                if (progress?.label case final label?)
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: _panelBodySize(context),
+                      height: 1.45,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                const SizedBox(height: 12),
                 LinearProgressIndicator(
                   value: progress == null || progress.total == 0
                       ? null
@@ -1513,14 +1511,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            '点击节点可定位下方实体',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
-            ),
-          ),
           const SizedBox(height: 10),
         ],
         const SizedBox(height: 12),
@@ -1545,7 +1535,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           controller: _graphQueryController,
           onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
-            hintText: '搜索人物 / 地点 / 事件',
+            hintText: '搜索',
             isDense: true,
             prefixIcon: const Icon(KaijuanIcons.search, size: 18),
             border: OutlineInputBorder(
@@ -2010,8 +2000,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return parts.join(' · ');
   }
 
-  /// Collection picker: one row per work with 已生成 / 未生成 / 生成中 state.
-  /// Tapping a ready work opens its graph; an ungenerated one starts it.
+  /// Collection picker: one native ListTile per work (same visual language
+  /// as the outline tab). Tapping opens the work's graph or starts it.
   Widget _buildGraphWorksList(
     BuildContext context,
     List<AiGraphWorkCandidate> works,
@@ -2021,45 +2011,29 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return ListView(
       key: ValueKey<int>(_graphListEpoch),
       controller: _graphScrollController,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
       children: [
-        Text(
-          '知识图谱',
-          style: TextStyle(
-            fontSize: _panelTitleSize(context),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '这本书包含多部著作，可以逐部生成图谱。已生成的著作可直接点开查看。',
-          style: TextStyle(
-            fontSize: _panelBodySize(context),
-            height: 1.45,
-            color: context.appSecondaryText,
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (generating) ...[
-          LinearProgressIndicator(
-            value: progress == null || progress.total == 0
-                ? null
-                : progress.completed / progress.total,
-          ),
-          if (progress?.label != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              progress?.label ?? '',
-              style: TextStyle(
-                fontSize: context.appCaptionSize,
-                color: context.appSecondaryText,
-              ),
+        Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 4),
+          child: Text(
+            '知识图谱',
+            style: TextStyle(
+              fontSize: _panelTitleSize(context),
+              fontWeight: FontWeight.w600,
             ),
-          ],
-          const SizedBox(height: 8),
+          ),
+        ),
+        if (generating) ...[
+          Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 10),
+            child: LinearProgressIndicator(
+              value: progress == null || progress.total == 0
+                  ? null
+                  : progress.completed / progress.total,
+            ),
+          ),
         ],
         for (final work in works) _buildGraphWorkRow(context, work),
-        const SizedBox(height: 8),
       ],
     );
   }
@@ -2073,142 +2047,52 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         BookReaderController.workKeyFor(generatingWork) == key;
     final busy = generatingThis || _c.isGeneratingBookGraph;
     final dimmed = busy && !generatingThis;
-    final actionLabel = ready ? '查看《${work.title}》图谱' : '生成《${work.title}》图谱';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Opacity(
-        opacity: dimmed ? 0.55 : 1,
-        child: Material(
-          color: colors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            canRequestFocus: true,
-            onTap: busy
-                ? null
-                : () {
-                    if (ready) {
-                      _c.openWorkGraph(work);
-                    } else {
-                      unawaited(_c.generateBookGraph(only: work));
-                    }
-                  },
-            child: Semantics(
-              button: true,
-              enabled: !busy,
-              label: actionLabel,
-              excludeSemantics: true,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: colors.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: Icon(
-                        KaijuanIcons.collections,
-                        size: 17,
-                        color: colors.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            work.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: colors.onSurface,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            work.isOpenEnded
-                                ? '至书末'
-                                : '${work.sectionCount} 节',
-                            style: TextStyle(
-                              fontSize: context.appCaptionSize,
-                              color: colors.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Fixed-width status zone keeps the trailing chevron on
-                    // one shared edge regardless of badge/text/spinner width.
-                    SizedBox(
-                      width: 64,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          if (generatingThis) ...[
-                            const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '生成中',
-                              style: TextStyle(
-                                fontSize: context.appCaptionSize,
-                                color: colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ] else if (ready)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: colors.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                '已生成',
-                                style: TextStyle(
-                                  fontSize: context.appCaptionSize,
-                                  color: colors.primary,
-                                ),
-                              ),
-                            )
-                          else
-                            Text(
-                              '生成',
-                              style: TextStyle(
-                                fontSize: context.appCaptionSize,
-                                fontWeight: FontWeight.w600,
-                                color: colors.primary,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    Icon(
-                      KaijuanIcons.chevronRight,
-                      size: 16,
-                      color: ready
-                          ? colors.onSurfaceVariant
-                          : colors.primary,
-                    ),
-                  ],
-                ),
-              ),
-            ),
+    final range = work.isOpenEnded ? '至书末' : '${work.sectionCount} 节';
+    return Opacity(
+      opacity: dimmed ? 0.55 : 1,
+      child: ListTile(
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
+        minVerticalPadding: 0,
+        title: Text(
+          work.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: _panelBodySize(context),
+            fontWeight: FontWeight.w600,
+            color: context.appPrimaryText,
           ),
         ),
+        subtitle: Text(
+          ready ? '$range · 已生成' : range,
+          style: TextStyle(
+            fontSize: context.appCaptionSize,
+            color: context.appSecondaryText,
+          ),
+        ),
+        trailing: generatingThis
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Text(
+                ready ? '已生成' : '生成',
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  fontWeight: FontWeight.w600,
+                  color: colors.primary,
+                ),
+              ),
+        onTap: busy
+            ? null
+            : () {
+                if (ready) {
+                  _c.openWorkGraph(work);
+                } else {
+                  unawaited(_c.generateBookGraph(only: work));
+                }
+              },
       ),
     );
   }
