@@ -80,7 +80,12 @@ class BookAiGraphView extends StatelessWidget {
       ],
       'edges': [
         for (final r in selectedRels)
-          {'srcId': r.source, 'dstId': r.target, 'edgeName': r.type},
+          {
+            'srcId': r.source,
+            'dstId': r.target,
+            'edgeName': r.type,
+            'ranking': r.weight.toInt(),
+          },
       ],
     };
 
