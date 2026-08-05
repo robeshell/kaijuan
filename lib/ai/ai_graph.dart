@@ -7,6 +7,37 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+/// One selectable work/volume inside a collection when generating a graph.
+///
+/// Derived from the outline: `_planStructure` already merges each work/volume
+/// of a collection into one unit that spans multiple spine sections, so a
+/// candidate = outline chapter with `endSectionIndexExclusive - start > 1`.
+class AiGraphWorkCandidate {
+  const AiGraphWorkCandidate({
+    required this.title,
+    required this.startSection,
+    required this.endSectionExclusive,
+    this.sample = '',
+  });
+
+  /// Work/volume title (outline group title).
+  final String title;
+
+  /// Inclusive 1-based spine section where the work starts.
+  final int startSection;
+
+  /// Exclusive 1-based spine endpoint of the work.
+  final int endSectionExclusive;
+
+  /// Outline summary sample, used as the dialog subtitle.
+  final String sample;
+
+  int get sectionCount => endSectionExclusive - startSection;
+
+  bool contains(int spineSection) =>
+      spineSection >= startSection && spineSection < endSectionExclusive;
+}
+
 /// Entity kinds extracted for v1. `organization / item / concept` are
 /// reserved for later versions and never generated today.
 enum AiGraphEntityType {

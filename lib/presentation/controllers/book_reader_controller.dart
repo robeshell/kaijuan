@@ -897,7 +897,8 @@ class BookReaderController extends ChangeNotifier {
   bool _isGraphAppendixSection(AiBookSectionSlice section) {
     final label = section.label.trim().replaceAll(RegExp(r'\s+'), '');
     return RegExp(
-      r'^(附录|参考书目|参考文献|索引|致谢|后记|跋|注释|年表)',
+      r'^(附录|参考书目|参考文献|索引|致谢|后记|跋|注释|年表|'
+      r'前言|序言|序|自序|代序|凡例|出版说明|编者按|导读|题记)',
     ).hasMatch(label);
   }
 
@@ -1199,14 +1200,14 @@ class BookReaderController extends ChangeNotifier {
     }
   }
 
-  Future<void> generateBookGraph() {
+  Future<void> generateBookGraph({AiGraphWorkCandidate? only}) {
     final active = _bookGraphGeneration;
     if (active != null) return active;
     final done = Completer<void>();
     _bookGraphGeneration = done.future;
     unawaited(() async {
       try {
-        await _generateBookGraph();
+        await _generateBookGraph(only: only);
         done.complete();
       } catch (error, stackTrace) {
         done.completeError(error, stackTrace);
@@ -1222,7 +1223,35 @@ class BookReaderController extends ChangeNotifier {
     return done.future;
   }
 
-  Future<void> _generateBookGraph() async {
+  /// Non-null when the outline reveals a collection / multi-volume book:
+  /// at least two outline units each spanning multiple spine sections
+  /// (a plain book's chapters are one-section units). Each candidate is one
+  /// work the user can generate the graph for; the sheet shows a picker.
+  List<AiGraphWorkCandidate>? get graphWorkCandidates {
+    final outline = _bookOutline;
+    if (outline == null) return null;
+    final works = <AiGraphWorkCandidate>[];
+    for (final chapter in outline.chapters) {
+      final start = chapter.sourceSectionIndex;
+      final end = chapter.endSectionIndexExclusive;
+      if (start == null || end == null || end - start < 2) continue;
+      final title = chapter.title.trim();
+      if (title.isEmpty) continue;
+      works.add(
+        AiGraphWorkCandidate(
+          title: title,
+          startSection: start,
+          endSectionExclusive: end,
+          sample: chapter.summary.trim(),
+        ),
+      );
+    }
+    if (works.length < 2) return null;
+    works.sort((a, b) => a.startSection.compareTo(b.startSection));
+    return works;
+  }
+
+  Future<void> _generateBookGraph({AiGraphWorkCandidate? only}) async {
     final service = _aiGraph;
     if (service == null || !canUseAiChat) {
       _bookGraphError = 'AI 未启用或未配置';
@@ -1255,13 +1284,21 @@ class BookReaderController extends ChangeNotifier {
       final graphSections = _graphEligibleSections(
         _filterOutlineSections(titled),
       );
-      if (graphSections.isEmpty) {
-        throw AiProviderException('没有可用于生成图谱的正文');
+      final scoped = only == null
+          ? graphSections
+          : graphSections
+                .where(
+                  (section) =>
+                      only.contains(section.sourceSectionIndex ?? section.index),
+                )
+                .toList(growable: false);
+      if (scoped.isEmpty) {
+        throw AiProviderException('所选著作没有可用于生成图谱的正文');
       }
       final graph = await service.generate(
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        sections: graphSections,
+        sections: scoped,
         includesUnread: allowUnread,
         readThroughSection: allowUnread ? null : sectionIndex + 1,
         existing: _bookGraph,

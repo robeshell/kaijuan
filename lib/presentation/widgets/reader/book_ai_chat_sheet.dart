@@ -1917,6 +1917,27 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
       if (confirmed != true || !mounted) return;
     }
+    final works = _c.graphWorkCandidates;
+    if (works != null && works.isNotEmpty) {
+      // Collection / multi-volume book: let the user pick which work the
+      // graph should cover (a whole collection would mix unrelated casts).
+      final chosen = await showAppChoiceDialog<AiGraphWorkCandidate>(
+        context,
+        title: '选择要生成图谱的著作',
+        choices: [
+          for (final work in works)
+            AppDialogChoice(
+              value: work,
+              label: work.title,
+              subtitle: '${work.sectionCount} 节'
+                  '${work.sample.isEmpty ? '' : ' · ${work.sample.length > 42 ? '${work.sample.substring(0, 42)}…' : work.sample}'}',
+            ),
+        ],
+      );
+      if (chosen == null || !mounted) return;
+      await _c.generateBookGraph(only: chosen);
+      return;
+    }
     await _c.generateBookGraph();
   }
 
