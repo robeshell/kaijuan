@@ -306,7 +306,7 @@ class AiBookOutlineService {
         label: '正在识别全书结构',
       ),
     );
-    final units = await _planStructure(
+    final units = await planStructure(
       provider: provider,
       bookTitle: bookTitle,
       bookAuthor: bookAuthor,
@@ -651,13 +651,21 @@ class AiBookOutlineService {
   /// Lets the model identify works and volumes before summaries are requested.
   /// A malformed plan must never make body sections disappear, so it falls
   /// back to a one-section-per-unit plan.
-  Future<List<AiBookSectionSlice>> _planStructure({
-    required AiProvider provider,
+  /// One-shot structural recognition: groups contiguous spine sections into
+  /// logical units (a chapter, a volume, or a whole work inside a collection).
+  /// Public so graph generation can detect collections before an outline
+  /// exists (docs/specs/ai-graph.md §合集选书).
+  Future<List<AiBookSectionSlice>> planStructure({
+    AiProvider? provider,
     required String bookTitle,
     required String? bookAuthor,
     required List<AiBookSectionSlice> sections,
     CancelToken? cancelToken,
   }) async {
+    final resolvedProvider = provider ?? _openProvider();
+    if (resolvedProvider == null) {
+      throw AiProviderException('AI 未启用或未配置');
+    }
     final manifest = _structureManifest(sections);
     if (sections.length <= _maxDirectNavigationUnits &&
         sections.every((section) => section.isNavigationUnit)) {
@@ -669,7 +677,7 @@ class AiBookOutlineService {
       'indexes=${sections.map((section) => section.index).join(',')}',
     );
     final result = await completeWithRetry(
-      provider,
+      resolvedProvider,
       AiCompletionRequest(
         messages: [
           const AiMessage(

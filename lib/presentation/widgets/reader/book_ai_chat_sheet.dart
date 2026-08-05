@@ -1917,7 +1917,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
       if (confirmed != true || !mounted) return;
     }
-    final works = _c.graphWorkCandidates;
+    final works = await _c.resolveGraphWorkCandidates();
+    if (!mounted) return;
     if (works != null && works.isNotEmpty) {
       // Collection / multi-volume book: let the user pick which work the
       // graph should cover (a whole collection would mix unrelated casts).

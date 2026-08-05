@@ -1237,18 +1237,75 @@ class BookReaderController extends ChangeNotifier {
   List<AiGraphWorkCandidate>? get graphWorkCandidates {
     final outline = _bookOutline;
     if (outline == null) return null;
-    final byStart = <(int, AiBookOutlineChapter)>[
+    final rows = <(int, String, int?, String)>[
       for (final chapter in outline.chapters)
         if (chapter.sourceSectionIndex != null)
-          (chapter.sourceSectionIndex!, chapter),
-    ]..sort((a, b) => a.$1.compareTo(b.$1));
+          (chapter.sourceSectionIndex!, chapter.title,
+              chapter.endSectionIndexExclusive, chapter.summary.trim()),
+    ];
+    rows.sort((a, b) => a.$1.compareTo(b.$1));
+    return _worksFromRows(rows);
+  }
+
+  /// Same as [graphWorkCandidates], but when no outline exists yet it runs a
+  /// one-shot structural recognition (a single short call vs. the dozens of
+  /// extraction calls a generation makes) to detect collections. Returns null
+  /// on recognition failure → caller falls back to full-book generation.
+  Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates() async {
+    final fromOutline = graphWorkCandidates;
+    if (fromOutline != null || _bookOutline != null) return fromOutline;
+    final service = _aiOutline;
+    if (service == null || !canUseAiChat) return null;
+    try {
+      final body = await _loadBookPlainTextCached(
+        AiBookOutlineService.maxBookBodyChars,
+      );
+      var sections = AiChatBookCorpus.parseSections(body);
+      if (sections.isEmpty) return null;
+      final titled = [
+        for (final section in sections)
+          AiBookSectionSlice(
+            index: section.index,
+            label: section.label.trim().isNotEmpty
+                ? section.label.trim()
+                : _titleForOutlineSection(section.index),
+            text: section.text,
+            sourceSectionIndex: section.sourceSectionIndex,
+            isNavigationUnit: section.isNavigationUnit,
+          ),
+      ];
+      final eligible =
+          _graphEligibleSections(_filterOutlineSections(titled));
+      if (eligible.isEmpty) return null;
+      final units = await service.planStructure(
+        bookTitle: item.title,
+        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        sections: eligible,
+      );
+      final rows = <(int, String, int?, String)>[
+        for (final unit in units)
+          if (unit.sourceSectionIndex != null)
+            (unit.sourceSectionIndex!, unit.label, null, ''),
+      ];
+      rows.sort((a, b) => a.$1.compareTo(b.$1));
+      return _worksFromRows(rows);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// [rows] are (startSection, title, optional persisted end). A missing end
+  /// is derived from the next row's start; the last row stays open-ended.
+  List<AiGraphWorkCandidate>? _worksFromRows(
+    List<(int, String, int?, String)> rows,
+  ) {
     final works = <AiGraphWorkCandidate>[];
-    for (var i = 0; i < byStart.length; i++) {
-      final (start, chapter) = byStart[i];
-      final end = chapter.endSectionIndexExclusive ??
-          (i + 1 < byStart.length ? byStart[i + 1].$1 : null);
+    for (var i = 0; i < rows.length; i++) {
+      final (start, rawTitle, persistedEnd, sample) = rows[i];
+      final end =
+          persistedEnd ?? (i + 1 < rows.length ? rows[i + 1].$1 : null);
       if (end != null && end - start < 2) continue;
-      final title = chapter.title.trim();
+      final title = rawTitle.trim();
       if (title.isEmpty || _isGraphAppendixLabel(title)) continue;
       if (_isOutlineMetadataTitle(title)) continue;
       works.add(
@@ -1256,7 +1313,7 @@ class BookReaderController extends ChangeNotifier {
           title: title,
           startSection: start,
           endSectionExclusive: end,
-          sample: chapter.summary.trim(),
+          sample: sample,
         ),
       );
     }
