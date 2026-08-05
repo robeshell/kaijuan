@@ -210,6 +210,15 @@ class BackupExporter {
         }
         result.add({
           'contentHash': graph.contentHash,
+          if (AiGraphStore.workKeyOfFile(
+                entity.uri.pathSegments.last,
+                graph.contentHash,
+              ) !=
+              null)
+            'workKey': AiGraphStore.workKeyOfFile(
+              entity.uri.pathSegments.last,
+              graph.contentHash,
+            ),
           'graph': graph.toJson(),
         });
       } catch (_) {

@@ -294,6 +294,16 @@ class BookReaderController extends ChangeNotifier {
   CancelToken? _bookOutlineCancel;
   Future<void>? _bookOutlineGeneration;
   AiBookGraph? _bookGraph;
+
+  /// Graph of the work currently shown/generated when viewing a collection
+  /// (null for whole-book graphs / plain books).
+  AiGraphWorkCandidate? _activeGraphWork;
+
+  /// Per-work graphs of the current collection, keyed by workKey.
+  Map<String, AiBookGraph> _workGraphs = {};
+
+  /// Work being generated right now (null = whole book / not generating).
+  AiGraphWorkCandidate? _generatingGraphWork;
   AiGraphProgress? _bookGraphProgress;
   String? _bookGraphError;
   CancelToken? _bookGraphCancel;
@@ -1188,6 +1198,39 @@ class BookReaderController extends ChangeNotifier {
   // ------------------------------------------------------------------
 
   AiBookGraph? get bookGraph => _bookGraph;
+
+  /// Collection work currently shown in the graph tab, or null for a
+  /// whole-book graph / plain book.
+  AiGraphWorkCandidate? get activeGraphWork => _activeGraphWork;
+
+  bool get hasActiveWorkGraph => _activeGraphWork != null;
+
+  /// Work currently being generated, or null (whole book / idle). The graph
+  /// picker uses this to show per-row progress.
+  AiGraphWorkCandidate? get generatingGraphWork => _generatingGraphWork;
+
+  static String workKeyFor(AiGraphWorkCandidate work) => 's${work.startSection}';
+
+  /// True when a graph was already generated for [work] of this collection.
+  bool hasWorkGraph(AiGraphWorkCandidate work) =>
+      _workGraphs.containsKey(workKeyFor(work));
+
+  /// Shows the generated graph of [work] (collection picker → work view).
+  void openWorkGraph(AiGraphWorkCandidate work) {
+    final graph = _workGraphs[workKeyFor(work)];
+    if (graph == null) return;
+    _bookGraph = graph;
+    _activeGraphWork = work;
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Back to the collection picker (work view → list).
+  void closeWorkGraph() {
+    if (_activeGraphWork == null) return;
+    _activeGraphWork = null;
+    _bookGraph = null;
+    if (!_disposed) notifyListeners();
+  }
   AiGraphProgress? get bookGraphProgress => _bookGraphProgress;
   String? get bookGraphError => _bookGraphError;
   bool get isGeneratingBookGraph => _bookGraphGeneration != null;
@@ -1199,6 +1242,12 @@ class BookReaderController extends ChangeNotifier {
     final graph = await store.read(item.contentHash);
     if (graph != null && !identical(graph, _bookGraph)) {
       _bookGraph = graph;
+      _activeGraphWork = null;
+      if (!_disposed) notifyListeners();
+    }
+    final works = await store.readAllFor(item.contentHash);
+    if (works.length != _workGraphs.length) {
+      _workGraphs = works;
       if (!_disposed) notifyListeners();
     }
   }
@@ -1206,6 +1255,7 @@ class BookReaderController extends ChangeNotifier {
   Future<void> generateBookGraph({AiGraphWorkCandidate? only}) {
     final active = _bookGraphGeneration;
     if (active != null) return active;
+    _generatingGraphWork = only ?? _activeGraphWork;
     final done = Completer<void>();
     _bookGraphGeneration = done.future;
     unawaited(() async {
@@ -1220,6 +1270,7 @@ class BookReaderController extends ChangeNotifier {
       done.future.whenComplete(() {
         _bookGraphGeneration = null;
         _bookGraphCancel = null;
+        _generatingGraphWork = null;
         if (!_disposed) notifyListeners();
       }),
     );
@@ -1328,6 +1379,9 @@ class BookReaderController extends ChangeNotifier {
       if (!_disposed) notifyListeners();
       return;
     }
+    final work = only ?? _activeGraphWork;
+    final workKey = work == null ? null : workKeyFor(work);
+    final existing = workKey == null ? _bookGraph : _workGraphs[workKey];
     _bookGraphError = null;
     final cancel = CancelToken();
     _bookGraphCancel = cancel;
@@ -1371,7 +1425,7 @@ class BookReaderController extends ChangeNotifier {
         sections: scoped,
         includesUnread: allowUnread,
         readThroughSection: allowUnread ? null : sectionIndex + 1,
-        existing: _bookGraph,
+        existing: existing,
         cancelToken: cancel,
         onProgress: (progress) {
           _bookGraphProgress = progress;
@@ -1379,8 +1433,9 @@ class BookReaderController extends ChangeNotifier {
         },
       );
       _bookGraph = graph;
+      if (work != null) _activeGraphWork = work;
       _bookGraphProgress = null;
-      await _saveBookGraph(graph);
+      await _saveBookGraph(graph, workKey: workKey);
       if (!_disposed) notifyListeners();
     } on AiGraphGenerationException catch (error) {
       _bookGraphProgress = null;
@@ -1390,7 +1445,7 @@ class BookReaderController extends ChangeNotifier {
             partial.contentHash == item.contentHash &&
             !identical(partial, _bookGraph)) {
           _bookGraph = partial;
-          await _saveBookGraph(partial);
+          await _saveBookGraph(partial, workKey: workKey);
         }
         _bookGraphError = error.message;
       }
@@ -1404,19 +1459,31 @@ class BookReaderController extends ChangeNotifier {
     }
   }
 
-  Future<void> _saveBookGraph(AiBookGraph graph) async {
+  Future<void> _saveBookGraph(AiBookGraph graph, {String? workKey}) async {
     final store = _aiGraphStore;
     if (store == null) return;
-    await store.write(graph.copyWith(contentHash: item.contentHash));
+    await store.write(
+      graph.copyWith(contentHash: item.contentHash),
+      workKey: workKey,
+    );
+    if (workKey != null) _workGraphs[workKey] = graph;
   }
 
   Future<void> deleteBookGraph() async {
     if (isGeneratingBookGraph) return;
     final store = _aiGraphStore;
+    final work = _activeGraphWork;
+    final workKey = work == null ? null : workKeyFor(work);
     if (store != null) {
-      await store.delete(item.contentHash);
+      await store.delete(item.contentHash, workKey: workKey);
     }
-    _bookGraph = null;
+    if (workKey == null) {
+      _bookGraph = null;
+    } else {
+      _workGraphs.remove(workKey);
+      _bookGraph = null;
+      _activeGraphWork = null;
+    }
     _bookGraphError = null;
     if (!_disposed) notifyListeners();
   }

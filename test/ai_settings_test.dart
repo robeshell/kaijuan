@@ -22,6 +22,43 @@ void main() {
       expect(AiProviderKind.deepseek.fixedProtocol, AiApiProtocol.openai);
       expect(AiProviderKind.custom.fixedProtocol, isNull);
     });
+
+    test('ollama is local and OpenAI-compatible', () {
+      expect(AiProviderKind.ollama.isLocalBackend, isTrue);
+      expect(AiProviderKind.ollama.fixedProtocol, AiApiProtocol.openai);
+      expect(AiProviderKind.ollama.defaultBaseUrl, contains('localhost:11434'));
+      expect(AiProviderKind.fromStorage('ollama'), AiProviderKind.ollama);
+      expect(AiProviderKind.openai.isLocalBackend, isFalse);
+    });
+  });
+
+  group('DefaultAiProviderFactory', () {
+    test('local backend may create without api key', () {
+      const factory = DefaultAiProviderFactory();
+      final provider = factory.create(
+        settings: const AiSettings(
+          providerKind: AiProviderKind.ollama,
+          baseUrl: 'http://localhost:11434/v1',
+          model: 'llama3.2',
+        ),
+        apiKey: '',
+      );
+      expect(provider, isNotNull);
+      expect(provider, isA<OpenAiCompatibleAiProvider>());
+    });
+
+    test('cloud backend without key returns null', () {
+      const factory = DefaultAiProviderFactory();
+      final provider = factory.create(
+        settings: const AiSettings(
+          providerKind: AiProviderKind.openai,
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-5.4-mini',
+        ),
+        apiKey: '',
+      );
+      expect(provider, isNull);
+    });
   });
 
   group('AiSettings protocol', () {
@@ -43,6 +80,16 @@ void main() {
       );
       expect(settings.usesOpenAiProtocol, isTrue);
       expect(settings.resolvedProtocol, AiApiProtocol.openai);
+    });
+
+    test('local backend skips api key requirement', () {
+      const local = AiSettings(providerKind: AiProviderKind.ollama);
+      expect(local.requiresApiKey, isFalse);
+      expect(local.resolvedBaseUrl, 'http://localhost:11434/v1');
+      expect(local.resolvedModel, isEmpty);
+
+      const cloud = AiSettings(providerKind: AiProviderKind.openai);
+      expect(cloud.requiresApiKey, isTrue);
     });
   });
 
@@ -475,6 +522,32 @@ void main() {
       await controller.setProviderKind(AiProviderKind.anthropic);
       expect(controller.settings.baseUrl, contains('anthropic'));
       expect(controller.settings.model, contains('claude'));
+    });
+
+    test('switching to local ollama resets url/model and skips key', () async {
+      final controller = AiSettingsController(
+        settingsStore: MemoryAiSettingsStore(),
+        credentialStore: MemoryAiCredentialStore(),
+      );
+      await controller.load();
+      await controller.setProviderKind(AiProviderKind.openai);
+      await controller.setApiKey('sk-openai');
+
+      await controller.setProviderKind(AiProviderKind.ollama);
+      expect(controller.settings.providerKind, AiProviderKind.ollama);
+      expect(controller.settings.baseUrl, contains('localhost:11434'));
+      expect(controller.settings.model, isEmpty);
+      expect(controller.apiKey, isEmpty);
+      // Local backend becomes ready without an API key.
+      await controller.setEnabled(true);
+      await controller.setModel('llama3.2');
+      expect(controller.isReadyForRequests, isTrue);
+
+      // Back to cloud: preset defaults restore and the provider key returns.
+      await controller.setProviderKind(AiProviderKind.openai);
+      expect(controller.settings.baseUrl, contains('openai.com'));
+      expect(controller.settings.model, 'gpt-5.4-mini');
+      expect(controller.apiKey, 'sk-openai');
     });
 
     test('each provider keeps its own api key', () async {

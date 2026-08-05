@@ -63,6 +63,9 @@ class AiSettings {
     return providerKind.defaultModel;
   }
 
+  /// Cloud presets always need an API key; local backends (Ollama) skip it.
+  bool get requiresApiKey => !providerKind.isLocalBackend;
+
   AiSettings copyWith({
     bool? enabled,
     AiProviderKind? providerKind,

@@ -38,7 +38,9 @@ enum AiProviderKind {
   /// xAI Grok — OpenAI-compatible Chat Completions at api.x.ai.
   xai,
   /// User-supplied base URL; protocol is [AiSettings.customProtocol].
-  custom;
+  custom,
+  /// Local Ollama — OpenAI-compatible endpoint on localhost, no API key.
+  ollama;
 
   String get storageValue => name;
 
@@ -49,12 +51,16 @@ enum AiProviderKind {
     return AiProviderKind.openai;
   }
 
+  /// Local backends run on the user's machine and need no API key.
+  bool get isLocalBackend => this == AiProviderKind.ollama;
+
   String get displayName => switch (this) {
     AiProviderKind.openai => 'OpenAI',
     AiProviderKind.anthropic => 'Anthropic',
     AiProviderKind.deepseek => 'DeepSeek',
     AiProviderKind.xai => 'Grok',
     AiProviderKind.custom => '自定义',
+    AiProviderKind.ollama => 'Ollama（本地）',
   };
 
   /// Default public base URL for the preset. Empty for [custom].
@@ -64,6 +70,7 @@ enum AiProviderKind {
     AiProviderKind.deepseek => 'https://api.deepseek.com/v1',
     AiProviderKind.xai => 'https://api.x.ai/v1',
     AiProviderKind.custom => '',
+    AiProviderKind.ollama => 'http://localhost:11434/v1',
   };
 
   /// Suggested model id when the user picks this preset.
@@ -81,13 +88,16 @@ enum AiProviderKind {
     AiProviderKind.xai => 'grok-4.5',
     // Custom: leave empty; fill via 获取模型 or manual entry.
     AiProviderKind.custom => '',
+    // Local models depend on what the user has pulled; resolve via 获取模型.
+    AiProviderKind.ollama => '',
   };
 
   /// Fixed protocol for presets. [custom] is null — use settings field.
   AiApiProtocol? get fixedProtocol => switch (this) {
     AiProviderKind.openai ||
     AiProviderKind.deepseek ||
-    AiProviderKind.xai => AiApiProtocol.openai,
+    AiProviderKind.xai ||
+    AiProviderKind.ollama => AiApiProtocol.openai,
     AiProviderKind.anthropic => AiApiProtocol.anthropic,
     AiProviderKind.custom => null,
   };

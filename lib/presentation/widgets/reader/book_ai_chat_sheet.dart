@@ -103,6 +103,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   final _outlineChildrenKeys = <String, GlobalKey>{};
   bool _outlineOverviewExpanded = false;
   _AiGraphFilter _graphFilter = _AiGraphFilter.all;
+
+  /// Collection works shown as the graph-tab picker (null = plain book or
+  /// not resolved yet). Resolved lazily: sync from the outline, else via a
+  /// one-shot structure recognition.
+  List<AiGraphWorkCandidate>? _graphWorks;
+  bool _graphWorksLoading = false;
   final String _graphQuery = '';
   String? _graphHighlighted;
   Timer? _graphHighlightTimer;
@@ -219,6 +225,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // previous scroll position.
     if (_activeTab == _BookAiWorkspaceTab.graph) {
       _graphListEpoch++;
+      unawaited(_ensureGraphWorks());
     }
   }
 
@@ -1242,6 +1249,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final progress = _c.bookGraphProgress;
     final generating = _c.isGeneratingBookGraph;
     final error = _c.bookGraphError;
+    // Collection books: the picker lists every work; entering one shows its
+    // graph (whole-book / plain-book graphs keep the single view below).
+    final works = _graphWorks ?? _c.graphWorkCandidates;
+    if (works != null && works.isNotEmpty && !_c.hasActiveWorkGraph) {
+      return _buildGraphWorksList(context, works);
+    }
     if (!_ready) {
       return _AiUnavailable(
         message: '添加 API Key 后，就可以生成本书的人物、地点与事件图谱。',
@@ -1255,6 +1268,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (_c.activeGraphWork != null) ...[
+                _graphBackRow(),
+                const SizedBox(height: 8),
+              ],
               Icon(
                 KaijuanIcons.collections,
                 size: 34,
@@ -1350,6 +1367,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       controller: _graphScrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
+        if (_c.activeGraphWork != null) ...[
+          _graphBackRow(),
+          const SizedBox(height: 4),
+        ],
         Row(
           children: [
             Expanded(
@@ -1906,7 +1927,27 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     Navigator.of(context).maybePop();
   }
 
-  Future<void> _generateGraph({bool force = false}) async {
+  Future<void> _ensureGraphWorks() async {
+    if (_graphWorks != null || _graphWorksLoading || !mounted) return;
+    final sync = _c.graphWorkCandidates;
+    if (sync != null) {
+      setState(() => _graphWorks = sync);
+      return;
+    }
+    if (_c.bookOutline != null) return; // has outline, not a collection
+    _graphWorksLoading = true;
+    final resolved = await _c.resolveGraphWorkCandidates();
+    if (!mounted) return;
+    _graphWorksLoading = false;
+    if (resolved != null && resolved.isNotEmpty) {
+      setState(() => _graphWorks = resolved);
+    }
+  }
+
+  Future<void> _generateGraph({
+    bool force = false,
+    AiGraphWorkCandidate? work,
+  }) async {
     if (!_ready || _c.isGeneratingBookGraph) return;
     if (force && _c.bookGraph != null) {
       final confirmed = await showAppConfirmDialog(
@@ -1917,29 +1958,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
       if (confirmed != true || !mounted) return;
     }
-    final works = await _c.resolveGraphWorkCandidates();
-    if (!mounted) return;
-    if (works != null && works.isNotEmpty) {
-      // Collection / multi-volume book: let the user pick which work the
-      // graph should cover (a whole collection would mix unrelated casts).
-      final chosen = await showAppChoiceDialog<AiGraphWorkCandidate>(
-        context,
-        title: '选择要生成图谱的著作',
-        choices: [
-          for (final work in works)
-            AppDialogChoice(
-              value: work,
-              label: work.title,
-              subtitle: '${work.isOpenEnded ? '至书末' : '${work.sectionCount} 节'}'
-                  '${work.sample.isEmpty ? '' : ' · ${work.sample.length > 42 ? '${work.sample.substring(0, 42)}…' : work.sample}'}',
-            ),
-        ],
-      );
-      if (chosen == null || !mounted) return;
-      await _c.generateBookGraph(only: chosen);
-      return;
-    }
-    await _c.generateBookGraph();
+    await _c.generateBookGraph(only: work);
   }
 
   Future<void> _deleteGraph() async {
@@ -1968,6 +1987,185 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final parts = [if (timeText.isNotEmpty) timeText, if (durationText.isNotEmpty) durationText];
     return parts.join(' · ');
   }
+
+  /// Collection picker: one row per work with 已生成 / 未生成 / 生成中 state.
+  /// Tapping a ready work opens its graph; an ungenerated one starts it.
+  Widget _buildGraphWorksList(
+    BuildContext context,
+    List<AiGraphWorkCandidate> works,
+  ) {
+    final generating = _c.isGeneratingBookGraph;
+    final progress = _c.bookGraphProgress;
+    return ListView(
+      key: ValueKey<int>(_graphListEpoch),
+      controller: _graphScrollController,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      children: [
+        Text(
+          '知识图谱',
+          style: TextStyle(
+            fontSize: _panelTitleSize(context),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '这部书包含多部著作。选择一部生成它的图谱；已生成的可以直接查看。',
+          style: TextStyle(
+            fontSize: _panelBodySize(context),
+            height: 1.45,
+            color: context.appSecondaryText,
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (generating) ...[
+          LinearProgressIndicator(
+            value: progress == null || progress.total == 0
+                ? null
+                : progress.completed / progress.total,
+          ),
+          if (progress?.label != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              progress?.label ?? '',
+              style: TextStyle(
+                fontSize: context.appCaptionSize,
+                color: context.appSecondaryText,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+        ],
+        for (final work in works) _buildGraphWorkRow(context, work),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  Widget _buildGraphWorkRow(BuildContext context, AiGraphWorkCandidate work) {
+    final colors = context.appColors;
+    final key = BookReaderController.workKeyFor(work);
+    final ready = _c.hasWorkGraph(work);
+    final generatingWork = _c.generatingGraphWork;
+    final generatingThis = generatingWork != null &&
+        BookReaderController.workKeyFor(generatingWork) == key;
+    final busy = generatingThis || _c.isGeneratingBookGraph;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: busy
+              ? null
+              : () {
+                  if (ready) {
+                    _c.openWorkGraph(work);
+                  } else {
+                    unawaited(_c.generateBookGraph(only: work));
+                  }
+                },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Icon(
+                    KaijuanIcons.collections,
+                    size: 17,
+                    color: colors.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        work.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colors.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        work.isOpenEnded
+                            ? '至书末'
+                            : '${work.sectionCount} 节',
+                        style: TextStyle(
+                          fontSize: context.appCaptionSize,
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (generatingThis)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else if (ready)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '已生成',
+                      style: TextStyle(
+                        fontSize: context.appCaptionSize,
+                        color: colors.primary,
+                      ),
+                    ),
+                  )
+                else
+                  Text(
+                    '未生成',
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                const SizedBox(width: 2),
+                Icon(
+                  KaijuanIcons.chevronRight,
+                  size: 16,
+                  color: colors.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _graphBackRow() => Align(
+    alignment: Alignment.centerLeft,
+    child: TextButton.icon(
+      onPressed: _c.closeWorkGraph,
+      icon: const Icon(KaijuanIcons.back, size: 16),
+      label: const Text('全部著作'),
+    ),
+  );
 
   String _graphFilterLabel(_AiGraphFilter filter) => switch (filter) {
     _AiGraphFilter.all => '全部',

@@ -84,7 +84,9 @@ class DefaultAiProviderFactory implements AiProviderFactory {
     required String apiKey,
   }) {
     final key = apiKey.trim();
-    if (key.isEmpty) return null;
+    // Local backends (Ollama) need no API key; the OpenAI-compatible provider
+    // sends an empty Authorization header, which local endpoints ignore.
+    if (key.isEmpty && !settings.providerKind.isLocalBackend) return null;
     final baseUrl = settings.resolvedBaseUrl;
     if (baseUrl.isEmpty) return null;
     // Model may be empty when only listing models; complete/stream still need

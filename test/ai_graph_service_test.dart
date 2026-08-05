@@ -5,6 +5,7 @@ import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
+import 'dart:io';
 
 void main() {
   AiBookGraphService serviceWith(_GraphProvider provider) {
@@ -363,6 +364,62 @@ void main() {
       expect(AiBookGraphService.normalizeRelationType(' TRUSTS '), '信任');
       expect(AiBookGraphService.normalizeRelationType('???'), '相关');
       expect(AiBookGraphService.normalizeRelationType(''), '相关');
+    });
+  });
+
+  group('AiGraphStore per-work graphs', () {
+    late Directory tempDir;
+    late AiGraphStore store;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('ai_graph_store_test');
+      store = AiGraphStore(tempDir);
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    AiBookGraph graphFor(String work) => AiBookGraph(
+      contentHash: 'h1',
+      generatedAt: DateTime.utc(2026, 8, 5, 12),
+      model: 'graph-test',
+      includesUnread: false,
+      coveredSections: const [1],
+      entities: [
+        AiGraphEntity(
+          name: work,
+          type: AiGraphEntityType.person,
+          aliases: const [],
+          description: '',
+          evidence: [
+            AiGraphEvidence(sectionIndex: 1, quote: work),
+          ],
+        ),
+      ],
+      relations: const [],
+    );
+
+    test('whole-book and per-work graphs live in separate files', () async {
+      await store.write(graphFor('整本'), workKey: null);
+      await store.write(graphFor('s51'), workKey: 's51');
+      await store.write(graphFor('s95'), workKey: 's95');
+
+      expect((await store.read('h1'))?.entities.single.name, '整本');
+      expect((await store.read('h1', workKey: 's51'))?.entities.single.name,
+          's51');
+      final all = await store.readAllFor('h1');
+      expect(all.keys.toSet(), {'s51', 's95'});
+    });
+
+    test('delete only removes the targeted work', () async {
+      await store.write(graphFor('s51'), workKey: 's51');
+      await store.write(graphFor('s95'), workKey: 's95');
+      await store.delete('h1', workKey: 's51');
+      expect(await store.read('h1', workKey: 's51'), isNull);
+      expect((await store.readAllFor('h1')).keys.toSet(), {'s95'});
     });
   });
 }

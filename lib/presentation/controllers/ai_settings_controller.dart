@@ -53,10 +53,11 @@ class AiSettingsController extends ChangeNotifier {
   /// Search Key present for the selected search provider (chat 联网 toggle).
   bool get isSearchReady => hasSearchApiKey;
 
-  /// Ready for M1+ language features: switch on, key present, URL/model resolvable.
+  /// Ready for M1+ language features: switch on, key present (cloud only),
+  /// URL/model resolvable.
   bool get isReadyForRequests =>
       _settings.enabled &&
-      hasApiKey &&
+      (!_settings.requiresApiKey || hasApiKey) &&
       _settings.resolvedBaseUrl.isNotEmpty &&
       _settings.resolvedModel.isNotEmpty;
 
@@ -94,11 +95,19 @@ class AiSettingsController extends ChangeNotifier {
 
     var baseUrl = _settings.baseUrl;
     var model = _settings.model;
-    if (baseUrl.trim().isEmpty || baseUrl.trim() == previous.defaultBaseUrl) {
+    // Local backends have a fixed localhost endpoint and no cross-provider
+    // model; switching to/from them resets both. Cloud presets keep a user's
+    // custom URL but swap the preset default for the new provider's default.
+    if (kind.isLocalBackend || previous.isLocalBackend) {
       baseUrl = kind.defaultBaseUrl;
-    }
-    if (model.trim().isEmpty || model.trim() == previous.defaultModel) {
       model = kind.defaultModel;
+    } else {
+      if (baseUrl.trim().isEmpty || baseUrl.trim() == previous.defaultBaseUrl) {
+        baseUrl = kind.defaultBaseUrl;
+      }
+      if (model.trim().isEmpty || model.trim() == previous.defaultModel) {
+        model = kind.defaultModel;
+      }
     }
     _settings = _settings.copyWith(
       providerKind: kind,
@@ -279,7 +288,7 @@ class AiSettingsController extends ChangeNotifier {
       'base=${_settings.resolvedBaseUrl} model=${_settings.resolvedModel} '
       'key=${AiLog.maskKey(key)}',
     );
-    if (key.isEmpty) {
+    if (_settings.requiresApiKey && key.isEmpty) {
       final result = const AiConnectionTestResult.failure('请先填写 API Key');
       AiLog.d('testConnection fail: empty key');
       _applyTest(result);
@@ -387,7 +396,7 @@ class AiSettingsController extends ChangeNotifier {
       'protocol=${_settings.resolvedProtocol.displayName} '
       'base=${_settings.resolvedBaseUrl} key=${AiLog.maskKey(key)}',
     );
-    if (key.isEmpty) {
+    if (_settings.requiresApiKey && key.isEmpty) {
       _modelsError = '请先填写 API Key';
       _availableModels = const [];
       notifyListeners();

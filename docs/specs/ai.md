@@ -121,21 +121,29 @@
    - 「启用 AI」：关时下方表单项 disabled 或仍可编辑但不请求。  
    - 副文案：「使用你自己的 API Key；密钥只保存在本机。」  
 
-2. **连接**  
-   - API Key：安全输入（可显隐）；保存进平台安全存储。  
-   - 接口地址：默认占位如 `https://api.x.ai/v1` 或留空提示「兼容 OpenAI 的 Base URL」。  
+2. **服务商（云端 / 本地）**  
+   - **云端**：OpenAI / Anthropic / DeepSeek / Grok / 自定义（现有行为，需 API Key）。  
+   - **本地**：Ollama。默认端点 `http://localhost:11434/v1`（OpenAI 兼容），**无需 API Key**——选中后隐藏 Key 字段，接口地址可改，模型经「获取模型」拉取本地已安装模型（`GET /v1/models`）；数据不出本机。  
+
+3. **连接**  
+   - API Key（仅云端服务商显示）：安全输入（可显隐）；保存进平台安全存储。  
+   - 接口地址：默认占位如 `https://api.x.ai/v1` 或留空提示「兼容 OpenAI 的 Base URL」；本地服务商默认 Ollama 地址。  
    - 模型：文本框或近期列表；不内置付费套餐 UI。  
    - 「测试连接」：发最小 completion；成功 SnackBar「连接正常」；失败展示可读错误。  
 
-3. **联网搜索（可选，BYOK）**  
+4. **联网搜索（可选，BYOK）**  
    - 服务商：Tavily / Brave Search。  
    - 搜索 API Key：与模型 Key 分开，进安全存储，**不进** WebDAV。  
    - 仅当用户在本书 AI 面板打开「联网」时才会请求搜索 API。  
 
-4. **阅读偏好**  
+5. **阅读偏好**  
    - 「允许未读上下文」：控制大纲范围。关 = 只处理当前章节及之前的正文；开 = 处理全书。**本书对话不按进度裁剪**。  
 
 文案原则：不承诺具体供应商名称作为唯一后端；不展示「免费额度」类托管话术。
+
+**macOS 密码框快捷键约定**：API Key / 搜索 Key 为安全输入（可显隐）。macOS 桌面上，系统 Edit 菜单触发的 **Cmd+V / Cmd+C 会被引擎的 secure 输入路径静默吞掉**（Flutter 引擎缺陷，上游修复未合入；明文输入框不受影响），因此：
+- 密码框提供「粘贴」「复制」图标按钮；「复制」不依赖可见选区，遮挡（obscure）状态下也复制明文。
+- 快捷键粘贴用 **Ctrl+V**（走应用内 `CallbackShortcuts` 直接写 controller，绕开引擎 secure 限制）；Cmd+V 仅在明文输入框可用。
 
 ### 4.2 选区结果卡（M1）
 
@@ -496,6 +504,7 @@ AiBookLanguageProvider（或 Composite）
 - 流式：SSE；可取消（关闭 panel / dispose）。  
 - 超时与重试：短请求 1 次重试；长任务按章重试，不整本重来。  
 - 模型名用户自填；App 可提供「常用占位」但不锁死。  
+- 本地（Ollama）：OpenAI 兼容端点 `http://localhost:11434/v1`；`AiProviderKind.ollama` 标记 `isLocalBackend`，Provider 工厂与 controller 在本地服务商下**跳过 API Key 校验**；模型经 `GET /v1/models` 列出本地已安装模型。
 
 默认文档示例可用 xAI 兼容端点（`https://api.x.ai/v1`），**不**在 UI 写死为唯一选项。
 
@@ -509,7 +518,6 @@ AiBookLanguageProvider（或 Composite）
 | 写入笔记：覆盖 vs 追加 | 已有 note 时二次确认「替换 / 追加」 | M1 实现前钉死 |
 | 多对话管理 | 当前每本书一个对话 | 等用户确定划线提问与对话归属规则后再设计 |
 | 对话历史是否进 WebDAV | v1 **已支持**，随用户主动备份同步 | 不备份任何 Key |
-| 桌面本地模型（Ollama） | **中**；同一 `AiProvider` 换 base | 不挡 M0–M2 |
 | 功能级模型分流（译/对话不同模型） | **中** | M0 单模型即可 |
 | 结果卡 vs 底 sheet | 窄屏 sheet、宽屏锚定卡 | 实现时按断点 |
 

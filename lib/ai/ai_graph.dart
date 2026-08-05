@@ -415,14 +415,39 @@ class AiGraphStore {
 
   final Directory _directory;
 
-  File _fileFor(String contentHash) {
+  /// One file per graph. A collection keeps one graph per work
+  /// (docs/specs/ai-graph.md §合集选书): `$hash.json` for the whole book,
+  /// `$hash.$workKey.json` for a single work inside a collection.
+  static String fileNameFor(String contentHash, {String? workKey}) {
     final safe = contentHash.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-    return File('${_directory.path}${Platform.pathSeparator}$safe.json');
+    if (workKey == null) return '$safe.json';
+    final safeKey = workKey.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+    return '$safe.$safeKey.json';
   }
 
-  Future<AiBookGraph?> read(String contentHash) async {
+  File _fileFor(String contentHash, {String? workKey}) => File(
+    '${_directory.path}${Platform.pathSeparator}'
+    '${fileNameFor(contentHash, workKey: workKey)}',
+  );
+
+  /// The per-work key embedded in a collection file name, or null for a
+  /// whole-book graph. Parses `$hash.$workKey.json`.
+  static String? workKeyOfFile(String fileName, String contentHash) {
+    final safe = contentHash.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+    final stem = fileName.endsWith('.json')
+        ? fileName.substring(0, fileName.length - 5)
+        : fileName;
+    if (stem == safe) return null;
+    if (stem.startsWith('$safe.')) {
+      final key = stem.substring(safe.length + 1);
+      if (key.isNotEmpty) return key;
+    }
+    return null;
+  }
+
+  Future<AiBookGraph?> read(String contentHash, {String? workKey}) async {
     try {
-      final file = _fileFor(contentHash);
+      final file = _fileFor(contentHash, workKey: workKey);
       if (!await file.exists()) return null;
       final decoded = jsonDecode(await file.readAsString());
       if (decoded is! Map) return null;
@@ -432,14 +457,36 @@ class AiGraphStore {
     }
   }
 
-  Future<void> write(AiBookGraph graph) async {
+  /// All per-work graphs for [contentHash] (collection files `$hash.*.json`),
+  /// keyed by workKey. Whole-book files (`$hash.json`) are not included.
+  Future<Map<String, AiBookGraph>> readAllFor(String contentHash) async {
+    try {
+      if (!await _directory.exists()) return {};
+      final safe = contentHash.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final result = <String, AiBookGraph>{};
+      await for (final entity in _directory.list(followLinks: false)) {
+        if (entity is! File || !entity.path.endsWith('.json')) continue;
+        final key = workKeyOfFile(entity.uri.pathSegments.last, safe);
+        if (key == null) continue;
+        final decoded = jsonDecode(await entity.readAsString());
+        if (decoded is! Map) continue;
+        final graph = AiBookGraph.fromJson(Map<String, dynamic>.from(decoded));
+        if (graph != null) result[key] = graph;
+      }
+      return result;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> write(AiBookGraph graph, {String? workKey}) async {
     await _directory.create(recursive: true);
-    final file = _fileFor(graph.contentHash);
+    final file = _fileFor(graph.contentHash, workKey: workKey);
     await file.writeAsString(jsonEncode(graph.toJson()), flush: true);
   }
 
-  Future<void> delete(String contentHash) async {
-    final file = _fileFor(contentHash);
+  Future<void> delete(String contentHash, {String? workKey}) async {
+    final file = _fileFor(contentHash, workKey: workKey);
     if (await file.exists()) {
       await file.delete();
     }

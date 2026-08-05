@@ -47,6 +47,15 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
 
   AiSettingsController get controller => widget.controller;
 
+  /// Cloud presets listed under the 云端 group; local backends are separate.
+  static const _cloudProviderKinds = [
+    AiProviderKind.openai,
+    AiProviderKind.anthropic,
+    AiProviderKind.deepseek,
+    AiProviderKind.xai,
+    AiProviderKind.custom,
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -333,7 +342,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 ),
                 const SizedBox(height: AppSettingsMetrics.headerGap),
                 Text(
-                  '使用你自己的 API Key。密钥只保存在本机，不会进入 WebDAV 备份。',
+                  settings.providerKind.isLocalBackend
+                      ? '使用本地 Ollama 服务，无需 API Key，数据不出本机。'
+                      : '使用你自己的 API Key。密钥只保存在本机，不会进入 WebDAV 备份。',
                   style: TextStyle(
                     fontSize: context.appCaptionSize,
                     height: 1.45,
@@ -374,12 +385,38 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                               ? (kind) => unawaited(_onProviderSelected(kind))
                               : (_) {},
                           options: [
-                            for (final kind in AiProviderKind.values)
+                            for (final kind in _cloudProviderKinds)
                               AppChoiceOption(
                                 value: kind,
                                 label: kind.displayName,
                                 enabled: fieldsEnabled,
                               ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          '本地',
+                          style: TextStyle(
+                            fontSize: context.appCaptionSize,
+                            fontWeight: FontWeight.w600,
+                            color: context.settingsSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        AppChoiceStrip<AiProviderKind>(
+                          wrap: true,
+                          selected: settings.providerKind,
+                          onSelected: fieldsEnabled
+                              ? (kind) => unawaited(_onProviderSelected(kind))
+                              : (_) {},
+                          options: [
+                            for (final kind in AiProviderKind.values)
+                              if (kind.isLocalBackend)
+                                AppChoiceOption(
+                                  value: kind,
+                                  label: kind.displayName,
+                                  enabled: fieldsEnabled,
+                                ),
                           ],
                         ),
                         if (settings.providerKind == AiProviderKind.custom) ...[
@@ -421,53 +458,75 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 AppSettingsGroup(
                   padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
                   children: [
-                    AppSettingsFormField(
-                      label: 'API Key',
-                      child: AppTextField(
-                        controller: _apiKey,
-                        obscureText: _obscureKey,
-                        enabled: fieldsEnabled,
-                        enableInteractiveSelection: true,
-                        textInputAction: TextInputAction.next,
-                        decoration: _decoration(
-                          '粘贴服务商提供的密钥',
-                          suffixIcon: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: '粘贴',
-                                icon: const Icon(KaijuanIcons.paste, size: 18),
-                                onPressed: fieldsEnabled
-                                    ? () => unawaited(_pasteInto(_apiKey))
-                                    : null,
-                              ),
-                              IconButton(
-                                tooltip: '复制',
-                                icon: const Icon(KaijuanIcons.copy, size: 18),
-                                onPressed: fieldsEnabled
-                                    ? () => _copyFrom(_apiKey)
-                                    : null,
-                              ),
-                              IconButton(
-                                tooltip: _obscureKey ? '显示密钥' : '隐藏密钥',
-                                icon: Icon(
-                                  _obscureKey
-                                      ? KaijuanIcons.visibility
-                                      : KaijuanIcons.visibilityOff,
-                                  size: 20,
-                                ),
-                                onPressed: fieldsEnabled
-                                    ? () => setState(
-                                        () => _obscureKey = !_obscureKey,
-                                      )
-                                    : null,
-                              ),
-                            ],
+                    if (settings.providerKind.isLocalBackend) ...[ //
+                      AppSettingsFormField(
+                        label: '本地模型服务',
+                        child: Text(
+                          'Ollama 运行在本机，无需 API Key。请确认已安装并启动 '
+                          'Ollama（默认端口 11434），然后填写接口地址与模型。',
+                          style: TextStyle(
+                            fontSize: context.appCaptionSize,
+                            height: 1.45,
+                            color: context.settingsSecondary,
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
+                      const SizedBox(height: 20),
+                    ] else ...[ //
+                      AppSettingsFormField(
+                        label: 'API Key',
+                        child: AppTextField(
+                          controller: _apiKey,
+                          obscureText: _obscureKey,
+                          enabled: fieldsEnabled,
+                          enableInteractiveSelection: true,
+                          textInputAction: TextInputAction.next,
+                          decoration: _decoration(
+                            '粘贴服务商提供的密钥',
+                            suffixIcon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: '粘贴',
+                                  icon: const Icon(
+                                    KaijuanIcons.paste,
+                                    size: 18,
+                                  ),
+                                  onPressed: fieldsEnabled
+                                      ? () => unawaited(_pasteInto(_apiKey))
+                                      : null,
+                                ),
+                                IconButton(
+                                  tooltip: '复制',
+                                  icon: const Icon(
+                                    KaijuanIcons.copy,
+                                    size: 18,
+                                  ),
+                                  onPressed: fieldsEnabled
+                                      ? () => _copyFrom(_apiKey)
+                                      : null,
+                                ),
+                                IconButton(
+                                  tooltip: _obscureKey ? '显示密钥' : '隐藏密钥',
+                                  icon: Icon(
+                                    _obscureKey
+                                        ? KaijuanIcons.visibility
+                                        : KaijuanIcons.visibilityOff,
+                                    size: 20,
+                                  ),
+                                  onPressed: fieldsEnabled
+                                      ? () => setState(
+                                          () => _obscureKey = !_obscureKey,
+                                        )
+                                      : null,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
                     AppSettingsFormField(
                       label: '接口地址',
                       child: AppTextField(
@@ -503,9 +562,11 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                               enableInteractiveSelection: true,
                               textInputAction: TextInputAction.done,
                               decoration: _decoration(
-                                settings.providerKind.defaultModel.isEmpty
-                                    ? '例如：gpt-5.4-mini'
-                                    : settings.providerKind.defaultModel,
+                                settings.providerKind.isLocalBackend
+                                    ? '例如：llama3.2（先「获取模型」）'
+                                    : settings.providerKind.defaultModel.isEmpty
+                                        ? '例如：gpt-5.4-mini'
+                                        : settings.providerKind.defaultModel,
                               ),
                             ),
                           ),
@@ -513,7 +574,10 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
                             child: OutlinedButton(
-                              onPressed: fieldsEnabled && hasKey
+                              onPressed:
+                                  fieldsEnabled &&
+                                      (hasKey ||
+                                          settings.providerKind.isLocalBackend)
                                   ? () => unawaited(_fetchModels())
                                   : null,
                               child: Text(
@@ -540,7 +604,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: fieldsEnabled && hasKey
+                    onPressed:
+                        fieldsEnabled &&
+                            (hasKey || settings.providerKind.isLocalBackend)
                         ? () => unawaited(_test())
                         : null,
                     child: Text(

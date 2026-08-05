@@ -761,7 +761,10 @@ class BackupService {
       }
       final remote = AiBookGraph.fromJson(Map<String, dynamic>.from(graphRaw));
       if (remote == null) continue;
-      final file = File(p.join(directory.path, '$hash.json'));
+      final workKey = _string(raw['workKey']);
+      final file = File(
+        p.join(directory.path, AiGraphStore.fileNameFor(hash, workKey: workKey)),
+      );
       if (await file.exists()) {
         // Local graph wins; restore never overwrites local content.
         continue;
