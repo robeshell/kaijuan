@@ -7,6 +7,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'ai_log.dart';
+
 /// One selectable work/volume inside a collection when generating a graph.
 ///
 /// Derived from the outline: `_planStructure` already merges each work/volume
@@ -452,7 +454,8 @@ class AiGraphStore {
       final decoded = jsonDecode(await file.readAsString());
       if (decoded is! Map) return null;
       return AiBookGraph.fromJson(Map<String, dynamic>.from(decoded));
-    } catch (_) {
+    } catch (error) {
+      AiLog.d('AiGraphStore read failed: $error');
       return null;
     }
   }
@@ -474,7 +477,8 @@ class AiGraphStore {
         if (graph != null) result[key] = graph;
       }
       return result;
-    } catch (_) {
+    } catch (error) {
+      AiLog.d('AiGraphStore readAllFor failed: $error');
       return {};
     }
   }

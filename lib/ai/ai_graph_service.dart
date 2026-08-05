@@ -498,6 +498,14 @@ class AiBookGraphService {
     if (cut <= 0 || cut >= chunk.length - 1) {
       cut = mid;
     }
+    // Never split a UTF-16 surrogate pair (emoji / rare CJK ext chars):
+    // back up if the cut lands right after a high surrogate.
+    if (cut > 0 &&
+        cut < chunk.length &&
+        chunk.codeUnitAt(cut - 1) >= 0xd800 &&
+        chunk.codeUnitAt(cut - 1) <= 0xdbff) {
+      cut -= 1;
+    }
     final first = chunk.substring(0, cut).trim();
     final second = chunk.substring(cut).trim();
     if (first.isEmpty || second.isEmpty) {
@@ -625,6 +633,13 @@ class AiBookGraphService {
         final name = map['name'];
         final typeRaw = map['type'];
         if (name is! String || name.trim().isEmpty) continue;
+        // Unknown types are dropped, not silently bucketed as person.
+        if (typeRaw is! String ||
+            (typeRaw != 'person' &&
+                typeRaw != 'location' &&
+                typeRaw != 'event')) {
+          continue;
+        }
         final type = AiGraphEntityType.fromWireName(typeRaw);
         final originalName = name.trim();
         final canonicalName = _resolveCanonical(

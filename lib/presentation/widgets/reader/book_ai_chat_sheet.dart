@@ -1870,7 +1870,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '$occurrences 次',
+                    '$occurrences 章',
                     style: TextStyle(
                       fontSize: context.appCaptionSize,
                       color: context.appSecondaryText,

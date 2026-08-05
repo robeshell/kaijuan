@@ -113,7 +113,7 @@ class BookAiGraphFullscreen extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '$occurrences 次',
+                  '$occurrences 章',
                   style: TextStyle(fontSize: 13, color: colors.onSurfaceVariant),
                 ),
               ],
