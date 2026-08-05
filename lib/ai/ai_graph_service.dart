@@ -304,47 +304,67 @@ class AiBookGraphService {
     final raws = <Map<String, Object?>>[];
     for (final chunk in chunks) {
       cancelToken?.throwIfCancelled();
-      try {
-        raws.add(
-          await _extractChunk(
-            provider,
-            bookTitle: bookTitle,
-            bookAuthor: bookAuthor,
-            sectionIndex: origin,
-            chunkText: chunk,
-            cancelToken: cancelToken,
-          ),
-        );
-      } on AiGraphGenerationException {
-        // Invalid / truncated output (finish=length on dense sections): halve
-        // the chunk so the model has room to close the JSON. One level only;
-        // a sub-chunk failure still surfaces to the caller.
-        if (chunk.length < 600) rethrow;
-        cancelToken?.throwIfCancelled();
-        final halves = _splitChunk(chunk);
-        raws.add(
-          await _extractChunk(
-            provider,
-            bookTitle: bookTitle,
-            bookAuthor: bookAuthor,
-            sectionIndex: origin,
-            chunkText: halves[0],
-            cancelToken: cancelToken,
-          ),
-        );
-        raws.add(
-          await _extractChunk(
-            provider,
-            bookTitle: bookTitle,
-            bookAuthor: bookAuthor,
-            sectionIndex: origin,
-            chunkText: halves[1],
-            cancelToken: cancelToken,
-          ),
-        );
-      }
+      raws.addAll(
+        await _extractChunkWithFallback(
+          provider,
+          origin,
+          chunk,
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          cancelToken: cancelToken,
+        ),
+      );
     }
     return raws;
+  }
+
+  /// Extracts one chunk, halving it recursively when output is invalid or
+  /// truncated (finish=length on dense sections), so the model always has
+  /// room to close the JSON. Depth is bounded; a small chunk failure surfaces.
+  Future<List<Map<String, Object?>>> _extractChunkWithFallback(
+    AiProvider provider,
+    int sectionIndex,
+    String chunk, {
+    required String bookTitle,
+    required String? bookAuthor,
+    required CancelToken? cancelToken,
+    int depth = 0,
+  }) async {
+    try {
+      return [
+        await _extractChunk(
+          provider,
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          sectionIndex: sectionIndex,
+          chunkText: chunk,
+          cancelToken: cancelToken,
+        ),
+      ];
+    } on AiGraphGenerationException {
+      if (chunk.length < 2000 || depth >= 2) rethrow;
+      cancelToken?.throwIfCancelled();
+      final halves = _splitChunk(chunk);
+      final first = await _extractChunkWithFallback(
+        provider,
+        sectionIndex,
+        halves[0],
+        bookTitle: bookTitle,
+        bookAuthor: bookAuthor,
+        cancelToken: cancelToken,
+        depth: depth + 1,
+      );
+      final second = await _extractChunkWithFallback(
+        provider,
+        sectionIndex,
+        halves[1],
+        bookTitle: bookTitle,
+        bookAuthor: bookAuthor,
+        cancelToken: cancelToken,
+        depth: depth + 1,
+      );
+      return [...first, ...second];
+    }
   }
 
   /// Splits a chunk near its midpoint, preferring a line break, so each half
@@ -392,12 +412,13 @@ class AiBookGraphService {
             '章节编号：$sectionIndex\n\n'
             '抽取要求：只输出如下结构的 JSON：\n'
             '{"entities":[{"name":"规范名","type":"person|location|event",'
-            '"aliases":["别名"],"description":"3-5句","evidence":[{"section":'
+            '"aliases":["别名"],"description":"1-2句","evidence":[{"section":'
             '$sectionIndex,"quote":"原文连续片段"}]}],'
             '"relations":[{"source":"实体A","target":"实体B",'
             '"type":"snake_case关系类型","description":"一句",'
             '"evidence":[{"section":$sectionIndex,"quote":"原文连续片段"}]}]}\n'
-            '规则：name 用书中最常见称呼；aliases 含其余称呼；'
+            '规则：name 用书中最常见称呼；aliases 含其余称呼、不超过 3 个；'
+            'description 用 1-2 句，紧扣证据；'
             'quote 必须逐字来自以下正文；evidence 至少 1 条；'
             'type 取值仅限 person/location/event；关系类型用小写 snake_case；'
             '本章无实体或关系时对应数组输出 []。\n\n'
@@ -411,10 +432,18 @@ class AiBookGraphService {
       temperature: 0,
     );
 
-    var decoded = _decodeJsonObject(
-      (await completeWithRetry(provider, request, cancelToken: cancelToken))
-          .text,
+    final firstResult = await completeWithRetry(
+      provider,
+      request,
+      cancelToken: cancelToken,
     );
+    var decoded = _decodeJsonObject(firstResult.text);
+    if (decoded == null && firstResult.truncated) {
+      // finish=length: the JSON is cut mid-object and the same request would
+      // truncate again. Halving (handled by the section loop) is cheaper
+      // than a wasted retry.
+      throw const AiGraphGenerationException('图谱抽取输出被截断');
+    }
     if (decoded == null) {
       // One re-probe with an explicit "only JSON" nudge before giving up.
       final retryRequest = AiCompletionRequest(

@@ -289,7 +289,7 @@ class OpenAiCompatibleAiProvider implements AiProvider {
       'openai POST complete finish=$finish '
       'reply="${AiLog.bodyPreview(text, max: 80)}"',
     );
-    return AiCompletionResult(text: text);
+    return AiCompletionResult(text: text, truncated: finish == 'length');
   }
 
   @override

@@ -231,7 +231,10 @@ class AnthropicAiProvider implements AiProvider {
       'anthropic POST complete stop_reason=$stopReason '
       'reply="${AiLog.bodyPreview(text, max: 80)}"',
     );
-    return AiCompletionResult(text: text);
+    return AiCompletionResult(
+      text: text,
+      truncated: stopReason == 'max_tokens',
+    );
   }
 
   @override

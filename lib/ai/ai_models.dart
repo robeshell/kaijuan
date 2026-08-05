@@ -30,9 +30,15 @@ class AiCompletionRequest {
 
 /// Result of a non-streaming completion (used by test connection and short tools).
 class AiCompletionResult {
-  const AiCompletionResult({required this.text});
+  const AiCompletionResult({required this.text, this.truncated = false});
 
   final String text;
+
+  /// True when the provider stopped because the output hit the token budget
+  /// (`finish_reason == length` / `stop_reason == max_tokens`). A truncated
+  /// reply cannot contain a complete JSON object; retrying the same request
+  /// is pointless, so callers should shrink the input instead.
+  final bool truncated;
 }
 
 /// Outcome of "测试连接".
