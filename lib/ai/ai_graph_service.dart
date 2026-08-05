@@ -303,8 +303,8 @@ class AiBookGraphService {
     // entities: drop them and any edge that only touches them.
     final metaNames = <String>{
       bookTitle.trim(),
-      if (bookAuthor != null && bookAuthor!.trim().isNotEmpty)
-        bookAuthor!.trim(),
+      if (bookAuthor != null && bookAuthor.trim().isNotEmpty)
+        bookAuthor.trim(),
     };
     if (metaNames.isNotEmpty) {
       final storyNames = <String>{};

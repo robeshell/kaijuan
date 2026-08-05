@@ -216,6 +216,21 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     );
   }
 
+  /// Copy the field's full value to the clipboard.
+  ///
+  /// Unlike [copyFromController] this does not depend on a visible selection,
+  /// so it works while the field is obscured (macOS secure input blocks
+  /// Cmd+C / the Edit-menu copy path for obscured fields).
+  void _copyFrom(TextEditingController field) {
+    final text = field.text;
+    if (text.isEmpty) {
+      if (mounted) showAppSnackBar(context, '没有可复制的内容');
+      return;
+    }
+    Clipboard.setData(ClipboardData(text: text));
+    if (mounted) showAppSnackBar(context, '已复制到剪贴板');
+  }
+
   Future<void> _test() async {
     final result = await controller.testConnection(
       apiKey: _apiKey.text,
@@ -427,6 +442,13 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                                     : null,
                               ),
                               IconButton(
+                                tooltip: '复制',
+                                icon: const Icon(KaijuanIcons.copy, size: 18),
+                                onPressed: fieldsEnabled
+                                    ? () => _copyFrom(_apiKey)
+                                    : null,
+                              ),
+                              IconButton(
                                 tooltip: _obscureKey ? '显示密钥' : '隐藏密钥',
                                 icon: Icon(
                                   _obscureKey
@@ -591,6 +613,14 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                                     ),
                                     onPressed: () =>
                                         unawaited(_pasteInto(_searchApiKey)),
+                                  ),
+                                  IconButton(
+                                    tooltip: '复制',
+                                    icon: const Icon(
+                                      KaijuanIcons.copy,
+                                      size: 18,
+                                    ),
+                                    onPressed: () => _copyFrom(_searchApiKey),
                                   ),
                                   IconButton(
                                     tooltip: _obscureSearchKey

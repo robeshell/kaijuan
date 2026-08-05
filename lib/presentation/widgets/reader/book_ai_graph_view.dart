@@ -108,15 +108,15 @@ class BookAiGraphView extends StatelessWidget {
           Colors.teal,
           Colors.amber.shade700,
         ]
+        // 1.0 disables the hover dim-out: moving the mouse flips
+        // hoverVertex between nodes and the opacity jump reads as flicker.
+        // Vertex state stays tracked (tap detection needs hoverVertex).
+        ..hoverOpacity = 1.0
         ..vertexTextStyleGetter = (vertex, shape) => TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w500,
           color: colors.onSurface,
-        )
-        // 1.0 disables the hover dim-out: moving the mouse flips
-        // hoverVertex between nodes and the opacity jump reads as flicker.
-        // Vertex state stays tracked (tap detection needs hoverVertex).
-        ..hoverOpacity = 1.0)
+        ))
       ..vertexShape = VertexCircleShape()
       ..edgeShape = EdgeLineShape()
       ..onVertexTapUp = (vertex, _) {
