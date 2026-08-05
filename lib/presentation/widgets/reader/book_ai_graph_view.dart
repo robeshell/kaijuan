@@ -100,8 +100,9 @@ class BookAiGraphView extends StatelessWidget {
           Colors.amber.shade700,
         ]
         ..vertexTextStyleGetter = (vertex, shape) => TextStyle(
-          fontSize: 11,
-          color: colors.onSurfaceVariant,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          color: colors.onSurface,
         ))
       ..vertexShape = VertexCircleShape()
       ..edgeShape = EdgeLineShape()

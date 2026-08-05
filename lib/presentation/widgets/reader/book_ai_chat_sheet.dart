@@ -89,6 +89,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
   final _graphQueryController = TextEditingController();
+  final _graphScrollController = ScrollController();
   final _scroll = ScrollController();
   final _focus = FocusNode();
   late final TabController _tabs;
@@ -210,6 +211,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // the workspace changes, which feels like a stalled tab switch.
     if (_activeTab.index == _tabs.index) return;
     setState(() => _activeTab = _BookAiWorkspaceTab.values[_tabs.index]);
+    // TabBarView keeps visited pages alive; reset the graph list to the top
+    // so reopening the tab does not land mid-list.
+    if (_activeTab == _BookAiWorkspaceTab.graph &&
+        _graphScrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_graphScrollController.hasClients) {
+          _graphScrollController.jumpTo(0);
+        }
+      });
+    }
   }
 
   void _onReaderControllerChanged() {
@@ -1336,6 +1347,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         .length;
 
     return ListView(
+      controller: _graphScrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
         Row(
@@ -1921,6 +1933,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _input.dispose();
     _graphQueryController.dispose();
+    _graphScrollController.dispose();
     _graphHighlightTimer?.cancel();
     _scroll.dispose();
     _focus.dispose();
