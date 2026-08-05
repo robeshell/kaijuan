@@ -92,18 +92,17 @@ class BookAiGraphView extends StatelessWidget {
           colors.primary.withValues(alpha: 0.85),
           Colors.teal,
           Colors.amber.shade700,
-        ]
-        ..useLegend = true)
+        ])
       ..vertexShape = VertexCircleShape()
       ..edgeShape = EdgeLineShape()
-      ..vertexPanelBuilder = (vertex, viewfinder) {
-        final pos = viewfinder.localToGlobal(vertex.cpn!.position);
-        final data = Map<String, Object?>.from(vertex.data as Map);
+      ..vertexPanelBuilder = (hoverVertex) {
+        final c = hoverVertex.g!.options!.localToGlobal(hoverVertex.position);
+        final data = Map<String, Object?>.from(hoverVertex.data as Map);
         return Stack(
           children: [
             Positioned(
-              left: pos.dx + vertex.radius + 6,
-              top: pos.dy - 26,
+              left: c.x + hoverVertex.radius + 6,
+              top: c.y - 26,
               child: Material(
                 color: Colors.transparent,
                 child: Container(
