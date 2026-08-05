@@ -104,6 +104,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool _outlineOverviewExpanded = false;
   _AiGraphFilter _graphFilter = _AiGraphFilter.all;
 
+  /// Isolated entities (0 relations) collapse into a single row until opened.
+  bool _graphIsolatedExpanded = false;
+
   /// Collection works shown as the graph-tab picker (null = plain book or
   /// not resolved yet). Resolved lazily: sync from the outline, else via a
   /// one-shot structure recognition.
@@ -1346,6 +1349,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
     final readThrough = _c.sectionIndex + 1;
     final gateByProgress = !_allowUnread && graph.includesUnread;
+    // Entities with at least one relation form the readable core; zero-edge
+    // entities (mere mentions) collapse into one foldable row and are left
+    // off the force-directed view where they would float as orphan dots.
+    final connectedNames = <String>{
+      for (final r in graph.relations) ...[r.source, r.target],
+    };
     final visibleEntities = graph.entities.where((entity) {
       if (gateByProgress && entity.firstSection > readThrough) return false;
       if (_graphFilter != _AiGraphFilter.all &&
@@ -1360,6 +1369,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       }
       return true;
     }).toList(growable: false);
+    final isolatedEntities = <AiGraphEntity>[
+      for (final entity in visibleEntities)
+        if (!connectedNames.contains(entity.name)) entity,
+    ];
+    final mainEntities = <AiGraphEntity>[
+      for (final entity in visibleEntities)
+        if (connectedNames.contains(entity.name)) entity,
+    ];
+    // Search is allowed to surface mere mentions without the fold.
+    final foldIsolated =
+        isolatedEntities.isNotEmpty && _graphQuery.trim().isEmpty;
 
     final personCount = graph.entities
         .where(
@@ -1484,7 +1504,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
           ),
         ],
-        if (!generating && visibleEntities.isNotEmpty) ...[
+        if (!generating && mainEntities.isNotEmpty) ...[
           const SizedBox(height: 12),
           Stack(
             children: [
@@ -1493,6 +1513,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     .where(
                       (entity) =>
                           !gateByProgress || entity.firstSection <= readThrough,
+                    )
+                    .where(
+                      (entity) => connectedNames.contains(entity.name),
                     )
                     .toList(growable: false),
                 relations: graph.relations,
@@ -1577,8 +1600,70 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ],
             ),
           )
-        else
-          for (final entity in visibleEntities)
+        else ...[
+          for (final entity in mainEntities)
+            KeyedSubtree(
+              key: _graphEntityKeys.putIfAbsent(
+                entity.name,
+                () => GlobalKey(),
+              ),
+              child: _buildGraphEntityTile(
+                context,
+                entity,
+                gateByProgress,
+                readThrough,
+              ),
+            ),
+          if (foldIsolated)
+            _buildIsolatedRow(context, isolatedEntities, gateByProgress, readThrough)
+          else
+            for (final entity in isolatedEntities)
+              KeyedSubtree(
+                key: _graphEntityKeys.putIfAbsent(
+                  entity.name,
+                  () => GlobalKey(),
+                ),
+                child: _buildGraphEntityTile(
+                  context,
+                  entity,
+                  gateByProgress,
+                  readThrough,
+                ),
+              ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildIsolatedRow(
+    BuildContext context,
+    List<AiGraphEntity> isolated,
+    bool gateByProgress,
+    int readThrough,
+  ) {
+    final expanded = _graphIsolatedExpanded;
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 0),
+          minVerticalPadding: 0,
+          title: Text(
+            '仅提及的 ${isolated.length} 个实体',
+            style: TextStyle(
+              fontSize: context.appCaptionSize,
+              color: context.appSecondaryText,
+            ),
+          ),
+          trailing: Icon(
+            expanded ? KaijuanIcons.chevronDown : KaijuanIcons.chevronRight,
+            size: 18,
+            color: context.appSecondaryText,
+          ),
+          onTap: () =>
+              setState(() => _graphIsolatedExpanded = !expanded),
+        ),
+        if (expanded)
+          for (final entity in isolated)
             KeyedSubtree(
               key: _graphEntityKeys.putIfAbsent(
                 entity.name,
@@ -1616,6 +1701,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (graph == null) return;
     final readThrough = _c.sectionIndex + 1;
     final gateByProgress = !_allowUnread && graph.includesUnread;
+    final connectedNames = <String>{
+      for (final r in graph.relations) ...[r.source, r.target],
+    };
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => BookAiGraphFullscreen(
@@ -1627,6 +1715,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 (entity) =>
                     !gateByProgress || entity.firstSection <= readThrough,
               )
+              .where((entity) => connectedNames.contains(entity.name))
               .toList(growable: false),
           relations: graph.relations,
         ),
