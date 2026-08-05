@@ -1504,6 +1504,11 @@ class BookReaderController extends ChangeNotifier {
                       work.contains(section.sourceSectionIndex ?? section.index),
                 )
                 .toList(growable: false);
+      AiLog.d(
+        'graph generate scope: work=${work?.title ?? 'whole-book'} '
+        'range=${work == null ? '-' : '${work.startSection}..${work.endSectionExclusive}'} '
+        'sections=${graphSections.length} scoped=${scoped.length}',
+      );
       if (scoped.isEmpty) {
         throw AiProviderException('所选著作没有可用于生成图谱的正文');
       }
