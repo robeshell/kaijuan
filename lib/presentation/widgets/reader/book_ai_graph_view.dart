@@ -162,7 +162,13 @@ class BookAiGraphView extends StatelessWidget {
           ],
         );
       }
-      ..onVertexTapDown = (vertex, _) => onVertexTap(vertex.id as String);
+      ..onVertexTapUp = (vertex, _) {
+        // Deferred: mutating state inside the pointer-event dispatch trips
+        // Flutter's MouseTracker debug assertion on macOS (and onVertexTapDown
+        // is never invoked by this package — TapUp is the live callback).
+        final name = vertex.id as String;
+        Future.microtask(() => onVertexTap(name));
+      };
 
     final graphArea = ClipRRect(
       borderRadius: BorderRadius.circular(14),
@@ -181,8 +187,9 @@ class BookAiGraphView extends StatelessWidget {
               CoulombCenterDecorator(),
               HookeCenterDecorator(),
               ForceDecorator(),
-              ForceMotionDecorator(),
-              TimeCounterDecorator(),
+              // ForceMotionDecorator/TimeCounterDecorator dropped: their
+              // per-frame rebuild races pointer dispatch and trips
+              // MouseTracker._debugDuringDeviceUpdate on macOS debug.
             ],
           ),
           options: options,
