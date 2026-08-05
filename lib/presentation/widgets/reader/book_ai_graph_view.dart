@@ -10,7 +10,8 @@ import '../../../ai/ai_graph.dart';
 /// vertex bubbles its name up so the list below can scroll and highlight it.
 ///
 /// Density guard: beyond [_maxVertices] the most frequent entities win, so
-/// the graph never degenerates into a hairball.
+/// the graph never degenerates into a hairball. 60 keeps labels legible
+/// while still showing the core cast; the rest stay in the list below.
 class BookAiGraphView extends StatelessWidget {
   const BookAiGraphView({
     super.key,
@@ -27,7 +28,7 @@ class BookAiGraphView extends StatelessWidget {
   final ValueChanged<String> onVertexTap;
   final double height;
 
-  static const int _maxVertices = 120;
+  static const int _maxVertices = 60;
 
   List<AiGraphEntity> _topEntities() {
     final sorted = [...entities]..sort(_byFrequencyThenName);
@@ -97,7 +98,11 @@ class BookAiGraphView extends StatelessWidget {
           colors.primary.withValues(alpha: 0.85),
           Colors.teal,
           Colors.amber.shade700,
-        ])
+        ]
+        ..vertexTextStyleGetter = (vertex) => TextStyle(
+          fontSize: 11,
+          color: colors.onSurfaceVariant,
+        ))
       ..vertexShape = VertexCircleShape()
       ..edgeShape = EdgeLineShape()
       ..vertexPanelBuilder = (hoverVertex) {
@@ -171,8 +176,8 @@ class BookAiGraphView extends StatelessWidget {
             convertor: MapConvertor(),
             algorithm: RandomAlgorithm(
               decorators: [
-                CoulombDecorator(),
-                HookeDecorator(),
+                CoulombDecorator(k: 14),
+                HookeDecorator(length: 150),
                 CoulombCenterDecorator(),
                 HookeCenterDecorator(),
                 ForceDecorator(),
