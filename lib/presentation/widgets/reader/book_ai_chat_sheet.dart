@@ -1723,6 +1723,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               .where((entity) => connectedNames.contains(entity.name))
               .toList(growable: false),
           relations: graph.relations,
+          onJumpToEvidence: _goToGraphEvidence,
         ),
       ),
     );
@@ -1735,6 +1736,25 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       AiGraphEntityType.location => Colors.teal,
       AiGraphEntityType.event => Colors.amber.shade700,
     };
+  }
+
+  Widget _graphCountBadge(BuildContext context, int count) {
+    final colors = context.appColors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: colors.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          fontSize: context.appCaptionSize,
+          fontWeight: FontWeight.w600,
+          color: colors.primary,
+        ),
+      ),
+    );
   }
 
   Widget _buildGraphEntityTile(
@@ -1934,25 +1954,39 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             ],
             if (entity.description.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                entity.description,
-                style: TextStyle(
-                  fontSize: _panelBodySize(context),
-                  height: 1.5,
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                decoration: BoxDecoration(
+                  color: context.appColors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  entity.description,
+                  style: TextStyle(
+                    fontSize: _panelBodySize(context),
+                    height: 1.5,
+                  ),
                 ),
               ),
             ],
             if (relations.isNotEmpty) ...[
               const SizedBox(height: 16),
-              Text(
-                '关系（${relations.length}）',
-                style: TextStyle(
-                  fontSize: _panelBodySize(context),
-                  fontWeight: FontWeight.w600,
-                ),
+              Row(
+                children: [
+                  Text(
+                    '关系',
+                    style: TextStyle(
+                      fontSize: _panelBodySize(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _graphCountBadge(context, relations.length),
+                ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               for (final relation in relations)
                 AiRelationRow(
                   relation: relation,
@@ -1961,55 +1995,83 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ],
             if (evidence.isNotEmpty) ...[
               const SizedBox(height: 16),
-              Text(
-                '出处（${evidence.length}）',
-                style: TextStyle(
-                  fontSize: _panelBodySize(context),
-                  fontWeight: FontWeight.w600,
-                ),
+              Row(
+                children: [
+                  Text(
+                    '出处',
+                    style: TextStyle(
+                      fontSize: _panelBodySize(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _graphCountBadge(context, evidence.length),
+                ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               for (final item in evidence)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () {
-                      Navigator.of(sheetContext).pop();
-                      _goToGraphEvidence(item);
-                    },
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 3),
-                          child: Text(
-                            '第 ${item.sectionIndex} 节',
-                            style: TextStyle(
-                              fontSize: context.appCaptionSize,
-                              color: context.appColors.primary,
+                  child: Material(
+                    color: context.appColors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(10),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () {
+                        Navigator.of(sheetContext).pop();
+                        _goToGraphEvidence(item);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: context.appColors.primary
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '§${item.sectionIndex}',
+                                style: TextStyle(
+                                  fontSize: context.appCaptionSize,
+                                  fontWeight: FontWeight.w600,
+                                  color: context.appColors.primary,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            item.quote,
-                            style: TextStyle(
-                              fontSize: context.appCaptionSize,
-                              height: 1.4,
-                              color: item.spanResolved
-                                  ? context.appPrimaryText
-                                  : context.appSecondaryText,
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                item.quote,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: context.appCaptionSize,
+                                  height: 1.4,
+                                  color: item.spanResolved
+                                      ? context.appPrimaryText
+                                      : context.appSecondaryText,
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Icon(
+                                KaijuanIcons.forward,
+                                size: 14,
+                                color: context.appSecondaryText,
+                              ),
+                            ),
+                          ],
                         ),
-                        Icon(
-                          KaijuanIcons.forward,
-                          size: 14,
-                          color: context.appSecondaryText,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -2035,7 +2097,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final index = evidence.sectionIndex - 1;
     if (index < 0 || index >= _c.sectionCount) return;
     _c.goToSection(index, progressInSection: evidence.progressInSection ?? 0);
-    Navigator.of(context).maybePop();
+    // The evidence row already popped its modal; wait for that route's exit
+    // animation to finish, then close the side panel itself so the reader
+    // sees the quoted section. Popping immediately would hit the modal
+    // (still animating out) and leave the panel open.
+    Future<void>.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).maybePop();
+      }
+    });
   }
 
   Future<void> _ensureGraphWorks() async {

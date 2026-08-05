@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../ai/ai_graph.dart';
+import '../../../core/kaijuan_icons.dart';
 import 'ai_relation_row.dart';
 import 'book_ai_graph_view.dart';
 
@@ -12,11 +13,16 @@ class BookAiGraphFullscreen extends StatelessWidget {
     required this.entities,
     required this.relations,
     this.title = '知识图谱',
+    this.onJumpToEvidence,
   });
 
   final List<AiGraphEntity> entities;
   final List<AiGraphRelation> relations;
   final String title;
+
+  /// Called when the user taps an evidence row: jump the reader to the
+  /// quoted section (the caller owns the pop of this route).
+  final void Function(AiGraphEvidence evidence)? onJumpToEvidence;
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +76,22 @@ class BookAiGraphFullscreen extends StatelessWidget {
     final relations = this.relations
         .where((r) => r.source == entity.name || r.target == entity.name)
         .toList(growable: false);
+    final evidence = entity.evidence;
+    Widget sectionBadge(int count) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: colors.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: colors.primary,
+        ),
+      ),
+    );
     showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -104,44 +126,143 @@ class BookAiGraphFullscreen extends StatelessWidget {
               ),
             ],
             if (entity.description.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                entity.description,
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.5,
-                  color: colors.onSurface,
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  entity.description,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: colors.onSurface,
+                  ),
                 ),
               ),
             ],
             if (relations.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Text(
-                '关系（${relations.length}）',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: colors.onSurface,
-                ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Text(
+                    '关系',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: colors.onSurface,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  sectionBadge(relations.length),
+                ],
               ),
-              const SizedBox(height: 4),
-              for (final r in relations.take(12))
+              const SizedBox(height: 8),
+              for (final r in relations)
                 AiRelationRow(
                   relation: r,
                   selfName: entity.name,
                 ),
-              if (relations.length > 12)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    '… 另有 ${relations.length - 12} 条关系',
+            ],
+            if (evidence.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Text(
+                    '出处',
                     style: TextStyle(
-                      fontSize: 12,
-                      color: colors.onSurfaceVariant,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: colors.onSurface,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  sectionBadge(evidence.length),
+                ],
+              ),
+              const SizedBox(height: 8),
+              for (final item in evidence)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Material(
+                    color: colors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(10),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: onJumpToEvidence == null
+                          ? null
+                          : () {
+                              Navigator.of(sheetContext).pop();
+                              onJumpToEvidence!(item);
+                            },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colors.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '§${item.sectionIndex}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.primary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                item.quote,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.4,
+                                  color: item.spanResolved
+                                      ? colors.onSurface
+                                      : colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Icon(
+                                KaijuanIcons.forward,
+                                size: 14,
+                                color: colors.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
             ],
+            if (relations.isEmpty && evidence.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  '该实体暂无可见内容。',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
