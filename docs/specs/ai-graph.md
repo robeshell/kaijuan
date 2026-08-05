@@ -41,6 +41,7 @@
 - **关系抽取**：类型化关系（小写 `snake_case` 词表，如 `father_of`、`married_to`、`work_at`、`lives_in`、`participates_in`），双向语义（抽到 `A-B` 时 UI 可双向展示）。
 - **出处（证据）**：每条实体与关系至少一条原文证据；点击证据跳回书内位置（`BookLocator`：section + progressInSection）。
 - **章级增量**：只对新章节抽取并合并进已有图谱；进度、停止、断点续跑、重生成（= 删除重建）。
+- **排除附录类单元**：参考书目 / 附录 / 索引 / 致谢 / 后记 / 年表等不进图谱（复用大纲元数据过滤后再加图谱专属过滤）。这些单元人物关系价值低、输出密度最高（易截断），还带进一次性人名；正文章节不受影响。
 - **防剧透**：`allowUnreadContext` 关时，未读章节的实体、关系与证据**既不生成也不展示**（图谱按当前阅读位置过滤，读得越深图越全）。
 - **实体卡**：描述（依据驱动的 3–5 句）、别名、关系列表、证据列表、章节频次。
 - **缓存与备份**：按 `contentHash` 落盘；手动 WebDAV 快照上传，恢复时按书合并、本地优先、不覆盖；Key / 搜索 Key / WebDAV 凭据永不备份。
@@ -132,7 +133,7 @@ class AiGraphEvidence {
 
 ```text
 输入：sections（导航单元切分结果）+ allowUnreadContext（决定范围）
-  → 范围裁剪：关 = 只保留已读 section；开 = 全部
+  → 范围裁剪：关 = 只保留已读 section；开 = 全部（随后排除附录类单元，见 §2）
   → 已处理集合 = coveredSections ∩ 范围内；只对新 section 走抽取
   → 每 section 切成 800–2000 token 的 chunk（相邻 5–10% 重叠）
   → 每 chunk 一次 fenced JSON 抽取调用（温度 0；带 chunk_id + sectionIndex）

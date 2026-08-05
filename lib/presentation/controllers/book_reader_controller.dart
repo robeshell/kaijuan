@@ -882,6 +882,25 @@ class BookReaderController extends ChangeNotifier {
         .toList(growable: false);
   }
 
+  /// Graph-scoped filter on top of the outline metadata filter: appendix-like
+  /// units (bibliographies, appendices, indices, acknowledgements, afterwords)
+  /// carry little character-relationship value, are the densest LLM outputs
+  /// (finish=length), and pollute the graph with one-off names.
+  List<AiBookSectionSlice> _graphEligibleSections(
+    List<AiBookSectionSlice> sections,
+  ) {
+    return sections
+        .where((section) => !_isGraphAppendixSection(section))
+        .toList(growable: false);
+  }
+
+  bool _isGraphAppendixSection(AiBookSectionSlice section) {
+    final label = section.label.trim().replaceAll(RegExp(r'\s+'), '');
+    return RegExp(
+      r'^(附录|参考书目|参考文献|索引|致谢|后记|跋|注释|年表)',
+    ).hasMatch(label);
+  }
+
   bool _isOutlineMetadataTitle(String value) {
     final title = value.trim().replaceAll(RegExp(r'\s+'), '');
     return RegExp(
@@ -1233,7 +1252,9 @@ class BookReaderController extends ChangeNotifier {
             isNavigationUnit: section.isNavigationUnit,
           ),
       ];
-      final graphSections = _filterOutlineSections(titled);
+      final graphSections = _graphEligibleSections(
+        _filterOutlineSections(titled),
+      );
       if (graphSections.isEmpty) {
         throw AiProviderException('没有可用于生成图谱的正文');
       }
