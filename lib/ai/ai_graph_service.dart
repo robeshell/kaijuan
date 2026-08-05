@@ -63,7 +63,8 @@ class AiBookGraphService {
 
   /// Max sections extracted in parallel per batch. Extraction is independent
   /// per section; merge stays sequential to keep co-reference deterministic.
-  static const int maxConcurrentSections = 3;
+  /// 5 keeps deepseek-class endpoints saturated without tripping rate limits.
+  static const int maxConcurrentSections = 5;
 
   /// Output budget per extraction call. Generous so dense sections are not
   /// truncated, but the halving fallback (not this budget) is the real guard.
