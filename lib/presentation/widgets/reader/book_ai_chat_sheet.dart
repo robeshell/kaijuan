@@ -1650,7 +1650,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 0),
+          contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
           minVerticalPadding: 0,
           title: Text(
             '仅提及的 ${isolated.length} 个实体',
@@ -1781,7 +1781,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final typeColor = _graphTypeColor(context, entity.type);
     final highlighted = _graphHighlighted == entity.name;
     return Card(
-      margin: const EdgeInsets.only(bottom: 4),
+      margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
       color: highlighted ? typeColor.withValues(alpha: 0.08) : null,
       shape: RoundedRectangleBorder(
@@ -1796,8 +1796,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 0),
-        minVerticalPadding: 0,
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
         leading: Container(
           width: 8,
           height: 8,
