@@ -18,7 +18,7 @@ class BookAiGraphView extends StatelessWidget {
     required this.entities,
     required this.relations,
     required this.onVertexTap,
-    this.height = 300,
+    this.height,
   });
 
   final List<AiGraphEntity> entities;
@@ -26,7 +26,9 @@ class BookAiGraphView extends StatelessWidget {
 
   /// Called with the tapped entity's canonical name.
   final ValueChanged<String> onVertexTap;
-  final double height;
+
+  /// Fixed graph area height; null lets the parent constrain it (fullscreen).
+  final double? height;
 
   static const int _maxVertices = 60;
 
@@ -162,34 +164,34 @@ class BookAiGraphView extends StatelessWidget {
       }
       ..onVertexTapDown = (vertex, _) => onVertexTap(vertex.id as String);
 
-    return SizedBox(
-      height: height,
-      width: double.infinity,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.surfaceContainerLow,
-            border: Border.all(color: colors.outlineVariant),
+    final graphArea = ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerLow,
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: FlutterGraphWidget(
+          data: data,
+          convertor: MapConvertor(),
+          algorithm: RandomAlgorithm(
+            decorators: [
+              CoulombDecorator(k: 14),
+              HookeDecorator(length: 150),
+              CoulombCenterDecorator(),
+              HookeCenterDecorator(),
+              ForceDecorator(),
+              ForceMotionDecorator(),
+              TimeCounterDecorator(),
+            ],
           ),
-          child: FlutterGraphWidget(
-            data: data,
-            convertor: MapConvertor(),
-            algorithm: RandomAlgorithm(
-              decorators: [
-                CoulombDecorator(k: 14),
-                HookeDecorator(length: 150),
-                CoulombCenterDecorator(),
-                HookeCenterDecorator(),
-                ForceDecorator(),
-                ForceMotionDecorator(),
-                TimeCounterDecorator(),
-              ],
-            ),
-            options: options,
-          ),
+          options: options,
         ),
       ),
     );
+    if (height == null) {
+      return SizedBox(width: double.infinity, child: graphArea);
+    }
+    return SizedBox(height: height, width: double.infinity, child: graphArea);
   }
 }

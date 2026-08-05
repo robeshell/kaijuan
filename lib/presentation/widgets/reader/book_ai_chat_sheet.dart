@@ -24,6 +24,7 @@ import '../../screens/ai_settings_screen.dart';
 import '../app_components.dart';
 import '../app_overlays.dart';
 import 'ai_result_body.dart';
+import 'book_ai_graph_fullscreen.dart';
 import 'book_ai_graph_view.dart';
 
 /// Book-scoped AI chat (M2). Session is isolated by contentHash.
@@ -1460,15 +1461,34 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ],
         if (!generating && visibleEntities.isNotEmpty) ...[
           const SizedBox(height: 12),
-          BookAiGraphView(
-            entities: graph.entities
-                .where(
-                  (entity) =>
-                      !gateByProgress || entity.firstSection <= readThrough,
-                )
-                .toList(growable: false),
-            relations: graph.relations,
-            onVertexTap: _onGraphVertexTap,
+          Stack(
+            children: [
+              BookAiGraphView(
+                entities: graph.entities
+                    .where(
+                      (entity) =>
+                          !gateByProgress || entity.firstSection <= readThrough,
+                    )
+                    .toList(growable: false),
+                relations: graph.relations,
+                onVertexTap: _onGraphVertexTap,
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Material(
+                  color: context.appColors.surfaceContainerHighest
+                      .withValues(alpha: 0.9),
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: '全屏查看',
+                    iconSize: 18,
+                    icon: const Icon(KaijuanIcons.maximize),
+                    onPressed: _openGraphFullscreen,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           Text(
@@ -1555,6 +1575,26 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         alignment: 0.2,
       );
     }
+  }
+
+  void _openGraphFullscreen() {
+    final graph = _c.bookGraph;
+    if (graph == null) return;
+    final readThrough = _c.sectionIndex + 1;
+    final gateByProgress = !_allowUnread && graph.includesUnread;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BookAiGraphFullscreen(
+          entities: graph.entities
+              .where(
+                (entity) =>
+                    !gateByProgress || entity.firstSection <= readThrough,
+              )
+              .toList(growable: false),
+          relations: graph.relations,
+        ),
+      ),
+    );
   }
 
   Color _graphTypeColor(BuildContext context, AiGraphEntityType type) {
