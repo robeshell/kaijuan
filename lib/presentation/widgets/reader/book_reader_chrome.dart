@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/kaijuan_icons.dart';
 import '../../controllers/book_reader_controller.dart';
+import 'book_ai_chat_sheet.dart';
 import 'book_reader_tool_strip.dart';
 import 'glass_bar.dart';
 import 'reader_chrome_top_bar.dart';
@@ -60,6 +61,24 @@ class BookReaderChrome extends StatelessWidget {
                   color: fg,
                   weight: 300,
                 ),
+              ),
+              IconButton(
+                tooltip: '本书 AI',
+                visualDensity: density,
+                onPressed: () async {
+                  controller.hideChrome();
+                  // Capture text first; do not clear the page highlight
+                  // (default clearSelectionMenu wipes WebView selection).
+                  final sel = await controller.peekSelectedText();
+                  controller.dismissSelectionMenuKeepHighlight();
+                  if (!context.mounted) return;
+                  await showBookAiChatSheet(
+                    context,
+                    controller: controller,
+                    initialSelection: sel.isEmpty ? null : sel,
+                  );
+                },
+                icon: Icon(KaijuanIcons.aiChat, color: fg, weight: 300),
               ),
               IconButton(
                 tooltip: '搜索',

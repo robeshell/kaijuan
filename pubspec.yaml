@@ -45,6 +45,7 @@ dependencies:
   shelf_router: ^1.1.4
   network_info_plus: ^8.2.1
   qr_flutter: ^4.1.0
+  thinking_orbs: ^0.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

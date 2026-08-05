@@ -33,12 +33,14 @@ abstract final class KaijuanIcons {
   static const IconData chevronDown = FluentIcons.chevron_down_24_regular;
   static const IconData chevronLeft = FluentIcons.chevron_left_24_regular;
   static const IconData chevronRight = FluentIcons.chevron_right_24_regular;
+  static const IconData chevronUp = FluentIcons.chevron_up_24_regular;
   static const IconData circle = FluentIcons.circle_24_regular;
   static const IconData circleFilled = FluentIcons.circle_24_filled;
   static const IconData close = FluentIcons.dismiss_24_regular;
   static const IconData collections = FluentIcons.collections_24_regular;
   static const IconData cloud = FluentIcons.cloud_24_regular;
   static const IconData copy = FluentIcons.copy_24_regular;
+  static const IconData paste = FluentIcons.clipboard_paste_24_regular;
   static const IconData delete = FluentIcons.delete_24_regular;
   static const IconData document = FluentIcons.document_24_regular;
   static const IconData download = FluentIcons.arrow_download_24_regular;
@@ -81,6 +83,7 @@ abstract final class KaijuanIcons {
   static const IconData restore = FluentIcons.rectangle_landscape_24_regular;
   static const IconData search = FluentIcons.search_24_regular;
   static const IconData searchEmpty = FluentIcons.search_24_regular;
+  static const IconData sendFilled = FluentIcons.send_24_filled;
   static const IconData scan = FluentIcons.scan_24_regular;
   static const IconData settings = FluentIcons.settings_24_regular;
   static const IconData settingsFilled = FluentIcons.settings_24_filled;
@@ -89,11 +92,14 @@ abstract final class KaijuanIcons {
   static const IconData share = FluentIcons.share_ios_24_regular;
   static const IconData sort = FluentIcons.arrow_sort_24_regular;
   static const IconData stop = FluentIcons.stop_24_regular;
+  static const IconData stopFilled = FluentIcons.stop_24_filled;
   static const IconData swapHorizontal = FluentIcons.arrow_swap_24_regular;
   static const IconData swapVertical =
       FluentIcons.arrow_bidirectional_up_down_24_regular;
   static const IconData toc = FluentIcons.document_table_24_regular;
   static const IconData translate = FluentIcons.translate_24_regular;
+  static const IconData aiChat = FluentIcons.bot_sparkle_24_regular;
+  static const IconData chat = FluentIcons.chat_24_regular;
   static const IconData tune = FluentIcons.options_24_regular;
   static const IconData typography = FluentIcons.text_field_24_regular;
   static const IconData visibility = FluentIcons.eye_24_regular;

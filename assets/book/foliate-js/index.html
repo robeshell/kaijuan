@@ -28,6 +28,8 @@
     height: 100vh;
     overflow: hidden;
     background: #ffffff;
+    /* Desktop: host chrome is not editable text; avoid UA I-beam on empty shell. */
+    cursor: default;
   }
 
   body {
@@ -36,6 +38,7 @@
     margin: 0 !important;
     height: 100vh;
     background: #ffffff;
+    cursor: default;
   }
 
   #footnote-dialog {
@@ -115,7 +118,7 @@
     (async () => {
       if (shouldUseModernBundle) {
         await loadScript('./src/vendor/pdfjs/pdf.js', { async: false, defer: false });
-        await loadScript('./src/book.js?v=20260727c', { type: 'module' });
+        await loadScript('./src/book.js?v=20260805h', { type: 'module' });
         return;
       }
 

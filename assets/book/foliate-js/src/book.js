@@ -303,22 +303,35 @@ const setSelectionHandler = (view, doc, index) => {
       hasActiveSelection = true;
       doc.__anxSelectionClearedAt = 0;
       doc.__anxSuppressClick = false;
+      try { doc.documentElement?.classList?.add('kaika-selecting') } catch (_) {}
       return;
     }
 
+    try { doc.documentElement?.classList?.remove('kaika-selecting') } catch (_) {}
     if (!hasActiveSelection) return;
     hasActiveSelection = false;
     lastPointerUpRange = null;
-    // Menu-driven deselect must not eat the next page-turn tap.
+    // Menu-driven deselect must not eat the next chrome / page-turn tap.
     if (window.__kaikaClearingForMenuDismiss) {
       doc.__anxSelectionClearedAt = 0;
       doc.__anxSuppressClick = false;
+      if (doc.__anxSuppressClickTimer) {
+        clearTimeout(doc.__anxSuppressClickTimer);
+        doc.__anxSuppressClickTimer = 0;
+      }
       stopAutoPageSession(view);
       callFlutter('onSelectionCleared');
       return;
     }
+    // One-shot latch for the ghost click that collapses a selection. Auto-
+    // expire so a missed click-view does not force a second tap for chrome.
     doc.__anxSelectionClearedAt = Date.now();
     doc.__anxSuppressClick = true;
+    if (doc.__anxSuppressClickTimer) clearTimeout(doc.__anxSuppressClickTimer);
+    doc.__anxSuppressClickTimer = setTimeout(() => {
+      doc.__anxSuppressClick = false;
+      doc.__anxSuppressClickTimer = 0;
+    }, 280);
     stopAutoPageSession(view);
     callFlutter('onSelectionCleared');
   };
@@ -351,13 +364,42 @@ const setSelectionHandler = (view, doc, index) => {
     e.preventDefault()
   }, true)
   try {
+    // Desktop Platform View: the UA I-beam (`cursor: text`) applies to almost
+    // every paragraph, so the whole reader looks stuck in "text select" mode
+    // the moment you open a book. Force arrow while idle; I-beam only while
+    // the user is actively drag-selecting. Links stay pointer.
     const styleEl = doc.createElement('style')
     styleEl.setAttribute('data-kaika-no-callout', '1')
-    styleEl.textContent = '*, *::before, *::after { -webkit-touch-callout: none !important; }'
+    styleEl.textContent = [
+      '*, *::before, *::after { -webkit-touch-callout: none !important; }',
+      '@media (hover: hover) and (pointer: fine) {',
+      '  html, body, body * { cursor: default !important; }',
+      '  a[href], a[href] *, [role="link"], [role="link"] * { cursor: pointer !important; }',
+      '  button, [role="button"], summary { cursor: pointer !important; }',
+      '  html.kaika-selecting, html.kaika-selecting body, html.kaika-selecting body * {',
+      '    cursor: text !important;',
+      '  }',
+      '}',
+    ].join('\n')
     ;(doc.head || doc.documentElement).appendChild(styleEl)
     if (doc.documentElement) doc.documentElement.style.webkitTouchCallout = 'none'
     if (doc.body) doc.body.style.webkitTouchCallout = 'none'
   } catch (_) {}
+
+  const setSelectingCursor = (on) => {
+    try {
+      doc.documentElement?.classList?.toggle('kaika-selecting', !!on)
+    } catch (_) {}
+  }
+  doc.addEventListener('selectstart', () => setSelectingCursor(true))
+  doc.addEventListener('pointerup', () => {
+    // Keep I-beam while a non-empty selection remains (menu open); clear when
+    // the range collapses (handleSelectionStateChange also clears).
+    if (!getSelectionRange(doc.getSelection())) setSelectingCursor(false)
+  })
+  doc.addEventListener('pointercancel', () => {
+    if (!getSelectionRange(doc.getSelection())) setSelectingCursor(false)
+  })
 
   const selectionMenuGate = (() => {
     let timer
@@ -481,17 +523,50 @@ const setSelectionHandler = (view, doc, index) => {
   if (!view.isFixedLayout) {
     // go to the next page when selecting to the end of a page
     // this makes it possible to select across pages
+    //
+    // Desktop: while drag-selecting, browsers auto-scroll the paginator's
+    // horizontal multi-page strip past many pages. Scroll pinning lives in
+    // Paginator; here we only drive intentional single-page auto-advance
+    // while the pointer is still down.
+
+    // Desktop (fine pointer + hover): only auto-advance while the drag is
+    // held. After release a large selection often still sits at the page
+    // bottom and used to chain next() while the menu opened.
+    // Touch / coarse: keep post-release handle-drag auto-page for multi-page
+    // select (scroll pin in Paginator still blocks free-run).
+    const desktopSelectAutoPage =
+      typeof matchMedia === 'function'
+      && matchMedia('(hover: hover) and (pointer: fine)').matches;
+    let autoPagePointerDown = false;
 
     doc.addEventListener('selectstart', () => {
-      const container = view.shadowRoot.querySelector('foliate-paginator').shadowRoot.querySelector("#container");
+      const container = view.shadowRoot.querySelector('foliate-paginator')?.shadowRoot?.querySelector('#container');
       if (!container) return;
       globalThis.originalScrollLeft = container.scrollLeft;
       startAutoPageSession(view);
+      autoPagePointerDown = true;
     });
 
+    doc.addEventListener('pointerdown', () => {
+      autoPagePointerDown = true;
+    });
+
+    const haltDesktopAutoPageOnPointerUp = () => {
+      autoPagePointerDown = false;
+      if (!desktopSelectAutoPage) return;
+      const state = getAutoPageState(view);
+      clearAutoPageTimer(state);
+      clearAutoPagePostNextRecheck(state);
+      state.pendingFromPageKey = null;
+      state.awaitingPageAdvanceFromKey = null;
+      state.postNextRecheckAttempts = 0;
+    };
+    doc.addEventListener('pointerup', haltDesktopAutoPageOnPointerUp);
+    doc.addEventListener('pointercancel', haltDesktopAutoPageOnPointerUp);
 
     doc.addEventListener('selectionchange', () => {
       if (view.renderer.getAttribute('flow') !== 'paginated') return
+      if (desktopSelectAutoPage && !autoPagePointerDown) return
       const { lastLocation } = view
       if (!lastLocation) return
 
@@ -499,8 +574,9 @@ const setSelectionHandler = (view, doc, index) => {
       if (!selRange) return
       if (!lastLocation.range) return;
 
-      const container = view.shadowRoot.querySelector('foliate-paginator').shadowRoot.querySelector("#container");
+      const container = view.shadowRoot.querySelector('foliate-paginator')?.shadowRoot?.querySelector('#container');
       if (!container) return;
+      const paginator = view.renderer;
 
       const state = getAutoPageState(view);
       if (state.sessionId === 0) {
@@ -557,23 +633,26 @@ const setSelectionHandler = (view, doc, index) => {
         state.pendingTimer = setTimeout(async () => {
           state.pendingTimer = null;
           if (scheduledSessionId !== state.sessionId) return;
+          if (desktopSelectAutoPage && !autoPagePointerDown) return;
           state.triggeredPages.add(pageKey);
           try {
+            // Selection pin would fight an intentional next(); lift then re-pin.
+            paginator?.releaseSelectionScrollLock?.();
             await view.next();
-            const latestContainer = view.shadowRoot.querySelector('foliate-paginator').shadowRoot.querySelector("#container");
-            if (latestContainer) {
-              globalThis.originalScrollLeft = latestContainer.scrollLeft;
-            }
+            globalThis.originalScrollLeft = container.scrollLeft;
+            paginator?.relockSelectionScroll?.();
           } finally {
             if (state.pendingFromPageKey === pageKey) {
               state.pendingFromPageKey = null;
             }
+            if (desktopSelectAutoPage && !autoPagePointerDown) return;
             state.awaitingPageAdvanceFromKey = pageKey;
             state.postNextRecheckAttempts = 0;
             clearAutoPagePostNextRecheck(state);
             const runPostNextSelectionRecheck = () => {
               state.postNextRecheckTimer = null;
               if (scheduledSessionId !== state.sessionId) return;
+              if (desktopSelectAutoPage && !autoPagePointerDown) return;
               if (state.awaitingPageAdvanceFromKey !== pageKey) return;
               state.postNextRecheckAttempts += 1;
               try {
@@ -593,23 +672,7 @@ const setSelectionHandler = (view, doc, index) => {
             );
           }
         }, AUTO_PAGE_DELAY_MS);
-        return;
       }
-
-      const preventScroll = () => {
-        const selRange = getSelectionRange(doc.getSelection());
-        if (!selRange || !view.lastLocation || !view.lastLocation.range) return;
-
-        if (view.lastLocation.range.startContainer === selRange.endContainer) {
-          container.scrollLeft = globalThis.originalScrollLeft;
-        }
-      };
-
-      container.addEventListener('scroll', preventScroll);
-
-      doc.addEventListener('pointerup', () => {
-        container.removeEventListener('scroll', preventScroll);
-      }, { once: true });
     })
 
   }
@@ -1463,6 +1526,7 @@ class Reader {
   }
 
   #onLoad({ detail: { doc, index } }) {
+    onSectionLoaded(index)
     this.#doc = doc
     this.#index = index
     setSelectionHandler(this.view, doc, index)
@@ -1509,12 +1573,26 @@ class Reader {
     // Do not gate page-turns on __kaikaIgnoreAnnotationClickUntil — that flag
     // only suppresses show-annotation / note double-open after menu dismiss.
     const menuOpen = !!window.__kaikaSelectionMenuOpen || !!window.__kaikaMenuCursorZone
+    const coordinatesX = x / window.innerWidth
+    const coordinatesY = y / window.innerHeight
+    // Keep in sync with BookReaderCapabilities.pageTurnEdgeFraction.
+    const edge = 0.28
+    const isEdge = coordinatesX < edge || coordinatesX > 1 - edge
     const suppressTurn = window.__kaikaSuppressPageTurnUntil
       && Date.now() < window.__kaikaSuppressPageTurnUntil
 
-    // Ghost click / touchend from finishing a selection — never page-turn.
-    // (Menu may still be in flight to Flutter; flags are set in handleSelection.)
-    if (suppressTurn) {
+    // After selection: block only *edge* ghost page-turns. A blanket return
+    // here used to eat middle-band taps for ~900ms so chrome needed 2 taps
+    // after dismissing a selection.
+    if (suppressTurn && isEdge && !menuOpen) {
+      return
+    }
+
+    // Menu just dismissed on this gesture — do not also toggle chrome.
+    if (!menuOpen && !isEdge
+        && window.__kaikaSuppressChromeOnceUntil
+        && Date.now() < window.__kaikaSuppressChromeOnceUntil) {
+      window.__kaikaSuppressChromeOnceUntil = 0
       return
     }
 
@@ -1529,13 +1607,17 @@ class Reader {
 
       // One-shot: swallow the ghost click that collapses a user selection.
       if (this.#doc?.__anxSuppressClick) {
-        this.#doc.__anxSuppressClick = false;
-        return
+        const at = this.#doc.__anxSelectionClearedAt || 0
+        this.#doc.__anxSuppressClick = false
+        if (this.#doc.__anxSuppressClickTimer) {
+          clearTimeout(this.#doc.__anxSuppressClickTimer)
+          this.#doc.__anxSuppressClickTimer = 0
+        }
+        // Only honor a fresh latch; expired flag must not steal chrome taps.
+        if (Date.now() - at < 280) return
       }
     }
 
-    const coordinatesX = x / window.innerWidth
-    const coordinatesY = y / window.innerHeight
     onClickView(coordinatesX, coordinatesY)
   }
 
@@ -2007,6 +2089,53 @@ const onRelocated = (currentInfo) => {
     bookmark: currentInfo.bookmark,
     writingMode: reader.view.renderer.writingMode,
   })
+
+  scheduleNextSectionPrefetch()
+}
+
+let nextSectionPrefetchTimer = 0
+let nextSectionPrefetchPromise = null
+let preloadedSectionIndex = -1
+
+const releasePreloadedSection = () => {
+  if (preloadedSectionIndex < 0) return
+  reader.view.book.sections[preloadedSectionIndex]?.unload?.()
+  preloadedSectionIndex = -1
+}
+
+const prefetchNextSection = async () => {
+  const contents = reader.view.renderer?.getContents?.() ?? []
+  const currentIndex = contents[0]?.index ?? -1
+  const nextIndex = currentIndex + 1
+  const section = reader.view.book.sections[nextIndex]
+  if (!section || preloadedSectionIndex === nextIndex) return
+  try {
+    await section.load()
+    preloadedSectionIndex = nextIndex
+    console.log('FoliateReader prefetched-section', nextIndex)
+  } catch (e) {
+    console.debug('FoliateReader prefetch skipped', e)
+  }
+}
+
+const scheduleNextSectionPrefetch = () => {
+  if (nextSectionPrefetchTimer || nextSectionPrefetchPromise) return
+  const run = () => {
+    nextSectionPrefetchTimer = 0
+    if (!reader?.view?.renderer) return
+    nextSectionPrefetchPromise = prefetchNextSection()
+      .finally(() => { nextSectionPrefetchPromise = null })
+  }
+  if (typeof requestIdleCallback === 'function') {
+    nextSectionPrefetchTimer = requestIdleCallback(run, { timeout: 1500 })
+  } else {
+    nextSectionPrefetchTimer = setTimeout(run, 350)
+  }
+}
+
+const onSectionLoaded = index => {
+  releasePreloadedSection()
+  scheduleNextSectionPrefetch()
 }
 
 const onAnnotationClick = (annotation) => callFlutter('onAnnotationClick', annotation)
@@ -2039,7 +2168,8 @@ const appendNoteMarker = (g, rects, annotation, range) => {
   const ns = 'http://www.w3.org/2000/svg'
   const marker = document.createElementNS(ns, 'g')
   marker.style.pointerEvents = 'auto'
-  marker.style.cursor = 'pointer'
+  // Important: chapter docs force cursor:default !important on desktop.
+  marker.style.setProperty('cursor', 'pointer', 'important')
   marker.setAttribute('aria-label', '打开笔记')
 
   // Larger invisible hit target (mobile thumbs) without covering glyphs.
@@ -2222,19 +2352,67 @@ window.changeStyle = (newStyle) => {
 /// Desktop Platform Views own the system cursor. While the Flutter selection
 /// menu is open, map a normalized hit zone so mousemove inside it shows a
 /// pointer and everywhere else a default arrow (never the text I-beam).
-window.setSelectionMenuOpen = (open) => {
-  const wasOpen = !!window.__kaikaSelectionMenuOpen
-  window.__kaikaSelectionMenuOpen = !!open
-  if (!open) {
-    // Only arm the annotation-click ignore when actually dismissing a menu.
-    // Calling setMenuOpen(false) while already closed must not deaden taps.
-    if (wasOpen) {
-      window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 800
-    }
-    window.setSelectionMenuCursorZone(null)
-    return
+///
+/// Important: only rewrite `style.cursor` when the desired value changes.
+/// Re-applying the same cursor every mousemove / Flutter frame makes the
+/// system cursor flicker (I-beam ↔ arrow) on macOS Platform Views.
+const __kaikaMenuCursorEqualZone = (a, b) => {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.left === b.left && a.top === b.top
+    && a.right === b.right && a.bottom === b.bottom
+}
+
+const __kaikaMenuCursorApply = (cursor) => {
+  if (window.__kaikaLastMenuCursor === cursor) return
+  window.__kaikaLastMenuCursor = cursor
+  const setDoc = (doc) => {
+    if (!doc) return
+    try {
+      if (doc.documentElement) doc.documentElement.style.cursor = cursor
+      if (doc.body) doc.body.style.cursor = cursor
+    } catch (_) {}
   }
-  // Bind iframe dismiss listeners immediately (zone coords arrive next frame).
+  setDoc(document)
+  try {
+    const contents = reader?.view?.renderer?.getContents?.() || []
+    for (const content of contents) setDoc(content.doc)
+  } catch (_) {}
+}
+
+/** Suppress user-agent `cursor: text` on body copy while the menu is open. */
+const __kaikaMenuCursorSetSuppressText = (on) => {
+  const ensure = (doc) => {
+    if (!doc?.head) return
+    let el = doc.getElementById('kaika-menu-cursor-style')
+    if (on) {
+      if (!el) {
+        el = doc.createElement('style')
+        el.id = 'kaika-menu-cursor-style'
+        // Match/exceed idle+selecting rules (html.kaika-selecting body *) so the
+        // I-beam does not bleed through while the Flutter menu owns the cursor.
+        el.textContent =
+          'html.kaika-sel-menu-open,'
+          + 'html.kaika-sel-menu-open body,'
+          + 'html.kaika-sel-menu-open body * '
+          + '{ cursor: inherit !important; }'
+          + 'html.kaika-sel-menu-open { cursor: default !important; }'
+        doc.head.appendChild(el)
+      }
+      doc.documentElement?.classList?.add('kaika-sel-menu-open')
+    } else {
+      doc.documentElement?.classList?.remove('kaika-sel-menu-open')
+      el?.remove()
+    }
+  }
+  try {
+    ensure(document)
+    const contents = reader?.view?.renderer?.getContents?.() || []
+    for (const content of contents) ensure(content.doc)
+  } catch (_) {}
+}
+
+const __kaikaMenuCursorBindIframes = () => {
   try {
     const contents = reader?.view?.renderer?.getContents?.() || []
     for (const content of contents) {
@@ -2256,53 +2434,44 @@ window.setSelectionMenuOpen = (open) => {
   } catch (_) {}
 }
 
-window.setSelectionMenuCursorZone = (zone) => {
-  window.__kaikaMenuCursorZone = zone && typeof zone === 'object' ? zone : null
-  if (window.__kaikaMenuCursorZone) {
-    window.__kaikaSelectionMenuOpen = true
-  }
-  const apply = (cursor) => {
-    const setDoc = (doc) => {
-      if (!doc) return
-      try {
-        if (doc.documentElement) doc.documentElement.style.cursor = cursor
-        if (doc.body) doc.body.style.cursor = cursor
-      } catch (_) {}
+window.setSelectionMenuOpen = (open) => {
+  const wasOpen = !!window.__kaikaSelectionMenuOpen
+  window.__kaikaSelectionMenuOpen = !!open
+  if (!open) {
+    // Only arm the annotation-click ignore when actually dismissing a menu.
+    // Calling setMenuOpen(false) while already closed must not deaden taps.
+    if (wasOpen) {
+      window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 800
     }
-    setDoc(document)
-    try {
-      const contents = reader?.view?.renderer?.getContents?.() || []
-      for (const content of contents) setDoc(content.doc)
-    } catch (_) {}
-  }
-  const bindIframes = () => {
-    try {
-      const contents = reader?.view?.renderer?.getContents?.() || []
-      for (const content of contents) {
-        const doc = content.doc
-        if (!doc) continue
-        if (!doc.__kaikaMenuCursorBound) {
-          doc.__kaikaMenuCursorBound = true
-          doc.addEventListener('mousemove', window.__kaikaMenuCursorHitTest, true)
-        }
-        if (!doc.__kaikaMenuDismissBound) {
-          doc.__kaikaMenuDismissBound = true
-          // pointerdown only — click races overlayer show-annotation.
-          doc.addEventListener(
-            'pointerdown',
-            window.__kaikaMenuOutsidePointerDown,
-            true,
-          )
-        }
-      }
-    } catch (_) {}
-  }
-  if (!window.__kaikaMenuCursorZone) {
-    apply('')
+    window.setSelectionMenuCursorZone(null)
     return
   }
-  apply('default')
-  bindIframes()
+  // Bind iframe dismiss listeners immediately (zone coords arrive next frame).
+  __kaikaMenuCursorBindIframes()
+  __kaikaMenuCursorSetSuppressText(true)
+}
+
+window.setSelectionMenuCursorZone = (zone) => {
+  const next = zone && typeof zone === 'object' ? zone : null
+  // Skip no-op updates from Flutter post-frame callbacks every rebuild.
+  if (__kaikaMenuCursorEqualZone(window.__kaikaMenuCursorZone, next)
+      && !!next === !!window.__kaikaMenuCursorZone) {
+    if (next) __kaikaMenuCursorBindIframes()
+    return
+  }
+  window.__kaikaMenuCursorZone = next
+  if (window.__kaikaMenuCursorZone) {
+    window.__kaikaSelectionMenuOpen = true
+    __kaikaMenuCursorSetSuppressText(true)
+    __kaikaMenuCursorBindIframes()
+    // Force one apply after zone change (mousemove may not fire if still).
+    window.__kaikaLastMenuCursor = null
+    __kaikaMenuCursorApply('default')
+    return
+  }
+  __kaikaMenuCursorSetSuppressText(false)
+  window.__kaikaLastMenuCursor = null
+  __kaikaMenuCursorApply('')
 }
 
 if (!window.__kaikaMenuCursorListening) {
@@ -2330,19 +2499,8 @@ if (!window.__kaikaMenuCursorListening) {
     if (!zone) return
     const { x, y } = clientPoint(e)
     const inside = pointInZone(zone, x, y)
-    const cursor = inside ? 'pointer' : 'default'
-    const setDoc = (doc) => {
-      if (!doc) return
-      try {
-        if (doc.documentElement) doc.documentElement.style.cursor = cursor
-        if (doc.body) doc.body.style.cursor = cursor
-      } catch (_) {}
-    }
-    setDoc(document)
-    try {
-      const contents = reader?.view?.renderer?.getContents?.() || []
-      for (const content of contents) setDoc(content.doc)
-    } catch (_) {}
+    // Only flip when crossing the bubble edge — not on every pixel move.
+    __kaikaMenuCursorApply(inside ? 'pointer' : 'default')
   }
 
   window.__kaikaMenuOutsidePointerDown = (e) => {
@@ -2356,11 +2514,33 @@ if (!window.__kaikaMenuCursorListening) {
       return
     }
     try {
+      // Collapse may race ahead of clearSelection — arm before Flutter hop.
+      window.__kaikaClearingForMenuDismiss = true
+      window.__kaikaSuppressChromeOnceUntil = Date.now() + 400
+      try {
+        const contents = reader?.view?.renderer?.getContents?.() || []
+        for (const content of contents) {
+          const d = content.doc
+          if (!d) continue
+          d.__anxSuppressClick = false
+          d.__anxSelectionClearedAt = 0
+          if (d.__anxSuppressClickTimer) {
+            clearTimeout(d.__anxSuppressClickTimer)
+            d.__anxSuppressClickTimer = 0
+          }
+        }
+      } catch (_) {}
       // Sync flags before click/show-annotation on the same gesture.
       window.__kaikaSelectionMenuOpen = false
       window.__kaikaMenuCursorZone = null
+      window.__kaikaLastMenuCursor = null
+      __kaikaMenuCursorSetSuppressText(false)
+      __kaikaMenuCursorApply('')
       window.__kaikaIgnoreAnnotationClickUntil = Date.now() + 800
       callFlutter('onSelectionMenuDismiss')
+      setTimeout(() => {
+        window.__kaikaClearingForMenuDismiss = false
+      }, 120)
     } catch (_) {}
   }
 
@@ -2461,15 +2641,81 @@ window.getSelectedText = () => {
   return ''
 }
 
+// Surrounding text before/after the current selection — for AI translation
+// "附带选区前后文" (includeContext). Walks rendered text nodes, not chapter
+// normalization, so it matches what the user actually selected.
+window.selectionContext = (opts = {}) => {
+  const beforeN = Math.max(0, Number(opts?.before ?? 100) || 0)
+  const afterN = Math.max(0, Number(opts?.after ?? 100) || 0)
+  const empty = { before: '', after: '' }
+  try {
+    const range = reader.getSelection()
+    if (!range || range.collapsed) return empty
+    const before = beforeN > 0
+      ? walkSelectionText(range.startContainer, range.startOffset, -1, beforeN)
+      : ''
+    const after = afterN > 0
+      ? walkSelectionText(range.endContainer, range.endOffset, 1, afterN)
+      : ''
+    return { before, after }
+  } catch (e) {
+    console.warn('[Kaika] selectionContext failed', e)
+    return empty
+  }
+}
+
+function previousLeaf(node) {
+  let n = node
+  while (n && !n.previousSibling) n = n.parentNode
+  if (!n) return null
+  n = n.previousSibling
+  while (n && n.lastChild) n = n.lastChild
+  return n
+}
+
+function nextLeaf(node) {
+  let n = node
+  while (n && !n.nextSibling) n = n.parentNode
+  if (!n) return null
+  n = n.nextSibling
+  while (n && n.firstChild) n = n.firstChild
+  return n
+}
+
+function walkSelectionText(node, offset, dir, maxChars) {
+  let out = ''
+  let current = node
+  let at = offset
+  let guard = 0
+  while (out.length < maxChars && guard++ < 2000) {
+    if (current && current.nodeType === 3) {
+      const text = current.textContent || ''
+      const part = dir < 0 ? text.slice(0, at) : text.slice(at)
+      if (part) {
+        out = dir < 0 ? part + out : out + part
+        if (out.length >= maxChars) break
+      }
+      at = 0
+    }
+    current = dir < 0 ? previousLeaf(current) : nextLeaf(current)
+  }
+  const collapsed = out.replace(/\s+/g, ' ').trim()
+  if (collapsed.length <= maxChars) return collapsed
+  return dir < 0 ? collapsed.slice(-maxChars) : collapsed.slice(0, maxChars)
+}
+
 window.clearSelection = () => {
   window.__kaikaClearingForMenuDismiss = true
+  // Same-gesture click after menu close must not open chrome, but must not
+  // stick around to require a second tap either.
+  window.__kaikaSuppressChromeOnceUntil = Date.now() + 400
   try {
     reader.view.deselect()
   } finally {
     // selectionchange may arrive after this stack; keep flag briefly.
     setTimeout(() => {
       window.__kaikaClearingForMenuDismiss = false
-    }, 50)
+    }, 120)
   }
 }
 
@@ -2606,6 +2852,442 @@ window.previousContent = (count = 2000) => reader.getPreviousContent(count)
 
 window.getChapterContentByHref = async (href, opts) =>
   reader.getChapterContentByHref(href, opts)
+
+const plainText = value => String(value || '').replace(/\s+/g, ' ').trim()
+
+const sampleTextFromBothEnds = (text, maxChars) => {
+  if (text.length <= maxChars) return text
+  const head = Math.floor(maxChars * 0.72)
+  const tail = maxChars - head
+  return `${text.slice(0, head)}\n…\n${text.slice(text.length - tail)}`
+}
+
+const tocItemsForLogicalSections = toc => {
+  const queue = Array.isArray(toc) ? [toc] : []
+  let depth = 0
+  while (queue.length) {
+    const items = queue.shift()
+    const usable = items
+      .map(item => ({ ...item, label: plainText(item?.label) }))
+      .filter((item, index, all) =>
+        item.label.length >= 2 && all.findIndex(other => other.label === item.label) === index)
+    const labels = usable.map(item => item.label)
+    console.log(
+      '[Kaika][AI outline] TOC depth=', depth,
+      'items=', items.length,
+      'labels=', JSON.stringify(labels.slice(0, 24)),
+    )
+    // MOBI/AZW3 often wraps all works under one "总目录" node. Use the
+    // first level that contains siblings, rather than assuming the root.
+    if (labels.length >= 2) {
+      console.log(
+        '[Kaika][AI outline] selected TOC labels=',
+        JSON.stringify(labels.slice(0, 24)),
+      )
+      return usable
+    }
+    const children = []
+    for (const item of items) {
+      if (Array.isArray(item?.subitems) && item.subitems.length)
+        children.push(item.subitems)
+    }
+    queue.push(...children)
+    depth += 1
+  }
+  console.warn('[Kaika][AI outline] no usable TOC sibling labels')
+  return []
+}
+
+// Unlike title matching, a navigation target is stable across MOBI/AZW3
+// layouts. Resolve the TOC once and combine the sections between two targets.
+const tocSectionStarts = async (book, tocItems) => {
+  if (!book?.resolveHref || tocItems.length < 2) return []
+  const starts = []
+  for (const item of tocItems) {
+    if (!item.href) continue
+    try {
+      const target = await book.resolveHref(item.href)
+      if (Number.isInteger(target?.index) && target.index >= 0)
+        starts.push({ index: target.index, label: item.label })
+    } catch (e) {
+      console.warn('[Kaika][AI outline] TOC target resolve failed=', item.label, e)
+    }
+  }
+  starts.sort((a, b) => a.index - b.index)
+  const unique = starts.filter((item, index, all) =>
+    index === 0 || item.index !== all[index - 1].index)
+  console.log(
+    '[Kaika][AI outline] TOC targets=',
+    JSON.stringify(unique.map(item => `${item.index + 1}:${item.label}`)),
+  )
+  return unique.length >= 2 ? unique : []
+}
+
+// MOBI/AZW3 frequently provides a real navigation tree while flattening its
+// rendered content into one section without useful heading elements. The TOC
+// labels occur first in the contents page, then again where each work starts.
+const logicalSectionsFromToc = (bodyText, tocLabels, fallbackLabel) => {
+  if (tocLabels.length < 2) {
+    console.warn('[Kaika][AI outline] TOC split skipped: fewer than two labels')
+    return []
+  }
+  const positions = []
+  let cursor = 0
+  for (const label of tocLabels) {
+    const position = bodyText.indexOf(label, cursor)
+    if (position < 0) {
+      console.warn('[Kaika][AI outline] TOC first occurrence missing=', label)
+      return []
+    }
+    positions.push(position)
+    cursor = position + label.length
+  }
+
+  const starts = []
+  for (const label of tocLabels) {
+    const position = bodyText.indexOf(label, cursor)
+    if (position < 0) {
+      console.warn('[Kaika][AI outline] TOC second occurrence missing=', label)
+      return []
+    }
+    starts.push(position)
+    cursor = position + label.length
+  }
+  const output = []
+  const prelude = bodyText.slice(0, starts[0]).trim()
+  if (prelude) output.push({ label: fallbackLabel, text: prelude })
+  for (let i = 0; i < tocLabels.length; i++) {
+    const start = starts[i] + tocLabels[i].length
+    const end = starts[i + 1] ?? bodyText.length
+    const text = bodyText.slice(start, end).trim()
+    if (text) output.push({ label: tocLabels[i], text })
+  }
+  // Do not replace a valid section with a TOC that only points at labels.
+  const substantialCount = output.filter(piece => piece.text.length >= 120).length
+  console.log(
+    '[Kaika][AI outline] TOC split=',
+    'bodyChars=', bodyText.length,
+    'firstPositions=', JSON.stringify(positions),
+    'starts=', JSON.stringify(starts),
+    'pieces=', output.length,
+    'substantial=', substantialCount,
+  )
+  return substantialCount >= 2 ? output : []
+}
+
+// Some EPUBs put a whole anthology in one spine XHTML file. Split that file
+// at a repeated heading level so AI features see works/volumes, not one giant
+// "chapter" whose opening happens to be the table of contents.
+const logicalSectionsFromDocument = (doc, fallbackLabel, tocLabels = []) => {
+  const body = doc?.body
+  if (!body) return []
+  const bodyText = plainText(body.textContent)
+  const allHeadings = [...body.querySelectorAll('h1, h2, h3, h4, h5, h6')]
+    .filter(heading => plainText(heading.textContent))
+  let headings = []
+  for (let level = 1; level <= 6; level++) {
+    const matches = allHeadings.filter(heading => heading.localName === `h${level}`)
+    if (matches.length >= 2) {
+      headings = matches
+      break
+    }
+  }
+  if (!headings.length) {
+    const fromToc = logicalSectionsFromToc(bodyText, tocLabels, fallbackLabel)
+    return fromToc.length ? fromToc : (bodyText ? [{ label: fallbackLabel, text: bodyText }] : [])
+  }
+
+  const textBetween = (start, end) => {
+    const range = doc.createRange()
+    if (start) range.setStartAfter(start)
+    else range.selectNodeContents(body)
+    if (end) range.setEndBefore(end)
+    return plainText(range.toString())
+  }
+  const output = []
+  const prelude = textBetween(null, headings[0])
+  if (prelude) output.push({ label: fallbackLabel, text: prelude })
+  for (let i = 0; i < headings.length; i++) {
+    const label = plainText(headings[i].textContent)
+    const text = textBetween(headings[i], headings[i + 1])
+    // Keep a heading-only unit: it can still be useful to the structure plan.
+    if (label || text) output.push({ label: label || fallbackLabel, text })
+  }
+  return output
+}
+
+const outlineRangeEnd = (start, nextStart, endExclusive) => {
+  const end = Number.isInteger(nextStart) ? nextStart : endExclusive
+  return Number.isInteger(end) && end > start ? end : null
+}
+
+const findOutlineTocNode = async (book, items, startIndex) => {
+  for (const item of items || []) {
+    let target = null
+    try { target = item?.href ? await book.resolveHref(item.href) : null } catch (e) {}
+    if (target?.index === startIndex && Array.isArray(item?.subitems) && item.subitems.length)
+      return item
+    const nested = await findOutlineTocNode(book, item?.subitems, startIndex)
+    if (nested) return nested
+  }
+  return null
+}
+
+const outlineTocCandidates = async (book, startIndex, endExclusive) => {
+  const parent = await findOutlineTocNode(book, book?.toc, startIndex)
+  if (!parent?.subitems?.length) return []
+  const resolved = []
+  for (const item of parent.subitems) {
+    const label = plainText(item?.label)
+    if (!label || !item?.href) continue
+    try {
+      const target = await book.resolveHref(item.href)
+      if (Number.isInteger(target?.index) && target.index >= startIndex &&
+          (!Number.isInteger(endExclusive) || target.index < endExclusive)) {
+        resolved.push({ label, start: target.index })
+      }
+    } catch (e) {
+      console.warn('[Kaika][AI outline] child TOC target resolve failed=', label, e)
+    }
+  }
+  resolved.sort((a, b) => a.start - b.start)
+  const unique = resolved.filter((item, index, all) =>
+    index === 0 || item.start !== all[index - 1].start)
+  return unique.map((item, index) => ({
+    label: item.label,
+    start: item.start,
+    end: outlineRangeEnd(item.start, unique[index + 1]?.start, endExclusive),
+    source: 'toc',
+  }))
+}
+
+const outlineHeadingCandidates = async (sections, startIndex, endExclusive) => {
+  const output = []
+  const last = Number.isInteger(endExclusive) ? Math.min(endExclusive, sections.length) : sections.length
+  for (let index = startIndex; index < last; index++) {
+    const section = sections[index]
+    if (!section?.createDocument) continue
+    try {
+      const doc = await section.createDocument()
+      const headings = [...(doc?.querySelectorAll?.('h1, h2, h3, h4, h5, h6') || [])]
+        .map(heading => ({ heading, label: plainText(heading.textContent) }))
+        .filter(item => item.label.length >= 2)
+      if (!headings.length) continue
+      // The document's first real heading is its stable section-level anchor.
+      // We deliberately avoid multiple offsets inside one XHTML until a CFI
+      // locator is carried through the bridge.
+      output.push({
+        label: headings[0].label,
+        start: index,
+        end: index + 1,
+        source: 'heading',
+      })
+    } catch (e) {
+      console.warn('[Kaika][AI outline] heading read failed=', index + 1, e)
+    }
+  }
+  return output.length >= 2 ? output : []
+}
+
+const outlineSemanticCandidates = (sections, startIndex, endExclusive) => {
+  const last = Number.isInteger(endExclusive) ? Math.min(endExclusive, sections.length) : sections.length
+  const output = []
+  for (let index = startIndex; index < last; index++) {
+    const section = sections[index]
+    if (!section) continue
+    output.push({
+      label: String(section.href || section.id || `第 ${index + 1} 节`),
+      start: index,
+      end: index + 1,
+      source: 'semantic',
+    })
+  }
+  return output.length >= 2 ? output : []
+}
+
+const outlineCandidateBodies = async (sections, candidates, maxChars) => {
+  if (!candidates.length) return []
+  const perCandidate = Math.max(2400, Math.floor(maxChars / candidates.length))
+  const output = []
+  for (const candidate of candidates) {
+    const last = Number.isInteger(candidate.end)
+      ? Math.min(candidate.end, sections.length)
+      : sections.length
+    let body = ''
+    for (let index = candidate.start; index < last; index++) {
+      const section = sections[index]
+      if (!section?.createDocument) continue
+      try {
+        const doc = await section.createDocument()
+        const text = plainText(doc?.body?.textContent)
+        if (text) body += `${body ? '\n\n' : ''}${text}`
+      } catch (e) {
+        console.warn('[Kaika][AI outline] child body read failed=', index + 1, e)
+      }
+    }
+    const text = sampleTextFromBothEnds(body, perCandidate)
+    if (!text) continue
+    output.push({
+      label: candidate.label,
+      startSectionIndex: candidate.start + 1,
+      endSectionIndexExclusive: Number.isInteger(candidate.end) ? candidate.end + 1 : null,
+      text,
+      source: candidate.source,
+    })
+  }
+  return output
+}
+
+/// Reader-derived child ranges for a generated outline node. This returns
+/// only JSON-compatible values for the Flutter WebView bridge.
+window.getOutlineChildren = async (opts = {}) => {
+  const sections = reader?.view?.book?.sections || []
+  const book = reader?.view?.book
+  const start = Math.max(0, (Number(opts?.startSectionIndex) || 1) - 1)
+  const rawEnd = Number(opts?.endSectionIndexExclusive)
+  const end = Number.isFinite(rawEnd) && rawEnd > start + 1
+    ? Math.min(Math.floor(rawEnd) - 1, sections.length)
+    : null
+  const rawMax = Number(opts?.maxChars)
+  const maxChars = Number.isFinite(rawMax) && rawMax > 0
+    ? Math.min(Math.floor(rawMax), 300000)
+    : 120000
+  if (!sections.length || start >= sections.length) return []
+
+  let candidates = await outlineTocCandidates(book, start, end)
+  if (!candidates.length) candidates = await outlineHeadingCandidates(sections, start, end)
+  if (!candidates.length) candidates = outlineSemanticCandidates(sections, start, end)
+  // A one-item fallback would just restate the parent, so cache it as leaf.
+  if (candidates.length < 2) return []
+  const output = await outlineCandidateBodies(sections, candidates, maxChars)
+  console.log(
+    '[Kaika][AI outline] children=',
+    `range=${start + 1}-${end || sections.length}`,
+    `source=${candidates[0]?.source || 'none'}`,
+    `candidates=${output.length}`,
+    `labels=${JSON.stringify(output.slice(0, 24).map(item => item.label))}`,
+  )
+  return output
+}
+
+/// Concatenate spine section plain text for book-wide AI chat (no spoiler gate).
+/// Caps total length; collapses whitespace to keep tokens useful.
+window.getBookPlainText = async (opts = {}) => {
+  const rawMax = opts?.maxChars
+  const numericMax = rawMax == null ? 48000 : Number(rawMax)
+  // Corpus-level ceiling: covers whole books so later chapters stay searchable.
+  // The loop below still honors `maxChars` per call; this is just a sanity cap.
+  const maxChars = Number.isFinite(numericMax) && numericMax > 0
+    ? Math.min(Math.floor(numericMax), 1500000)
+    : 48000
+  const sections = reader?.view?.book?.sections || []
+  if (!sections.length) return ''
+
+  let out = ''
+  let logicalIndex = 0
+  const book = reader?.view?.book
+  const tocItems = tocItemsForLogicalSections(book?.toc)
+  const tocLabels = tocItems.map(item => item.label)
+  const tocStarts = await tocSectionStarts(book, tocItems)
+  const tocStartsBySection = new Map(tocStarts.map(item => [item.index, item]))
+  const useTocTargets = tocStarts.length >= 2
+  const tocPieces = []
+  let activeTocPiece = null
+  const flushTocPiece = () => {
+    if (activeTocPiece?.text.trim()) tocPieces.push(activeTocPiece)
+    activeTocPiece = null
+  }
+  const appendPiece = (label, text, sourceSectionIndex) => {
+    if (out.length >= maxChars || !text.trim()) return false
+    logicalIndex += 1
+    const navigationUnit = useTocTargets ? '~' : ''
+    const piece = `\n\n[§${logicalIndex}@${sourceSectionIndex}${navigationUnit} ${label}]\n${text.trim()}`
+    const room = maxChars - out.length
+    if (piece.length > room) {
+      out += piece.slice(0, room)
+      return false
+    }
+    out += piece
+    return true
+  }
+  console.log(
+    '[Kaika][AI outline] getBookPlainText=',
+    'sections=', sections.length,
+    'maxChars=', maxChars,
+    'tocLabels=', tocLabels.length,
+    'useTocTargets=', useTocTargets,
+  )
+  for (let i = 0; i < sections.length; i++) {
+    if (out.length >= maxChars) break
+    const section = sections[i]
+    if (!section?.createDocument) continue
+    try {
+      const doc = await section.createDocument()
+      const fallbackLabel = String(section.href || section.id || (i + 1))
+      if (useTocTargets) {
+        const tocStart = tocStartsBySection.get(i)
+        if (tocStart) {
+          flushTocPiece()
+          activeTocPiece = {
+            label: tocStart.label,
+            sourceSectionIndex: i + 1,
+            text: '',
+          }
+        }
+        // Text before the first work is front matter. Giving it a stable
+        // metadata label lets the Dart layer discard it without guessing.
+        activeTocPiece ??= {
+          label: '目录',
+          sourceSectionIndex: i + 1,
+          text: '',
+        }
+        const text = plainText(doc?.body?.textContent)
+        if (text) {
+          activeTocPiece.text +=
+            `${activeTocPiece.text ? '\n\n' : ''}${text}`
+        }
+        continue
+      }
+      const pieces = logicalSectionsFromDocument(doc, fallbackLabel, tocLabels)
+      console.log(
+        '[Kaika][AI outline] section=', i + 1,
+        'fallback=', fallbackLabel,
+        'bodyChars=', plainText(doc?.body?.textContent).length,
+        'pieces=', pieces.length,
+        'labels=', JSON.stringify(pieces.slice(0, 24).map(piece => piece.label)),
+      )
+      for (const { label, text } of pieces) {
+        if (!appendPiece(label, text, i + 1)) break
+      }
+    } catch (e) {
+      console.warn('[Kaika] getBookPlainText section failed', i, e)
+    }
+  }
+  if (useTocTargets) {
+    flushTocPiece()
+    // Do not let a long first work consume the bridge budget and erase later
+    // works. The Dart outline service samples these balanced unit bodies again.
+    const maxTocPieceChars = Math.max(
+      12000,
+      Math.floor(maxChars / Math.max(1, tocPieces.length)) - 256,
+    )
+    for (const piece of tocPieces) {
+      const sample = sampleTextFromBothEnds(piece.text, maxTocPieceChars)
+      if (!appendPiece(piece.label, sample, piece.sourceSectionIndex)) break
+    }
+    console.log(
+      '[Kaika][AI outline] TOC units=', tocPieces.length,
+      'perUnitChars=', maxTocPieceChars,
+      'labels=', JSON.stringify(tocPieces.map(piece => piece.label)),
+    )
+  }
+  console.log(
+    '[Kaika][AI outline] output=',
+    'logicalSections=', logicalIndex,
+    'chars=', out.length,
+  )
+  return out.trim()
+}
 
 // window.convertChinese = (mode) => reader.convertChinese(mode)
 

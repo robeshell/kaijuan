@@ -7,26 +7,25 @@
 
 | 你要… | 打开 |
 |--------|------|
-| 产品功能、阶段、非目标 | [PRODUCT.md](./PRODUCT.md) |
+| 产品功能、状态、下一程、非目标 | [PRODUCT.md](./PRODUCT.md) |
 | 共享视觉 | [DESIGN_FOUNDATION.md](./DESIGN_FOUNDATION.md) |
 | 工程结构 / 单入口 / 数据沿用 | [ENGINEERING.md](./ENGINEERING.md) |
 | Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | 某屏交互 | [specs/](./specs/) |
-| 图书工具条大改计划 | [specs/book-reader-tool-strip-plan.md](./specs/book-reader-tool-strip-plan.md)（底栏已落地，可归档） |
-| 图书阅读下一程 | [specs/book-reader-next-plan.md](./specs/book-reader-next-plan.md) |
-| 图书听书（TTS）方案 | [specs/book-tts.md](./specs/book-tts.md)（方案；不接云端 AI） |
+| 图书阅读下一程（历史计划） | [specs/book-reader-next-plan.md](./specs/book-reader-next-plan.md) |
+| 图书听书（TTS） | [specs/book-tts.md](./specs/book-tts.md)（T1 MVP 已有；不接云端 AI 音色） |
+| 本书 AI 智能体 | [specs/ai.md](./specs/ai.md)（BYOK / 词典译 / 对话…） |
+| AI 翻译偏好与选区译 | [specs/ai-translation.md](./specs/ai-translation.md)（设计定稿） |
 | 给 Open Design | [opendesign/HANDOFF.md](./opendesign/HANDOFF.md) |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
 | 会话交接（易过期） | [dev-handoff.md](./dev-handoff.md) |
-
-> 当前交接状态（2026-07-22）：Foliate 大改造尚未提交，Android metadata probe 存在已定位的 `style.allowScript` 启动参数阻塞。接手前先读 [dev-handoff.md](./dev-handoff.md)。
 
 ## 目录树
 
 ```text
 docs/
   README.md
-  PRODUCT.md                 ← 产品权威（单 App 双引擎）
+  PRODUCT.md                 ← 产品权威
   DESIGN_FOUNDATION.md       ← 视觉权威
   ENGINEERING.md             ← 工程骨架
   dev-handoff.md
@@ -35,12 +34,15 @@ docs/
   specs/
     _TEMPLATE.md
     library.md / shelf.md / search.md / lists.md / collections.md
-    subpages.md                     ← 管理型二级/子级页面统一骨架
-    reader-chrome.md / comic-reader.md / book-reader.md / wifi-transfer.md
-    webdav-backup.md              ← WebDAV 快照备份与恢复
-    reading-stats.md                 ← 阅读统计（洞察 + 时长 + 热力 + 备份）
-    book-reader-tool-strip-plan.md   ← 图书底栏工具条大改（计划）
-    book-tts.md                      ← 听书方案（系统 TTS，不接 AI）
+    subpages.md
+    import.md / remote-sources.md / wifi-transfer.md / webdav-backup.md
+    reader-chrome.md / comic-reader.md / book-reader.md
+    reading-stats.md
+    book-reader-tool-strip-plan.md   ← 图书底栏（已落地，可归档）
+    book-reader-next-plan.md
+    book-tts.md
+    ai.md                            ← 本书 AI 智能体
+    ai-translation.md                ← AI 翻译偏好与选区译（设计定稿）
   opendesign/
     HANDOFF.md / CONTEXT.md / DESIGN.md / BRIEFS.md
 ```
@@ -59,23 +61,30 @@ docs/
 
 - **一个 App、一套数据**（沿用已有 `app_library`）。  
 - **一个仓库**，共享 core；两个引擎按 `item.kind` 路由。  
-- 书库内提供「全部 / 漫画 / 图书」类型筛选，不再用品牌分段。  
-- 导入 **CBZ / ZIP / EPUB / FB2 / MOBI / AZW3 / PDF / TXT / MD**；EPUB 自动探测正文 vs 页图。导入链路按「方式 / 格式」两层组织，见 [specs/import.md](./specs/import.md)。
+- 书库内「全部 / 漫画 / 图书」类型筛选。  
+- 导入 **CBZ / ZIP / EPUB / FB2 / MOBI / AZW3 / PDF / TXT / MD**；方式/格式两层，见 [import.md](./specs/import.md)。  
+- **AI** 为可选本书智能体（BYOK），见 [PRODUCT.md §6](./PRODUCT.md)。
 
 ## 如何扩展
 
 ### 加功能
 
-1. 改 PRODUCT §4 表（标明 engine：image / book / 共享）。  
+1. 改 [PRODUCT.md](./PRODUCT.md) 对应功能表（标明引擎：页图 / reflow / 共享）。  
 2. 开或改 specs。  
 3. 实现挂对应 engine 或共享层（见 ENGINEERING）。  
 
 ### 加格式 / 导入策略
 
-1. PRODUCT §8 格式矩阵说明。
-2. `docs/specs/import.md` 先明确方式层与格式层的边界。
-3. `ReaderFormat` / `EpubImportRouter` 加格式路由；方式适配器只产生 `ImportCandidate`。
-4. 对应 import service 加支持，并复用统一 staging / hash / 提交协议。
+1. PRODUCT §7 格式矩阵。  
+2. `docs/specs/import.md` 明确方式层与格式层边界。  
+3. `ReaderFormat` / 路由加格式；方式适配器只产生 `ImportCandidate`。  
+4. 复用统一 staging / hash / 提交协议。  
+
+### 加 AI 能力
+
+1. 改 PRODUCT §6 能力表与落地顺序。  
+2. 开或改 `docs/specs/ai.md`；翻译专项见 `docs/specs/ai-translation.md`。  
+3. ENGINEERING 增加 `lib/ai`（或等价）边界与 Provider 约定。  
 
 ### 加工程包
 
@@ -87,14 +96,19 @@ docs/
 | Spec | 说明 |
 |------|------|
 | library / shelf / search | 书库 / 书架 / 搜索 |
-| import | 导入方式与导入格式两层链路 |
+| import | 导入方式与格式两层链路 |
+| remote-sources | WebDAV 导入 + OPDS |
+| wifi-transfer | WiFi 传书 MVP |
 | lists | **书单**（长清单） |
 | collections | **合集**（拼贴盒） |
-| subpages | 管理型二级/子级页面的统一布局、操作与状态 |
+| subpages | 管理型二级/子级页面骨架 |
 | reader-chrome | 共享 chrome 语言 |
-| book-reader | book reflow（主链已落地） |
+| comic-reader / book-reader | 双引擎阅读 |
 | webdav-backup | 用户自有 WebDAV 备份与恢复 |
-| book-tts | 听书方案（未实现；Foliate 切句 + 系统 TTS） |
+| reading-stats | 阅读统计 |
+| book-tts | 听书（系统 TTS；T1 MVP 已有） |
+| ai | 本书 AI 智能体（M0–M2 MVP；M3+ 规划） |
+| ai-translation | AI 翻译偏好与选区译（设计定稿；T0–T4） |
 | settings / mobile / overlay | **待写** |
 
-整理三概念权威表见 [PRODUCT.md §4.4a](./PRODUCT.md)。
+整理三概念权威表见 [PRODUCT.md §4.3](./PRODUCT.md)。

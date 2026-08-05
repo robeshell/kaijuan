@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
+import '../../core/text_editing_focus.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../library/stats/reading_time_tracker.dart';
@@ -12,7 +13,9 @@ import '../../library/storage/library_paths.dart';
 import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
+import '../controllers/ai_settings_controller.dart';
 import '../controllers/book_reader_controller.dart';
+import '../widgets/ai_settings_scope.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/reader/book_annotation_note_sheet.dart';
 import '../widgets/reader/book_image_viewer.dart';
@@ -34,11 +37,15 @@ class BookReaderScreen extends StatefulWidget {
     required this.database,
     required this.item,
     this.readingPreferences,
+    this.aiSettings,
   });
 
   final AppDatabase database;
   final ReadingItem item;
   final BookReadingPreferences? readingPreferences;
+
+  /// Optional; when null the screen resolves [AiSettingsScope] from context.
+  final AiSettingsController? aiSettings;
 
   static Future<void> open(
     BuildContext context, {
@@ -46,6 +53,9 @@ class BookReaderScreen extends StatefulWidget {
     required ReadingItem item,
     BookReadingPreferences? readingPreferences,
   }) {
+    // Resolve from the navigator context (fully mounted) so initState of the
+    // new route does not miss the inherited scope.
+    final aiSettings = AiSettingsScope.maybeOf(context);
     return Navigator.of(context, rootNavigator: true).push<void>(
       PageRouteBuilder<void>(
         transitionDuration: Duration.zero,
@@ -55,6 +65,7 @@ class BookReaderScreen extends StatefulWidget {
             database: database,
             item: item,
             readingPreferences: readingPreferences,
+            aiSettings: aiSettings ?? AiSettingsScope.maybeOf(context),
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -89,6 +100,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       database: widget.database,
       item: widget.item,
       readingPreferences: widget.readingPreferences,
+      aiSettings: widget.aiSettings ?? AiSettingsScope.maybeOf(context),
       scrollModeEnabled: scrollModeEnabled,
     );
     if (!scrollModeEnabled &&
@@ -98,6 +110,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       );
     }
     _engine = FoliateJsBookEngineAdapter(readerController: _controller);
+    _controller.attachPlatformFocusClearer(_engine.clearPlatformFocus);
     _controller.onOpenNoteEditor = _presentNoteEditor;
     _controller.addListener(_onBookControllerTick);
     _timeTracker = ReadingTimeTracker(
@@ -120,7 +133,16 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       }
     });
     _engine.attach();
+    // When AI/search/note TextFields take focus, drop WKWebView first-responder
+    // so Cmd/Ctrl+C·V reach Flutter instead of the platform view.
+    FocusManager.instance.addListener(_onGlobalFocusChange);
     unawaited(_openBookFile());
+  }
+
+  void _onGlobalFocusChange() {
+    if (!mounted) return;
+    if (!primaryFocusIsTextEditing()) return;
+    unawaited(_engine.clearPlatformFocus());
   }
 
   /// TTS playback must not accumulate reading time (PRODUCT §4.8).
@@ -134,9 +156,14 @@ class _BookReaderScreenState extends State<BookReaderScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Re-bind if initState missed the scope (route edge cases).
+    _controller.bindAiSettings(
+      widget.aiSettings ?? AiSettingsScope.maybeOf(context),
+    );
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    _reveal.duration =
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 420);
+    _reveal.duration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 420);
   }
 
   Future<void> _openBookFile() async {
@@ -189,6 +216,12 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    // Search / AI / notes / any TextField: do not steal Space, T, arrows, etc.
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary != null && primary != node && focusIsTextEditing(primary)) {
+      return KeyEventResult.ignored;
+    }
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (_controller.imageViewerOpen) {
@@ -321,12 +354,6 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                   fit: StackFit.expand,
                   children: [
                     _engine.buildView(context),
-                    const Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: ReaderWindowDragHandle(),
-                    ),
                     if (_showReveal)
                       IgnorePointer(
                         child: AnimatedBuilder(
@@ -387,6 +414,14 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                       if (_controller.imageViewerOpen)
                         BookImageViewer(controller: _controller),
                     ],
+                    // Above WebView + chrome SafeArea pad so the title band
+                    // still moves the window (Platform View eats background drag).
+                    const Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: ReaderWindowDragHandle(),
+                    ),
                   ],
                 ),
               ),
@@ -399,9 +434,11 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_onGlobalFocusChange);
     _controller.removeListener(_onBookControllerTick);
     unawaited(_timeTracker.detach());
     _controller.onOpenNoteEditor = null;
+    _controller.detachPlatformFocusClearer();
     _reveal.dispose();
     _focusNode.dispose();
     _engine.dispose();

@@ -117,11 +117,9 @@ class PlatformBookLanguageProvider implements BookLanguageProvider {
   }
 }
 
-/// Placeholder backend for the future AI integration.
-///
-/// It is intentionally not selected as the default backend yet. The AI layer
-/// can later implement [BookLanguageProvider] for both selected text and a
-/// full-book translation task.
+/// Historical placeholder. In-app AI dictionary / translation is driven by
+/// [AiLanguageService] + reader UI sheet, not this class. Kept so existing
+/// tests and docs references remain valid; do not select as the default.
 class AiBookLanguageProvider implements BookLanguageProvider {
   const AiBookLanguageProvider();
 
@@ -129,7 +127,7 @@ class AiBookLanguageProvider implements BookLanguageProvider {
   Future<BookLanguageActionResult> execute(BookLanguageRequest request) async {
     return const BookLanguageActionResult(
       status: BookLanguageActionStatus.unsupported,
-      message: 'AI 语言能力尚未配置',
+      message: '请在阅读器选区使用词典/翻译；并先在设置中启用 AI',
     );
   }
 }

@@ -6,6 +6,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../../ai/ai_chat.dart';
+import '../../ai/ai_chat_retrieve.dart';
+import '../../ai/ai_chat_service.dart';
+import '../../ai/ai_chat_tools.dart';
+import '../../ai/ai_log.dart';
+import '../../ai/ai_language_service.dart';
+import '../../ai/ai_models.dart';
+import '../../ai/ai_outline.dart';
+import '../../ai/ai_provider.dart';
+import '../../ai/ai_search.dart';
+import '../../ai/ai_translation.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
@@ -13,6 +24,7 @@ import '../../readers/book/book_models.dart';
 import '../../readers/book/book_theme.dart';
 import '../../readers/book/book_language_actions.dart';
 import '../../readers/book/foliate_js_bridge.dart';
+import 'ai_settings_controller.dart';
 
 /// Listen-to-book playback state (system TTS).
 enum BookTtsStatus { idle, playing, paused }
@@ -27,6 +39,7 @@ class BookReaderController extends ChangeNotifier {
     required this.item,
     BookReadingPreferences? readingPreferences,
     BookLanguageProvider? languageProvider,
+    AiSettingsController? aiSettings,
     this.scrollModeEnabled = true,
   }) : languageProvider =
            languageProvider ?? const PlatformBookLanguageProvider(),
@@ -74,6 +87,7 @@ class BookReaderController extends ChangeNotifier {
            readingPreferences?.pageTurnEffect ??
            BookReadingPreferences.defaultPageTurnEffect {
     readingPreferences?.fontStore.addListener(_onFontStoreChanged);
+    bindAiSettings(aiSettings);
   }
 
   void _onFontStoreChanged() {
@@ -84,8 +98,90 @@ class BookReaderController extends ChangeNotifier {
   final AppDatabase database;
   final ReadingItem item;
   final BookLanguageProvider languageProvider;
+  AiSettingsController? _aiSettings;
+  AiLanguageService? _aiLanguage;
   final BookReadingPreferences? _prefs;
   final bool scrollModeEnabled;
+  Future<void> Function()? _clearPlatformFocus;
+
+  /// Wire / re-wire BYOK AI after the widget tree can resolve [AiSettingsScope].
+  /// Safe to call repeatedly; no-ops when the controller identity is unchanged.
+  void bindAiSettings(AiSettingsController? aiSettings) {
+    if (identical(_aiSettings, aiSettings) &&
+        (aiSettings == null) == (_aiLanguage == null) &&
+        (aiSettings == null) == (_aiChat == null) &&
+        (aiSettings == null) == (_aiOutline == null)) {
+      return;
+    }
+    _aiSettings = aiSettings;
+    _aiLanguage = aiSettings == null
+        ? null
+        : AiLanguageService(
+            isAvailable: () => aiSettings.isReadyForRequests,
+            openProvider: () => aiSettings.openProvider(),
+            // Always read live settings so translation prefs pick up changes
+            // made while the reader is already open.
+            settings: () => aiSettings.settings,
+          );
+    _aiChat = aiSettings == null
+        ? null
+        : AiChatService(
+            isAvailable: () => aiSettings.isReadyForRequests,
+            openProvider: () => aiSettings.openProvider(),
+            settings: () => aiSettings.settings,
+          );
+    _aiOutline = aiSettings == null
+        ? null
+        : AiBookOutlineService(
+            isAvailable: () => aiSettings.isReadyForRequests,
+            openProvider: () => aiSettings.openProvider(),
+            settings: () => aiSettings.settings,
+          );
+    if (!_disposed) notifyListeners();
+  }
+
+  /// True when BYOK AI is enabled and ready for dictionary / translation / chat.
+  bool get canUseAiLanguage => _aiLanguage?.isAvailable ?? false;
+
+  /// Same readiness gate as language tools (shared provider + key).
+  bool get canUseAiChat => _aiChat?.isAvailable ?? false;
+
+  /// Search API key configured (chat 联网 switch).
+  bool get canUseWebSearch => _aiSettings?.isSearchReady ?? false;
+
+  AiSettingsController? get aiSettingsController => _aiSettings;
+
+  /// Live translation prefs from the shared settings controller (not a snapshot).
+  AiTranslationPreferences get translationPreferences =>
+      _aiSettings?.settings.translation ?? const AiTranslationPreferences();
+
+  /// Authors from EPUB metadata when the book is open (may be empty).
+  List<String> get bookAuthors => _bookAuthors;
+
+  /// Display label for AI prompts / UI ("甲、乙").
+  String get bookAuthorsLabel => _bookAuthors.join('、');
+
+  /// Called when Foliate reports OPF/publication metadata after open.
+  void setPublicationAuthors(List<String> authors) {
+    final cleaned = authors
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+    if (_listEqualsString(_bookAuthors, cleaned)) return;
+    _bookAuthors = cleaned;
+    if (!_disposed) notifyListeners();
+  }
+
+  static bool _listEqualsString(List<String> a, List<String> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  List<String> _bookAuthors = const [];
 
   BookSectionMap? _sectionMap;
   List<String> _tocTitles = const [];
@@ -164,8 +260,36 @@ class BookReaderController extends ChangeNotifier {
   void Function(String cfi)? _removeAnnotationFromEngine;
   VoidCallback? _clearWebSelection;
   Future<String> Function()? _getSelectedText;
+  Future<String> Function()? _getChapterText;
+  Future<String> Function(int maxChars)? _getReadSoFarText;
+  Future<String> Function(int maxChars)? _getBookPlainText;
+  Future<List<AiBookOutlineCandidate>> Function({
+    required int startSectionIndex,
+    required int? endSectionIndexExclusive,
+    required int maxChars,
+  })?
+  _getOutlineChildren;
+  Future<({String before, String after})?> Function(int before, int after)?
+  _getSelectionContext;
   void Function(Map<String, double>? zone)? _setMenuCursorZone;
   void Function(bool open)? _setMenuOpen;
+  AiChatService? _aiChat;
+  AiBookOutlineService? _aiOutline;
+  AiChatHistoryStore? _chatHistoryStore;
+  AiBookOutline? _bookOutline;
+  AiOutlineProgress? _bookOutlineProgress;
+  String? _bookOutlineError;
+  CancelToken? _bookOutlineCancel;
+  Future<void>? _bookOutlineGeneration;
+  final Map<String, Future<void>> _bookOutlineDetailGenerations = {};
+  final Map<String, CancelToken> _bookOutlineDetailCancels = {};
+  final Map<String, AiOutlineProgress> _bookOutlineDetailProgress = {};
+  final Map<String, String> _bookOutlineDetailErrors = {};
+  Future<void> _chatSessionWriteQueue = Future<void>.value();
+
+  /// Cached multi-section plain text for book chat (per open).
+  String? _cachedBookPlainText;
+  int _cachedBookPlainTextBudget = 0;
   void Function(String query)? _runSearch;
   VoidCallback? _clearSearch;
   Future<String?> Function()? _ttsHere;
@@ -373,6 +497,18 @@ class BookReaderController extends ChangeNotifier {
   // Engine lifecycle
   // ------------------------------------------------------------------
 
+  void attachPlatformFocusClearer(Future<void> Function() clear) {
+    _clearPlatformFocus = clear;
+  }
+
+  void detachPlatformFocusClearer() {
+    _clearPlatformFocus = null;
+  }
+
+  Future<void> clearPlatformFocus() async {
+    await _clearPlatformFocus?.call();
+  }
+
   /// Reads the native CFI before the WebView starts so the renderer can open
   /// directly at the saved position instead of painting page one and jumping.
   Future<BookLocator?> loadInitialLocator() async {
@@ -450,6 +586,17 @@ class BookReaderController extends ChangeNotifier {
     required Future<String> Function() getSelectedText,
     required void Function(Map<String, double>? zone) setMenuCursorZone,
     required void Function(bool open) setMenuOpen,
+    Future<String> Function()? getChapterText,
+    Future<String> Function(int maxChars)? getReadSoFarText,
+    Future<String> Function(int maxChars)? getBookPlainText,
+    Future<List<AiBookOutlineCandidate>> Function({
+      required int startSectionIndex,
+      required int? endSectionIndexExclusive,
+      required int maxChars,
+    })?
+    getOutlineChildren,
+    Future<({String before, String after})?> Function(int before, int after)?
+    getSelectionContext,
   }) {
     _renderAnnotations = renderAll;
     _addAnnotationToEngine = add;
@@ -458,6 +605,16 @@ class BookReaderController extends ChangeNotifier {
     _getSelectedText = getSelectedText;
     _setMenuCursorZone = setMenuCursorZone;
     _setMenuOpen = setMenuOpen;
+    _getChapterText = getChapterText;
+    _getReadSoFarText = getReadSoFarText;
+    _getBookPlainText = getBookPlainText;
+    _getOutlineChildren = getOutlineChildren;
+    _getSelectionContext = getSelectionContext;
+  }
+
+  /// Optional chat history store (per contentHash). Null → memory-only session.
+  void attachChatHistoryStore(AiChatHistoryStore? store) {
+    _chatHistoryStore = store;
   }
 
   void attachSearchBridge({
@@ -498,8 +655,630 @@ class BookReaderController extends ChangeNotifier {
     _removeAnnotationFromEngine = null;
     _clearWebSelection = null;
     _getSelectedText = null;
+    _getChapterText = null;
+    _getReadSoFarText = null;
+    _getBookPlainText = null;
+    _getOutlineChildren = null;
     _setMenuCursorZone = null;
     _setMenuOpen = null;
+    _cachedBookPlainText = null;
+    _cachedBookPlainTextBudget = 0;
+  }
+
+  /// Load or create the chat session for this book (isolated by contentHash).
+  Future<AiChatSession> loadChatSession() async {
+    final hash = item.contentHash;
+    final store = _chatHistoryStore;
+    if (store == null) {
+      return AiChatSession(contentHash: hash, itemId: item.id);
+    }
+    return await store.read(contentHash: hash, itemId: item.id) ??
+        AiChatSession(contentHash: hash, itemId: item.id);
+  }
+
+  Future<void> saveChatSession(AiChatSession session) async {
+    await _enqueueChatSessionWrite(() async {
+      final store = _chatHistoryStore;
+      if (store == null) return;
+      // The chat sheet and outline job save independently. Serialize those
+      // read-modify-write operations so neither can overwrite the other.
+      final current = await store.read(
+        contentHash: item.contentHash,
+        itemId: item.id,
+      );
+      await store.write(
+        current?.outline != null && session.outline == null
+            ? session.copyWith(outline: current!.outline)
+            : session,
+      );
+    });
+  }
+
+  Future<void> _enqueueChatSessionWrite(Future<void> Function() operation) {
+    final queued = _chatSessionWriteQueue.then<void>(
+      (_) => operation(),
+      onError: (_) => operation(),
+    );
+    _chatSessionWriteQueue = queued.catchError((_) {});
+    return queued;
+  }
+
+  /// User-initiated only. Do **not** call from library delete — same contentHash
+  /// re-import must restore this session (PRODUCT / ai.md §7.3).
+  Future<void> clearChatSession() async {
+    await _enqueueChatSessionWrite(() async {
+      final store = _chatHistoryStore;
+      if (store == null) return;
+      final current = await store.read(
+        contentHash: item.contentHash,
+        itemId: item.id,
+      );
+      if (current?.outline != null) {
+        await store.write(current!.copyWith(messages: const []));
+      } else {
+        await store.delete(item.contentHash);
+      }
+    });
+  }
+
+  AiBookOutline? get bookOutline => _bookOutline;
+  AiOutlineProgress? get bookOutlineProgress => _bookOutlineProgress;
+  String? get bookOutlineError => _bookOutlineError;
+  bool get isGeneratingBookOutline => _bookOutlineGeneration != null;
+
+  /// Loads the cached outline for this exact content hash. This does not call
+  /// the model; a book is only generated when the user explicitly requests it.
+  Future<AiBookOutline?> loadBookOutline({AiChatSession? session}) async {
+    final resolvedSession = session ?? await loadChatSession();
+    final outline = resolvedSession.outline;
+    if (!identical(_bookOutline, outline)) {
+      _bookOutline = outline;
+      if (!_disposed) notifyListeners();
+    }
+    return outline;
+  }
+
+  /// Generates a chapter outline in batches. The controller owns the job, so
+  /// closing the AI sheet does not cancel it while the reader remains open.
+  Future<void> generateBookOutline() {
+    final active = _bookOutlineGeneration;
+    if (active != null) return active;
+    final done = Completer<void>();
+    _bookOutlineGeneration = done.future;
+    unawaited(() async {
+      try {
+        await _generateBookOutline();
+        done.complete();
+      } catch (error, stackTrace) {
+        done.completeError(error, stackTrace);
+      }
+    }());
+    unawaited(
+      done.future.whenComplete(() {
+        _bookOutlineGeneration = null;
+        _bookOutlineCancel = null;
+        if (!_disposed) notifyListeners();
+      }),
+    );
+    return done.future;
+  }
+
+  Future<void> _generateBookOutline() async {
+    final service = _aiOutline;
+    if (service == null || !canUseAiChat) {
+      _bookOutlineError = 'AI 未启用或未配置';
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    _bookOutlineError = null;
+    final cancel = CancelToken();
+    _bookOutlineCancel = cancel;
+    if (!_disposed) notifyListeners();
+    try {
+      final body = await _loadBookPlainTextCached(
+        AiBookOutlineService.maxBookBodyChars,
+      );
+      var sections = AiChatBookCorpus.parseSections(body);
+      if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
+      AiLog.d(
+        'outline extracted=${sections.length} '
+        'navigation=${sections.where((section) => section.isNavigationUnit).length} '
+        'labels=${sections.take(24).map((section) => section.label).join(' | ')}',
+      );
+      // A book outline is explicitly whole-book work. Restricting it to the
+      // current spine position turns a collection opened at its front matter
+      // into a one-item "outline".
+      const includeUnread = true;
+      final titled = [
+        for (final section in sections)
+          AiBookSectionSlice(
+            index: section.index,
+            label: section.label.trim().isNotEmpty
+                ? section.label.trim()
+                : _titleForOutlineSection(section.index),
+            text: section.text,
+            sourceSectionIndex: section.sourceSectionIndex,
+            isNavigationUnit: section.isNavigationUnit,
+          ),
+      ];
+      final outlineSections = _filterOutlineSections(titled);
+      if (outlineSections.isEmpty) {
+        throw AiProviderException('没有可用于生成大纲的正文');
+      }
+      AiLog.d(
+        'outline usable=${outlineSections.length} '
+        'navigation=${outlineSections.where((section) => section.isNavigationUnit).length} '
+        'indexes=${outlineSections.map((section) => section.index).join(',')}',
+      );
+      final outline = await service.generate(
+        bookTitle: item.title,
+        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        sections: outlineSections,
+        includesUnread: includeUnread,
+        cancelToken: cancel,
+        onProgress: (progress) {
+          _bookOutlineProgress = progress;
+          if (!_disposed) notifyListeners();
+        },
+      );
+      _bookOutline = outline;
+      _bookOutlineProgress = null;
+      await _saveBookOutline(outline);
+      if (!_disposed) notifyListeners();
+    } on AiProviderException catch (error) {
+      _bookOutlineProgress = null;
+      if (!cancel.isCancelled) {
+        _bookOutlineError = error.message;
+      }
+      if (!_disposed) notifyListeners();
+    } catch (_) {
+      _bookOutlineProgress = null;
+      if (!cancel.isCancelled) {
+        _bookOutlineError = '生成大纲失败，请稍后重试';
+      }
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  String _titleForOutlineSection(int sectionIndex1Based) {
+    final toc = _tocTitles;
+    final index = sectionIndex1Based - 1;
+    if (index >= 0 && index < toc.length && toc[index].trim().isNotEmpty) {
+      return toc[index].trim();
+    }
+    return '第 $sectionIndex1Based 节';
+  }
+
+  /// EPUB spine often contains a TOC, copyright page and other paratext.
+  /// Structure planning belongs to [AiBookOutlineService]; this controller
+  /// only removes unambiguous metadata before the model sees the body.
+  List<AiBookSectionSlice> _filterOutlineSections(
+    List<AiBookSectionSlice> sections,
+  ) {
+    return sections
+        .where((section) => !_isOutlineMetadataSection(section))
+        .toList(growable: false);
+  }
+
+  bool _isOutlineMetadataTitle(String value) {
+    final title = value.trim().replaceAll(RegExp(r'\s+'), '');
+    return RegExp(
+      r'^(目录|总目录|全书目录|章节目录|目次|版权(?:信息)?|出版(?:信息|说明)?|图书在版编目|封面|封底|扉页|书名页)$',
+    ).hasMatch(title);
+  }
+
+  bool _isOutlineMetadataSection(AiBookSectionSlice section) {
+    if (_isOutlineMetadataTitle(section.label)) return true;
+    // A navigation target is already a named work/volume boundary. MOBI
+    // collections often put that work's own contents page before its body;
+    // treating the prefix as global metadata would discard the whole work.
+    if (section.isNavigationUnit) return false;
+    final text = section.text.trim();
+    if (text.isEmpty) return true;
+    final prefix = text.length > 640 ? text.substring(0, 640) : text;
+    final compact = prefix.replaceAll(RegExp(r'\s+'), '');
+    if (RegExp(r'^(目录|目次)(?:[：:]|$)').hasMatch(compact)) return true;
+    final hasCopyrightSignal = RegExp(
+      r'ISBN|图书在版编目|版权所有|版权归属|版权信息',
+    ).hasMatch(prefix);
+    return hasCopyrightSignal && RegExp(r'出版|出版社|版权|编目').hasMatch(prefix);
+  }
+
+  Future<void> _saveBookOutline(AiBookOutline outline) async {
+    await _enqueueChatSessionWrite(() async {
+      final store = _chatHistoryStore;
+      if (store == null) return;
+      final current = await store.read(
+        contentHash: item.contentHash,
+        itemId: item.id,
+      );
+      await store.write(
+        (current ??
+                AiChatSession(contentHash: item.contentHash, itemId: item.id))
+            .copyWith(outline: outline),
+      );
+    });
+  }
+
+  bool isGeneratingBookOutlineChildren(AiBookOutlineChapter chapter) =>
+      _bookOutlineDetailGenerations.containsKey(chapter.stableNodeId);
+
+  AiOutlineProgress? bookOutlineChildrenProgress(
+    AiBookOutlineChapter chapter,
+  ) => _bookOutlineDetailProgress[chapter.stableNodeId];
+
+  String? bookOutlineChildrenError(AiBookOutlineChapter chapter) =>
+      _bookOutlineDetailErrors[chapter.stableNodeId];
+
+  bool canGenerateBookOutlineChildren(AiBookOutlineChapter chapter) {
+    final children = chapter.children;
+    if (children != null) return children.isNotEmpty;
+    final outline = _bookOutline;
+    if (outline == null) return false;
+    final range = _outlineRangeFor(chapter, outline.chapters);
+    final end = range.endSectionIndexExclusive;
+    return end == null || end > range.startSectionIndex + 1;
+  }
+
+  /// Generates one reader-derived outline range when the reader explicitly
+  /// requests it. A successful empty result is persisted as a leaf.
+  Future<void> generateBookOutlineChildren(
+    AiBookOutlineChapter chapter, {
+    bool force = false,
+  }) {
+    if (!force && chapter.children != null) return Future<void>.value();
+    final nodeId = chapter.stableNodeId;
+    final active = _bookOutlineDetailGenerations[nodeId];
+    if (active != null) return active;
+    final done = Completer<void>();
+    _bookOutlineDetailGenerations[nodeId] = done.future;
+    unawaited(() async {
+      try {
+        await _generateBookOutlineChildren(chapter);
+        done.complete();
+      } catch (error, stackTrace) {
+        done.completeError(error, stackTrace);
+      }
+    }());
+    unawaited(
+      done.future.whenComplete(() {
+        _bookOutlineDetailGenerations.remove(nodeId);
+        _bookOutlineDetailCancels.remove(nodeId);
+        _bookOutlineDetailProgress.remove(nodeId);
+        if (!_disposed) notifyListeners();
+      }),
+    );
+    return done.future;
+  }
+
+  Future<void> _generateBookOutlineChildren(
+    AiBookOutlineChapter chapter,
+  ) async {
+    final service = _aiOutline;
+    final bridge = _getOutlineChildren;
+    final current = _bookOutline;
+    if (service == null || !canUseAiChat || bridge == null || current == null) {
+      _bookOutlineDetailErrors[chapter.stableNodeId] = '无法读取本书的子级结构';
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    final range = _outlineRangeFor(chapter, current.chapters);
+    final cancel = CancelToken();
+    _bookOutlineDetailCancels[chapter.stableNodeId] = cancel;
+    _bookOutlineDetailErrors.remove(chapter.stableNodeId);
+    if (!_disposed) notifyListeners();
+    try {
+      final candidates = await bridge(
+        startSectionIndex: range.startSectionIndex,
+        endSectionIndexExclusive: range.endSectionIndexExclusive,
+        maxChars: 240000,
+      );
+      cancel.throwIfCancelled();
+      AiLog.d(
+        'outline children parent=${chapter.stableNodeId} '
+        'range=${range.startSectionIndex}-${range.endSectionIndexExclusive ?? 'end'} '
+        'candidates=${candidates.length}',
+      );
+      final children = await service.generateChildren(
+        bookTitle: item.title,
+        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        parentNodeId: chapter.stableNodeId,
+        candidates: candidates,
+        cancelToken: cancel,
+        onProgress: (progress) {
+          _bookOutlineDetailProgress[chapter.stableNodeId] = progress;
+          if (!_disposed) notifyListeners();
+        },
+      );
+      cancel.throwIfCancelled();
+      final outline = _bookOutline;
+      if (outline == null) return;
+      final updatedChapters = _replaceOutlineChildren(
+        outline.chapters,
+        chapter.stableNodeId,
+        children,
+      );
+      final attachedCount = _outlineChildrenCount(
+        updatedChapters,
+        chapter.stableNodeId,
+      );
+      if (attachedCount == null) {
+        _bookOutlineDetailErrors[chapter.stableNodeId] = '无法更新下级大纲';
+        AiLog.d(
+          'outline children attach failed parent=${chapter.stableNodeId} '
+          'roots=${outline.chapters.length}',
+        );
+        if (!_disposed) notifyListeners();
+        return;
+      }
+      _bookOutline = outline.copyWith(chapters: updatedChapters);
+      if (!_disposed) notifyListeners();
+      // The result is ready for the open sheet. Persistence is serialized with
+      // chat writes and must not delay replacing the expanded tree on screen.
+      AiLog.d(
+        'outline children ready parent=${chapter.stableNodeId} '
+        'count=${children.length} attached=$attachedCount',
+      );
+      await _saveBookOutline(_bookOutline!);
+      AiLog.d('outline children persisted parent=${chapter.stableNodeId}');
+    } on AiProviderException catch (error) {
+      if (!cancel.isCancelled) {
+        _bookOutlineDetailErrors[chapter.stableNodeId] = error.message;
+      }
+      if (!_disposed) notifyListeners();
+    } catch (_) {
+      if (!cancel.isCancelled) {
+        _bookOutlineDetailErrors[chapter.stableNodeId] = '生成子级大纲失败，请稍后重试';
+      }
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  ({int startSectionIndex, int? endSectionIndexExclusive}) _outlineRangeFor(
+    AiBookOutlineChapter target,
+    List<AiBookOutlineChapter> roots,
+  ) {
+    ({int startSectionIndex, int? endSectionIndexExclusive})? find(
+      List<AiBookOutlineChapter> siblings,
+    ) {
+      for (var index = 0; index < siblings.length; index++) {
+        final node = siblings[index];
+        if (node.stableNodeId == target.stableNodeId) {
+          final start = node.sourceSectionIndex ?? node.sectionIndex;
+          final nextStart = index + 1 < siblings.length
+              ? siblings[index + 1].sourceSectionIndex ??
+                    siblings[index + 1].sectionIndex
+              : null;
+          final end = node.endSectionIndexExclusive ?? nextStart;
+          return (
+            startSectionIndex: start,
+            endSectionIndexExclusive: end != null && end > start ? end : null,
+          );
+        }
+        final children = node.children;
+        if (children != null) {
+          final nested = find(children);
+          if (nested != null) return nested;
+        }
+      }
+      return null;
+    }
+
+    return find(roots) ??
+        (
+          startSectionIndex: target.sourceSectionIndex ?? target.sectionIndex,
+          endSectionIndexExclusive: target.endSectionIndexExclusive,
+        );
+  }
+
+  List<AiBookOutlineChapter> _replaceOutlineChildren(
+    List<AiBookOutlineChapter> nodes,
+    String parentNodeId,
+    List<AiBookOutlineChapter> children,
+  ) {
+    return [
+      for (final node in nodes)
+        if (node.stableNodeId == parentNodeId)
+          node.copyWith(children: children)
+        else if (node.children != null)
+          node.copyWith(
+            children: _replaceOutlineChildren(
+              node.children!,
+              parentNodeId,
+              children,
+            ),
+          )
+        else
+          node,
+    ];
+  }
+
+  int? _outlineChildrenCount(
+    List<AiBookOutlineChapter> nodes,
+    String targetNodeId,
+  ) {
+    for (final node in nodes) {
+      if (node.stableNodeId == targetNodeId) return node.children?.length;
+      final children = node.children;
+      if (children != null) {
+        final nested = _outlineChildrenCount(children, targetNodeId);
+        if (nested != null) return nested;
+      }
+    }
+    return null;
+  }
+
+  Future<void> deleteBookOutline() async {
+    if (isGeneratingBookOutline) return;
+    await _enqueueChatSessionWrite(() async {
+      final store = _chatHistoryStore;
+      if (store != null) {
+        final current = await store.read(
+          contentHash: item.contentHash,
+          itemId: item.id,
+        );
+        if (current != null) {
+          if (current.messages.isEmpty) {
+            await store.delete(item.contentHash);
+          } else {
+            await store.write(current.copyWith(clearOutline: true));
+          }
+        }
+      }
+    });
+    _bookOutline = null;
+    _bookOutlineError = null;
+    if (!_disposed) notifyListeners();
+  }
+
+  void cancelBookOutlineGeneration() {
+    _bookOutlineCancel?.cancel();
+    for (final cancel in _bookOutlineDetailCancels.values) {
+      cancel.cancel();
+    }
+  }
+
+  /// Text for AI chat attachment: menu first, then live WebView selection.
+  Future<String> peekSelectedText() async {
+    final fromMenu = _selectionMenu?.text.trim() ?? '';
+    if (fromMenu.isNotEmpty) return fromMenu;
+    return ((await _getSelectedText?.call()) ?? '').trim();
+  }
+
+  /// Dismiss the selection **bubble** but keep page highlight when possible.
+  /// Call after [peekSelectedText] when opening 本书 AI.
+  void dismissSelectionMenuKeepHighlight() {
+    // Survive focus moving into the AI panel (WebView may fire selectionchange).
+    retainSelectionMenuForInteraction(
+      duration: const Duration(milliseconds: 2000),
+    );
+    clearSelectionMenu(clearWebSelection: false);
+  }
+
+  /// Lean chat seed: current chapter + selection + TOC titles (no whole-book dump).
+  Future<AiChatContextBundle> loadAiChatContext({
+    String? selectionOverride,
+  }) async {
+    try {
+      var selection = selectionOverride?.trim() ?? '';
+      if (selection.isEmpty) {
+        selection = _selectionMenu?.text.trim() ?? '';
+      }
+      if (selection.isEmpty) {
+        selection = ((await _getSelectedText?.call()) ?? '').trim();
+      }
+      final chapter = ((await _getChapterText?.call()) ?? '').trim();
+      final outline = _tocTitles
+          .map((t) => t.trim())
+          .where((t) => t.isNotEmpty)
+          .toList(growable: false);
+      return AiChatContextBundle(
+        chapterTitle: currentChapterTitle,
+        chapterText: chapter,
+        selectionText: selection,
+        tocOutline: outline,
+      );
+    } catch (_) {
+      return AiChatContextBundle(chapterTitle: currentChapterTitle);
+    }
+  }
+
+  Future<String> _loadBookPlainTextCached(int maxChars) async {
+    // Corpus-level budget: must cover the whole book so search / sample see
+    // later chapters (books are commonly 300–700k chars). Per-prompt truncation
+    // happens later in AiChatRetrieve / tool packers.
+    final budget = maxChars.clamp(2000, 1500000);
+    final cached = _cachedBookPlainText;
+    if (cached != null &&
+        cached.isNotEmpty &&
+        _cachedBookPlainTextBudget >= budget) {
+      return cached.length > budget ? cached.substring(0, budget) : cached;
+    }
+    final loaded = ((await _getBookPlainText?.call(budget)) ?? '').trim();
+    if (loaded.isNotEmpty) {
+      _cachedBookPlainText = loaded;
+      _cachedBookPlainTextBudget = budget;
+      return loaded;
+    }
+    // Fallback: current chapter only if spine extract failed.
+    return ((await _getChapterText?.call()) ?? '').trim();
+  }
+
+  /// Tool host for on-demand body (toc / chapter / search / sample).
+  AiChatToolHost get chatToolHost => _BookChatToolHost(this);
+
+  /// Stream an assistant reply for book chat. Null when AI is unavailable.
+  Stream<String>? streamBookChat({
+    required String userText,
+    required List<AiChatMessage> history,
+    required AiChatContextBundle context,
+    List<AiWebSearchHit>? webHits,
+    CancelToken? cancelToken,
+    void Function(String? status)? onToolStatus,
+  }) {
+    final service = _aiChat;
+    if (service == null || !service.isAvailable) return null;
+    return service.streamReply(
+      userText: userText,
+      history: history,
+      context: context,
+      bookTitle: item.title,
+      bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+      webHits: webHits,
+      tools: chatToolHost,
+      cancelToken: cancelToken,
+      onToolStatus: onToolStatus,
+    );
+  }
+
+  /// A short, answer-specific follow-up prompt. Failure is intentionally an
+  /// empty result so the chat sheet can keep its stable fallback suggestions.
+  Future<List<String>> suggestBookChatFollowUps({
+    required String userText,
+    required String answer,
+    required AiChatContextBundle context,
+    CancelToken? cancelToken,
+  }) async {
+    final service = _aiChat;
+    if (service == null || !service.isAvailable) return const [];
+    return service.suggestFollowUpQuestions(
+      userText: userText,
+      answer: answer,
+      context: context,
+      bookTitle: item.title,
+      bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+      cancelToken: cancelToken,
+    );
+  }
+
+  /// BYOK web search for chat 联网. Empty list if not configured.
+  Future<List<AiWebSearchHit>> searchWebForChat(String query) async {
+    final ai = _aiSettings;
+    if (ai == null || !ai.isSearchReady) {
+      throw AiProviderException('请先在设置中配置联网搜索 Key');
+    }
+    final q = buildAiWebSearchQuery(
+      userText: query,
+      bookTitle: item.title,
+      bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+    );
+    return ai.searchWeb(q);
+  }
+
+  /// Surrounding text around the current WebView selection (translation
+  /// context, ai-translation §4.5). Null when unavailable (selection gone /
+  /// legacy bundle without `window.selectionContext`).
+  Future<({String before, String after})?> loadSelectionContext({
+    int before = 100,
+    int after = 100,
+  }) async {
+    final fn = _getSelectionContext;
+    if (fn == null) return null;
+    try {
+      return await fn(before, after);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Foliate `renderAnnotations` handler — may arrive before DB watch emits.
@@ -896,12 +1675,12 @@ class BookReaderController extends ChangeNotifier {
     );
     if (_selectionMenu == null) {
       _setMenuOpen?.call(false);
-      _setMenuCursorZone?.call(null);
+      _clearMenuCursorZone();
       return;
     }
     _selectionMenu = null;
     _setMenuOpen?.call(false);
-    _setMenuCursorZone?.call(null);
+    _clearMenuCursorZone();
     // Anx only clears the native selection when the menu closes.
     if (clearWebSelection) {
       _clearWebSelection?.call();
@@ -911,27 +1690,54 @@ class BookReaderController extends ChangeNotifier {
 
   /// Call from the bubble on pointer-down so focus-loss selection clears do
   /// not dismiss mid-tap. Auto-unlocks; a later real deselect will close.
-  void retainSelectionMenuForInteraction() {
+  void retainSelectionMenuForInteraction({
+    Duration duration = const Duration(milliseconds: 500),
+  }) {
     _selectionClearLocked = true;
     _selectionClearLockTimer?.cancel();
-    _selectionClearLockTimer = Timer(const Duration(milliseconds: 500), () {
+    _selectionClearLockTimer = Timer(duration, () {
       _selectionClearLocked = false;
     });
   }
 
+  Map<String, double>? _lastMenuCursorZone;
+
   /// Normalized viewport box for the Flutter menu bubble (Platform View cursor).
+  ///
+  /// Skips identical updates — the selection overlay rebuilds often, and
+  /// re-pushing the same zone into the WebView makes the desktop cursor flicker.
   void setMenuCursorZone({
     required double left,
     required double top,
     required double right,
     required double bottom,
   }) {
-    _setMenuCursorZone?.call({
+    final zone = <String, double>{
       'left': left.clamp(0.0, 1.0),
       'top': top.clamp(0.0, 1.0),
       'right': right.clamp(0.0, 1.0),
       'bottom': bottom.clamp(0.0, 1.0),
-    });
+    };
+    final prev = _lastMenuCursorZone;
+    if (prev != null &&
+        prev['left'] == zone['left'] &&
+        prev['top'] == zone['top'] &&
+        prev['right'] == zone['right'] &&
+        prev['bottom'] == zone['bottom']) {
+      return;
+    }
+    _lastMenuCursorZone = zone;
+    _setMenuCursorZone?.call(zone);
+  }
+
+  void _clearMenuCursorZone() {
+    if (_lastMenuCursorZone == null) {
+      // Still tell the engine — it may hold a zone after a hot restart / race.
+      _setMenuCursorZone?.call(null);
+      return;
+    }
+    _lastMenuCursorZone = null;
+    _setMenuCursorZone?.call(null);
   }
 
   /// Returns true when text was written to the clipboard.
@@ -955,6 +1761,17 @@ class BookReaderController extends ChangeNotifier {
     required BookLanguageOperation operation,
     String? textOverride,
   }) {
+    return performPlatformLanguageAction(
+      operation: operation,
+      textOverride: textOverride,
+    );
+  }
+
+  /// Always uses the platform dictionary / translation path (system apps).
+  Future<BookLanguageActionResult> performPlatformLanguageAction({
+    required BookLanguageOperation operation,
+    String? textOverride,
+  }) {
     final menu = _selectionMenu;
     final text = (textOverride ?? _selectionMenu?.text ?? '').trim();
     return languageProvider.execute(
@@ -964,6 +1781,47 @@ class BookReaderController extends ChangeNotifier {
         itemId: item.id,
         cfi: menu?.cfi,
       ),
+    );
+  }
+
+  /// AI stream for in-app dictionary / translation. Null when AI is unavailable.
+  Stream<String>? streamLanguageAssist({
+    required BookLanguageOperation operation,
+    required String text,
+    CancelToken? cancelToken,
+    AiTranslationRequestOptions? translationOptions,
+  }) {
+    final service = _aiLanguage;
+    if (service == null || !service.isAvailable) return null;
+    if (operation == BookLanguageOperation.fullBookTranslation) {
+      return null;
+    }
+    // Always attach work identity so the model can prefer established names.
+    final chapter = currentChapterTitle.trim();
+    final title = item.title.trim();
+    final authors = bookAuthorsLabel.trim();
+    final merged = AiTranslationRequestOptions(
+      targetLanguage: translationOptions?.targetLanguage,
+      directionMode: translationOptions?.directionMode,
+      style: translationOptions?.style,
+      contextBefore: translationOptions?.contextBefore,
+      contextAfter: translationOptions?.contextAfter,
+      bookTitle: (translationOptions?.bookTitle?.trim().isNotEmpty ?? false)
+          ? translationOptions!.bookTitle
+          : (title.isEmpty ? null : title),
+      bookAuthor: (translationOptions?.bookAuthor?.trim().isNotEmpty ?? false)
+          ? translationOptions!.bookAuthor
+          : (authors.isEmpty ? null : authors),
+      chapterTitle:
+          (translationOptions?.chapterTitle?.trim().isNotEmpty ?? false)
+          ? translationOptions!.chapterTitle
+          : (chapter.isEmpty ? null : chapter),
+    );
+    return service.streamAssist(
+      operation: operation,
+      text: text,
+      cancelToken: cancelToken,
+      translationOptions: merged,
     );
   }
 
@@ -1557,6 +2415,7 @@ class BookReaderController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _bookOutlineCancel?.cancel();
     _attachGeneration++;
     _ttsGeneration++;
     _prefs?.fontStore.removeListener(_onFontStoreChanged);
@@ -1890,5 +2749,112 @@ class BookReaderController extends ChangeNotifier {
     _ttsStatus = BookTtsStatus.playing;
     notifyListeners();
     unawaited(_runTtsLoop(generation));
+  }
+}
+
+/// On-demand book body for [AiChatService] tools (no whole-book prompt dump).
+class _BookChatToolHost implements AiChatToolHost {
+  _BookChatToolHost(this._c);
+
+  final BookReaderController _c;
+
+  @override
+  Future<String> toolGetToc() async {
+    final titles = _c.tocTitles;
+    if (titles.isEmpty) {
+      final body = await _c._loadBookPlainTextCached(
+        AiChatService.maxBookBodyChars,
+      );
+      final sections = AiChatBookCorpus.parseSections(body);
+      if (sections.isNotEmpty) {
+        return AiChatBookCorpus.formatTocFromSlices(sections);
+      }
+      return '(目录不可用)';
+    }
+    final buf = StringBuffer();
+    for (var i = 0; i < titles.length; i++) {
+      final t = titles[i].trim();
+      buf.writeln('§${i + 1} ${t.isEmpty ? '（无标题）' : t}');
+    }
+    return buf.toString().trimRight();
+  }
+
+  @override
+  Future<String> toolGetCurrentChapter({int maxChars = 10000}) async {
+    var text = ((await _c._getChapterText?.call()) ?? '').trim();
+    if (text.isEmpty) {
+      text = ((await _c._getReadSoFarText?.call(maxChars)) ?? '').trim();
+    }
+    if (text.isEmpty) return '(当前章正文不可用)';
+    final title = _c.currentChapterTitle.trim();
+    final body = text.length > maxChars
+        ? '${text.substring(0, maxChars)}…'
+        : text;
+    if (title.isEmpty) return body;
+    return '[$title]\n$body';
+  }
+
+  @override
+  Future<String> toolGetChapter(
+    int sectionIndex1Based, {
+    int maxChars = 10000,
+  }) async {
+    final body = await _c._loadBookPlainTextCached(
+      AiChatService.maxBookBodyChars,
+    );
+    final sections = AiChatBookCorpus.parseSections(body);
+    if (sections.isEmpty) {
+      // Fallback: only current chapter known.
+      if (sectionIndex1Based == _c.sectionIndex + 1) {
+        return toolGetCurrentChapter(maxChars: maxChars);
+      }
+      return 'Error: book body not loaded; try get_current_chapter.';
+    }
+    return AiChatBookCorpus.sectionText(
+      sections,
+      sectionIndex1Based,
+      maxChars: maxChars,
+    );
+  }
+
+  @override
+  Future<String> toolSearchBook(String query, {int maxChars = 12000}) async {
+    final body = await _c._loadBookPlainTextCached(
+      AiChatService.maxBookBodyChars,
+    );
+    if (body.isEmpty) return '(书中无正文可检索)';
+    final packed = AiChatRetrieve.pack(
+      userText: query,
+      selection: '',
+      bookBody: body,
+      maxSections: 10,
+      maxRelatedChars: maxChars,
+    );
+    final formatted = packed.formatRelatedForPrompt(maxChars: maxChars);
+    if (formatted.isEmpty) {
+      return 'No keyword hits for "$query". Try sample_book or get_toc.';
+    }
+    return 'Search "$query" (${packed.note}):\n$formatted';
+  }
+
+  @override
+  Future<String> toolSampleBook({int maxChars = 36000}) async {
+    final body = await _c._loadBookPlainTextCached(
+      AiChatService.maxBookBodyChars,
+    );
+    if (body.isEmpty) return '(书中无正文可取样)';
+    final packed = AiChatRetrieve.pack(
+      userText: '请根据提供的各部分正文，概括整本书的主线与主题',
+      selection: '',
+      bookBody: body,
+      maxSections: 16,
+      maxRelatedChars: maxChars,
+    );
+    final formatted = packed.formatRelatedForPrompt(maxChars: maxChars);
+    final outline = packed.sectionOutline.isEmpty
+        ? ''
+        : 'Parts: ${packed.sectionOutline.join(' · ')}\n\n';
+    if (formatted.isEmpty) return '$outline(empty samples)';
+    return '$outline$formatted';
   }
 }

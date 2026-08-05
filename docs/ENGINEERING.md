@@ -20,6 +20,7 @@ kaijuan/                            # 仓库名
     library/import/                 # 方式适配、格式判定、内容寻址、元数据、DB 提交
     readers/comic/                  # 页图引擎
     readers/book/                   # reflow 引擎
+    ai/                             # BYOK Provider、设置存储（不进 WebDAV 备份）
     presentation/                   # UI / controllers
   android/ ios/ macos/ windows/ linux/
   tool/                             # 构建与辅助脚本
@@ -89,6 +90,16 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - 选区词典 / 翻译由 `BookReaderController` 调用 `BookLanguageProvider`，表现层不直接持有平台通道。
 - 默认 `PlatformBookLanguageProvider` 只调用设备已有能力：Android 使用系统 Intent 选择器，Apple 使用系统词典 / Translation framework；不内置外网词典，也不发起网络请求。
 - `BookLanguageProvider` 的请求包含 `dictionary`、`selectionTranslation`、`fullBookTranslation` 三种操作；后续 AI Provider 可替换默认实现，承载单句结果或整本书任务，不改选区菜单协议。
+
+### AI 边界（BYOK）
+
+- 产品范围见 [PRODUCT.md §6](./PRODUCT.md) 与 [specs/ai.md](./specs/ai.md)。
+- `lib/ai/`：`AiProvider`（OpenAI 兼容 / Anthropic Messages）、`AiSettings`（非机密 JSON）、`SecureAiCredentialStore`（模型 Key + 搜索 Key 分槽）、选区语言 `AiLanguageService`、本书对话 `AiChatService`（**轻量 tool 循环**，非 LangChain；`get_toc` / `get_chapter` / `search_book` / `sample_book`）、`AiBookOutlineService`（模型先依据 spine 标题与短样本生成并校验结构计划，再按单元分批结构化大纲与全书汇总）、可选联网 `AiWebSearchService`（Tavily / Brave）+ `ai_chat/` 会话文件（按 contentHash；保存对话与大纲，用户主动快照时可备份，永不备份 Key）。
+- 预设服务商：OpenAI、Anthropic、DeepSeek；另支持「自定义（OpenAI 兼容）」端点。
+- 表现层只经 `AiSettingsController`；Widget **不得**持有 `http.Client`、不得读写安全存储、不得拼装供应商请求体。
+- API Key（模型与搜索）**不得**写入 `ai_settings.json`、WebDAV 备份清单或调试导出。
+- 总开关关闭时 `openProvider()` 返回 null，业务层不得绕过开关发请求。
+- 本书 AI「联网」默认关；仅开关开且已配搜索 Key 时才调用搜索 API，结果注入 chat system prompt 的补充区。
 
 ### 表现层导航边界
 

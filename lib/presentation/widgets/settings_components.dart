@@ -1,3 +1,5 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/kaijuan_icons.dart';
@@ -344,6 +346,106 @@ class AppSettingsFormField extends StatelessWidget {
         const SizedBox(height: 8),
         child,
       ],
+    );
+  }
+}
+
+/// Platform-adaptive switch sized for settings rows (not a 48×48 Material slab).
+///
+/// Apple platforms use [CupertinoSwitch] so the control matches system Settings;
+/// elsewhere the themed Material switch is used with a compact tap target.
+class AppSettingsSwitch extends StatelessWidget {
+  const AppSettingsSwitch({
+    required this.value,
+    required this.onChanged,
+    super.key,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = context.appColors.primary;
+    final disabled = onChanged == null;
+    final platform = defaultTargetPlatform;
+    final cupertino =
+        platform == TargetPlatform.iOS || platform == TargetPlatform.macOS;
+
+    // Apple: system-sized CupertinoSwitch. Bare Material Switch is oversized
+    // and fights the quiet settings chrome on macOS / iOS.
+    if (cupertino) {
+      return Opacity(
+        opacity: disabled ? 0.45 : 1,
+        child: CupertinoSwitch(
+          value: value,
+          onChanged: onChanged,
+          activeTrackColor: accent,
+        ),
+      );
+    }
+
+    return Switch(
+      value: value,
+      onChanged: onChanged,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      activeThumbColor: Theme.of(context).colorScheme.onPrimary,
+      activeTrackColor: accent,
+    );
+  }
+}
+
+/// Title + optional subtitle + trailing [AppSettingsSwitch], for settings groups.
+class AppSettingsSwitchRow extends StatelessWidget {
+  const AppSettingsSwitchRow({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+    super.key,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: context.appListTitleSize,
+                    fontWeight: FontWeight.w600,
+                    color: context.settingsPrimary,
+                  ),
+                ),
+                if (subtitle case final text?) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    text,
+                    style: TextStyle(
+                      color: context.settingsSecondary,
+                      fontSize: context.appCaptionSize,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          AppSettingsSwitch(value: value, onChanged: onChanged),
+        ],
+      ),
     );
   }
 }

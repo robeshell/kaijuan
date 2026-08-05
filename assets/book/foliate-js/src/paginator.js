@@ -445,6 +445,14 @@ export class Paginator extends HTMLElement {
   #loadingPrev = false
   #pendingRelocate = null
   #isSnapping = false
+  /** Pin scroll offset while the user is drag-selecting (desktop edge autoscroll). */
+  #selectionScrollLock = null
+  /** Cooldown so one trackpad/Magic Mouse flick turns at most one page. */
+  #wheelCooldownUntil = 0
+  #onWheelBound = null
+  #onDocSelectStartBound = null
+  #onDocPointerUpBound = null
+  #onDocSelectionChangeBound = null
   constructor() {
     super()
     this.#root.innerHTML = `<style>
@@ -507,6 +515,7 @@ export class Paginator extends HTMLElement {
             overflow-y: hidden;
             -webkit-overflow-scrolling: touch;
             touch-action: pan-x;
+            overscroll-behavior: none;
             -ms-overflow-style: none;  /* Internet Explorer 10+ */
             scrollbar-width: none;  /* Firefox */
         }
@@ -562,6 +571,15 @@ export class Paginator extends HTMLElement {
     this.#observer.observe(this.#container)
     this.#container.addEventListener('scroll', () => {
       if (this.#ignoreNativeScroll) return
+      // Desktop text selection drags near edges auto-scroll this multi-page
+      // strip; pin until the gesture ends so we never free-run pages.
+      if (this.#selectionScrollLock != null && !this.scrolled) {
+        const prop = this.scrollProp
+        if (Math.abs(this.#container[prop] - this.#selectionScrollLock) > 0.5) {
+          this.#container[prop] = this.#selectionScrollLock
+        }
+        return
+      }
       if (this.#justAnchored) {
         this.#justAnchored = false
         return
@@ -576,13 +594,28 @@ export class Paginator extends HTMLElement {
     })
 
     const opts = { passive: false }
+    this.#onWheelBound = this.#onWheel.bind(this)
+    this.#onDocSelectStartBound = () => this.#beginSelectionScrollLock()
+    this.#onDocPointerUpBound = () => this.#endSelectionScrollLockSoon()
+    this.#onDocSelectionChangeBound = () => {
+      if (!this.#hasActiveTextSelection()) this.#selectionScrollLock = null
+      else if (this.#selectionScrollLock == null) this.#beginSelectionScrollLock()
+    }
     this.addEventListener('touchstart', this.#onTouchStart.bind(this), opts)
     this.addEventListener('touchmove', this.#onTouchMove.bind(this), opts)
     this.addEventListener('touchend', this.#onTouchEnd.bind(this), opts)
+    // Capture wheel on the host so trackpad/Magic Mouse cannot free-scroll
+    // the horizontal page strip (one flick used to run many pages).
+    this.addEventListener('wheel', this.#onWheelBound, opts)
     this.addEventListener('load', ({ detail: { doc } }) => {
       doc.addEventListener('touchstart', this.#onTouchStart.bind(this), opts)
       doc.addEventListener('touchmove', this.#onTouchMove.bind(this), opts)
       doc.addEventListener('touchend', this.#onTouchEnd.bind(this), opts)
+      doc.addEventListener('wheel', this.#onWheelBound, opts)
+      doc.addEventListener('selectstart', this.#onDocSelectStartBound)
+      doc.addEventListener('pointerup', this.#onDocPointerUpBound)
+      doc.addEventListener('pointercancel', this.#onDocPointerUpBound)
+      doc.addEventListener('selectionchange', this.#onDocSelectionChangeBound)
     })
 
     this.#mediaQueryListener = () => {
@@ -1002,6 +1035,68 @@ export class Paginator extends HTMLElement {
     }
     if (window.__kaikaSelectionMenuOpen) return true
     return false
+  }
+
+  #beginSelectionScrollLock() {
+    if (this.scrolled) return
+    this.#selectionScrollLock = this.#container[this.scrollProp]
+  }
+
+  #endSelectionScrollLockSoon() {
+    // Defer so a late selectionchange from the same gesture still sees the pin.
+    requestAnimationFrame(() => {
+      if (!this.#hasActiveTextSelection()) this.#selectionScrollLock = null
+    })
+  }
+
+  /**
+   * Allow intentional page turns (auto-page during multi-page select) to move
+   * the scroller, then re-pin at the new offset.
+   */
+  releaseSelectionScrollLock() {
+    this.#selectionScrollLock = null
+  }
+
+  relockSelectionScroll() {
+    if (this.scrolled) return
+    if (!this.#hasActiveTextSelection()) {
+      this.#selectionScrollLock = null
+      return
+    }
+    this.#selectionScrollLock = this.#container[this.scrollProp]
+  }
+
+  /**
+   * Paginated mode lays pages in a horizontal overflow strip. Trackpad /
+   * Magic Mouse wheel events would free-scroll many pages with momentum.
+   * Spec (desktop): prevent free scroll; map only horizontal-dominant gestures
+   * to a single discrete page turn; never map pure vertical wheel to page turn.
+   */
+  #onWheel(e) {
+    if (this.scrolled) return
+    // Always kill native free-scroll through the multi-column strip.
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (this.#locked || this.#isSnapping) return
+    if (this.#hasActiveTextSelection()) return
+    // Browser zoom / pinch-zoom synthesis.
+    if (e.ctrlKey || e.metaKey) return
+
+    const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? (this.size || 800) : 1
+    const dx = e.deltaX * scale
+    const dy = e.deltaY * scale
+    const adx = Math.abs(dx)
+    const ady = Math.abs(dy)
+    // Vertical-dominant: no page turn (product: 不把纵向滚轮隐式映射成翻页).
+    if (adx < 10 || adx <= ady) return
+
+    const now = performance.now()
+    if (now < this.#wheelCooldownUntil) return
+    // Positive deltaX scrolls content left → next page in LTR.
+    const goNext = this.#rtl ? dx < 0 : dx > 0
+    this.#wheelCooldownUntil = now + 420
+    void (goNext ? this.next() : this.prev())
   }
 
   #onTouchEnd(e) {

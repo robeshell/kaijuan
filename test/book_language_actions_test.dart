@@ -40,7 +40,7 @@ void main() {
     },
   );
 
-  test('AI provider remains an explicit future hook', () async {
+  test('legacy AI provider hook stays unsupported', () async {
     const provider = AiBookLanguageProvider();
     final result = await provider.execute(
       const BookLanguageRequest(
@@ -50,6 +50,6 @@ void main() {
     );
 
     expect(result.status, BookLanguageActionStatus.unsupported);
-    expect(result.message, 'AI 语言能力尚未配置');
+    expect(result.message, contains('启用 AI'));
   });
 }

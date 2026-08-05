@@ -12,6 +12,8 @@ import '../../../core/theme/brand_tokens.g.dart';
 import '../../../domain/reader_models.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../app_overlays.dart';
+import 'book_ai_chat_sheet.dart';
+import 'book_ai_language_sheet.dart';
 import 'book_annotation_note_sheet.dart';
 import 'book_excerpt_sheet.dart';
 import '../../../readers/book/book_language_actions.dart';
@@ -31,8 +33,12 @@ class BookSelectionMenuOverlay extends StatelessWidget {
 
   /// Paint-approximate heights (card + caret). Used for above/below decision
   /// and clamps only — vertical gap is pinned to the selection edge.
-  static const _actionsHeightEstimate = 52.0;
-  static const _markupHeightEstimate = 112.0;
+  ///
+  /// Actions: pad 6×2 + icon 20 + gap 2 + caption (~14@1.15) + caret 7 ≈ 55–64.
+  /// Markup is two rows; keep a generous estimate so we do not force a too-short
+  /// [slotHeight] (that caused RenderFlex bottom overflow near the top edge).
+  static const _actionsHeightEstimate = 64.0;
+  static const _markupHeightEstimate = 128.0;
 
   static const _markupColors = <BookHighlightColor>[
     BookHighlightColor.pink,
@@ -120,6 +126,10 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     // Align(bottom) so real paint height does not inflate the gap (old bug:
     // top = anchor - estimatedH - gap sat too far when estimate was high).
     // Never use Positioned(bottom-only) — expands the child mid-screen.
+    //
+    // Important: only apply [slotHeight] when the slot is tall enough for the
+    // bubble. A short max-height (e.g. 31px) makes the inner Column overflow
+    // instead of growing — yellow/black stripes on selection near the top.
     final double posTop;
     final double? slotHeight;
     final double zoneTop;
@@ -127,16 +137,18 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     if (placeAbove) {
       final edge = anchorTop - _gap;
       final available = edge - safeTop;
-      if (available >= menuHEstimate * 0.5) {
+      if (available >= menuHEstimate) {
         posTop = safeTop;
         slotHeight = available;
         zoneTop = math.max(safeTop, edge - menuHEstimate);
         zoneBottom = edge;
       } else {
-        posTop = safeTop;
+        // Not enough room for a tight slot: pin by top without max-height so
+        // the bubble paints full size (may sit slightly over the selection).
+        posTop = math.max(safeTop, edge - menuHEstimate);
         slotHeight = null;
-        zoneTop = safeTop;
-        zoneBottom = safeTop + menuHEstimate;
+        zoneTop = posTop;
+        zoneBottom = posTop + menuHEstimate;
       }
     } else {
       posTop = (anchorBottom + _gap).clamp(safeTop, safeBottom - menuHEstimate);
@@ -216,6 +228,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
               controller.openSearch(initialQuery: q.isEmpty ? null : q);
             },
             onExcerpt: () => _excerpt(context, text),
+            onAiChat: () => unawaited(_openAiChat(context, text)),
           );
 
     final interactive = Listener(
@@ -323,17 +336,60 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     );
   }
 
+  Future<void> _openAiChat(BuildContext context, String text) async {
+    final sel = text.trim();
+    // Keep page highlight; only drop the action bubble.
+    controller.dismissSelectionMenuKeepHighlight();
+    if (!context.mounted) return;
+    await showBookAiChatSheet(
+      context,
+      controller: controller,
+      initialSelection: sel.isEmpty ? null : sel,
+    );
+  }
+
   Future<void> _openLanguage(
     BuildContext context,
     BookLanguageOperation operation,
     String text,
   ) async {
-    final action = controller.performLanguageAction(
+    final cfi = controller.selectionMenu?.cfi;
+    final wantAi =
+        controller.canUseAiLanguage &&
+        operation != BookLanguageOperation.fullBookTranslation;
+    // Capture surrounding text BEFORE the WebView selection is cleared
+    // (translation 附带选区前后文). Only when the user enabled it.
+    String? before;
+    String? after;
+    if (wantAi &&
+        operation == BookLanguageOperation.selectionTranslation &&
+        controller.translationPreferences.includeContext) {
+      final prefs = controller.translationPreferences;
+      final ctx = await controller.loadSelectionContext(
+        before: prefs.contextChars,
+        after: prefs.contextChars,
+      );
+      before = ctx?.before;
+      after = ctx?.after;
+    }
+    controller.clearSelectionMenu();
+    if (wantAi) {
+      if (!context.mounted) return;
+      await showBookAiLanguageSheet(
+        context,
+        controller: controller,
+        operation: operation,
+        text: text,
+        cfi: cfi,
+        contextBefore: before,
+        contextAfter: after,
+      );
+      return;
+    }
+    final result = await controller.performPlatformLanguageAction(
       operation: operation,
       textOverride: text,
     );
-    controller.clearSelectionMenu();
-    final result = await action;
     if (!context.mounted || result.handled) return;
     showAppSnackBar(context, result.message ?? '当前设备暂不可用');
   }
@@ -350,6 +406,7 @@ class _ActionsCard extends StatefulWidget {
     required this.onTranslate,
     required this.onSearch,
     required this.onExcerpt,
+    required this.onAiChat,
   });
 
   final bool placeAbove;
@@ -361,6 +418,7 @@ class _ActionsCard extends StatefulWidget {
   final VoidCallback onTranslate;
   final VoidCallback onSearch;
   final VoidCallback onExcerpt;
+  final VoidCallback onAiChat;
 
   @override
   State<_ActionsCard> createState() => _ActionsCardState();
@@ -377,8 +435,9 @@ class _ActionsCardState extends State<_ActionsCard> {
     // which would always look "wide" even on phones.
     final compact = context.appIsCompact;
 
-    // Wide: all seven actions. Compact primary: 划线·笔记·复制·搜索·更多.
-    // Compact more: 词典·翻译·书摘·收起 (keeps row density under control).
+    // Wide: primary actions including 问 AI.
+    // Compact primary: 划线·笔记·复制·搜索·更多.
+    // Compact more: 词典·翻译·问 AI·书摘·收起.
     final List<Widget> items;
     if (!compact) {
       items = [
@@ -396,6 +455,11 @@ class _ActionsCardState extends State<_ActionsCard> {
           icon: KaijuanIcons.copy,
           label: '复制',
           onPressed: widget.onCopy,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.aiChat,
+          label: '问 AI',
+          onPressed: widget.onAiChat,
         ),
         _ActionItem(
           icon: KaijuanIcons.open,
@@ -429,6 +493,11 @@ class _ActionsCardState extends State<_ActionsCard> {
           icon: KaijuanIcons.translate,
           label: '翻译',
           onPressed: widget.onTranslate,
+        ),
+        _ActionItem(
+          icon: KaijuanIcons.aiChat,
+          label: '问 AI',
+          onPressed: widget.onAiChat,
         ),
         _ActionItem(
           icon: KaijuanIcons.quote,
@@ -622,6 +691,8 @@ class _Bubble extends StatelessWidget {
     final surface = glass.strongSurface.withValues(
       alpha: math.max(glass.strongSurface.a, _minimumSurfaceOpacity),
     );
+    // mainAxisSize.min + no max-height parent: intrinsic size only.
+    // Callers must not wrap this in a shorter max-height box (see placement).
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

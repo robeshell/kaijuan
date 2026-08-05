@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../ai/ai_outline.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../presentation/controllers/book_reader_controller.dart';
 import 'book_rendition_session.dart';
@@ -64,6 +65,18 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   bool _desktopPaintNudge = false;
 
   bool get rendererReady => _webReady;
+
+  /// Release WKWebView / WebView2 native first-responder so Flutter TextFields
+  /// receive Cmd/Ctrl+C·V and other desktop editing shortcuts.
+  Future<void> clearPlatformFocus() async {
+    final controller = _webController;
+    if (controller == null) return;
+    try {
+      await controller.clearFocus();
+    } catch (_) {
+      // Best-effort; missing platform method must not break typing.
+    }
+  }
 
   static bool get _isDesktop {
     if (kIsWeb) return false;
@@ -153,6 +166,11 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       getSelectedText: _getSelectedText,
       setMenuCursorZone: _setMenuCursorZone,
       setMenuOpen: _setMenuOpen,
+      getChapterText: _getChapterText,
+      getReadSoFarText: _getReadSoFarText,
+      getBookPlainText: _getBookPlainText,
+      getOutlineChildren: _getOutlineChildren,
+      getSelectionContext: _getSelectionContext,
     );
     readerController.attachSearchBridge(
       search: _runSearch,
@@ -316,6 +334,133 @@ try {
     final raw = await _evaluate('window.getSelectedText()');
     if (raw is String) return raw;
     return raw?.toString() ?? '';
+  }
+
+  Future<({String before, String after})?> _getSelectionContext(
+    int before,
+    int after,
+  ) async {
+    final raw = await _evaluate(
+      'window.selectionContext({before: $before, after: $after})',
+    );
+    if (raw is Map) {
+      final beforeText = raw['before'];
+      final afterText = raw['after'];
+      return (
+        before: beforeText is String ? beforeText : '',
+        after: afterText is String ? afterText : '',
+      );
+    }
+    return null;
+  }
+
+  Future<String> _getChapterText() async {
+    final raw = await _evaluate('window.theChapterContent()');
+    if (raw is String) return raw;
+    return raw?.toString() ?? '';
+  }
+
+  Future<String> _getReadSoFarText(int maxChars) async {
+    final n = maxChars.clamp(200, 20000);
+    final raw = await _evaluate('window.previousContent($n)');
+    if (raw is String) return raw;
+    return raw?.toString() ?? '';
+  }
+
+  Future<String> _getBookPlainText(int maxChars) async {
+    // Corpus-level cap (whole book), not per-prompt: see AiChatService.
+    final n = maxChars.clamp(2000, 1500000);
+    if (!_webReady) return '';
+    final controller = _webController;
+    final lease = _webLease;
+    if (controller == null || lease == null) return '';
+    final session = _session;
+    if (session == null || !session.isCurrent(lease)) return '';
+    try {
+      final result = await controller.callAsyncJavaScript(
+        functionBody: '''
+try {
+  return await window.getBookPlainText({maxChars: $n});
+} catch (e) {
+  console.error('[Kaika] getBookPlainText failed', e);
+  return '';
+}
+''',
+      );
+      final value = result?.value;
+      if (value is String) return value;
+      return value?.toString() ?? '';
+    } catch (e) {
+      debugPrint('[FoliateJs] getBookPlainText error: $e');
+      return '';
+    }
+  }
+
+  Future<List<AiBookOutlineCandidate>> _getOutlineChildren({
+    required int startSectionIndex,
+    required int? endSectionIndexExclusive,
+    required int maxChars,
+  }) async {
+    if (!_webReady) return const [];
+    final controller = _webController;
+    final lease = _webLease;
+    final session = _session;
+    if (controller == null || lease == null || session == null ||
+        !session.isCurrent(lease)) {
+      return const [];
+    }
+    final start = startSectionIndex.clamp(1, 1500000);
+    final end = endSectionIndexExclusive == null
+        ? 'null'
+        : endSectionIndexExclusive.clamp(start + 1, 1500001).toString();
+    final budget = maxChars.clamp(12000, 300000);
+    try {
+      final result = await controller.callAsyncJavaScript(
+        functionBody: '''
+try {
+  return await window.getOutlineChildren({
+    startSectionIndex: $start,
+    endSectionIndexExclusive: $end,
+    maxChars: $budget,
+  });
+} catch (e) {
+  console.error('[Kaika] getOutlineChildren failed', e);
+  return [];
+}
+''',
+      );
+      final raw = result?.value;
+      if (raw is! List) return const [];
+      final output = <AiBookOutlineCandidate>[];
+      for (final value in raw) {
+        if (value is! Map) continue;
+        final label = value['label'];
+        final text = value['text'];
+        final startIndex = value['startSectionIndex'];
+        final endIndex = value['endSectionIndexExclusive'];
+        if (label is! String || text is! String || startIndex is! num ||
+            label.trim().isEmpty || text.trim().isEmpty || startIndex < 1) {
+          continue;
+        }
+        final start = startIndex.toInt();
+        final end = endIndex is num ? endIndex.toInt() : null;
+        output.add(
+          AiBookOutlineCandidate(
+            label: label.trim(),
+            text: text.trim(),
+            startSectionIndex: start,
+            endSectionIndexExclusive: end != null && end > start
+                ? end
+                : null,
+            source: AiOutlineNodeSource.fromWireName(value['source']),
+          ),
+        );
+      }
+      return output;
+    } catch (error) {
+      debugPrint('[FoliateJs] getOutlineChildren error: $error');
+      return const [];
+    }
   }
 
   void _setMenuCursorZone(Map<String, double>? zone) {
@@ -482,7 +627,8 @@ try {
         JSON.stringify({
           sections: (reader.view.book.sections || []).map((section, index) =>
             String(section.href || section.id || index)),
-          toc: reader.view.book.toc || []
+          toc: reader.view.book.toc || [],
+          author: (reader.view.book.metadata && reader.view.book.metadata.author) || []
         })
       ''');
       if (!lease.isCurrent || _disposed) return;
@@ -492,6 +638,7 @@ try {
         throw Exception('EPUB 没有可阅读的正文');
       }
 
+      readerController.setPublicationAuthors(publication.authors);
       _sectionHrefs = publication.sectionHrefs;
       final titles = List<String>.generate(
         _sectionHrefs.length,
@@ -590,19 +737,22 @@ try {
       readerController.clearSelectionMenu();
       return;
     }
-    // Selection finger-up can deliver onClick before/without a live menu.
-    if (readerController.shouldSuppressPageTurnFromClick) {
-      return;
-    }
     if (readerController.chromeVisible) {
       readerController.hideChrome();
       return;
     }
     if (readerController.readingMode == BookReadingMode.page) {
-      if (click.x < BookReaderCapabilities.pageTurnEdgeFraction) {
-        _previousPage();
-      } else if (click.x > 1 - BookReaderCapabilities.pageTurnEdgeFraction) {
-        _nextPage();
+      // Suppress only edge page-turns after a selection (ghost click). Middle
+      // band must still toggle chrome on the first intentional tap.
+      if (BookReaderCapabilities.isPageTurnEdge(click.x)) {
+        if (readerController.shouldSuppressPageTurnFromClick) {
+          return;
+        }
+        if (click.x < BookReaderCapabilities.pageTurnEdgeFraction) {
+          _previousPage();
+        } else {
+          _nextPage();
+        }
       } else {
         readerController.toggleChrome();
       }

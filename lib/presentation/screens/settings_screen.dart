@@ -10,7 +10,9 @@ import '../../app/comic_reading_preferences.dart';
 import '../../app/theme_preferences.dart';
 import '../controllers/backup_controller.dart';
 import '../controllers/library_controller.dart';
+import '../controllers/ai_settings_controller.dart';
 import '../navigation/app_page_route.dart';
+import 'ai_settings_screen.dart';
 import 'backup_settings_screen.dart';
 import 'reading_stats_screen.dart';
 import '../../app_update/app_update_service.dart';
@@ -26,6 +28,7 @@ class SettingsScreen extends StatelessWidget {
     required this.themePreferences,
     required this.backupController,
     required this.libraryController,
+    required this.aiSettingsController,
     this.comicReadingPreferences,
     this.bookReadingPreferences,
   });
@@ -33,6 +36,7 @@ class SettingsScreen extends StatelessWidget {
   final ThemePreferences themePreferences;
   final BackupController backupController;
   final LibraryController libraryController;
+  final AiSettingsController aiSettingsController;
   final ComicReadingPreferences? comicReadingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
 
@@ -133,6 +137,33 @@ class SettingsScreen extends StatelessWidget {
                       comicReadingPreferences: comicReadingPreferences,
                       bookReadingPreferences: bookReadingPreferences,
                     ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSettingsMetrics.sectionGap),
+              const _SectionLabel('AI'),
+              const SizedBox(height: 12),
+              AppSettingsGroup(
+                children: [
+                  ListenableBuilder(
+                    listenable: aiSettingsController,
+                    builder: (context, _) {
+                      final ready = aiSettingsController.isReadyForRequests;
+                      final enabled = aiSettingsController.settings.enabled;
+                      final description = !enabled
+                          ? '关闭中 · 使用你自己的 API Key'
+                          : ready
+                          ? '${aiSettingsController.settings.providerKind.displayName} · 已就绪'
+                          : '已启用 · 请完成密钥与模型配置';
+                      return _SettingsActionRow(
+                        label: 'AI 助手',
+                        description: description,
+                        onTap: () => AiSettingsScreen.open(
+                          context,
+                          controller: aiSettingsController,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),

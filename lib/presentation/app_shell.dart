@@ -16,6 +16,7 @@ import '../library/import/wifi_transfer_service.dart';
 import '../library/remote/remote_source_controller.dart';
 import 'controllers/library_controller.dart';
 import 'controllers/backup_controller.dart';
+import 'controllers/ai_settings_controller.dart';
 import 'navigation/app_page_route.dart';
 import 'screens/library_screen.dart';
 import 'screens/reading_stats_screen.dart';
@@ -39,6 +40,7 @@ class AppShell extends StatefulWidget {
     this.wifiTransferService,
     required this.remoteSourceController,
     required this.backupController,
+    required this.aiSettingsController,
     required this.readingPreferences,
     this.bookReadingPreferences,
   });
@@ -49,6 +51,7 @@ class AppShell extends StatefulWidget {
   final WifiTransferService? wifiTransferService;
   final RemoteSourceController remoteSourceController;
   final BackupController backupController;
+  final AiSettingsController aiSettingsController;
   final ComicReadingPreferences readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
 
@@ -107,6 +110,7 @@ class _AppShellState extends State<AppShell> {
         themePreferences: widget.themePreferences,
         backupController: widget.backupController,
         libraryController: widget.libraryController,
+        aiSettingsController: widget.aiSettingsController,
         comicReadingPreferences: widget.readingPreferences,
         bookReadingPreferences: widget.bookReadingPreferences,
       ),

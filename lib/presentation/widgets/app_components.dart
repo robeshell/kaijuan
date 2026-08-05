@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../core/kaijuan_icons.dart';
+import '../../core/text_editing_focus.dart';
 import '../../core/theme.dart';
 import '../../core/theme/brand_tokens.g.dart';
 
@@ -32,6 +33,8 @@ class AppTextField extends StatelessWidget {
     this.expands = false,
     this.obscureText = false,
     this.readOnly = false,
+    this.enabled = true,
+    this.enableInteractiveSelection = true,
     this.decoration,
     this.style,
     super.key,
@@ -51,6 +54,8 @@ class AppTextField extends StatelessWidget {
   final bool expands;
   final bool obscureText;
   final bool readOnly;
+  final bool enabled;
+  final bool enableInteractiveSelection;
   final InputDecoration? decoration;
   final TextStyle? style;
 
@@ -74,7 +79,7 @@ class AppTextField extends StatelessWidget {
         letterSpacing: tokenStyle.letterSpacing,
       ),
     );
-    return TextField(
+    final field = TextField(
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
@@ -89,9 +94,13 @@ class AppTextField extends StatelessWidget {
       expands: expands,
       obscureText: obscureText,
       readOnly: readOnly,
+      enabled: enabled,
+      enableInteractiveSelection: enableInteractiveSelection,
       style: inputStyle,
       decoration: resolvedDecoration,
     );
+    // Direct controller paste/copy (not Intent-only) — survives WebView focus fights.
+    return withDesktopTextEditingShortcuts(field, controller: controller);
   }
 }
 
@@ -263,10 +272,7 @@ class AppGlassSurface extends StatelessWidget {
       filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
       child: surface,
     );
-    final clipped = ClipRRect(
-      borderRadius: borderRadius,
-      child: blurred,
-    );
+    final clipped = ClipRRect(borderRadius: borderRadius, child: blurred);
     if (!showShadow) return clipped;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -695,37 +701,221 @@ Future<T?> showAppBottomSheet<T>(
   bool showHandle = true,
   bool useRootNavigator = false,
   double maxWidth = 760,
+  Color? barrierColor,
+  Color? surfaceColor,
 }) {
   final dark = Theme.of(context).brightness == Brightness.dark;
   return showModalBottomSheet<T>(
     context: context,
     useRootNavigator: useRootNavigator,
+    requestFocus: true,
     useSafeArea: true,
     isScrollControlled: isScrollControlled,
     backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: dark ? 0.62 : 0.38),
+    barrierColor:
+        barrierColor ?? Colors.black.withValues(alpha: dark ? 0.62 : 0.38),
     elevation: 0,
     constraints: BoxConstraints(maxWidth: maxWidth),
-    builder: (sheetContext) =>
-        AppBottomSheet(showHandle: showHandle, child: builder(sheetContext)),
+    builder: (sheetContext) => AppBottomSheet(
+      showHandle: showHandle,
+      surfaceColor: surfaceColor,
+      child: builder(sheetContext),
+    ),
   );
+}
+
+/// Prefer a trailing side panel on medium/wide windows; bottom sheet on compact.
+///
+/// Reading tools (本书 AI) should keep the page visible on tablet/desktop, and
+/// use a familiar bottom sheet on phones.
+Future<T?> showAppAdaptivePanel<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool useRootNavigator = true,
+  Color? barrierColor,
+  Color? surfaceColor,
+  bool sideSheetBlur = true,
+}) {
+  if (context.appIsCompact) {
+    return showAppBottomSheet<T>(
+      context,
+      builder: builder,
+      isScrollControlled: true,
+      useRootNavigator: useRootNavigator,
+      showHandle: true,
+      barrierColor: barrierColor,
+      surfaceColor: surfaceColor,
+    );
+  }
+  return showAppSideSheet<T>(
+    context: context,
+    builder: builder,
+    useRootNavigator: useRootNavigator,
+    barrierColor: barrierColor,
+    surfaceColor: surfaceColor,
+    blur: sideSheetBlur,
+  );
+}
+
+/// Side-panel width that tracks [MediaQuery] / window class.
+///
+/// Call from build (not only at open) so resize / split-view updates live.
+double resolveAppSideSheetWidth(BuildContext context) {
+  final width = MediaQuery.sizeOf(context).width;
+  return switch (context.appWindowClass) {
+    // Rare: side sheet opened on compact (e.g. resized while open).
+    AppWindowClass.compact => (width * 0.92).clamp(280.0, width),
+    // Tablet / narrow desktop: ~half the window, room for reading + chat.
+    AppWindowClass.medium => (width * 0.48).clamp(380.0, 560.0),
+    // Wide desktop: about two-fifths, capped so it does not eat the page.
+    AppWindowClass.wide => (width * 0.40).clamp(440.0, 720.0),
+  };
+}
+
+/// Modal panel sliding from the trailing edge (right in LTR).
+///
+/// Width is **recomputed every frame** from [MediaQuery] so it follows window
+/// resize (macOS/Windows split, iPad Stage Manager, etc.).
+Future<T?> showAppSideSheet<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool useRootNavigator = false,
+  Color? barrierColor,
+  Color? surfaceColor,
+  bool blur = true,
+}) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+
+  return showGeneralDialog<T>(
+    context: context,
+    useRootNavigator: useRootNavigator,
+    requestFocus: true,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor:
+        barrierColor ?? Colors.black.withValues(alpha: dark ? 0.62 : 0.38),
+    transitionDuration: const Duration(milliseconds: 240),
+    pageBuilder: (dialogContext, animation, secondaryAnimation) {
+      return _AppSideSheetHost(
+        builder: builder,
+        surfaceColor: surfaceColor,
+        blur: blur,
+      );
+    },
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      final reduce = MediaQuery.disableAnimationsOf(context);
+      if (reduce) return child;
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(1, 0),
+          end: Offset.zero,
+        ).animate(curved),
+        child: child,
+      );
+    },
+  );
+}
+
+/// Sizes the side panel from live [MediaQuery] (resize-safe).
+class _AppSideSheetHost extends StatelessWidget {
+  const _AppSideSheetHost({
+    required this.builder,
+    this.surfaceColor,
+    required this.blur,
+  });
+
+  final WidgetBuilder builder;
+  final Color? surfaceColor;
+  final bool blur;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final panelWidth = resolveAppSideSheetWidth(context);
+    return Align(
+      alignment: AlignmentDirectional.centerEnd,
+      child: Material(
+        color: Colors.transparent,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          width: panelWidth,
+          height: size.height,
+          child: AppSideSheet(
+            surfaceColor: surfaceColor,
+            blur: blur,
+            child: builder(context),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-height glass panel for [showAppSideSheet].
+class AppSideSheet extends StatelessWidget {
+  const AppSideSheet({
+    required this.child,
+    this.surfaceColor,
+    this.blur = true,
+    super.key,
+  });
+
+  final Widget child;
+  final Color? surfaceColor;
+  final bool blur;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadiusDirectional.only(
+      topStart: Radius.circular(AppRadii.sheet),
+      bottomStart: Radius.circular(AppRadii.sheet),
+    );
+    return AppGlassSurface(
+      strong: true,
+      blur: blur,
+      color: surfaceColor,
+      shadowOffset: const Offset(-8, 0),
+      shadowBlur: 28,
+      borderRadius: radius.resolve(Directionality.of(context)),
+      child: Material(
+        color: Colors.transparent,
+        child: ClipRRect(
+          borderRadius: radius.resolve(Directionality.of(context)),
+          child: SafeArea(
+            // Leading edge sits against the barrier; pad the rest.
+            left: false,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AppBottomSheet extends StatelessWidget {
   const AppBottomSheet({
     required this.child,
     this.showHandle = true,
+    this.surfaceColor,
     super.key,
   });
 
   final Widget child;
   final bool showHandle;
+  final Color? surfaceColor;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AppGlassSurface(
       strong: true,
+      color: surfaceColor,
       shadowOffset: const Offset(0, -8),
       shadowBlur: 28,
       borderRadius: const BorderRadius.vertical(
@@ -1255,7 +1445,8 @@ class AppListRow extends StatelessWidget {
           splashColor: Colors.transparent,
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              minHeight: minHeight ??
+              minHeight:
+                  minHeight ??
                   (context.appComponentProfile == AppComponentProfile.desktop
                       ? KaiBrandDesktopMetrics.listRowSingle
                       : KaiBrandMobileMetrics.listRowSingle),
@@ -1265,7 +1456,10 @@ class AppListRow extends StatelessWidget {
               child: Row(
                 children: [
                   if (leading case final value?) ...[
-                    SizedBox(width: leadingWidth, child: Center(child: value)),
+                    SizedBox(
+                      width: leadingWidth,
+                      child: Center(child: value),
+                    ),
                     const SizedBox(width: 10),
                   ],
                   Expanded(

@@ -23,8 +23,10 @@ import 'library/remote/remote_source_controller.dart';
 import 'library/remote/remote_store.dart';
 import 'library/persistence/app_database.dart';
 import 'library/storage/library_paths.dart';
+import 'ai/ai_settings.dart';
 import 'presentation/controllers/library_controller.dart';
 import 'presentation/controllers/backup_controller.dart';
+import 'presentation/controllers/ai_settings_controller.dart';
 import 'readers/book/book_loopback_server.dart';
 import 'readers/book/book_theme.dart';
 
@@ -107,6 +109,7 @@ Widget _readyApp(_BootServices services) {
     wifiTransferService: services.wifiTransferService,
     remoteSourceController: services.remoteSourceController,
     backupController: services.backupController,
+    aiSettingsController: services.aiSettingsController,
   );
 }
 
@@ -120,6 +123,7 @@ class _BootServices {
     required this.wifiTransferService,
     required this.remoteSourceController,
     required this.backupController,
+    required this.aiSettingsController,
   });
 
   final BrandConfig brand;
@@ -130,6 +134,7 @@ class _BootServices {
   final WifiTransferService wifiTransferService;
   final RemoteSourceController remoteSourceController;
   final BackupController backupController;
+  final AiSettingsController aiSettingsController;
 }
 
 Future<_BootServices> _loadBootServices() async {
@@ -227,6 +232,13 @@ Future<_BootServices> _loadBootServices() async {
     remote: remoteSourceController,
   );
   await backupController.load();
+  final aiSettingsController = AiSettingsController(
+    settingsStore: JsonAiSettingsStore(
+      File(p.join(supportDir.path, 'ai_settings.json')),
+    ),
+    credentialStore: SecureAiCredentialStore(),
+  );
+  await aiSettingsController.load();
 
   return _BootServices(
     brand: brand,
@@ -237,6 +249,7 @@ Future<_BootServices> _loadBootServices() async {
     wifiTransferService: wifiTransferService,
     remoteSourceController: remoteSourceController,
     backupController: backupController,
+    aiSettingsController: aiSettingsController,
   );
 }
 

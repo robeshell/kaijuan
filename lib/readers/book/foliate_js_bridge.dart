@@ -28,7 +28,7 @@ class FoliateImportSnapshot {
     final cover = _decodeDataUrl(payload['cover']);
     return FoliateImportSnapshot(
       title: payload['title']?.toString().trim() ?? '',
-      authors: _contributors(payload['author']),
+      authors: contributorsFrom(payload['author']),
       sectionCount: _integer(payload['sectionCount']),
       sampledSections: _integer(payload['sampledSections']),
       sampledImageOnlySections: _integer(payload['sampledImageOnlySections']),
@@ -38,7 +38,8 @@ class FoliateImportSnapshot {
     );
   }
 
-  static List<String> _contributors(Object? value) {
+  /// Normalizes Foliate/OPF contributor payloads (`string` or `{name}` list).
+  static List<String> contributorsFrom(Object? value) {
     final values = value is List ? value : [?value];
     return values
         .map((entry) {
@@ -79,10 +80,14 @@ class FoliatePublicationSnapshot {
   const FoliatePublicationSnapshot({
     required this.sectionHrefs,
     required this.toc,
+    this.authors = const [],
   });
 
   final List<String> sectionHrefs;
   final List<FoliateTocNode> toc;
+
+  /// From EPUB/OPF metadata when available.
+  final List<String> authors;
 
   factory FoliatePublicationSnapshot.fromJsonString(String source) {
     final decoded = jsonDecode(source);
@@ -106,6 +111,7 @@ class FoliatePublicationSnapshot {
                 .whereType<FoliateTocNode>()
                 .toList(growable: false)
           : const [],
+      authors: FoliateImportSnapshot.contributorsFrom(decoded['author']),
     );
   }
 }
