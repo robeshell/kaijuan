@@ -2139,7 +2139,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
       if (confirmed != true || !mounted) return;
     }
-    await _c.generateBookGraph(only: work);
+    await _c.generateBookGraph(only: work, force: force);
   }
 
   Future<void> _deleteGraph() async {
@@ -2328,15 +2328,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
           ],
         ),
-        onTap: busy
-            ? null
-            : () {
-                if (ready) {
-                  _c.openWorkGraph(work);
-                } else {
-                  unawaited(_c.generateBookGraph(only: work));
-                }
-              },
+        onTap: generatingThis
+            ? () => _c.enterGraphWork(work)
+            : busy
+                ? null
+                : () {
+                    if (ready) {
+                      _c.openWorkGraph(work);
+                    } else {
+                      unawaited(_c.generateBookGraph(only: work));
+                    }
+                  },
       ),
     );
   }

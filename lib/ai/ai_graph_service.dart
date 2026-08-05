@@ -261,7 +261,7 @@ class AiBookGraphService {
             AiGraphProgress(
               completed: batchStart + i + 1,
               total: working.length,
-              label: '已处理第 $origin 节',
+              label: '正在分析第 ${batchStart + i + 1} / ${working.length} 节',
             ),
           );
         }

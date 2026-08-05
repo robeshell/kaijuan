@@ -1233,6 +1233,16 @@ class BookReaderController extends ChangeNotifier {
   bool hasWorkGraph(AiGraphWorkCandidate work) =>
       _workGraphs.containsKey(workKeyFor(work));
 
+  /// Opens the graph view of [work] even while it is generating (the picker
+  /// lets you jump back into the in-flight generation to watch/stop it).
+  void enterGraphWork(AiGraphWorkCandidate work) {
+    if (_activeGraphWork == work) return;
+    _activeGraphWork = work;
+    _wholeBookGraphView = false;
+    _bookGraph = _workGraphs[workKeyFor(work)];
+    if (!_disposed) notifyListeners();
+  }
+
   /// Shows the generated graph of [work] (collection picker → work view).
   void openWorkGraph(AiGraphWorkCandidate work) {
     final graph = _workGraphs[workKeyFor(work)];
@@ -1314,7 +1324,10 @@ class BookReaderController extends ChangeNotifier {
     return candidates.length == 1 ? candidates.single : null;
   }
 
-  Future<void> generateBookGraph({AiGraphWorkCandidate? only}) {
+  Future<void> generateBookGraph({
+    AiGraphWorkCandidate? only,
+    bool force = false,
+  }) {
     final active = _bookGraphGeneration;
     if (active != null) return active;
     _generatingGraphWork = only ?? _activeGraphWork;
@@ -1322,7 +1335,7 @@ class BookReaderController extends ChangeNotifier {
     _bookGraphGeneration = done.future;
     unawaited(() async {
       try {
-        await _generateBookGraph(only: only);
+        await _generateBookGraph(only: only, force: force);
         done.complete();
       } catch (error, stackTrace) {
         done.completeError(error, stackTrace);
@@ -1434,7 +1447,10 @@ class BookReaderController extends ChangeNotifier {
     return works;
   }
 
-  Future<void> _generateBookGraph({AiGraphWorkCandidate? only}) async {
+  Future<void> _generateBookGraph({
+    AiGraphWorkCandidate? only,
+    bool force = false,
+  }) async {
     final service = _aiGraph;
     if (service == null || !canUseAiChat) {
       _bookGraphError = 'AI 未启用或未配置';
@@ -1443,7 +1459,12 @@ class BookReaderController extends ChangeNotifier {
     }
     final work = only ?? _activeGraphWork;
     final workKey = work == null ? null : workKeyFor(work);
-    final existing = workKey == null ? _bookGraph : _workGraphs[workKey];
+    // Regeneration starts from scratch: the previous graph may come from a
+    // different corpus granularity (piece vs section) and must not leak into
+    // the new one via incremental merge.
+    final existing = force
+        ? null
+        : (workKey == null ? _bookGraph : _workGraphs[workKey]);
     _bookGraphError = null;
     final cancel = CancelToken();
     _bookGraphCancel = cancel;
