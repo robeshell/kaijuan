@@ -155,6 +155,10 @@ class AiBookGraphService {
             ? batchStart + maxConcurrentSections
             : working.length;
         final batch = working.sublist(batchStart, batchEnd);
+        // Known-entity table from the merge cache so far: tells the model
+        // which entities already exist, so a chapter only emits new relations
+        // and evidence instead of re-describing known characters.
+        final knownEntities = _knownEntitiesText(entities);
         // Extract every section of the batch in parallel (each section's
         // chunks stay sequential inside); merge stays ordered afterwards.
         final results = await Future.wait<List<Map<String, Object?>>>([
@@ -164,6 +168,7 @@ class AiBookGraphService {
               section,
               bookTitle: bookTitle,
               bookAuthor: bookAuthor,
+              knownEntities: knownEntities,
               cancelToken: cancelToken,
             ),
         ]);
@@ -291,6 +296,23 @@ class AiBookGraphService {
     return out;
   }
 
+  /// Formats the top entities (by frequency) as a compact known-entity table
+  /// for the extraction prompt. Bounded so prompt size stays flat.
+  static String _knownEntitiesText(List<AiGraphEntity> entities) {
+    if (entities.isEmpty) return '';
+    final sorted = [...entities]..sort(_byFrequencyThenName);
+    final lines = <String>[];
+    for (final entity in sorted.take(80)) {
+      final aliases = entity.aliases.take(3).join('、');
+      lines.add(
+        aliases.isEmpty
+            ? '  ${entity.name}'
+            : '  ${entity.name}（$aliases）',
+      );
+    }
+    return lines.join('\n');
+  }
+
   /// Extracts every chunk of one section sequentially; returns the raw
   /// per-chunk payloads in chunk order for the ordered merge phase.
   Future<List<Map<String, Object?>>> _extractSection(
@@ -298,6 +320,7 @@ class AiBookGraphService {
     AiBookSectionSlice section, {
     required String bookTitle,
     required String? bookAuthor,
+    required String knownEntities,
     required CancelToken? cancelToken,
   }) async {
     final origin = section.originSectionIndex;
@@ -312,6 +335,7 @@ class AiBookGraphService {
           chunk,
           bookTitle: bookTitle,
           bookAuthor: bookAuthor,
+          knownEntities: knownEntities,
           cancelToken: cancelToken,
         ),
       );
@@ -328,6 +352,7 @@ class AiBookGraphService {
     String chunk, {
     required String bookTitle,
     required String? bookAuthor,
+    required String knownEntities,
     required CancelToken? cancelToken,
     int depth = 0,
   }) async {
@@ -339,6 +364,7 @@ class AiBookGraphService {
           bookAuthor: bookAuthor,
           sectionIndex: sectionIndex,
           chunkText: chunk,
+          knownEntities: knownEntities,
           cancelToken: cancelToken,
         ),
       ];
@@ -352,6 +378,7 @@ class AiBookGraphService {
         halves[0],
         bookTitle: bookTitle,
         bookAuthor: bookAuthor,
+        knownEntities: knownEntities,
         cancelToken: cancelToken,
         depth: depth + 1,
       );
@@ -361,6 +388,7 @@ class AiBookGraphService {
         halves[1],
         bookTitle: bookTitle,
         bookAuthor: bookAuthor,
+        knownEntities: knownEntities,
         cancelToken: cancelToken,
         depth: depth + 1,
       );
@@ -397,8 +425,14 @@ class AiBookGraphService {
     required String? bookAuthor,
     required int sectionIndex,
     required String chunkText,
+    required String knownEntities,
     required CancelToken? cancelToken,
   }) async {
+    final knownBlock = knownEntities.isEmpty
+        ? ''
+        : '已知实体（已存在，本章只补充它们的新关系与证据，'
+              '不要重复创建，不要为它们写 description）：\n'
+              '$knownEntities\n\n';
     final messages = [
       AiMessage(
         role: AiMessageRole.system,
@@ -411,6 +445,7 @@ class AiBookGraphService {
         content:
             '书名：《$bookTitle》${bookAuthor == null ? '' : '  作者：$bookAuthor'}\n'
             '章节编号：$sectionIndex\n\n'
+            '$knownBlock'
             '抽取要求：只输出如下结构的 JSON：\n'
             '{"entities":[{"name":"规范名","type":"person|location|event",'
             '"aliases":["别名"],"description":"1-2句","evidence":[{"section":'
