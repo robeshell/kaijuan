@@ -53,8 +53,10 @@ class AiBookGraphService {
   final AiProvider? Function() _openProvider;
   final AiSettings Function() _settings;
 
-  /// Max characters of one chapter sent per extraction call.
-  static const int chunkMaxChars = 9000;
+  /// Max characters of one chapter sent per extraction call. Smaller chunks
+  /// keep single-response output (and latency) bounded; a halving fallback
+  /// below handles dense sections whose entities exceed the token budget.
+  static const int chunkMaxChars = 6000;
 
   /// Overlap between adjacent chunks so relations spanning a cut survive.
   static const int chunkOverlapChars = 200;
@@ -63,9 +65,9 @@ class AiBookGraphService {
   /// per section; merge stays sequential to keep co-reference deterministic.
   static const int maxConcurrentSections = 3;
 
-  /// Output budget per extraction call (~half the chunk input), so the model
-  /// does not keep generating far past the schema.
-  static const int extractionMaxTokens = 4096;
+  /// Output budget per extraction call. Generous so dense sections are not
+  /// truncated, but the halving fallback (not this budget) is the real guard.
+  static const int extractionMaxTokens = 8192;
 
   /// Whole-run corpus budget (mirrors outline's cap).
   static const int maxBookBodyChars = 1500000;
@@ -302,18 +304,70 @@ class AiBookGraphService {
     final raws = <Map<String, Object?>>[];
     for (final chunk in chunks) {
       cancelToken?.throwIfCancelled();
-      raws.add(
-        await _extractChunk(
-          provider,
-          bookTitle: bookTitle,
-          bookAuthor: bookAuthor,
-          sectionIndex: origin,
-          chunkText: chunk,
-          cancelToken: cancelToken,
-        ),
-      );
+      try {
+        raws.add(
+          await _extractChunk(
+            provider,
+            bookTitle: bookTitle,
+            bookAuthor: bookAuthor,
+            sectionIndex: origin,
+            chunkText: chunk,
+            cancelToken: cancelToken,
+          ),
+        );
+      } on AiGraphGenerationException {
+        // Invalid / truncated output (finish=length on dense sections): halve
+        // the chunk so the model has room to close the JSON. One level only;
+        // a sub-chunk failure still surfaces to the caller.
+        if (chunk.length < 600) rethrow;
+        cancelToken?.throwIfCancelled();
+        final halves = _splitChunk(chunk);
+        raws.add(
+          await _extractChunk(
+            provider,
+            bookTitle: bookTitle,
+            bookAuthor: bookAuthor,
+            sectionIndex: origin,
+            chunkText: halves[0],
+            cancelToken: cancelToken,
+          ),
+        );
+        raws.add(
+          await _extractChunk(
+            provider,
+            bookTitle: bookTitle,
+            bookAuthor: bookAuthor,
+            sectionIndex: origin,
+            chunkText: halves[1],
+            cancelToken: cancelToken,
+          ),
+        );
+      }
     }
     return raws;
+  }
+
+  /// Splits a chunk near its midpoint, preferring a line break, so each half
+  /// is a coherent text unit with its own extraction call.
+  static List<String> _splitChunk(String chunk) {
+    final mid = chunk.length ~/ 2;
+    var cut = chunk.indexOf('\n', mid - 200);
+    if (cut < 0 || cut > mid + 200) {
+      cut = chunk.lastIndexOf('\n', mid);
+    }
+    if (cut <= 0 || cut >= chunk.length - 1) {
+      cut = mid;
+    }
+    final first = chunk.substring(0, cut).trim();
+    final second = chunk.substring(cut).trim();
+    if (first.isEmpty || second.isEmpty) {
+      final hard = mid;
+      return [
+        chunk.substring(0, hard).trim(),
+        chunk.substring(hard).trim(),
+      ];
+    }
+    return [first, second];
   }
 
   Future<Map<String, Object?>> _extractChunk(
