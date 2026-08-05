@@ -2249,9 +2249,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         BookReaderController.workKeyFor(generatingWork) == key;
     final busy = generatingThis || _c.isGeneratingBookGraph;
     final dimmed = busy && !generatingThis;
-    final range = work.isOpenEnded
-        ? '至书末'
-        : '${_c.graphActualSectionCounts?[key] ?? work.sectionCount} 节';
+    final actual = _c.graphActualSectionCounts?[key];
+    final String range;
+    if (actual != null) {
+      range = '$actual 节';
+    } else if (work.isOpenEnded) {
+      range = '至书末';
+    } else if (_c.graphActualSectionCounts != null) {
+      // Count pass finished but this row has no data (fallback path):
+      // show the spine-range estimate rather than a stale placeholder.
+      range = '${work.sectionCount} 节';
+    } else {
+      range = '计算中';
+    }
     return Opacity(
       opacity: dimmed ? 0.55 : 1,
       child: ListTile(

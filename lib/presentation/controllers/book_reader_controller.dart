@@ -1398,7 +1398,10 @@ class BookReaderController extends ChangeNotifier {
       _graphActualSectionCounts = counts;
       if (!_disposed) notifyListeners();
     } catch (_) {
-      // Counts are cosmetic; fall back to the spine-range estimate.
+      // Counts are cosmetic; mark the pass as done so the picker falls
+      // back to the spine-range estimate instead of '计算中' forever.
+      _graphActualSectionCounts = const {};
+      if (!_disposed) notifyListeners();
     }
   }
 
