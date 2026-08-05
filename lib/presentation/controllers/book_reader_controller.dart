@@ -1380,7 +1380,23 @@ class BookReaderController extends ChangeNotifier {
       final body = await _loadBookGraphPlainTextCached(
         AiBookGraphService.maxBookBodyChars,
       );
-      final sections = AiChatBookCorpus.parseSections(body);
+      var sections = AiChatBookCorpus.parseSections(body);
+      if (sections.isEmpty) return;
+      // Same metadata/outline filtering the generation pipeline applies, so
+      // the picker count and the progress total agree exactly.
+      final titled = [
+        for (final section in sections)
+          AiBookSectionSlice(
+            index: section.index,
+            label: section.label.trim().isNotEmpty
+                ? section.label.trim()
+                : _titleForOutlineSection(section.index),
+            text: section.text,
+            sourceSectionIndex: section.sourceSectionIndex,
+            isNavigationUnit: section.isNavigationUnit,
+          ),
+      ];
+      sections = _graphEligibleSections(_filterOutlineSections(titled));
       final works = graphWorkCandidates ?? const [];
       final counts = <String, int>{};
       for (final work in works) {
