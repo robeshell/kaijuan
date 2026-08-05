@@ -1262,7 +1262,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // Collection books: the picker lists every work; entering one shows its
     // graph (whole-book / plain-book graphs keep the single view below).
     final works = _graphWorks ?? _c.graphWorkCandidates;
-    if (works != null && works.isNotEmpty && !_c.hasActiveWorkGraph) {
+    if (works != null &&
+        works.isNotEmpty &&
+        !_c.hasActiveWorkGraph &&
+        !_c.viewingWholeBookGraph) {
       return _buildGraphWorksList(context, works);
     }
     if (!_ready) {
@@ -1278,7 +1281,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_c.activeGraphWork != null) ...[
+              if (_c.activeGraphWork != null || _c.viewingWholeBookGraph) ...[
                 _graphBackRow(),
                 const SizedBox(height: 8),
               ],
@@ -1394,7 +1397,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       controller: _graphScrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        if (_c.activeGraphWork != null) ...[
+        if (_c.activeGraphWork != null || _c.viewingWholeBookGraph) ...[
           _graphBackRow(),
           const SizedBox(height: 8),
         ],
@@ -1404,7 +1407,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               child: Text(
                 _c.activeGraphWork != null
                     ? '《${_c.activeGraphWork!.title}》图谱'
-                    : (graph.includesUnread ? '全书图谱' : '已读章节图谱'),
+                    : (_c.viewingWholeBookGraph
+                        ? '整本图谱'
+                        : (graph.includesUnread ? '全书图谱' : '已读章节图谱')),
                 style: TextStyle(
                   fontSize: _panelTitleSize(context),
                   fontWeight: FontWeight.w600,
@@ -1709,7 +1714,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         builder: (_) => BookAiGraphFullscreen(
           title: _c.activeGraphWork != null
               ? '《${_c.activeGraphWork!.title}》图谱'
-              : '知识图谱',
+              : (_c.viewingWholeBookGraph ? '整本图谱' : '知识图谱'),
           entities: graph.entities
               .where(
                 (entity) =>
@@ -2119,7 +2124,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ),
         if (generating) ...[
           Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 16, 10),
+            padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 16, 4),
             child: Row(
               children: [
                 _thinkingOrb(context),
@@ -2133,12 +2138,62 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     ),
                   ),
                 ),
+                TextButton.icon(
+                  onPressed: _c.cancelBookGraphGeneration,
+                  icon: const Icon(KaijuanIcons.stop, size: 16),
+                  label: const Text('停止'),
+                ),
               ],
             ),
           ),
+          const SizedBox(height: 6),
         ],
-        for (final work in works) _buildGraphWorkRow(context, work),
+        // Legacy whole-book graph (pre per-work files) stays reachable.
+        if (_c.bookGraph != null) ...[
+          _buildWholeBookGraphRow(context),
+          const Divider(height: 1),
+        ],
+        for (final work in works) ...[
+          _buildGraphWorkRow(context, work),
+          const Divider(height: 1),
+        ],
       ],
+    );
+  }
+
+  Widget _buildWholeBookGraphRow(BuildContext context) {
+    final colors = context.appColors;
+    final graph = _c.bookGraph!;
+    final range = graph.includesUnread ? '全书' : '已读';
+    return ListTile(
+      contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
+      minVerticalPadding: 0,
+      leading: Icon(
+        KaijuanIcons.collections,
+        size: 18,
+        color: context.appSecondaryText,
+      ),
+      title: Text(
+        '整本图谱',
+        style: TextStyle(
+          fontSize: _panelBodySize(context),
+          fontWeight: FontWeight.w600,
+          color: context.appPrimaryText,
+        ),
+      ),
+      subtitle: Text(
+        '$range · 已生成',
+        style: TextStyle(
+          fontSize: context.appCaptionSize,
+          color: context.appSecondaryText,
+        ),
+      ),
+      trailing: Icon(
+        KaijuanIcons.chevronRight,
+        size: 16,
+        color: colors.onSurfaceVariant,
+      ),
+      onTap: () => _c.openWholeBookGraph(),
     );
   }
 
@@ -2155,8 +2210,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return Opacity(
       opacity: dimmed ? 0.55 : 1,
       child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 4, 0),
         minVerticalPadding: 0,
+        leading: Icon(
+          KaijuanIcons.collections,
+          size: 18,
+          color: context.appSecondaryText,
+        ),
         title: Text(
           work.title,
           maxLines: 1,
@@ -2174,13 +2234,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             color: context.appSecondaryText,
           ),
         ),
-        trailing: generatingThis
-            ? SizedBox(
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (generatingThis)
+              SizedBox(
                 width: 20,
                 height: 20,
                 child: _thinkingOrb(context),
               )
-            : Text(
+            else
+              Text(
                 ready ? '已生成' : '生成',
                 style: TextStyle(
                   fontSize: context.appCaptionSize,
@@ -2188,6 +2252,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   color: colors.primary,
                 ),
               ),
+            const SizedBox(width: 4),
+            Icon(
+              KaijuanIcons.chevronRight,
+              size: 16,
+              color: colors.onSurfaceVariant,
+            ),
+          ],
+        ),
         onTap: busy
             ? null
             : () {

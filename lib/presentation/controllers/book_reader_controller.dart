@@ -299,6 +299,10 @@ class BookReaderController extends ChangeNotifier {
   /// (null for whole-book graphs / plain books).
   AiGraphWorkCandidate? _activeGraphWork;
 
+  /// True while the legacy whole-book graph ($hash.json of a collection) is
+  /// being viewed — keeps the picker from swallowing it.
+  bool _wholeBookGraphView = false;
+
   /// Per-work graphs of the current collection, keyed by workKey.
   Map<String, AiBookGraph> _workGraphs = {};
 
@@ -1205,6 +1209,16 @@ class BookReaderController extends ChangeNotifier {
 
   bool get hasActiveWorkGraph => _activeGraphWork != null;
 
+  /// True while the legacy whole-book graph of a collection is being viewed.
+  bool get viewingWholeBookGraph => _wholeBookGraphView;
+
+  /// Opens the legacy whole-book graph ($hash.json — pre-per-work files).
+  void openWholeBookGraph() {
+    if (_bookGraph == null || _activeGraphWork != null) return;
+    _wholeBookGraphView = true;
+    if (!_disposed) notifyListeners();
+  }
+
   /// Work currently being generated, or null (whole book / idle). The graph
   /// picker uses this to show per-row progress.
   AiGraphWorkCandidate? get generatingGraphWork => _generatingGraphWork;
@@ -1226,8 +1240,8 @@ class BookReaderController extends ChangeNotifier {
 
   /// Back to the collection picker (work view → list).
   void closeWorkGraph() {
-    if (_activeGraphWork == null) return;
     _activeGraphWork = null;
+    _wholeBookGraphView = false;
     _bookGraph = null;
     if (!_disposed) notifyListeners();
   }
