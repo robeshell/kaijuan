@@ -59,6 +59,14 @@ class AiBookGraphService {
   /// Overlap between adjacent chunks so relations spanning a cut survive.
   static const int chunkOverlapChars = 200;
 
+  /// Max sections extracted in parallel per batch. Extraction is independent
+  /// per section; merge stays sequential to keep co-reference deterministic.
+  static const int maxConcurrentSections = 3;
+
+  /// Output budget per extraction call (~half the chunk input), so the model
+  /// does not keep generating far past the schema.
+  static const int extractionMaxTokens = 4096;
+
   /// Whole-run corpus budget (mirrors outline's cap).
   static const int maxBookBodyChars = 1500000;
 
@@ -136,41 +144,53 @@ class AiBookGraphService {
     );
 
     try {
-      for (var i = 0; i < working.length; i++) {
+      for (var batchStart = 0;
+          batchStart < working.length;
+          batchStart += maxConcurrentSections) {
         cancelToken?.throwIfCancelled();
-        final section = working[i];
-        final origin = section.originSectionIndex;
-        final chunks = _chunkText(section.text);
-        for (var c = 0; c < chunks.length; c++) {
+        final batchEnd = (batchStart + maxConcurrentSections) < working.length
+            ? batchStart + maxConcurrentSections
+            : working.length;
+        final batch = working.sublist(batchStart, batchEnd);
+        // Extract every section of the batch in parallel (each section's
+        // chunks stay sequential inside); merge stays ordered afterwards.
+        final results = await Future.wait<List<Map<String, Object?>>>([
+          for (final section in batch)
+            _extractSection(
+              provider,
+              section,
+              bookTitle: bookTitle,
+              bookAuthor: bookAuthor,
+              cancelToken: cancelToken,
+            ),
+        ]);
+        // Merge sequentially in chapter order so co-reference is stable.
+        for (var i = 0; i < batch.length; i++) {
           cancelToken?.throwIfCancelled();
-          final raw = await _extractChunk(
-            provider,
-            bookTitle: bookTitle,
-            bookAuthor: bookAuthor,
-            sectionIndex: origin,
-            chunkText: chunks[c],
-            cancelToken: cancelToken,
-          );
-          _mergeChunk(
-            canonical: canonical,
-            entityIndex: entityIndex,
-            relationIndex: relationIndex,
-            entities: entities,
-            relations: relations,
-            sectionIndex: origin,
-            sectionText: section.text,
-            raw: raw,
+          final section = batch[i];
+          final origin = section.originSectionIndex;
+          for (final raw in results[i]) {
+            _mergeChunk(
+              canonical: canonical,
+              entityIndex: entityIndex,
+              relationIndex: relationIndex,
+              entities: entities,
+              relations: relations,
+              sectionIndex: origin,
+              sectionText: section.text,
+              raw: raw,
+            );
+          }
+          if (!covered.contains(origin)) covered.add(origin);
+          covered.sort();
+          onProgress?.call(
+            AiGraphProgress(
+              completed: batchStart + i + 1,
+              total: working.length,
+              label: '已处理第 $origin 节',
+            ),
           );
         }
-        if (!covered.contains(origin)) covered.add(origin);
-        covered.sort();
-        onProgress?.call(
-          AiGraphProgress(
-            completed: i + 1,
-            total: working.length,
-            label: '已处理第 $origin 节',
-          ),
-        );
       }
     } on AiProviderException catch (e) {
       final message = e.message.contains('已取消')
@@ -268,6 +288,34 @@ class AiBookGraphService {
     return out;
   }
 
+  /// Extracts every chunk of one section sequentially; returns the raw
+  /// per-chunk payloads in chunk order for the ordered merge phase.
+  Future<List<Map<String, Object?>>> _extractSection(
+    AiProvider provider,
+    AiBookSectionSlice section, {
+    required String bookTitle,
+    required String? bookAuthor,
+    required CancelToken? cancelToken,
+  }) async {
+    final origin = section.originSectionIndex;
+    final chunks = _chunkText(section.text);
+    final raws = <Map<String, Object?>>[];
+    for (final chunk in chunks) {
+      cancelToken?.throwIfCancelled();
+      raws.add(
+        await _extractChunk(
+          provider,
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          sectionIndex: origin,
+          chunkText: chunk,
+          cancelToken: cancelToken,
+        ),
+      );
+    }
+    return raws;
+  }
+
   Future<Map<String, Object?>> _extractChunk(
     AiProvider provider, {
     required String bookTitle,
@@ -305,7 +353,7 @@ class AiBookGraphService {
 
     final request = AiCompletionRequest(
       messages: messages,
-      maxTokens: 8192,
+      maxTokens: extractionMaxTokens,
       temperature: 0,
     );
 
@@ -324,7 +372,7 @@ class AiBookGraphService {
                 '你上一次的回复不是有效 JSON。请只输出一个 JSON 对象，不要代码块之外的文字。',
           ),
         ],
-        maxTokens: 8192,
+        maxTokens: extractionMaxTokens,
         temperature: 0,
       );
       decoded = _decodeJsonObject(
