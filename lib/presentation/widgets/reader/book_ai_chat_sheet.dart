@@ -1471,6 +1471,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     .toList(growable: false),
                 relations: graph.relations,
                 onVertexTap: _onGraphVertexTap,
+                height: 300,
               ),
               Positioned(
                 top: 8,
