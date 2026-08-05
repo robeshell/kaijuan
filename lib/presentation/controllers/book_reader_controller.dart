@@ -1365,16 +1365,18 @@ class BookReaderController extends ChangeNotifier {
   /// The outline does not persist `endSectionIndexExclusive` for every unit
   /// (see real collection caches), so a work's end is derived from the next
   /// unit's start; the last work is open-ended (spans to the book's tail).
+
+
   List<AiGraphWorkCandidate>? get graphWorkCandidates {
     final outline = _bookOutline;
     if (outline == null) return null;
-    final rows = <(int, String, int?, String)>[
+    final rows = <(int?, String, int?, String)>[
       for (final chapter in outline.chapters)
-        if (chapter.sourceSectionIndex != null)
-          (chapter.sourceSectionIndex!, chapter.title,
-              chapter.endSectionIndexExclusive, chapter.summary.trim()),
+        // Volume-opening TOC nodes (e.g. a collection's first work) can have
+        // a null sourceSectionIndex; keep them — they resolve to spine 1.
+        (chapter.sourceSectionIndex, chapter.title,
+            chapter.endSectionIndexExclusive, chapter.summary.trim()),
     ];
-    rows.sort((a, b) => a.$1.compareTo(b.$1));
     return _worksFromRows(rows);
   }
 
@@ -1413,12 +1415,10 @@ class BookReaderController extends ChangeNotifier {
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
         sections: eligible,
       );
-      final rows = <(int, String, int?, String)>[
+      final rows = <(int?, String, int?, String)>[
         for (final unit in units)
-          if (unit.sourceSectionIndex != null)
-            (unit.sourceSectionIndex!, unit.label, null, ''),
+          (unit.sourceSectionIndex, unit.label, null, ''),
       ];
-      rows.sort((a, b) => a.$1.compareTo(b.$1));
       return _worksFromRows(rows);
     } catch (_) {
       return null;
@@ -1428,13 +1428,21 @@ class BookReaderController extends ChangeNotifier {
   /// [rows] are (startSection, title, optional persisted end). A missing end
   /// is derived from the next row's start; the last row stays open-ended.
   List<AiGraphWorkCandidate>? _worksFromRows(
-    List<(int, String, int?, String)> rows,
+    List<(int?, String, int?, String)> rows,
   ) {
+    // Volume-opening nodes with a null start come first (spine 1); the rest
+    // follow by start.
+    final ordered = [...rows]..sort((a, b) {
+      final sa = a.$1 ?? 1;
+      final sb = b.$1 ?? 1;
+      return sa.compareTo(sb);
+    });
     final works = <AiGraphWorkCandidate>[];
-    for (var i = 0; i < rows.length; i++) {
-      final (start, rawTitle, persistedEnd, sample) = rows[i];
+    for (var i = 0; i < ordered.length; i++) {
+      final (rawStart, rawTitle, persistedEnd, sample) = ordered[i];
+      final start = rawStart ?? 1;
       final end =
-          persistedEnd ?? (i + 1 < rows.length ? rows[i + 1].$1 : null);
+          persistedEnd ?? (i + 1 < ordered.length ? (ordered[i + 1].$1 ?? 1) : null);
       if (end != null && end - start < 2) continue;
       final title = rawTitle.trim();
       if (title.isEmpty || _isGraphAppendixLabel(title)) continue;
