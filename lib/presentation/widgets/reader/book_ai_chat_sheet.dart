@@ -1781,120 +1781,79 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final typeColor = _graphTypeColor(context, entity.type);
     final highlighted = _graphHighlighted == entity.name;
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 4),
       elevation: 0,
-      color: highlighted
-          ? typeColor.withValues(alpha: 0.08)
-          : null,
+      color: highlighted ? typeColor.withValues(alpha: 0.08) : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
+        // Structure only on the highlighted state; resting rows are plain
+        // like the rest of the workspace lists.
         side: BorderSide(
           color: highlighted
               ? typeColor.withValues(alpha: 0.6)
-              : context.appColors.outlineVariant,
-          width: highlighted ? 1.4 : 1,
+              : Colors.transparent,
+          width: highlighted ? 1.4 : 0,
         ),
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        canRequestFocus: true,
-        onTap: () => _showEntityDetails(entity),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-          child: Row(
-            children: [
-              // Type rail: one colored bar per entity kind, matching the
-              // graph view's tag colors.
-              Container(
-                width: 3,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: typeColor,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            entity.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: _panelBodySize(context),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: typeColor.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            _graphFilterLabelFor(entity.type),
-                            style: TextStyle(
-                              fontSize: context.appCaptionSize,
-                              color: typeColor,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (entity.description.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        entity.description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: context.appCaptionSize,
-                          color: context.appSecondaryText,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '$occurrences 章',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$relationCount 关系',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                KaijuanIcons.chevronRight,
-                size: 16,
-                color: context.appSecondaryText,
-              ),
-            ],
+      child: ListTile(
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 0),
+        minVerticalPadding: 0,
+        leading: Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: typeColor,
+            shape: BoxShape.circle,
           ),
         ),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(
+                entity.name,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: _panelBodySize(context),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: typeColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                _graphFilterLabelFor(entity.type),
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  color: typeColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+        subtitle: entity.description.isEmpty
+            ? null
+            : Text(
+                entity.description,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  color: context.appSecondaryText,
+                ),
+              ),
+        trailing: Text(
+          '$occurrences 章 · $relationCount 关系',
+          style: TextStyle(
+            fontSize: context.appCaptionSize,
+            color: context.appSecondaryText,
+          ),
+        ),
+        onTap: () => _showEntityDetails(entity),
       ),
     );
   }
