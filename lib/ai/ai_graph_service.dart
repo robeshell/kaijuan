@@ -1505,7 +1505,10 @@ class AiBookGraphService {
         for (final e in updated.evidence) {
           if (seen.add(e.quote)) evidence.add(e);
         }
-        keep[key] = existing.copyWith(evidence: evidence);
+        keep[key] = existing.copyWith(
+          evidence: evidence,
+          weight: evidence.length.toDouble(),
+        );
       }
     }
     relations..clear()..addAll(keep.values);

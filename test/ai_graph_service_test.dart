@@ -1028,10 +1028,11 @@ void main() {
 
     test('review batch is consumed once (no starvation, no re-submit)',
         () async {
-      // 12 mentions sharing the same ascending relation, spread over 2
-      // batches (5 sections each): batch 1 reviews 10 pairs (cap), batch 2
-      // must review only the remaining 2 — the old code re-submitted the
-      // same 10 and starved the last pair.
+      // 12 mentions sharing the same ascending relation, spread over 3
+      // batches (5/5/2 sections): batch 1 reviews 4 pairs, batch 2 five,
+      // batch 3 the remaining two — later batches must never re-submit
+      // consumed pairs (the old code re-submitted the first 10 every time
+      // and starved the last pair).
       final sections = <int, Map<String, Object?>>{};
       for (var i = 1; i <= 12; i++) {
         sections[i] = {
