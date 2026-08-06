@@ -1411,8 +1411,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ? null
         : (AiGraphEntity a, AiGraphEntity b) =>
               a.firstSection.compareTo(b.firstSection);
-    final orderedMain = [...mainEntities]..sort(chapterOrder);
-    final orderedIsolated = [...isolatedEntities]..sort(chapterOrder);
+    final orderedMain = chapterOrder == null
+        ? mainEntities
+        : ([...mainEntities]..sort(chapterOrder));
+    final orderedIsolated = chapterOrder == null
+        ? isolatedEntities
+        : ([...isolatedEntities]..sort(chapterOrder));
 
     final personCount = graph.entities
         .where(
