@@ -1405,18 +1405,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // Search is allowed to surface mere mentions without the fold.
     final foldIsolated =
         isolatedEntities.isNotEmpty && _graphQuery.trim().isEmpty;
-    // Locations / events read as a chapter-by-chapter flow; persons stay in
-    // the service's frequency order (most important first).
-    final chapterOrder = _graphViewMode == _GraphViewMode.persons
-        ? null
-        : (AiGraphEntity a, AiGraphEntity b) =>
-              a.firstSection.compareTo(b.firstSection);
-    final orderedMain = chapterOrder == null
-        ? mainEntities
-        : ([...mainEntities]..sort(chapterOrder));
-    final orderedIsolated = chapterOrder == null
-        ? isolatedEntities
-        : ([...isolatedEntities]..sort(chapterOrder));
+    // Every list view reads as a chapter-by-chapter flow: entities are
+    // ordered by first appearance (出场顺序), so the lists mirror the
+    // reading experience.
+    final chapterOrder = (AiGraphEntity a, AiGraphEntity b) =>
+        a.firstSection.compareTo(b.firstSection);
+    final orderedMain = [...mainEntities]..sort(chapterOrder);
+    final orderedIsolated = [...isolatedEntities]..sort(chapterOrder);
 
     final personCount = graph.entities
         .where(
