@@ -468,19 +468,39 @@ void main() {
   });
 
   group('normalizeRelationType', () {
+    AiBookGraphService service() => serviceWith(_GraphProvider());
+
     test('maps English NER tags to the Chinese vocabulary', () {
-      expect(AiBookGraphService.normalizeRelationType('trusts'), '信任');
-      expect(AiBookGraphService.normalizeRelationType('teacher_student'), '师生');
-      expect(AiBookGraphService.normalizeRelationType('served'), '效力');
-      expect(AiBookGraphService.normalizeRelationType('replaced'), '更替');
-      expect(AiBookGraphService.normalizeRelationType('mediated'), '调停');
+      final s = service();
+      expect(s.normalizeRelationType('trusts'), '信任');
+      expect(s.normalizeRelationType('teacher_student'), '师生');
+      expect(s.normalizeRelationType('served'), '效力');
+      expect(s.normalizeRelationType('replaced'), '更替');
+      expect(s.normalizeRelationType('mediated'), '调停');
     });
 
     test('keeps Chinese vocabulary and collapses unknown to the fallback', () {
-      expect(AiBookGraphService.normalizeRelationType('弹劾'), '弹劾');
-      expect(AiBookGraphService.normalizeRelationType(' TRUSTS '), '信任');
-      expect(AiBookGraphService.normalizeRelationType('???'), '相关');
-      expect(AiBookGraphService.normalizeRelationType(''), '相关');
+      final s = service();
+      expect(s.normalizeRelationType('弹劾'), '弹劾');
+      expect(s.normalizeRelationType(' TRUSTS '), '信任');
+      expect(s.normalizeRelationType('???'), '相关');
+      expect(s.normalizeRelationType(''), '相关');
+    });
+
+    test('uses per-settings relation words instead of the defaults', () {
+      final s = AiBookGraphService(
+        isAvailable: () => true,
+        openProvider: () => _GraphProvider(),
+        settings: () => const AiSettings(
+          graphRuleWords: AiGraphRuleWords(
+            relationTypes: ['知己'],
+            relationTypeAliases: {'pal': '知己'},
+          ),
+        ),
+      );
+      expect(s.normalizeRelationType('知己'), '知己');
+      expect(s.normalizeRelationType('pal'), '知己');
+      expect(s.normalizeRelationType('trusts'), '相关'); // default alias gone
     });
   });
 

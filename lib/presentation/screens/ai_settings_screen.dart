@@ -45,6 +45,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   late final TextEditingController _appendixWords;
   late final TextEditingController _metadataWords;
   late final TextEditingController _citationTemplates;
+  late final TextEditingController _relationTypes;
+  late final TextEditingController _relationAliases;
   bool _obscureKey = true;
   bool _obscureSearchKey = true;
   bool _seeded = false;
@@ -70,6 +72,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     _appendixWords = TextEditingController();
     _metadataWords = TextEditingController();
     _citationTemplates = TextEditingController();
+    _relationTypes = TextEditingController();
+    _relationAliases = TextEditingController();
     // Rebuild only this State when text changes — never push keystrokes into
     // ChangeNotifier (that rebuilds the form mid-paste on macOS).
     _apiKey.addListener(_onDraftChanged);
@@ -79,6 +83,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     _appendixWords.addListener(_onDraftChanged);
     _metadataWords.addListener(_onDraftChanged);
     _citationTemplates.addListener(_onDraftChanged);
+    _relationTypes.addListener(_onDraftChanged);
+    _relationAliases.addListener(_onDraftChanged);
     unawaited(_ensureLoaded());
   }
 
@@ -126,6 +132,13 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         .graphRuleWords
         .citationQuoteTemplates
         .join('\n');
+    _relationTypes.text = settings.graphRuleWords.relationTypes.join('\n');
+    _relationAliases.text = settings
+        .graphRuleWords
+        .relationTypeAliases
+        .entries
+        .map((e) => '${e.key}=${e.value}')
+        .join('\n');
     _seeded = true;
     setState(() {});
   }
@@ -140,6 +153,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
           appendixUnits: _parseWords(_appendixWords.text),
           metadataUnits: _parseWords(_metadataWords.text),
           citationQuoteTemplates: _parseWords(_citationTemplates.text),
+          relationTypes: _parseWords(_relationTypes.text),
+          relationTypeAliases: _parseAliases(_relationAliases.text),
         ),
       );
       await controller.setSearchApiKey(_searchApiKey.text, notify: true);
@@ -151,6 +166,20 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     for (final line in text.split('\n'))
       if (line.trim().isNotEmpty) line.trim(),
   ];
+
+  /// Parses `english=中文` lines into an alias map; malformed lines are
+  /// skipped (keeps hand edits from silently corrupting the map).
+  static Map<String, String> _parseAliases(String text) {
+    final map = <String, String>{};
+    for (final line in text.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      final eq = trimmed.indexOf('=');
+      if (eq <= 0 || eq == trimmed.length - 1) continue;
+      map[trimmed.substring(0, eq).trim()] = trimmed.substring(eq + 1).trim();
+    }
+    return map;
+  }
 
   @override
   void dispose() {
@@ -164,6 +193,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
           appendixUnits: _parseWords(_appendixWords.text),
           metadataUnits: _parseWords(_metadataWords.text),
           citationQuoteTemplates: _parseWords(_citationTemplates.text),
+          relationTypes: _parseWords(_relationTypes.text),
+          relationTypeAliases: _parseAliases(_relationAliases.text),
         ),
       ),
     );
@@ -189,6 +220,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       ..removeListener(_onDraftChanged)
       ..dispose();
     _citationTemplates
+      ..removeListener(_onDraftChanged)
+      ..dispose();
+    _relationTypes
+      ..removeListener(_onDraftChanged)
+      ..dispose();
+    _relationAliases
       ..removeListener(_onDraftChanged)
       ..dispose();
     super.dispose();
@@ -925,6 +962,32 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                       onReset: () => setState(() {
                         _citationTemplates.text = AiGraphRuleWords
                             .defaultCitationQuoteTemplates
+                            .join('\n');
+                      }),
+                    ),
+                    const SizedBox(height: 20),
+                    _GraphRuleWordsField(
+                      label: '关系类型',
+                      helper: '每行一个关系词，如 信任、敌对、师徒',
+                      controller: _relationTypes,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _relationTypes.text = AiGraphRuleWords
+                            .defaultRelationTypes
+                            .join('\n');
+                      }),
+                    ),
+                    const SizedBox(height: 20),
+                    _GraphRuleWordsField(
+                      label: '英文关系别名',
+                      helper: '每行 英文=中文，如 trusts=信任、teacher_student=师生',
+                      controller: _relationAliases,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _relationAliases.text = AiGraphRuleWords
+                            .defaultRelationTypeAliases
+                            .entries
+                            .map((e) => '${e.key}=${e.value}')
                             .join('\n');
                       }),
                     ),

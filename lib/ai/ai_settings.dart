@@ -15,6 +15,8 @@ class AiGraphRuleWords {
     this.appendixUnits = defaultAppendixUnits,
     this.metadataUnits = defaultMetadataUnits,
     this.citationQuoteTemplates = defaultCitationQuoteTemplates,
+    this.relationTypes = defaultRelationTypes,
+    this.relationTypeAliases = defaultRelationTypeAliases,
   });
 
   /// Front/back-matter unit words matched as a PREFIX of a section label
@@ -29,6 +31,14 @@ class AiGraphRuleWords {
   /// Citation-quote templates; `{name}` is replaced with the entity name
   /// (e.g. `据{name}`, `{name}写道`).
   final List<String> citationQuoteTemplates;
+
+  /// Curated Chinese relation-type vocabulary the extraction prompt offers;
+  /// anything else collapses via [relationTypeAliases] or to '相关'.
+  final List<String> relationTypes;
+
+  /// Raw (usually English NER) relation tags → Chinese vocabulary, one entry
+  /// per line as `english=中文` in the settings UI.
+  final Map<String, String> relationTypeAliases;
 
   static const defaultAppendixUnits = <String>[
     '附录',
@@ -160,16 +170,65 @@ class AiGraphRuleWords {
     '据说{name}',
   ];
 
+  static const defaultRelationTypes = <String>[
+    '信任', '效力', '敌对', '弹劾', '师生', '师徒', '同僚', '亲属', '更替',
+    '调停', '协助', '隶属', '婚配', '爱慕', '仇视', '追随', '举荐', '主从',
+    '同盟', '竞争', '仰慕', '忌惮', '庇护', '提携', '投靠', '反目', '和解',
+    '嫌隙', '知遇', '共事', '打压', '倚重',
+  ];
+
+  static const defaultRelationTypeAliases = <String, String>{
+    'trust': '信任', 'trusts': '信任', 'trusted': '信任',
+    'serve': '效力', 'serves': '效力', 'served': '效力', 'servant': '效力',
+    'works_for': '效力', 'work_for': '效力', 'worked_for': '效力',
+    'employer': '效力', 'employee': '效力',
+    'teacher_student': '师生', 'teacher': '师生', 'student': '师生',
+    'mentor': '师生', 'mentee': '师生', 'apprentice': '师徒',
+    'master': '师徒', 'master_apprentice': '师徒', 'disciple': '师徒',
+    'married': '婚配', 'marriage': '婚配', 'married_to': '婚配',
+    'spouse': '婚配', 'wife': '婚配', 'husband': '婚配', 'lover': '爱慕',
+    'love': '爱慕', 'loves': '爱慕', 'romance': '爱慕', 'affair': '爱慕',
+    'parent': '亲属', 'father': '亲属', 'mother': '亲属', 'son': '亲属',
+    'daughter': '亲属', 'child': '亲属', 'family': '亲属',
+    'relative': '亲属', 'brother': '亲属', 'sister': '亲属',
+    'friend': '同盟', 'friends': '同盟', 'friend_of': '同盟',
+    'allied': '同盟', 'allies': '同盟', 'alliance': '同盟',
+    'enemy': '敌对', 'enemies': '敌对', 'enemy_of': '敌对',
+    'rival': '敌对', 'rivals': '敌对', 'rivalry': '敌对',
+    'conflict': '敌对', 'conflicts': '敌对', 'attacked': '敌对',
+    'impeached': '弹劾', 'accused': '弹劾', 'impeachment': '弹劾',
+    'replaced': '更替', 'replaces': '更替', 'replace': '更替',
+    'succeeded': '更替', 'successor': '更替', 'succession': '更替',
+    'mediated': '调停', 'mediator': '调停', 'mediate': '调停',
+    'helped': '协助', 'helps': '协助', 'helped_by': '协助',
+    'assisted': '协助', 'supports': '协助', 'supported': '协助',
+    'recommended': '举荐', 'recommend': '举荐', 'recommendation': '举荐',
+    'colleague': '同僚', 'colleagues': '同僚', 'worked_with': '同僚',
+    'coworker': '同僚',
+    'subordinate': '隶属', 'subordinates': '隶属', 'under': '隶属',
+    'followed': '追随', 'follower': '追随', 'followers': '追随',
+    'fear': '忌惮', 'fears': '忌惮', 'feared': '忌惮',
+    'protects': '庇护', 'protected': '庇护', 'patron': '庇护',
+    'patronage': '庇护', 'promoted': '提携', 'promote': '提携',
+    'collaborates': '共事', 'collaborated': '共事',
+    'worked_together': '共事', 'collaborator': '共事',
+  };
+
   AiGraphRuleWords copyWith({
     List<String>? appendixUnits,
     List<String>? metadataUnits,
     List<String>? citationQuoteTemplates,
+    List<String>? relationTypes,
+    Map<String, String>? relationTypeAliases,
   }) {
     return AiGraphRuleWords(
       appendixUnits: appendixUnits ?? this.appendixUnits,
       metadataUnits: metadataUnits ?? this.metadataUnits,
       citationQuoteTemplates:
           citationQuoteTemplates ?? this.citationQuoteTemplates,
+      relationTypes: relationTypes ?? this.relationTypes,
+      relationTypeAliases:
+          relationTypeAliases ?? this.relationTypeAliases,
     );
   }
 
@@ -177,21 +236,35 @@ class AiGraphRuleWords {
     'appendixUnits': appendixUnits,
     'metadataUnits': metadataUnits,
     'citationQuoteTemplates': citationQuoteTemplates,
+    'relationTypes': relationTypes,
+    'relationTypeAliases': relationTypeAliases,
   };
 
   static AiGraphRuleWords fromJson(Object? json) {
     if (json is! Map) return const AiGraphRuleWords();
     final map = Map<String, dynamic>.from(json);
+    final defaults = const AiGraphRuleWords();
     return AiGraphRuleWords(
       appendixUnits:
           (map['appendixUnits'] as List?)?.cast<String>() ??
-          const AiGraphRuleWords().appendixUnits,
+          defaults.appendixUnits,
       metadataUnits:
           (map['metadataUnits'] as List?)?.cast<String>() ??
-          const AiGraphRuleWords().metadataUnits,
+          defaults.metadataUnits,
       citationQuoteTemplates:
           (map['citationQuoteTemplates'] as List?)?.cast<String>() ??
-          const AiGraphRuleWords().citationQuoteTemplates,
+          defaults.citationQuoteTemplates,
+      relationTypes:
+          (map['relationTypes'] as List?)?.cast<String>() ??
+          defaults.relationTypes,
+      relationTypeAliases:
+          map['relationTypeAliases'] is Map
+              ? Map<String, String>.from(
+                  (map['relationTypeAliases'] as Map).map(
+                    (key, value) => MapEntry(key.toString(), value.toString()),
+                  ),
+                )
+              : defaults.relationTypeAliases,
     );
   }
 }
