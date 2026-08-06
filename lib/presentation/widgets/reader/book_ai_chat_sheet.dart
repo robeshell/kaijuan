@@ -1294,14 +1294,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 color: context.appSecondaryText,
               ),
               const SizedBox(height: 14),
-              Text(
-                generating ? '正在生成知识图谱' : '知识图谱',
-                style: TextStyle(
-                  fontSize: _panelTitleSize(context),
-                  fontWeight: FontWeight.w600,
-                  color: context.appPrimaryText,
+              // While generating, the title row is redundant next to the
+              // live progress label; keep it only for the idle state.
+              if (!generating)
+                Text(
+                  '知识图谱',
+                  style: TextStyle(
+                    fontSize: _panelTitleSize(context),
+                    fontWeight: FontWeight.w600,
+                    color: context.appPrimaryText,
+                  ),
                 ),
-              ),
               if (generating) ...[
                 const SizedBox(height: 14),
                 Row(
