@@ -919,7 +919,8 @@ class BookReaderController extends ChangeNotifier {
     final label = raw.trim().replaceAll(RegExp(r'\s+'), '');
     return RegExp(
       r'^(附录|参考书目|参考文献|索引|致谢|后记|跋|注释|年表|'
-      r'前言|序言|序|自序|代序|凡例|出版说明|编者按|导读|题记)',
+      r'前言|序言|序|自序|代序|凡例|出版说明|编者按|导读|题记|'
+      r'重印前记|重印后记|再版前记|再版后记|再版说明|重印说明)',
     ).hasMatch(label);
   }
 

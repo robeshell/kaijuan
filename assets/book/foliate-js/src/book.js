@@ -3226,7 +3226,15 @@ window.getBookPlainText = async (opts = {}) => {
     if (!section?.createDocument) continue
     try {
       const doc = await section.createDocument()
-      const fallbackLabel = String(section.href || section.id || (i + 1))
+      // Prefer the TOC unit title this section belongs to: appendix/front-
+      // matter units carry their real name (e.g. '附录 记钱钟书与《围城》'),
+      // which the Dart layer filters out before the model sees the body.
+      // Falling back to the bare href hides that and lets appendix text into
+      // the graph as ordinary chapters.
+      const tocStart = tocStartsBySection.get(i)
+      const fallbackLabel = tocStart
+        ? tocStart.label
+        : String(section.href || section.id || (i + 1))
       if (useTocTargets) {
         const tocStart = tocStartsBySection.get(i)
         if (tocStart) {
