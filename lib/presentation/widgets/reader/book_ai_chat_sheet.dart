@@ -752,15 +752,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 ),
               ),
               const SizedBox(height: 6),
-              Text(
-                progress?.label ?? '生成一次后会保存在这本书中。',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: _panelBodySize(context),
-                  height: 1.45,
-                  color: context.appSecondaryText,
+              // While generating, the live progress label lives next to the
+              // thinking orb below; showing it here too duplicates the text.
+              if (!generating)
+                Text(
+                  progress?.label ?? '生成一次后会保存在这本书中。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: _panelBodySize(context),
+                    height: 1.45,
+                    color: context.appSecondaryText,
+                  ),
                 ),
-              ),
               if (generating) ...[
                 const SizedBox(height: 14),
                 Row(
