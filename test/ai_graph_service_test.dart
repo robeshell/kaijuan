@@ -1044,9 +1044,9 @@ void main() {
               '"scope":"setting"}',
         };
       }
-      // Six sections per 母/皇 half, two batches of five sections each
-      // (sections 1-5 then 6-10 then 11-12) — at least one boundary falls
-      // between 母 and 皇 groups.
+      // Six sections per 母/皇 half; the 5/5/2 batch boundaries (1-5, 6-10,
+      // 11-12) fall between and inside the two halves, exercising both
+      // cross-half and within-half pending accumulation.
       final motherSections = [
         for (var i = 1; i <= 6; i++) i,
       ];
