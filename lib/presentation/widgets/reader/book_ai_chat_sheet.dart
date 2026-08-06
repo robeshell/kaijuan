@@ -1408,7 +1408,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // Every list view reads as a chapter-by-chapter flow: entities are
     // ordered by first appearance (出场顺序), so the lists mirror the
     // reading experience.
-    final chapterOrder = (AiGraphEntity a, AiGraphEntity b) =>
+    int chapterOrder(AiGraphEntity a, AiGraphEntity b) =>
         a.firstSection.compareTo(b.firstSection);
     final orderedMain = [...mainEntities]..sort(chapterOrder);
     final orderedIsolated = [...isolatedEntities]..sort(chapterOrder);
