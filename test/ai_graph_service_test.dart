@@ -5,6 +5,7 @@ import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
+import 'dart:convert';
 import 'dart:io';
 
 void main() {
@@ -30,6 +31,41 @@ void main() {
       expect(AiGraphEventType.fromWireName('不存在的类型'),
           AiGraphEventType.other);
       expect(AiGraphEventType.fromWireName(null), AiGraphEventType.other);
+    });
+
+    test('mergeLog survives JSON round-trip', () {
+      final source = AiBookGraph(
+        contentHash: 'h1',
+        generatedAt: DateTime.utc(2026, 8, 6, 12),
+        model: 'graph-test',
+        includesUnread: false,
+        coveredSections: const [1, 2],
+        sectionTitles: const {2: '第二章'},
+        entities: const [],
+        relations: const [],
+        mergeLog: const [
+          {
+            'from': '孝定皇太后',
+            'to': '慈圣太后',
+            'score': 0.5,
+            'reason': 'review',
+            'section': 2,
+          },
+        ],
+      );
+
+      final restored = AiBookGraph.fromJson(
+        jsonDecode(jsonEncode(source.toJson())),
+      )!;
+      expect(restored.mergeLog, [
+        {
+          'from': '孝定皇太后',
+          'to': '慈圣太后',
+          'score': 0.5,
+          'reason': 'review',
+          'section': 2,
+        },
+      ]);
     });
 
     test('JSON round-trip preserves graph, entities, relations and evidence',
@@ -270,6 +306,277 @@ void main() {
       expect(relation.type, '同僚');
       expect(graph.coveredSections, [1]);
       expect(graph.model, 'graph-test');
+    });
+
+    test('similar person names merge across sections (慈圣太后/慈圣皇太后)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣太后"}],
+              "scope":"setting"}],
+             "relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"慈圣皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":2,"quote":"慈圣皇太后"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],"description":"",
+              "evidence":[{"section":2,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣皇太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":2,"quote":"慈圣皇太后是万历皇帝生母"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一节', '慈圣太后。'),
+          slice(2, '第二节', '慈圣皇太后是万历皇帝生母。'),
+        ],
+        includesUnread: true,
+      );
+
+      // 慈圣太后/慈圣皇太后 are the same person (皇后→太后升格) → one entity.
+      final cisu = graph.entities.where((e) => e.name.contains('慈圣'));
+      expect(cisu.length, 1);
+      expect(cisu.single.name, '慈圣太后');
+      expect(graph.entities.length, 2);
+      // Relation endpoints normalized to the canonical names.
+      final relation = graph.relations.single;
+      expect(relation.source, '慈圣太后');
+      expect(relation.target, '万历皇帝');
+      // Audit trail records the name-structure merge (score 0.7, stem rule).
+      expect(
+        graph.mergeLog.any((e) =>
+            e['reason'] == 'name' &&
+            e['from'] == '慈圣皇太后' &&
+            e['to'] == '慈圣太后' &&
+            e['score'] == 0.7),
+        isTrue,
+      );
+    });
+
+    test('unrelated person names never merge (正德皇帝 vs 万历皇帝)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"正德皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"正德皇帝"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":2,"quote":"万历皇帝"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '正德皇帝。'), slice(2, '二', '万历皇帝。')],
+        includesUnread: true,
+      );
+
+      expect(graph.entities.length, 2);
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'正德皇帝', '万历皇帝'});
+    });
+
+    test('same relation across sections fuses into one edge with all evidence',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"张三与李四同在京城为官"}],
+              "scope":"setting"},
+             {"name":"李四","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"张三与李四同在京城为官"}],
+              "scope":"setting"}],
+             "relations":[{"source":"张三","target":"李四","type":"同僚",
+              "description":"同在京城。",
+              "evidence":[{"section":1,"quote":"张三与李四同在京城为官"}]}]}
+          ''',
+          2: '''
+            {"entities":[],
+             "relations":[{"source":"张三","target":"李四","type":"同僚",
+              "description":"同在京城。",
+              "evidence":[{"section":2,"quote":"张三李四同僚多年"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一节', '张三与李四同在京城为官。'),
+          slice(2, '第二节', '张三李四同僚多年。'),
+        ],
+        includesUnread: true,
+      );
+
+      // Knowledge fusion: mergeKey (source|target|type) dedupes the edge and
+      // appends evidence; weight reflects the fused evidence count.
+      expect(graph.relations.length, 1);
+      final relation = graph.relations.single;
+      expect(relation.source, '张三');
+      expect(relation.target, '李四');
+      expect(relation.type, '同僚');
+      expect(relation.evidence.length, 2);
+      expect(relation.weight, 2);
+    });
+
+    test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
+        () async {
+      final provider = _GraphProvider(
+        reviewVerdicts: '["same"]',
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}]}]}
+          ''',
+          2: '''
+            {"entities":[{"name":"孝定皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}],
+              "scope":"setting"}],
+             "relations":[{"source":"孝定皇太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一节', '慈圣太后是万历皇帝生母。'),
+          slice(2, '第二节', '孝定皇太后是万历皇帝生母。'),
+        ],
+        includesUnread: true,
+      );
+
+      // Same person despite unrelated names: the shared 母子 relation triggers
+      // the review and the model confirms → one entity, both aliases kept.
+      final merged = graph.entities.where((e) =>
+          e.name.contains('慈圣') || e.name.contains('孝定'));
+      expect(merged.length, 1);
+      expect(merged.single.name, '慈圣太后');
+      expect(merged.single.aliases, contains('孝定皇太后'));
+      expect(graph.entities.length, 2);
+      // Relation endpoints rewired to the surviving canonical.
+      expect(graph.relations.single.source, '慈圣太后');
+      expect(graph.relations.single.target, '万历皇帝');
+      // Audit trail records the reviewed merge.
+      expect(
+        graph.mergeLog.any((e) =>
+            e['reason'] == 'review' && e['from'] == '孝定皇太后'),
+        isTrue,
+      );
+    });
+
+    test('shared father never merges siblings (下溯证据不误合)', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"},
+             {"name":"朱常洛","type":"person","aliases":[],
+              "description":"万历长子。",
+              "evidence":[{"section":1,"quote":"朱常洛是万历长子"}],
+              "scope":"setting"}],
+             "relations":[{"source":"万历皇帝","target":"朱常洛",
+              "type":"亲属","kin":"父子",
+              "evidence":[{"section":1,"quote":"朱常洛是万历长子"}]}]}
+          ''',
+          2: '''
+            {"entities":[{"name":"朱常洵","type":"person","aliases":[],
+              "description":"万历之子。",
+              "evidence":[{"section":2,"quote":"朱常洵是万历之子"}],
+              "scope":"setting"}],
+             "relations":[{"source":"万历皇帝","target":"朱常洵",
+              "type":"亲属","kin":"父子",
+              "evidence":[{"section":2,"quote":"朱常洵是万历之子"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一节', '朱常洛是万历长子。'),
+          slice(2, '第二节', '朱常洵是万历之子。'),
+        ],
+        includesUnread: true,
+      );
+
+      // Both sons share the father but are different people: no merge, no
+      // review call (descending relation evidence is intentionally weak).
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'万历皇帝', '朱常洛', '朱常洵'});
+      expect(graph.relations.length, 2);
+      expect(graph.mergeLog.where((e) => e['reason'] == 'review'), isEmpty);
+    });
+
+    test('merge review failure never fails the generation', () async {
+      final provider = _GraphProvider(
+        throwOnReview: true,
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}]}]}
+          ''',
+          2: '''
+            {"entities":[{"name":"孝定皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}],
+              "scope":"setting"}],
+             "relations":[{"source":"孝定皇太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一节', '慈圣太后是万历皇帝生母。'),
+          slice(2, '第二节', '孝定皇太后是万历皇帝生母。'),
+        ],
+        includesUnread: true,
+      );
+
+      // Review failed silently: both entities stay, graph still complete.
+      expect(graph.entities.length, 3);
+      expect(graph.coveredSections, [1, 2]);
+      expect(graph.mergeLog.where((e) => e['reason'] == 'review'), isEmpty);
     });
 
     test('unresolvable quote degrades to section-level evidence', () async {
@@ -688,6 +995,132 @@ void main() {
       expect(graph.coveredSections, [1]);
     });
 
+    test('relations without evidence are dropped (后验校验)', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","aliases":[],
+              "description":"主角。",
+              "evidence":[{"section":1,"quote":"张三出场"}],
+              "scope":"setting"},
+             {"name":"李四","type":"person","aliases":[],
+              "description":"配角。",
+              "evidence":[{"section":1,"quote":"李四出场"}],
+              "scope":"setting"}],
+             "relations":[{"source":"张三","target":"李四","type":"同僚",
+              "description":"无证据的关系。","evidence":[]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '张三出场。李四出场。')],
+        includesUnread: true,
+      );
+
+      // Provenance is mandatory: an edge without quote-backed evidence never
+      // enters the graph, even when both endpoints exist.
+      expect(graph.entities.length, 2);
+      expect(graph.relations, isEmpty);
+      expect(graph.coveredSections, [1]);
+    });
+
+    test('review batch is consumed once (no starvation, no re-submit)',
+        () async {
+      // 11 mentions sharing the same ascending relation → 11 review pairs;
+      // the cap (10) must be consumed so the batch is never re-submitted.
+      final entities1 = <String>[];
+      final entities2 = <String>[];
+      for (var i = 1; i <= 11; i++) {
+        entities1.add('{"name":"母$i","type":"person","aliases":[],'
+            '"description":"万历之母。","evidence":[{"section":1,"quote":"母$i"}],'
+            '"scope":"setting"}');
+        entities2.add('{"name":"皇太后$i","type":"person","aliases":[],'
+            '"description":"万历之母。","evidence":[{"section":2,"quote":"皇太后$i"}],'
+            '"scope":"setting"}');
+      }
+      final provider = _GraphProvider(
+        reviewVerdicts: '["different","different","different","different",'
+            '"different","different","different","different","different","different"]',
+        responses: {
+          1: '{"entities":[${entities1.join(',')}],'
+              '"relations":[{"source":"母1","target":"万历皇帝","type":"亲属",'
+              '"kin":"母子","evidence":[{"section":1,"quote":"母1是万历之母"}]}]}',
+          2: '{"entities":[${entities2.join(',')}],'
+              '"relations":[{"source":"皇太后1","target":"万历皇帝","type":"亲属",'
+              '"kin":"母子","evidence":[{"section":2,"quote":"皇太后1是万历之母"}]}]}',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '母1。'), slice(2, '二', '皇太后1。')],
+        includesUnread: true,
+      );
+
+      // Exactly one review call: the batch is consumed, never re-submitted.
+      final reviewCalls = provider.requests
+          .where((r) => r.messages.any((m) => m.content.contains('人物身份判定引擎')))
+          .toList();
+      expect(reviewCalls.length, 1);
+      expect(graph.coveredSections, [1, 2]);
+    });
+
+    test('post-review relations keep fusing instead of duplicating', () async {
+      // Section 3 re-mentions the already-fused 慈圣太后→万历皇帝 edge after
+      // the 孝定=慈圣 review merged section 2's edge: relationIndex must be
+      // rebuilt, so the third chunk fuses into the same relation.
+      final provider = _GraphProvider(
+        reviewVerdicts: '["same"]',
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}]}]}
+          ''',
+          2: '''
+            {"entities":[{"name":"孝定皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}],
+              "scope":"setting"}],
+             "relations":[{"source":"孝定皇太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}]}]}
+          ''',
+          3: '''
+            {"entities":[{"name":"慈圣太后","type":"person","aliases":[],
+              "description":"","evidence":[{"section":3,"quote":"慈圣太后"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":3,"quote":"慈圣太后与万历母子情深"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一节', '慈圣太后是万历皇帝生母。'),
+          slice(2, '第二节', '孝定皇太后是万历皇帝生母。'),
+          slice(3, '第三节', '慈圣太后与万历母子情深。'),
+        ],
+        includesUnread: true,
+      );
+
+      expect(graph.entities.where((e) => e.name.contains('慈圣')), hasLength(1));
+      expect(graph.relations.length, 1);
+      expect(graph.relations.single.evidence.length, 3);
+    });
+
     test('confirmed plan is used and step-0 call is skipped', () async {
       final provider = _GraphProvider(
         responses: {
@@ -847,6 +1280,8 @@ class _GraphProvider implements AiProvider {
     this.responses = const {},
     this.invalidJson = false,
     this.narrationBody = defaultNarrationBody,
+    this.reviewVerdicts = '[]',
+    this.throwOnReview = false,
   });
 
   /// sectionIndex -> raw JSON body (may be wrapped in ```json fences).
@@ -855,6 +1290,10 @@ class _GraphProvider implements AiProvider {
 
   /// Step-0 display plan body (default: event-driven, organization low).
   final String narrationBody;
+
+  /// JSON array returned by the merge-review call (the 人物身份判定引擎 prompt).
+  final String reviewVerdicts;
+  final bool throwOnReview;
 
   static const String defaultNarrationBody = '{'
       '"features":{"eventDriven":0.8,"characterEnsemble":0.2,'
@@ -881,6 +1320,10 @@ class _GraphProvider implements AiProvider {
       return const AiCompletionResult(text: '抱歉，我无法完成这个请求。');
     }
     final prompt = request.messages.last.content;
+    if (request.messages.any((m) => m.content.contains('人物身份判定引擎'))) {
+      if (throwOnReview) throw Exception('review failed');
+      return AiCompletionResult(text: reviewVerdicts);
+    }
     final match = RegExp(r'章节编号：(\d+)').firstMatch(prompt);
     if (match == null) {
       // Step-0 display plan call: return a valid plan so generation walks

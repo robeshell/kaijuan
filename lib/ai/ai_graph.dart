@@ -505,6 +505,7 @@ class AiBookGraph {
     this.coveredSections = const [],
     this.sectionTitles = const {},
     this.excludedGraphSections = const [],
+    this.mergeLog = const [],
     this.entities = const [],
     this.relations = const [],
     this.narration,
@@ -534,6 +535,11 @@ class AiBookGraph {
   /// same manual slice (incremental runs keep excluding them too).
   final List<int> excludedGraphSections;
 
+  /// Audit trail of fuzzy (non-exact) entity merges: each entry is
+  /// {from, to, score, reason, section} — the ER pipeline's merge log
+  /// (Dedupe/Splink convention) so wrong merges are traceable and fixable.
+  final List<Map<String, Object?>> mergeLog;
+
   final List<AiGraphEntity> entities;
   final List<AiGraphRelation> relations;
 
@@ -550,6 +556,7 @@ class AiBookGraph {
     List<int>? coveredSections,
     Map<int, String>? sectionTitles,
     List<int>? excludedGraphSections,
+    List<Map<String, Object?>>? mergeLog,
     List<AiGraphEntity>? entities,
     List<AiGraphRelation>? relations,
     AiNarrationPlan? narration,
@@ -564,6 +571,7 @@ class AiBookGraph {
       sectionTitles: sectionTitles ?? this.sectionTitles,
       excludedGraphSections:
           excludedGraphSections ?? this.excludedGraphSections,
+      mergeLog: mergeLog ?? this.mergeLog,
       entities: entities ?? this.entities,
       relations: relations ?? this.relations,
       narration: narration ?? this.narration,
@@ -581,6 +589,7 @@ class AiBookGraph {
     'includesUnread': includesUnread,
     'coveredSections': coveredSections,
     'excludedGraphSections': excludedGraphSections,
+    'mergeLog': mergeLog,
     'sectionTitles': {
       for (final entry in sectionTitles.entries) '${entry.key}': entry.value,
     },
@@ -621,6 +630,7 @@ class AiBookGraph {
     }
     final rawCovered = json['coveredSections'];
     final rawExcluded = json['excludedGraphSections'];
+    final rawMergeLog = json['mergeLog'];
     final rawTitles = json['sectionTitles'];
     return AiBookGraph(
       contentHash: hash,
@@ -633,6 +643,13 @@ class AiBookGraph {
           : const [],
       excludedGraphSections: rawExcluded is List
           ? rawExcluded.whereType<int>().toList(growable: false)
+          : const [],
+      mergeLog: rawMergeLog is List
+          ? [
+              for (final entry in rawMergeLog)
+                if (entry is Map)
+                  Map<String, Object?>.from(entry),
+            ]
           : const [],
       sectionTitles: rawTitles is Map
           ? {
