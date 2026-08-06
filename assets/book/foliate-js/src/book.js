@@ -3200,10 +3200,10 @@ window.getBookPlainText = async (opts = {}) => {
     if (activeTocPiece?.text.trim()) tocPieces.push(activeTocPiece)
     activeTocPiece = null
   }
-  const appendPiece = (label, text, sourceSectionIndex) => {
+  const appendPiece = (label, text, sourceSectionIndex, navigation = false) => {
     if (out.length >= maxChars || !text.trim()) return false
     logicalIndex += 1
-    const navigationUnit = useTocTargets ? '~' : ''
+    const navigationUnit = navigation ? '~' : ''
     const piece = `\n\n[§${logicalIndex}@${sourceSectionIndex}${navigationUnit} ${label}]\n${text.trim()}`
     const room = maxChars - out.length
     if (piece.length > room) {
@@ -3243,14 +3243,18 @@ window.getBookPlainText = async (opts = {}) => {
             label: tocStart.label,
             sourceSectionIndex: i + 1,
             text: '',
+            navigation: true,
           }
         }
         // Text before the first work is front matter. Giving it a stable
         // metadata label lets the Dart layer discard it without guessing.
+        // It is NOT a real navigation target: no '~' marker, so the Dart
+        // metadata filter (目录) can remove it instead of nav-exempting it.
         activeTocPiece ??= {
           label: '目录',
           sourceSectionIndex: i + 1,
           text: '',
+          navigation: false,
         }
         const text = plainText(doc?.body?.textContent)
         if (text) {
@@ -3284,7 +3288,7 @@ window.getBookPlainText = async (opts = {}) => {
     )
     for (const piece of tocPieces) {
       const sample = sampleTextFromBothEnds(piece.text, maxTocPieceChars)
-      if (!appendPiece(piece.label, sample, piece.sourceSectionIndex)) break
+      if (!appendPiece(piece.label, sample, piece.sourceSectionIndex, piece.navigation !== false)) break
     }
     console.log(
       '[Kaika][AI outline] TOC units=', tocPieces.length,

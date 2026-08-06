@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:io';
+
 import 'ai_log.dart';
 import 'ai_models.dart';
 import 'ai_settings.dart';
@@ -62,6 +64,14 @@ Future<AiCompletionResult> completeWithRetry(
     } on TimeoutException {
       if (attempt + 1 >= attempts) rethrow;
       AiLog.d('complete retry attempt=${attempt + 1} reason=timeout');
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+    } on IOException {
+      // TLS handshake failures / socket resets (e.g. HandshakeException:
+      // "Connection terminated during handshake") — transient network noise.
+      // Without this catch a flaky connection silently kills one graph
+      // section (each section is a separate completion call).
+      if (attempt + 1 >= attempts) rethrow;
+      AiLog.d('complete retry attempt=${attempt + 1} reason=network');
       await Future<void>.delayed(const Duration(milliseconds: 700));
     }
   }

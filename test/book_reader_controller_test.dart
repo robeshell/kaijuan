@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/app/book_reading_preferences.dart';
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
@@ -379,5 +380,132 @@ void main() {
     expect(reloaded.pageTurnEffect, BookPageTurnEffect.none);
 
     controller.dispose();
+  });
+
+  group('graph section chooser', () {
+    test('auto-filter drops front/back matter, keeps body chapters',
+        () async {
+      final item = await insertBook(id: 'graph-sections');
+      final controller = BookReaderController(
+        database: database,
+        item: item,
+      );
+      controller.attachAnnotationBridge(
+        renderAll: (_) {},
+        add: (_) {},
+        remove: (_) {},
+        clearSelection: () {},
+        getSelectedText: () async => '',
+        setMenuCursorZone: (_) {},
+        setMenuOpen: (_) {},
+        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+[§1@1 封面]
+万历十五年
+[§2@2 目录]
+第一章 万历皇帝
+第二章 首辅申时行
+[§3@3 前言]
+本书缘起…
+[§4@4 中文版序言]
+黄仁宇序
+[§5@5 第一章 万历皇帝]
+万历皇帝年幼登基…
+[§6@6 附录一 万历十五年大事纪]
+1572年…
+[§7@7 参考书目]
+黄仁宇《万历十五年》
+''',
+      );
+
+      final sections = await controller.graphSectionChoices(null);
+      final labels = sections.map((s) => s.label).toList();
+
+      // 封面/目录/前言/附录/参考书目 are filtered automatically. The
+      // compound title 中文版序言 slips past the prefix word list — exactly
+      // the case the dialog's manual section chooser exists for.
+      expect(labels, ['中文版序言', '第一章 万历皇帝']);
+      controller.dispose();
+    });
+
+    test('manual exclude drops the compound front matter (中文版序言)',
+        () async {
+      final item = await insertBook(id: 'graph-sections-exclude');
+      final controller = BookReaderController(
+        database: database,
+        item: item,
+      );
+      controller.attachAnnotationBridge(
+        renderAll: (_) {},
+        add: (_) {},
+        remove: (_) {},
+        clearSelection: () {},
+        getSelectedText: () async => '',
+        setMenuCursorZone: (_) {},
+        setMenuOpen: (_) {},
+        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+[§1@1 中文版序言]
+黄仁宇序
+[§2@2 第一章 万历皇帝]
+万历皇帝年幼登基…
+[§3@3 第二章 首辅申时行]
+申时行…
+''',
+      );
+
+      final choices = await controller.graphSectionChoices(null);
+      // User unchecks 中文版序言 (§1) in the dialog.
+      final kept = BookReaderController.excludeGraphSections(
+        choices,
+        {1},
+      );
+      expect(kept.map((s) => s.label).toList(), [
+        '第一章 万历皇帝',
+        '第二章 首辅申时行',
+      ]);
+
+      // Excluding everything must fail loudly, not generate an empty graph.
+      expect(
+        () => BookReaderController.excludeGraphSections(choices, {1, 2, 3}),
+        throwsA(isA<AiProviderException>()),
+      );
+      controller.dispose();
+    });
+
+    test('spine-dedupe: multiple logical sections on one spine stay once',
+        () async {
+      final item = await insertBook(id: 'graph-sections-dedupe');
+      final controller = BookReaderController(
+        database: database,
+        item: item,
+      );
+      controller.attachAnnotationBridge(
+        renderAll: (_) {},
+        add: (_) {},
+        remove: (_) {},
+        clearSelection: () {},
+        getSelectedText: () async => '',
+        setMenuCursorZone: (_) {},
+        setMenuOpen: (_) {},
+        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+[§1@1 第一章 万历皇帝]
+第一节正文
+[§2@1 第一节 少年天子]
+第二节正文
+[§3@1 第二节 张居正]
+第三节正文
+[§4@2 第二章 首辅申时行]
+第二章正文
+''',
+      );
+
+      final sections = await controller.graphSectionChoices(null);
+      // Same spine (1) for the first three logical sections → deduped to the
+      // first; spine 2 stays.
+      expect(sections.map((s) => s.label).toList(), [
+        '第一章 万历皇帝',
+        '第二章 首辅申时行',
+      ]);
+      controller.dispose();
+    });
   });
 }

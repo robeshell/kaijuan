@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
@@ -166,6 +168,26 @@ void main() {
         throwsA(isA<AiProviderException>()),
       );
       expect(provider.completeCalls, 1);
+    });
+
+    test('retries once on network errors (HandshakeException), then succeeds',
+        () async {
+      final provider = _NetworkFailThenOkProvider();
+      final result = await completeWithRetry(
+        provider,
+        const AiCompletionRequest(messages: []),
+      );
+      expect(result.text, 'ok');
+      expect(provider.completeCalls, 2);
+    });
+
+    test('rethrows network errors after exhausting attempts', () async {
+      final provider = _AlwaysNetworkFailProvider();
+      await expectLater(
+        completeWithRetry(provider, const AiCompletionRequest(messages: [])),
+        throwsA(isA<IOException>()),
+      );
+      expect(provider.completeCalls, 2);
     });
   });
 
@@ -560,9 +582,61 @@ class _FailProvider implements AiProvider {
   }
 }
 
+/// Fails once with a transient TLS/socket error, then succeeds.
+class _NetworkFailThenOkProvider implements AiProvider {
+  int completeCalls = 0;
+
+  @override
+  Future<AiCompletionResult> complete(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async {
+    completeCalls++;
+    if (completeCalls == 1) {
+      throw const HandshakeException('Connection terminated during handshake');
+    }
+    return const AiCompletionResult(text: 'ok');
+  }
+
+  @override
+  Stream<AiStreamChunk> stream(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async* {}
+
+  @override
+  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async {
+    return const [];
+  }
+}
+
+/// Always throws a network error — retry exhausts and rethrows.
+class _AlwaysNetworkFailProvider implements AiProvider {
+  int completeCalls = 0;
+
+  @override
+  Future<AiCompletionResult> complete(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async {
+    completeCalls++;
+    throw const SocketException('Connection reset by peer');
+  }
+
+  @override
+  Stream<AiStreamChunk> stream(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async* {}
+
+  @override
+  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async {
+    return const [];
+  }
+}
+
 /// Provider whose probe always returns prose (model intends to answer directly).
-class _ProseProvider implements AiProvider {
-  bool streamCalled = false;
+class _ProseProvider implements AiProvider {  bool streamCalled = false;
 
   @override
   Future<AiCompletionResult> complete(

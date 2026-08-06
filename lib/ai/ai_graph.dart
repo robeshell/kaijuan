@@ -45,12 +45,14 @@ class AiGraphWorkCandidate {
       (isOpenEnded || spineSection < endSectionExclusive!);
 }
 
-/// Entity kinds extracted for v1. `organization / item / concept` are
-/// reserved for later versions and never generated today.
+/// Entity kinds extracted for v1. `item / concept` are reserved for later
+/// versions and never generated today; `organization` is only generated when
+/// the narration plan says the book is organization-driven (§3.3).
 enum AiGraphEntityType {
   person,
   location,
-  event;
+  event,
+  organization;
 
   String get wireName => name;
 
@@ -58,6 +60,7 @@ enum AiGraphEntityType {
     'person' => AiGraphEntityType.person,
     'location' => AiGraphEntityType.location,
     'event' => AiGraphEntityType.event,
+    'organization' => AiGraphEntityType.organization,
     _ => AiGraphEntityType.person,
   };
 }
@@ -312,6 +315,7 @@ class AiGraphRelation {
     required this.target,
     required this.type,
     this.description = '',
+    this.kin = '',
     this.evidence = const [],
     this.weight = 1,
   });
@@ -322,6 +326,11 @@ class AiGraphRelation {
   /// Lowercase snake_case relation type (e.g. `married_to`, `father_of`).
   final String type;
   final String description;
+
+  /// Concrete kinship label for 亲属/婚配 relations (父子/夫妻/兄弟…); empty
+  /// for non-kin or graphs generated before this field existed. Shown on
+  /// family-tree edges (spec: ai-graph-narration §5.1).
+  final String kin;
   final List<AiGraphEvidence> evidence;
 
   /// Evidence count after merge (chapter coverage).
@@ -332,6 +341,7 @@ class AiGraphRelation {
 
   AiGraphRelation copyWith({
     String? description,
+    String? kin,
     List<AiGraphEvidence>? evidence,
     double? weight,
   }) {
@@ -340,6 +350,7 @@ class AiGraphRelation {
       target: target,
       type: type,
       description: description ?? this.description,
+      kin: kin ?? this.kin,
       evidence: evidence ?? this.evidence,
       weight: weight ?? this.weight,
     );
@@ -350,6 +361,7 @@ class AiGraphRelation {
     'target': target,
     'type': type,
     'description': description,
+    if (kin.isNotEmpty) 'kin': kin,
     'evidence': [for (final e in evidence) e.toJson()],
     'weight': weight,
   };
@@ -372,8 +384,112 @@ class AiGraphRelation {
       target: target.trim(),
       type: type.trim(),
       description: json['description'] as String? ?? '',
+      kin: json['kin'] as String? ?? '',
       evidence: AiGraphEntity._evidenceList(rawEvidence),
       weight: json['weight'] is num ? (json['weight'] as num).toDouble() : 1,
+    );
+  }
+}
+
+/// Book-level display plan (spec: docs/specs/ai-graph-narration.md §3).
+///
+/// Produced by the model at pipeline step 0 from the book title, outline and
+/// a body sample. Only affects *display* preferences — default view, entry
+/// order, and which extraction branches get extra prompting — never
+/// entity/relation correctness (those stay evidence-anchored).
+///
+/// Older graphs have no `narration` segment; the UI then falls back to the
+/// default person list exactly as before this feature.
+class AiNarrationPlan {
+  const AiNarrationPlan({
+    required this.features,
+    required this.defaultView,
+    required this.viewOrder,
+    this.wantMap = false,
+  });
+
+  /// Five narration dimensions, each independent 0..1.
+  final Map<String, double> features;
+
+  /// Recommended default view. One of [knownViews]; `org_tree` is not
+  /// produced until the organization tree lands.
+  final String defaultView;
+
+  /// Entry order (a permutation of the available views, [defaultView] first).
+  final List<String> viewOrder;
+
+  /// Whether a map would help the reader; UI shows the text location chain
+  /// (地图文字版) when true — no real map is rendered.
+  final bool wantMap;
+
+  static const List<String> knownFeatures = [
+    'eventDriven', // 事件驱动
+    'characterEnsemble', // 人物群像
+    'organization', // 组织博弈
+    'geography', // 地理叙事
+    'essay', // 散文随笔
+  ];
+
+  static const List<String> knownViews = [
+    'persons',
+    'locations',
+    'events',
+    'graph',
+    'family_tree',
+    'org_tree',
+  ];
+
+  double feature(String key) => features[key] ?? 0;
+
+  /// Returns a copy with a different recommended view; [viewOrder] is
+  /// re-ordered so the new view leads (used by the pre-generation confirm
+  /// dialog when the user picks a different default).
+  AiNarrationPlan withDefaultView(String view) {
+    if (view == defaultView) return this;
+    return AiNarrationPlan(
+      features: features,
+      defaultView: view,
+      viewOrder: [
+        view,
+        for (final v in viewOrder)
+          if (v != view) v,
+      ],
+      wantMap: wantMap,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'features': features,
+    'defaultView': defaultView,
+    'viewOrder': viewOrder,
+    'wantMap': wantMap,
+  };
+
+  /// Null when the payload is missing or invalid — caller falls back to the
+  /// default person list (same behavior as graphs generated before this
+  /// feature). Values are clamped, not rejected, so a slightly out-of-range
+  /// model number never invalidates an otherwise good plan.
+  static AiNarrationPlan? fromJson(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    final rawFeatures = json['features'];
+    if (rawFeatures is! Map) return null;
+    final features = <String, double>{};
+    for (final key in knownFeatures) {
+      final raw = rawFeatures[key];
+      if (raw is! num) return null;
+      features[key] = raw.toDouble().clamp(0.0, 1.0);
+    }
+    final view = json['defaultView'];
+    final order = json['viewOrder'];
+    if (view is! String || !knownViews.contains(view)) return null;
+    final viewOrder =
+        order is List ? order.whereType<String>().toList(growable: false) : <String>[];
+    if (viewOrder.isEmpty || !viewOrder.contains(view)) return null;
+    return AiNarrationPlan(
+      features: features,
+      defaultView: view,
+      viewOrder: viewOrder,
+      wantMap: json['wantMap'] as bool? ?? false,
     );
   }
 }
@@ -390,6 +506,7 @@ class AiBookGraph {
     this.sectionTitles = const {},
     this.entities = const [],
     this.relations = const [],
+    this.narration,
   });
 
   static const int currentVersion = 1;
@@ -414,6 +531,10 @@ class AiBookGraph {
   final List<AiGraphEntity> entities;
   final List<AiGraphRelation> relations;
 
+  /// Display plan from pipeline step 0; null for graphs generated before
+  /// this feature or when the plan call failed (silent default fallback).
+  final AiNarrationPlan? narration;
+
   AiBookGraph copyWith({
     String? contentHash,
     DateTime? generatedAt,
@@ -424,6 +545,7 @@ class AiBookGraph {
     Map<int, String>? sectionTitles,
     List<AiGraphEntity>? entities,
     List<AiGraphRelation>? relations,
+    AiNarrationPlan? narration,
   }) {
     return AiBookGraph(
       contentHash: contentHash ?? this.contentHash,
@@ -435,6 +557,7 @@ class AiBookGraph {
       sectionTitles: sectionTitles ?? this.sectionTitles,
       entities: entities ?? this.entities,
       relations: relations ?? this.relations,
+      narration: narration ?? this.narration,
     );
   }
 
@@ -453,6 +576,7 @@ class AiBookGraph {
     },
     'entities': [for (final e in entities) e.toJson()],
     'relations': [for (final r in relations) r.toJson()],
+    if (narration != null) 'narration': narration!.toJson(),
   };
 
   /// Null when the payload is invalid or produced by an older generator.
@@ -505,6 +629,11 @@ class AiBookGraph {
           : const {},
       entities: entities,
       relations: relations,
+      narration: AiNarrationPlan.fromJson(
+        json['narration'] is Map
+            ? Map<String, dynamic>.from(json['narration'] as Map)
+            : null,
+      ),
     );
   }
 }

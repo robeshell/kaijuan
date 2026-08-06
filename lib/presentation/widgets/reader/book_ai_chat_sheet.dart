@@ -9,7 +9,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:thinking_orbs/thinking_orbs.dart';
 
 import '../../../ai/ai_chat.dart';
+import '../../../ai/ai_chat_retrieve.dart';
 import '../../../ai/ai_graph.dart';
+import '../../../ai/ai_graph_family_tree.dart';
 import '../../../ai/ai_log.dart';
 import '../../../ai/ai_models.dart';
 import '../../../ai/ai_outline.dart';
@@ -25,6 +27,7 @@ import '../app_components.dart';
 import '../app_overlays.dart';
 import 'ai_result_body.dart';
 import 'ai_relation_row.dart';
+import 'book_ai_graph_family_tree_view.dart';
 import 'book_ai_graph_fullscreen.dart';
 import 'book_ai_graph_view.dart';
 
@@ -89,7 +92,7 @@ enum _OutlineAction { delete }
 /// layout stays available as a secondary「关系图」view. Each entity type gets
 /// its own chapter-ordered list so「谁是谁 / 在哪里 / 发生了哪些事」are
 /// readable without the graph.
-enum _GraphViewMode { persons, locations, events, graph }
+enum _GraphViewMode { persons, locations, events, graph, familyTree }
 
 /// Sort order for the entity list views.
 enum _GraphSortOrder {
@@ -117,6 +120,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool _outlineOverviewExpanded = false;
   _GraphViewMode _graphViewMode = _GraphViewMode.persons;
 
+  /// Plan whose default view has been applied; applying again is skipped so
+  /// the user's manual view choice survives unrelated controller updates.
+  AiBookGraph? _appliedNarrationGraph;
+  bool _familyTreeDetailExpanded = false;
+
   /// Per-view sort order, so 人物/地点/事件 keep their own choice. Defaults
   /// to frequency (most-mentioned first).
   final _graphSortOrders = <_GraphViewMode, _GraphSortOrder>{};
@@ -132,7 +140,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// one-shot structure recognition.
   List<AiGraphWorkCandidate>? _graphWorks;
   bool _graphWorksLoading = false;
-  final String _graphQuery = '';
+  String _graphQuery = '';
   String? _graphHighlighted;
   Timer? _graphHighlightTimer;
   final _graphEntityKeys = <String, GlobalKey>{};
@@ -253,7 +261,20 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   void _onReaderControllerChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // Apply the narration plan's recommended default view once per graph
+    // instance (new generation or re-analysis); afterwards the user's own
+    // view choice wins.
+    final graph = _c.bookGraph;
+    final plan = graph?.narration;
+    if (plan != null && !identical(graph, _appliedNarrationGraph)) {
+      _appliedNarrationGraph = graph;
+      final wanted = _viewModeFor(plan.defaultView);
+      if (wanted != null && _graphViewMode != wanted) {
+        _graphViewMode = wanted;
+      }
+    }
+    setState(() {});
   }
 
   Future<void> _bootstrap() async {
@@ -1276,13 +1297,65 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool get _allowUnread =>
       _c.aiSettingsController?.settings.allowUnreadContext ?? true;
 
-  /// Which entity type the current list view filters to; null on the graph
-  /// view (no list rendered there).
-  AiGraphEntityType? get _graphListEntityType => switch (_graphViewMode) {
-    _GraphViewMode.persons => AiGraphEntityType.person,
-    _GraphViewMode.locations => AiGraphEntityType.location,
-    _GraphViewMode.events => AiGraphEntityType.event,
-    _GraphViewMode.graph => null,
+  /// Which entity types the current list view shows; empty on the graph
+  /// view (no list rendered there). The persons view also folds in
+  /// `organization` entities (家族/势力 read as part of the cast).
+  Set<AiGraphEntityType> get _graphListEntityTypes => switch (_graphViewMode) {
+    _GraphViewMode.persons => {
+        AiGraphEntityType.person,
+        AiGraphEntityType.organization,
+      },
+    _GraphViewMode.locations => {AiGraphEntityType.location},
+    _GraphViewMode.events => {AiGraphEntityType.event},
+    _GraphViewMode.graph => const {},
+    _GraphViewMode.familyTree => const {},
+  };
+
+  /// View entry order: the plan's `viewOrder` when present (unknown views
+  /// like family_tree are skipped until the tree lands), then the base
+  /// order for anything not mentioned — entries are never hidden.
+  List<_GraphViewMode> _orderedGraphViewModes(AiNarrationPlan? plan) {
+    const base = [
+      _GraphViewMode.persons,
+      _GraphViewMode.locations,
+      _GraphViewMode.events,
+      _GraphViewMode.graph,
+      _GraphViewMode.familyTree,
+    ];
+    if (plan == null) {
+      return [
+        _GraphViewMode.persons,
+        _GraphViewMode.locations,
+        _GraphViewMode.events,
+        _GraphViewMode.graph,
+      ];
+    }
+    final ordered = <_GraphViewMode>[];
+    for (final view in plan.viewOrder) {
+      final mode = _viewModeFor(view);
+      if (mode != null && !ordered.contains(mode)) ordered.add(mode);
+    }
+    for (final mode in base) {
+      if (!ordered.contains(mode)) ordered.add(mode);
+    }
+    return ordered;
+  }
+
+  _GraphViewMode? _viewModeFor(String view) => switch (view) {
+    'persons' => _GraphViewMode.persons,
+    'locations' => _GraphViewMode.locations,
+    'events' => _GraphViewMode.events,
+    'graph' => _GraphViewMode.graph,
+    'family_tree' => _GraphViewMode.familyTree,
+    _ => null, // org_tree: not rendered until the organization tree lands.
+  };
+
+  static const _graphViewLabels = <_GraphViewMode, String>{
+    _GraphViewMode.persons: '人物',
+    _GraphViewMode.locations: '地点',
+    _GraphViewMode.events: '事件',
+    _GraphViewMode.graph: '关系图',
+    _GraphViewMode.familyTree: '家族树',
   };
 
   Widget _buildGraphTab(BuildContext context) {
@@ -1395,8 +1468,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     };
     final visibleEntities = graph.entities.where((entity) {
       if (gateByProgress && entity.firstSection > readThrough) return false;
-      final listType = _graphListEntityType;
-      if (listType != null && entity.type != listType) return false;
+      final listTypes = _graphListEntityTypes;
+      if (listTypes.isNotEmpty && !listTypes.contains(entity.type)) {
+        return false;
+      }
       if (_graphQuery.trim().isNotEmpty) {
         final query = _graphQuery.trim();
         final hit = entity.name.contains(query) ||
@@ -1534,23 +1609,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         if (!generating && mainEntities.isNotEmpty) ...[
           const SizedBox(height: 10),
           SegmentedButton<_GraphViewMode>(
-            segments: const [
-              ButtonSegment(
-                value: _GraphViewMode.persons,
-                label: Text('人物'),
-              ),
-              ButtonSegment(
-                value: _GraphViewMode.locations,
-                label: Text('地点'),
-              ),
-              ButtonSegment(
-                value: _GraphViewMode.events,
-                label: Text('事件'),
-              ),
-              ButtonSegment(
-                value: _GraphViewMode.graph,
-                label: Text('关系图'),
-              ),
+            segments: [
+              for (final mode in _orderedGraphViewModes(graph.narration))
+                ButtonSegment(
+                  value: mode,
+                  label: Text(_graphViewLabels[mode]!),
+                ),
             ],
             selected: {_graphViewMode},
             onSelectionChanged: (selection) =>
@@ -1613,7 +1677,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       (entity) => connectedNames.contains(entity.name),
                     )
                     .toList(growable: false),
-                relations: graph.relations,
+                // Same spoiler gate as the family tree: hide edges whose
+                // evidence is entirely in unread chapters.
+                relations: graph.relations
+                    .where(
+                      (r) =>
+                          !gateByProgress ||
+                          r.evidence
+                              .any((e) => e.sectionIndex <= readThrough),
+                    )
+                    .toList(growable: false),
                 onVertexTap: _onGraphVertexTap,
                 height: 300,
               ),
@@ -1636,14 +1709,23 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
           const SizedBox(height: 10),
         ],
-        if (_graphViewMode != _GraphViewMode.graph) ...[
+        if (!generating &&
+            mainEntities.isNotEmpty &&
+            _graphViewMode == _GraphViewMode.familyTree) ...[
+          const SizedBox(height: 12),
+          _buildFamilyTreeView(context, graph, gateByProgress, readThrough),
+          const SizedBox(height: 10),
+        ],
+        if (_graphViewMode != _GraphViewMode.graph &&
+            _graphViewMode != _GraphViewMode.familyTree) ...[
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _graphQueryController,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (value) =>
+                      setState(() => _graphQuery = value),
                   decoration: InputDecoration(
                     hintText: '搜索',
                     isDense: true,
@@ -1695,6 +1777,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ],
           ),
           const SizedBox(height: 8),
+          if (_graphViewMode == _GraphViewMode.locations &&
+              (graph.narration?.feature('geography') ?? 0) >= 0.5)
+            _buildLocationChain(context, graph, gateByProgress, readThrough),
           if (visibleEntities.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 20),
@@ -1715,7 +1800,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     TextButton(
                       onPressed: () {
                         _graphQueryController.clear();
-                        setState(() {});
+                        setState(() => _graphQuery = '');
                       },
                       child: const Text('清除搜索'),
                     ),
@@ -1893,6 +1978,207 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
   }
 
+  /// Family-tree view: the line-connected chart plus the foldable
+  /// 「未入树 N 人 · 关系复杂 N 人」rows (each name opens the entity card).
+  /// Degrades to a hint when the book has no kin data at all.
+  Widget _buildFamilyTreeView(
+    BuildContext context,
+    AiBookGraph graph,
+    bool gateByProgress,
+    int readThrough,
+  ) {
+    final treeEntities = graph.entities
+        .where((e) => !gateByProgress || e.firstSection <= readThrough)
+        .toList(growable: false);
+    // Spoiler gate (mirrors _buildGraphEntityTile's relation count): a 亲属
+    // edge whose evidence is entirely in unread chapters reveals a late-plot
+    // kinship between two already-introduced characters, so it must not
+    // enter the tree (or the isolated/complex counts).
+    final treeRelations = graph.relations
+        .where(
+          (r) =>
+              !gateByProgress ||
+              r.evidence.any((e) => e.sectionIndex <= readThrough),
+        )
+        .toList(growable: false);
+    final familyTree = buildFamilyTree(
+      entities: treeEntities,
+      relations: treeRelations,
+    );
+    if (familyTree.roots.isEmpty && familyTree.isolatedCount == 0) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          '本书暂无血缘关系数据',
+          style: TextStyle(
+            fontSize: context.appCaptionSize,
+            color: context.appSecondaryText,
+          ),
+        ),
+      );
+    }
+    final detailNames = [
+      ...familyTree.complexNames,
+      ...familyTree.isolatedNames,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        BookAiGraphFamilyTreeView(
+          tree: familyTree,
+          onVertexTap: _showEntityDetailsByName,
+        ),
+        if (familyTree.isolatedCount > 0 ||
+            familyTree.complexNames.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          InkWell(
+            onTap: () => setState(
+              () => _familyTreeDetailExpanded = !_familyTreeDetailExpanded,
+            ),
+            borderRadius: BorderRadius.circular(6),
+            child: Row(
+              children: [
+                Icon(
+                  _familyTreeDetailExpanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  size: 14,
+                  color: context.appSecondaryText,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    '未入树 ${familyTree.isolatedCount} 人'
+                    ' · 关系复杂 ${familyTree.complexNames.length} 人',
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_familyTreeDetailExpanded) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final name in detailNames)
+                  ActionChip(
+                    label: Text(name),
+                    visualDensity: VisualDensity.compact,
+                    // Tree mode renders no entity list rows, so the
+                    // scroll-and-highlight path in _onGraphVertexTap has
+                    // nothing to scroll to — go straight to the detail card
+                    // (same as tapping a tree node).
+                    onPressed: () => _showEntityDetailsByName(name),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+
+  /// Text-only location chain (地图文字版, spec §6): setting locations strung
+  /// into an actual route — grouped by chapter, ordered by in-chapter
+  /// appearance (firstSection, then the resolved progress of the first
+  /// evidence), each location tappable to its entity card. No real map.
+  Widget _buildLocationChain(
+    BuildContext context,
+    AiBookGraph graph,
+    bool gateByProgress,
+    int readThrough,
+  ) {
+    final locations = graph.entities
+        .where(
+          (e) =>
+              e.type == AiGraphEntityType.location &&
+              e.scope == AiGraphEntityScope.setting,
+        )
+        .where((e) => !gateByProgress || e.firstSection <= readThrough)
+        .toList(growable: false)
+      ..sort((a, b) {
+        final bySection = a.firstSection.compareTo(b.firstSection);
+        if (bySection != 0) return bySection;
+        return _chainProgress(a).compareTo(_chainProgress(b));
+      });
+    if (locations.isEmpty) return const SizedBox.shrink();
+    const cap = 20;
+    final shown = locations.take(cap).toList(growable: false);
+    final total = locations.length;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: context.appColors.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '地点链 · 按书中出现顺序',
+            style: TextStyle(
+              fontSize: context.appCaptionSize,
+              color: context.appSecondaryText,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 5,
+            runSpacing: 5,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              for (var i = 0; i < shown.length; i++) ...[
+                if (i > 0)
+                  Text(
+                    '→',
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize - 1,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                _LocationChainPill(
+                  name: shown[i].name,
+                  mentionCount: shown[i].chapterFreq.values
+                      .fold<int>(0, (sum, v) => sum + v),
+                  onTap: () => _onGraphVertexTap(shown[i].name),
+                ),
+              ],
+            ],
+          ),
+          if (total > cap)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '等 ${total - cap} 处…',
+                style: TextStyle(
+                  fontSize: context.appCaptionSize - 1,
+                  color: context.appSecondaryText,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// In-chapter appearance progress: the resolved progress of the first
+  /// located evidence (0 when nothing resolved — sorts before located ones).
+  double _chainProgress(AiGraphEntity entity) {
+    for (final evidence in entity.evidence) {
+      final progress = evidence.progressInSection;
+      if (progress != null) return progress;
+    }
+    return 0;
+  }
+
   Color _graphEventTypeColor(AiGraphEventType type) => switch (type) {
     AiGraphEventType.combat => const Color(0xffef4444),
     AiGraphEventType.growth => const Color(0xff3b82f6),
@@ -1950,6 +2236,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
   }
 
+  /// Family-tree node tap: open the entity detail card directly (same as a
+  /// list row tap). The tree canvas has no scroll target for the highlight-
+  /// and-scroll path used by the list views, so we skip that and go straight
+  /// to the detail sheet the user expects.
+  void _showEntityDetailsByName(String name) {
+    final graph = _c.bookGraph;
+    if (graph == null) return;
+    final match = graph.entities.where((e) => e.name == name);
+    if (match.isNotEmpty) _showEntityDetails(match.first);
+  }
+
   void _onGraphVertexTap(String name) {
     setState(() => _graphHighlighted = name);
     _graphHighlightTimer?.cancel();
@@ -1987,7 +2284,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               )
               .where((entity) => connectedNames.contains(entity.name))
               .toList(growable: false),
-          relations: graph.relations,
+          // Spoiler gate: hide edges whose evidence is unread-only.
+          relations: graph.relations
+              .where(
+                (r) =>
+                    !gateByProgress ||
+                    r.evidence.any((e) => e.sectionIndex <= readThrough),
+              )
+              .toList(growable: false),
           onJumpToEvidence: _goToGraphEvidence,
         ),
       ),
@@ -2000,6 +2304,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       AiGraphEntityType.person => colors.primary,
       AiGraphEntityType.location => Colors.teal,
       AiGraphEntityType.event => Colors.amber.shade700,
+      AiGraphEntityType.organization => const Color(0xffec4899),
     };
   }
 
@@ -2349,7 +2654,40 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
       if (confirmed != true || !mounted) return;
     }
+    // Step-0 display plan, confirmed before extraction: a fresh generation
+    // (no narration yet) and every regeneration get the confirm dialog;
+    // incremental runs keep their existing plan untouched.
+    final hasPlan = _c.bookGraph?.narration != null;
+    if (force || !hasPlan) {
+      final confirmed = await _confirmNarrationPlan(work);
+      if (confirmed == null || !mounted) return;
+      await _c.generateBookGraph(
+        only: work,
+        force: force,
+        narrationOverride: confirmed.plan,
+        excludedGraphSectionIndices: confirmed.excludedSections.isEmpty
+            ? null
+            : confirmed.excludedSections,
+      );
+      return;
+    }
     await _c.generateBookGraph(only: work, force: force);
+  }
+
+  /// Pre-generation confirm dialog: runs the step-0 display plan (features +
+  /// recommended view, user may pick another default view) **and** the
+  /// auto-filtered graph corpus with a manual section chooser (uncheck to
+  /// exclude a chapter). Returns the confirmed plan + excluded section
+  /// indices. Null = cancelled.
+  Future<({AiNarrationPlan plan, Set<int> excludedSections})?>
+      _confirmNarrationPlan(
+    AiGraphWorkCandidate? work,
+  ) {
+    return showDialog<({AiNarrationPlan plan, Set<int> excludedSections})>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _NarrationPlanDialog(controller: _c, work: work),
+    );
   }
 
   Future<void> _deleteGraph() async {
@@ -2572,7 +2910,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     if (ready) {
                       _c.openWorkGraph(work);
                     } else {
-                      unawaited(_c.generateBookGraph(only: work));
+                      unawaited(_generateGraph(work: work));
                     }
                   },
       ),
@@ -2605,6 +2943,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String _graphFilterLabelFor(AiGraphEntityType type) => switch (type) {    AiGraphEntityType.person => '人物',
     AiGraphEntityType.location => '地点',
     AiGraphEntityType.event => '事件',
+    AiGraphEntityType.organization => '势力',
   };
 
   @override
@@ -3283,6 +3622,414 @@ class _Bubble extends StatelessWidget {
               child: IntrinsicWidth(child: bubble),
             )
           : SizedBox(width: maxWidth, child: bubble),
+    );
+  }
+}
+
+/// Location pill inside the location chain: name + mention count when > 1,
+/// tappable to the entity card.
+class _LocationChainPill extends StatelessWidget {
+  const _LocationChainPill({
+    required this.name,
+    required this.mentionCount,
+    required this.onTap,
+  });
+
+  final String name;
+  final int mentionCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.8),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                name,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+              if (mentionCount > 1) ...[
+                const SizedBox(width: 4),
+                Text(
+                  '×$mentionCount',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontSize: 10,
+                        color: colors.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pre-generation display-plan confirm dialog (spec §3.2): runs the step-0
+/// call inside the dialog (loading → plan), shows the five-dimension
+/// features and lets the user confirm the recommended default view or pick
+/// another one. Pops the confirmed plan; null = cancelled.
+class _NarrationPlanDialog extends StatefulWidget {
+  const _NarrationPlanDialog({required this.controller, this.work});
+
+  final BookReaderController controller;
+  final AiGraphWorkCandidate? work;
+
+  @override
+  State<_NarrationPlanDialog> createState() => _NarrationPlanDialogState();
+}
+
+class _NarrationPlanDialogState extends State<_NarrationPlanDialog> {
+  static const _featureLabels = <String, String>{
+    'eventDriven': '事件驱动',
+    'characterEnsemble': '人物群像',
+    'organization': '组织博弈',
+    'geography': '地理叙事',
+    'essay': '散文随笔',
+  };
+
+  static const _viewLabels = <String, String>{
+    'persons': '人物',
+    'locations': '地点',
+    'events': '事件',
+    'graph': '关系图',
+    'family_tree': '家族树',
+    'org_tree': '组织树',
+  };
+
+  AiNarrationPlan? _plan;
+  bool _failed = false;
+  String? _selectedView;
+
+  /// Auto-filtered graph corpus (metadata/appendix removed, spine-deduped).
+  /// Shown for the user's manual second pass: uncheck to exclude a section.
+  List<AiBookSectionSlice>? _sections;
+  bool _sectionsFailed = false;
+  final Set<int> _excludedSections = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _analyze();
+    _loadSections();
+  }
+
+  Future<void> _loadSections() async {
+    setState(() {
+      _sections = null;
+      _sectionsFailed = false;
+    });
+    try {
+      final sections = await widget.controller
+          .graphSectionChoices(widget.work);
+      if (!mounted) return;
+      setState(() => _sections = sections);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _sectionsFailed = true);
+    }
+  }
+
+  Future<void> _analyze() async {
+    setState(() {
+      _plan = null;
+      _failed = false;
+    });
+    final plan = await widget.controller
+        .analyzeActiveGraphNarration(work: widget.work);
+    if (!mounted) return;
+    setState(() {
+      if (plan == null) {
+        _failed = true;
+      } else {
+        _plan = plan;
+        // org_tree has no rendered entry yet; if the model still picked it
+        // as the default, fall back to the first selectable view so the
+        // confirm button applies a view that actually exists.
+        final defaultView = plan.defaultView == 'org_tree'
+            ? plan.viewOrder.firstWhere(
+                (v) => v != 'org_tree',
+                orElse: () => 'persons',
+              )
+            : plan.defaultView;
+        _selectedView = defaultView;
+      }
+    });
+  }
+
+  String get _summary {
+    final plan = _plan!;
+    final ranked = [...AiNarrationPlan.knownFeatures]
+      ..sort((a, b) => plan.feature(b).compareTo(plan.feature(a)));
+    final top = ranked.firstWhere(
+      (key) => plan.feature(key) >= 0.5,
+      orElse: () => ranked.first,
+    );
+    return '${_featureLabels[top] ?? top}为主 · '
+        '推荐${_viewLabels[plan.defaultView] ?? plan.defaultView}';
+  }
+
+  /// All auto-filtered sections are excluded → generation would be empty.
+  bool get _allExcluded =>
+      _sections != null &&
+      _sections!.isNotEmpty &&
+      _excludedSections.length >= _sections!.length;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('展示方案'),
+      content: SizedBox(
+        width: 360,
+        child: _buildBody(context, colors),
+      ),
+      actions: [
+        if (_plan != null || _failed)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+        if (_failed)
+          FilledButton(onPressed: _analyze, child: const Text('重试'))
+        else if (_plan != null)
+          FilledButton(
+            onPressed: _selectedView == null || _allExcluded
+                ? null
+                : () => Navigator.of(context).pop(
+                      (
+                        plan: _plan!.withDefaultView(_selectedView!),
+                        excludedSections: Set<int>.unmodifiable(
+                          _excludedSections,
+                        ),
+                      ),
+                    ),
+            child: const Text('生成图谱'),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBody(BuildContext context, ColorScheme colors) {
+    if (_failed) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, size: 32, color: colors.error),
+          const SizedBox(height: 10),
+          Text(
+            '展示方案分析失败',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '无法分析本书的展示方式，可重试或取消。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      );
+    }
+    final plan = _plan;
+    if (plan == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(height: 12),
+            Text('正在分析本书的展示方案…'),
+          ],
+        ),
+      );
+    }
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _summary,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 12),
+          for (final key in AiNarrationPlan.knownFeatures)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      _featureLabels[key] ?? key,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: LinearProgressIndicator(
+                        value: plan.feature(key),
+                        minHeight: 5,
+                        backgroundColor: colors.surfaceContainerHighest,
+                        color: colors.primary,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 28,
+                    child: Text(
+                      plan.feature(key).toStringAsFixed(1),
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 10),
+          Text(
+            '默认视图',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              // org_tree is not a rendered entry yet — offering it as a
+              // default-view choice would be a silent no-op (mirrors the
+              // entryOrder filter in _buildNarrationCard).
+              for (final view in plan.viewOrder)
+                if (view != 'org_tree')
+                  ChoiceChip(
+                    label: Text(_viewLabels[view] ?? view),
+                    selected: _selectedView == view,
+                    onSelected: (_) => setState(() => _selectedView = view),
+                    visualDensity: VisualDensity.compact,
+                  ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '选择生成后首先展示的视图，其余入口按方案排序保留。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Text(
+                '图谱正文范围',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              if (_sections != null) ...[
+                const SizedBox(width: 8),
+                Text(
+                  '已选 ${_sections!.length - _excludedSections.length} / ${_sections!.length} 节',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '已自动过滤前言/目录/附录等辅文；以下章节参与生成，'
+            '取消勾选可排除（如 序言/导读/出版说明）。',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 6),
+          if (_sectionsFailed)
+            Row(
+              children: [
+                Text(
+                  '章节列表加载失败',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.error,
+                      ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _loadSections,
+                  child: const Text('重试'),
+                ),
+              ],
+            )
+          else if (_sections == null)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 10),
+                  Text('正在加载章节…'),
+                ],
+              ),
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final section in _sections!)
+                    CheckboxListTile(
+                      dense: true,
+                      value: !_excludedSections.contains(section.index),
+                      onChanged: (checked) => setState(() {
+                        if (checked == true) {
+                          _excludedSections.remove(section.index);
+                        } else {
+                          _excludedSections.add(section.index);
+                        }
+                      }),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        '§${section.index} ${section.label}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'ai_chat_retrieve.dart';
 import 'ai_graph.dart';
+import 'ai_log.dart';
 import 'ai_models.dart';
 import 'ai_provider.dart';
 import 'ai_settings.dart';
@@ -99,6 +100,103 @@ class AiBookGraphService {
   /// Whole-run corpus budget (mirrors outline's cap).
   static const int maxBookBodyChars = 1500000;
 
+  /// Step-0 display plan call (spec: docs/specs/ai-graph-narration.md §3).
+  ///
+  /// One whole-book call (title + outline labels + body sample) asking the
+  /// model for the five-dimension narration profile and the recommended
+  /// default view. The result only drives *display* preferences; it never
+  /// touches entity/relation data. Returns null on any failure — the caller
+  /// silently falls back to the default view instead of blocking generation.
+  static const int narrationMaxTokens = 2048;
+
+  /// Sections sampled for the body glimpse (first N sections).
+  static const int narrationSampleSections = 3;
+
+  /// Chars taken from the head of each sampled section.
+  static const int narrationSampleChars = 600;
+
+  Future<AiNarrationPlan?> analyzeNarration({
+    required String bookTitle,
+    String? bookAuthor,
+    required List<AiBookSectionSlice> sections,
+    CancelToken? cancelToken,
+  }) async {
+    try {
+      cancelToken?.throwIfCancelled();
+      if (!_isAvailable()) return null;
+      final provider = _openProvider();
+      if (provider == null) return null;
+      final outline = [
+        for (final s in sections.take(200))
+          if (s.label.trim().isNotEmpty) s.label.trim(),
+      ].toList(growable: false);
+      final sample = sections
+          .take(narrationSampleSections)
+          .map((s) => s.text.length > narrationSampleChars
+              ? s.text.substring(0, narrationSampleChars)
+              : s.text)
+          .join('\n……\n');
+      final messages = [
+        AiMessage(
+          role: AiMessageRole.system,
+          content: '你是书籍阅读体验设计师。基于给定信息判断这本书适合怎样'
+              '展示知识图谱，严格只输出一个 JSON 对象，不要输出 JSON 之外的任何文字。',
+        ),
+        AiMessage(
+          role: AiMessageRole.user,
+          content:
+              '书名：《$bookTitle》${bookAuthor == null ? '' : '  作者：$bookAuthor'}\n'
+              '大纲（章节标题）：${outline.isEmpty ? '（无）' : outline.join(' / ')}\n\n'
+              '正文抽样：\n$sample\n\n'
+              '要求：输出如下结构的 JSON：\n'
+              '{"features":{"eventDriven":0-1,"characterEnsemble":0-1,'
+              '"organization":0-1,"geography":0-1,"essay":0-1},'
+              '"defaultView":"persons|locations|events|graph|family_tree|org_tree",'
+              '"viewOrder":["推荐顺序，defaultView 第一"],"wantMap":true|false}\n'
+              '特征语义（各自独立 0-1，不必相加为 1）：\n'
+              '- eventDriven：情节/事件推进叙事（如冒险、案件）\n'
+              '- characterEnsemble：人物群像、多主角、关系网是核心（如群像小说）\n'
+              '- organization：组织/势力/家族/派系博弈是主线\n'
+              '- geography：地理空间/旅途/多地点场景是重要叙事要素\n'
+              '- essay：散文/随笔/杂文/评论集（非虚构叙述、议论为主）\n'
+              'defaultView 推荐规则：家族/组织博弈为主选 family_tree；'
+              '人物关系是核心选 persons；事件主线清晰选 events；'
+              '地点重要选 locations；混合型选最值得先看的视图。'
+              'viewOrder 是全部候选视图的排列（包含 defaultView 且它排第一，'
+              '可含 future 的 org_tree）。wantMap=true 仅当地理叙事显著且地图'
+              '能帮助读者时。',
+        ),
+      ];
+      final request = AiCompletionRequest(
+        messages: messages,
+        maxTokens: narrationMaxTokens,
+        temperature: 0,
+      );
+      final result = await completeWithRetry(
+        provider,
+        request,
+        cancelToken: cancelToken,
+      );
+      final decoded = _decodeJsonObject(result.text);
+      if (decoded == null) return null;
+      final plan = AiNarrationPlan.fromJson(
+        Map<String, dynamic>.from(decoded),
+      );
+      if (plan != null) {
+        AiLog.d('graph narration plan: default=${plan.defaultView} '
+            'order=${plan.viewOrder.join(',')} wantMap=${plan.wantMap}');
+      }
+      return plan;
+    } on AiProviderException {
+      // A cancelled step-0 call must surface the stop, not silently fall
+      // back (otherwise the user's stop only takes effect at extraction).
+      rethrow;
+    } catch (_) {
+      // Silent fallback: a failed plan call never blocks graph generation.
+      return null;
+    }
+  }
+
   Future<AiBookGraph> generate({
     required String bookTitle,
     String? bookAuthor,
@@ -106,10 +204,12 @@ class AiBookGraphService {
     required bool includesUnread,
     int? readThroughSection,
     AiBookGraph? existing,
+    /// User-confirmed display plan from the pre-generation dialog. When
+    /// null the pipeline auto-runs step 0 (or reuses [existing]'s plan).
+    AiNarrationPlan? plannedNarration,
     CancelToken? cancelToken,
     void Function(AiGraphProgress progress)? onProgress,
-  }) async {
-    if (!_isAvailable()) {
+  }) async {    if (!_isAvailable()) {
       throw const AiGraphGenerationException('AI 未启用或未配置');
     }
     final provider = _openProvider();
@@ -165,6 +265,25 @@ class AiBookGraphService {
       for (final r in relations) r.mergeKey: r,
     };
 
+    // Step 0: display plan (once per graph). A failure or a missing provider
+    // silently skips narration — generation proceeds with the default view.
+    AiNarrationPlan? narration = plannedNarration ?? existing?.narration;
+    if (narration == null && working.isNotEmpty) {
+      onProgress?.call(
+        AiGraphProgress(
+          completed: 0,
+          total: working.length,
+          label: '正在分析本书的展示方案…',
+        ),
+      );
+      narration = await analyzeNarration(
+        bookTitle: bookTitle,
+        bookAuthor: bookAuthor,
+        sections: sections,
+        cancelToken: cancelToken,
+      );
+    }
+
     onProgress?.call(
       AiGraphProgress(
         completed: 0,
@@ -196,6 +315,7 @@ class AiBookGraphService {
               bookTitle: bookTitle,
               bookAuthor: bookAuthor,
               knownEntities: knownEntities,
+              narration: narration,
               cancelToken: cancelToken,
             ),
         ]);
@@ -304,6 +424,7 @@ class AiBookGraphService {
       },
       entities: entities,
       relations: relations,
+      narration: narration,
     );
   }
 
@@ -331,6 +452,7 @@ class AiBookGraphService {
       sectionTitles: existing?.sectionTitles ?? const {},
       entities: entities,
       relations: relations,
+      narration: existing?.narration,
     );
   }
 
@@ -424,6 +546,7 @@ class AiBookGraphService {
     required String bookTitle,
     required String? bookAuthor,
     required String knownEntities,
+    required AiNarrationPlan? narration,
     required CancelToken? cancelToken,
   }) async {
     final origin = section.originSectionIndex;
@@ -439,6 +562,7 @@ class AiBookGraphService {
           bookTitle: bookTitle,
           bookAuthor: bookAuthor,
           knownEntities: knownEntities,
+          narration: narration,
           cancelToken: cancelToken,
         ),
       );
@@ -456,6 +580,7 @@ class AiBookGraphService {
     required String bookTitle,
     required String? bookAuthor,
     required String knownEntities,
+    required AiNarrationPlan? narration,
     required CancelToken? cancelToken,
     int depth = 0,
   }) async {
@@ -468,6 +593,7 @@ class AiBookGraphService {
           sectionIndex: sectionIndex,
           chunkText: chunk,
           knownEntities: knownEntities,
+          narration: narration,
           cancelToken: cancelToken,
         ),
       ];
@@ -482,6 +608,7 @@ class AiBookGraphService {
         bookTitle: bookTitle,
         bookAuthor: bookAuthor,
         knownEntities: knownEntities,
+        narration: narration,
         cancelToken: cancelToken,
         depth: depth + 1,
       );
@@ -492,6 +619,7 @@ class AiBookGraphService {
         bookTitle: bookTitle,
         bookAuthor: bookAuthor,
         knownEntities: knownEntities,
+        narration: narration,
         cancelToken: cancelToken,
         depth: depth + 1,
       );
@@ -537,6 +665,7 @@ class AiBookGraphService {
     required int sectionIndex,
     required String chunkText,
     required String knownEntities,
+    required AiNarrationPlan? narration,
     required CancelToken? cancelToken,
   }) async {
     final knownBlock = knownEntities.isEmpty
@@ -544,31 +673,42 @@ class AiBookGraphService {
         : '已知实体（已存在，本章只补充它们的新关系与证据，'
               '不要重复创建，不要为它们写 description）：\n'
               '$knownEntities\n\n';
+    // Narration-driven extraction branches (spec §3.3): the step-0 plan
+    // tunes the prompt per book, without touching the validation/merge
+    // pipeline. Organization books may emit `organization` entities.
+    final narrationBlock = narration == null
+        ? ''
+        : [
+            if (narration.feature('organization') >= 0.5)
+              '本书以组织/势力/家族博弈为主：实体类型额外允许 organization'
+              '（家族、组织、势力、派系，如「史塔克家族」），'
+              '并多抽隶属关系（隶属/效力/追随）；',
+            if (narration.feature('geography') >= 0.5)
+              '地理叙事显著：location 实体仅限地理地点（城市/国家/区域/'
+              '自然地貌/街道/建筑场所），船只、机构、组织、公司等不算 location；'
+              'location 的 description 应包含方位与地点间的相对关系'
+              '（如「位于城北，紧邻港口」）；',
+            if (narration.feature('essay') >= 0.5)
+              '本书为散文/随笔/议论集：scope 判定从严，单章举例引述的'
+              '人物一律 reference，只有全书反复出现的讨论对象可标 setting；',
+          ].join();
+    final entityTypes = (narration?.feature('organization') ?? 0) >= 0.5
+        ? 'person|location|event|organization'
+        : 'person|location|event';
     final messages = [
       AiMessage(
         role: AiMessageRole.system,
         content:
             '你是书籍分析引擎。只依据给定原文抽取人物、地点、事件实体与它们之间的关系，'
-            '禁止使用原文以外的知识。严格只输出一个 JSON 对象，不要输出 JSON 之外的任何文字。',
-      ),
-      AiMessage(
-        role: AiMessageRole.user,
-        content:
-            '书名：《$bookTitle》${bookAuthor == null ? '' : '  作者：$bookAuthor'}\n'
-            '章节编号：$sectionIndex\n\n'
-            '$knownBlock'
-            '抽取要求：只输出如下结构的 JSON：\n'
-            '{"entities":[{"name":"规范名","type":"person|location|event",'
-            '"scope":"setting|reference",'
-            '"aliases":["别名"],"description":"1-2句","evidence":[{"section":'
-            '$sectionIndex,"quote":"原文连续片段"}]}],'
-            '"relations":[{"source":"实体A","target":"实体B",'
-            '"type":"snake_case关系类型","description":"一句",'
-            '"evidence":[{"section":$sectionIndex,"quote":"原文连续片段"}]}]}\n'
+            '禁止使用原文以外的知识。严格只输出一个 JSON 对象，不要输出 JSON 之外的任何文字。\n'
+            // Fixed extraction rules live in the system message (stable
+            // prefix → DeepSeek context-cache hits at 0.02元 vs 1元).
+            // The section number / body / known-entity list stay in the user
+            // message so the system prefix never changes across sections.
             '规则：name 用书中最常见称呼；aliases 含其余称呼、不超过 3 个；'
-            'description 用 1-2 句，紧扣证据；'
-            'quote 必须逐字来自以下正文；evidence 至少 1 条；'
-            'type 取值仅限 person/location/event；'
+            'description 用一句话、不超过 20 字，紧扣证据；'
+            'quote 必须逐字来自正文，单条不超过 30 字；evidence 至少 1 条；'
+            'type 取值仅限 $entityTypes；'
             'type 为 event 时必须输出 eventType（仅限 战斗/成长/社交/旅行/'
             '角色登场/物品交接/组织变动/关系变化 之一，用最贴切的一个）'
             '与 importance（1-3 整数，3=重大情节）；'
@@ -579,13 +719,34 @@ class AiBookGraphService {
             '（如散文中引用的罗素、苏东坡）。'
             '标错 reference 会让该实体从图谱主视图中隐藏，'
             '所以只对真正的引用标 reference；'
+            '$narrationBlock'
             '${_relationTypes.isEmpty
                 ? '关系类型不受限制，自由描述（中文，如 结盟、背叛）；'
                 : '关系类型仅限以下中文：${_relationTypes.join('、')}，用最贴切的一个；'}'
+            '方向性关系（亲属/师徒/隶属/效力/追随）必须固定方向：'
+            'source=长辈/师父/上级/被效力方/被追随者，'
+            'target=晚辈/徒弟/下级/效力者/追随者，方向颠倒即为错误；'
+            '婚配/同盟/敌对等无方向关系不做方向要求；'
             '不要抽取书作者、作序者、编者、译者等元信息人物，'
             '除非他们作为故事角色实际登场；'
-            '本章无实体或关系时对应数组输出 []。\n\n'
-            '正文：\n$chunkText',
+            '本章无实体或关系时对应数组输出 []。',
+      ),
+      AiMessage(
+        role: AiMessageRole.user,
+        content:
+            '书名：《$bookTitle》${bookAuthor == null ? '' : '  作者：$bookAuthor'}\n'
+            '章节编号：$sectionIndex\n\n'
+            '抽取要求：只输出如下结构的 JSON：\n'
+            '{"entities":[{"name":"规范名","type":"$entityTypes",'
+            '"scope":"setting|reference",'
+            '"aliases":["别名"],"description":"一句话","evidence":[{"section":'
+            '$sectionIndex,"quote":"原文连续片段"}]}],'
+            '"relations":[{"source":"实体A","target":"实体B",'
+            '"type":"snake_case关系类型","description":"一句",'
+            '"kin":"具体称谓（仅亲属/婚配/师徒等关系，如 父子/夫妻/兄弟/师徒）",'
+            '"evidence":[{"section":$sectionIndex,"quote":"原文连续片段"}]}]}\n\n'
+            '正文：\n$chunkText\n\n'
+            '已抽取实体（合并时参考，避免重复输出）：\n$knownBlock',
       ),
     ];
 
@@ -662,7 +823,8 @@ class AiBookGraphService {
         if (typeRaw is! String ||
             (typeRaw != 'person' &&
                 typeRaw != 'location' &&
-                typeRaw != 'event')) {
+                typeRaw != 'event' &&
+                typeRaw != 'organization')) {
           continue;
         }
         final type = AiGraphEntityType.fromWireName(typeRaw);
@@ -795,6 +957,7 @@ class AiBookGraphService {
           final next = _mergeRelationEvidence(
             existing,
             map['description'],
+            map['kin'],
             sectionIndex,
             rawEvidence: map['evidence'],
             sectionText: sectionText,
@@ -814,6 +977,7 @@ class AiBookGraphService {
             target: target,
             type: type,
             description: map['description'] as String? ?? '',
+            kin: map['kin'] as String? ?? '',
             evidence: evidence,
             weight: evidence.length.toDouble(),
           );
@@ -910,6 +1074,7 @@ class AiBookGraphService {
   static AiGraphRelation _mergeRelationEvidence(
     AiGraphRelation relation,
     Object? descriptionRaw,
+    Object? kinRaw,
     int sectionIndex, {
     required Object? rawEvidence,
     required String sectionText,
@@ -924,8 +1089,14 @@ class AiBookGraphService {
             relation.description.isEmpty
         ? descriptionRaw.trim()
         : relation.description;
+    final kin = kinRaw is String &&
+            kinRaw.trim().isNotEmpty &&
+            relation.kin.isEmpty
+        ? kinRaw.trim()
+        : relation.kin;
     return relation.copyWith(
       description: description,
+      kin: kin,
       evidence: evidence,
       weight: evidence.length.toDouble(),
     );

@@ -133,6 +133,88 @@ void main() {
       };
       expect(AiBookGraph.fromJson(old), isNull);
     });
+
+    test('narration plan round-trips inside the graph package', () {
+      const plan = AiNarrationPlan(
+        features: {
+          'eventDriven': 0.8,
+          'characterEnsemble': 0.9,
+          'organization': 0.6,
+          'geography': 0.3,
+          'essay': 0.0,
+        },
+        defaultView: 'family_tree',
+        viewOrder: ['family_tree', 'persons', 'events', 'graph'],
+        wantMap: true,
+      );
+      final source = AiBookGraph(
+        contentHash: 'h1',
+        narration: plan,
+      );
+      final restored = AiBookGraph.fromJson(source.toJson());
+      expect(restored, isNotNull);
+      expect(restored!.narration, isNotNull);
+      expect(restored.narration!.defaultView, 'family_tree');
+      expect(restored.narration!.viewOrder, ['family_tree', 'persons', 'events', 'graph']);
+      expect(restored.narration!.wantMap, isTrue);
+      expect(restored.narration!.feature('characterEnsemble'), 0.9);
+    });
+
+    test('old graph without narration falls back to null', () {
+      final source = AiBookGraph(contentHash: 'h1').toJson();
+      final restored = AiBookGraph.fromJson(source);
+      expect(restored, isNotNull);
+      expect(restored!.narration, isNull);
+    });
+
+    test('kin kinship label round-trips through the relation JSON', () {
+      final relation = AiGraphRelation(
+        source: '方老先生',
+        target: '方鸿渐',
+        type: '亲属',
+        kin: '父子',
+        description: '方老先生是方鸿渐的父亲。',
+        evidence: [
+          AiGraphEvidence(sectionIndex: 1, quote: '父子'),
+        ],
+        weight: 1,
+      );
+      final restored = AiGraphRelation.fromJson(relation.toJson());
+      expect(restored, isNotNull);
+      expect(restored!.kin, '父子');
+      // Old graphs without the field read as empty.
+      final old = Map<String, dynamic>.from(relation.toJson())..remove('kin');
+      expect(AiGraphRelation.fromJson(old)!.kin, isEmpty);
+    });
+    test('invalid narration payload is rejected (falls back to default view)',
+        () {
+      expect(
+        AiNarrationPlan.fromJson({
+          'features': {'eventDriven': 0.5}, // missing the other four
+          'defaultView': 'persons',
+          'viewOrder': ['persons'],
+          'wantMap': false,
+        }),
+        isNull,
+      );
+      expect(AiNarrationPlan.fromJson(null), isNull);
+      // Out-of-range values clamp instead of invalidating the plan.
+      final clamped = AiNarrationPlan.fromJson({
+        'features': {
+          'eventDriven': 1.5,
+          'characterEnsemble': -0.2,
+          'organization': 0.5,
+          'geography': 0.5,
+          'essay': 0.5,
+        },
+        'defaultView': 'persons',
+        'viewOrder': ['persons'],
+        'wantMap': false,
+      });
+      expect(clamped, isNotNull);
+      expect(clamped!.feature('eventDriven'), 1.0);
+      expect(clamped.feature('characterEnsemble'), 0.0);
+    });
   });
 
   group('AiBookGraphService extraction', () {
@@ -332,7 +414,7 @@ void main() {
       expect(entity.chapterFreq, {1: 1, 2: 1});
       expect(entity.firstSection, 1);
       expect(entity.lastSection, 2);
-      expect(provider.requests.length, 2);
+      expect(provider.extractionRequests.length, 2);
     });
 
     test('duplicate evidence is not appended twice', () async {
@@ -355,6 +437,103 @@ void main() {
       );
 
       expect(graph.entities.single.evidence.length, 1);
+    });
+
+    test('step-0 narration plan lands in the graph; extraction is untouched',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","aliases":[],
+              "description":"主角。",
+              "evidence":[{"section":1,"quote":"张三出场"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '张三出场。')],
+        includesUnread: true,
+      );
+
+      expect(graph.narration, isNotNull);
+      expect(graph.narration!.defaultView, 'events');
+      expect(graph.narration!.viewOrder.first, 'events');
+      expect(graph.entities.single.name, '张三');
+      // One plan call + one extraction call.
+      expect(provider.requests.length, 2);
+      expect(provider.extractionRequests.length, 1);
+      // Direction convention is baked into the extraction prompt (system
+      // message: fixed rules live there for DeepSeek context-cache hits).
+      final prompt = provider.extractionRequests.single.messages
+          .map((m) => m.content)
+          .join('\n');
+      expect(prompt, contains('方向性关系（亲属/师徒/隶属/效力/追随）必须固定方向'));
+      expect(prompt, contains('quote 必须逐字来自正文，单条不超过 30 字'));
+    });
+
+    test('organization-driven plan feeds back into the extraction prompt',
+        () async {
+      final provider = _GraphProvider(
+        narrationBody: '{'
+            '"features":{"eventDriven":0.3,"characterEnsemble":0.4,'
+            '"organization":0.9,"geography":0.2,"essay":0.0},'
+            '"defaultView":"family_tree","viewOrder":["family_tree","persons"],'
+            '"wantMap":false}',
+        responses: {
+          1: '''
+            {"entities":[{"name":"史塔克家族","type":"organization","aliases":[],
+              "description":"北境守护家族。",
+              "evidence":[{"section":1,"quote":"史塔克家族坐镇临冬城"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '史塔克家族坐镇临冬城。')],
+        includesUnread: true,
+      );
+
+      expect(graph.narration!.feature('organization'), 0.9);
+      final prompt =
+          provider.extractionRequests.single.messages.last.content;
+      expect(prompt, contains('person|location|event|organization'));
+      expect(graph.entities.single.type, AiGraphEntityType.organization);
+    });
+
+    test('failed narration call silently degrades and does not block', () async {
+      // Force the narration call to fail while keeping extraction valid:
+      // reuse _GraphProvider with a narration body that is not valid JSON.
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","aliases":[],
+              "description":"主角。",
+              "evidence":[{"section":1,"quote":"张三出场"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+      // Force the narration call to fail while keeping extraction valid:
+      // reuse _GraphProvider with a narration body that is not valid JSON.
+      final failing = _GraphProvider(
+        narrationBody: 'not json at all',
+        responses: provider.responses,
+      );
+
+      final graph = await serviceWith(failing).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '张三出场。')],
+        includesUnread: true,
+      );
+
+      expect(graph.narration, isNull);
+      expect(graph.entities.single.name, '张三');
+      expect(graph.coveredSections, [1]);
     });
   });
 
@@ -396,7 +575,7 @@ void main() {
         existing: existing,
       );
 
-      expect(provider.requests.length, 1);
+      expect(provider.extractionRequests.length, 1);
       expect(graph.coveredSections, [1, 2]);
       expect(graph.entities.any((e) => e.name == '张三'), isTrue);
       expect(graph.entities.any((e) => e.name == '李四'), isTrue);
@@ -424,7 +603,7 @@ void main() {
         readThroughSection: 1,
       );
 
-      expect(provider.requests.length, 1);
+      expect(provider.extractionRequests.length, 1);
       expect(graph.coveredSections, [1]);
       expect(graph.entities.any((e) => e.name == '李四'), isFalse);
     });
@@ -470,7 +649,7 @@ void main() {
           ),
         ),
       );
-      expect(provider.requests.length, 2);
+      expect(provider.extractionRequests.length, 2);
     });
 
     test('entities without evidence are dropped', () async {
@@ -492,6 +671,65 @@ void main() {
 
       expect(graph.entities, isEmpty);
       expect(graph.coveredSections, [1]);
+    });
+
+    test('confirmed plan is used and step-0 call is skipped', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","aliases":[],
+              "description":"主角。",
+              "evidence":[{"section":1,"quote":"张三出场"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+      const confirmed = AiNarrationPlan(
+        features: {
+          'eventDriven': 0.9,
+          'characterEnsemble': 0.1,
+          'organization': 0.0,
+          'geography': 0.0,
+          'essay': 0.0,
+        },
+        defaultView: 'events',
+        viewOrder: ['events', 'persons', 'locations', 'graph'],
+        wantMap: false,
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '张三出场。')],
+        includesUnread: true,
+        plannedNarration: confirmed,
+      );
+
+      // The confirmed plan lands as-is; only the extraction call ran (no
+      // step-0 request because the caller already decided the plan).
+      expect(graph.narration, same(confirmed));
+      expect(provider.requests.length, 1);
+      expect(provider.extractionRequests.length, 1);
+    });
+
+    test('withDefaultView re-orders the view order', () {
+      const plan = AiNarrationPlan(
+        features: {
+          'eventDriven': 0.5,
+          'characterEnsemble': 0.5,
+          'organization': 0.5,
+          'geography': 0.5,
+          'essay': 0.5,
+        },
+        defaultView: 'persons',
+        viewOrder: ['persons', 'events', 'locations', 'graph'],
+        wantMap: false,
+      );
+
+      final changed = plan.withDefaultView('family_tree');
+      expect(changed.defaultView, 'family_tree');
+      expect(changed.viewOrder, ['family_tree', 'persons', 'events', 'locations', 'graph']);
+      // Unchanged view returns the same instance.
+      expect(plan.withDefaultView('persons'), same(plan));
     });
   });
 
@@ -590,12 +828,33 @@ void main() {
 }
 
 class _GraphProvider implements AiProvider {
-  _GraphProvider({this.responses = const {}, this.invalidJson = false});
+  _GraphProvider({
+    this.responses = const {},
+    this.invalidJson = false,
+    this.narrationBody = defaultNarrationBody,
+  });
 
   /// sectionIndex -> raw JSON body (may be wrapped in ```json fences).
   final Map<int, String> responses;
   final bool invalidJson;
+
+  /// Step-0 display plan body (default: event-driven, organization low).
+  final String narrationBody;
+
+  static const String defaultNarrationBody = '{'
+      '"features":{"eventDriven":0.8,"characterEnsemble":0.2,'
+      '"organization":0.1,"geography":0.1,"essay":0.0},'
+      '"defaultView":"events","viewOrder":["events","persons","locations","graph"],'
+      '"wantMap":false}';
   final List<AiCompletionRequest> requests = [];
+
+  /// Requests that hit the per-chapter extraction prompt (any message carries
+  /// a 章节编号 line — the retry nudge appends to the original messages);
+  /// the step-0 narration call is a separate request type.
+  List<AiCompletionRequest> get extractionRequests => [
+    for (final r in requests)
+      if (r.messages.any((m) => m.content.contains('章节编号：'))) r,
+  ];
 
   @override
   Future<AiCompletionResult> complete(
@@ -608,7 +867,14 @@ class _GraphProvider implements AiProvider {
     }
     final prompt = request.messages.last.content;
     final match = RegExp(r'章节编号：(\d+)').firstMatch(prompt);
-    final section = int.parse(match!.group(1)!);
+    if (match == null) {
+      // Step-0 display plan call: return a valid plan so generation walks
+      // the real path (the plan itself is asserted in narration tests).
+      return AiCompletionResult(
+        text: '```json\n$narrationBody\n```',
+      );
+    }
+    final section = int.parse(match.group(1)!);
     final body = responses[section] ?? '{"entities":[],"relations":[]}';
     return AiCompletionResult(text: '```json\n$body\n```');
   }

@@ -63,6 +63,7 @@ class BookAiGraphView extends StatelessWidget {
     AiGraphEntityType.person => '人物',
     AiGraphEntityType.location => '地点',
     AiGraphEntityType.event => '事件',
+    AiGraphEntityType.organization => '势力',
   };
 
   @override

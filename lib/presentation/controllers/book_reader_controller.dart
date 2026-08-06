@@ -311,6 +311,7 @@ class BookReaderController extends ChangeNotifier {
   AiGraphWorkCandidate? _generatingGraphWork;
   AiGraphProgress? _bookGraphProgress;
   String? _bookGraphError;
+
   CancelToken? _bookGraphCancel;
   Future<void>? _bookGraphGeneration;
   final Map<String, Future<void>> _bookOutlineDetailGenerations = {};
@@ -1383,6 +1384,8 @@ class BookReaderController extends ChangeNotifier {
   Future<void> generateBookGraph({
     AiGraphWorkCandidate? only,
     bool force = false,
+    AiNarrationPlan? narrationOverride,
+    Set<int>? excludedGraphSectionIndices,
   }) {
     final active = _bookGraphGeneration;
     if (active != null) return active;
@@ -1391,7 +1394,12 @@ class BookReaderController extends ChangeNotifier {
     _bookGraphGeneration = done.future;
     unawaited(() async {
       try {
-        await _generateBookGraph(only: only, force: force);
+        await _generateBookGraph(
+          only: only,
+          force: force,
+          narrationOverride: narrationOverride,
+          excludedGraphSectionIndices: excludedGraphSectionIndices,
+        );
         done.complete();
       } catch (error, stackTrace) {
         done.completeError(error, stackTrace);
@@ -1568,6 +1576,8 @@ class BookReaderController extends ChangeNotifier {
   Future<void> _generateBookGraph({
     AiGraphWorkCandidate? only,
     bool force = false,
+    AiNarrationPlan? narrationOverride,
+    Set<int>? excludedGraphSectionIndices,
   }) async {
     final service = _aiGraph;
     if (service == null || !canUseAiChat) {
@@ -1588,60 +1598,20 @@ class BookReaderController extends ChangeNotifier {
     _bookGraphCancel = cancel;
     if (!_disposed) notifyListeners();
     try {
-      final body = await _loadBookGraphPlainTextCached(
-        AiBookGraphService.maxBookBodyChars,
-      );
-      var sections = AiChatBookCorpus.parseSections(body);
-      if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
       final allowUnread = _aiSettings?.settings.allowUnreadContext ?? true;
-      final titled = [
-        for (final section in sections)
-          AiBookSectionSlice(
-            index: section.index,
-            label: section.label.trim().isNotEmpty
-                ? section.label.trim()
-                : _titleForOutlineSection(section.index),
-            text: section.text,
-            sourceSectionIndex: section.sourceSectionIndex,
-            isNavigationUnit: section.isNavigationUnit,
-          ),
-      ];
-      final graphSections = _graphEligibleSections(
-        _filterOutlineSections(titled),
+      final deduped = await _graphSectionsForWork(work);
+      final sections = excludeGraphSections(
+        deduped,
+        excludedGraphSectionIndices ?? const {},
       );
-      final scoped = work == null
-          ? graphSections
-          : graphSections
-                .where(
-                  (section) =>
-                      work.contains(section.sourceSectionIndex ?? section.index),
-                )
-                .toList(growable: false);
-      // One spine section can yield several logical sections (a document is
-      // split on headings); dedupe so the progress count and the picker's
-      // spine-based section count (44 vs 55) agree, and each spine is
-      // extracted once.
-      final seenSpines = <int>{};
-      final deduped = <AiBookSectionSlice>[
-        for (final section in scoped)
-          if (seenSpines.add(section.originSectionIndex)) section,
-      ];
-      AiLog.d(
-        'graph generate scope: work=${work?.title ?? 'whole-book'} '
-        'range=${work == null ? '-' : '${work.startSection}..${work.endSectionExclusive}'} '
-        'sections=${graphSections.length} scoped=${scoped.length} '
-        'deduped=${deduped.length}',
-      );
-      if (scoped.isEmpty) {
-        throw AiProviderException('所选著作没有可用于生成图谱的正文');
-      }
       final graph = await service.generate(
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        sections: deduped,
+        sections: sections,
         includesUnread: allowUnread,
         readThroughSection: allowUnread ? null : sectionIndex + 1,
         existing: existing,
+        plannedNarration: narrationOverride,
         cancelToken: cancel,
         onProgress: (progress) {
           _bookGraphProgress = progress;
@@ -1672,6 +1642,108 @@ class BookReaderController extends ChangeNotifier {
         _bookGraphError = '生成图谱失败，请稍后重试';
       }
       if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Loads + slices the graph corpus for [work] (null = whole book) with the
+  /// exact same filtering / spine-dedupe as generation, so re-analysis and
+  /// generation always agree on scope (single source of truth).
+  Future<List<AiBookSectionSlice>> _graphSectionsForWork(
+    AiGraphWorkCandidate? work,
+  ) async {
+    final body = await _loadBookGraphPlainTextCached(
+      AiBookGraphService.maxBookBodyChars,
+    );
+    final sections = AiChatBookCorpus.parseSections(body);
+    if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
+    final titled = [
+      for (final section in sections)
+        AiBookSectionSlice(
+          index: section.index,
+          label: section.label.trim().isNotEmpty
+              ? section.label.trim()
+              : _titleForOutlineSection(section.index),
+          text: section.text,
+          sourceSectionIndex: section.sourceSectionIndex,
+          isNavigationUnit: section.isNavigationUnit,
+        ),
+    ];
+    final graphSections = _graphEligibleSections(
+      _filterOutlineSections(titled),
+    );
+    final scoped = work == null
+        ? graphSections
+        : graphSections
+              .where(
+                (section) =>
+                    work.contains(section.sourceSectionIndex ?? section.index),
+              )
+              .toList(growable: false);
+    if (scoped.isEmpty) {
+      throw AiProviderException('所选著作没有可用于生成图谱的正文');
+    }
+    // One spine section can yield several logical sections (a document is
+    // split on headings); dedupe so the progress count and the picker's
+    // spine-based section count agree, and each spine is extracted once.
+    final seenSpines = <int>{};
+    final deduped = <AiBookSectionSlice>[
+      for (final section in scoped)
+        if (seenSpines.add(section.originSectionIndex)) section,
+    ];
+    AiLog.d(
+      'graph scope: work=${work?.title ?? 'whole-book'} '
+      'range=${work == null ? '-' : '${work.startSection}..${work.endSectionExclusive}'} '
+      'sections=${graphSections.length} scoped=${scoped.length} '
+      'deduped=${deduped.length}',
+    );
+    return deduped;
+  }
+
+  /// The exact graph corpus the generation will use for [work] (null = whole
+  /// book), after the automatic metadata/appendix filter and spine-dedupe —
+  /// single source of truth for the pre-generation section chooser.
+  /// Throws on empty body.
+  Future<List<AiBookSectionSlice>> graphSectionChoices(
+    AiGraphWorkCandidate? work,
+  ) {
+    return _graphSectionsForWork(work);
+  }
+
+  /// Applies the user-confirmed manual slice on top of the automatic filter
+  /// (the dialog showed exactly the [sections] list, so [excluded] indices
+  /// line up). Throws when nothing remains.
+  @visibleForTesting
+  static List<AiBookSectionSlice> excludeGraphSections(
+    List<AiBookSectionSlice> sections,
+    Set<int> excluded,
+  ) {
+    if (excluded.isEmpty) return sections;
+    final kept = [
+      for (final section in sections)
+        if (!excluded.contains(section.index)) section,
+    ];
+    if (kept.isEmpty) {
+      throw AiProviderException('所选章节都被排除了，请至少保留一节正文');
+    }
+    return kept;
+  }
+
+  /// Runs the step-0 display plan for [work] (null = whole book) and returns
+  /// it — used by the pre-generation confirm dialog. Null on any failure
+  /// (the dialog then offers retry / cancel). Does not save anything.
+  Future<AiNarrationPlan?> analyzeActiveGraphNarration({    AiGraphWorkCandidate? work,
+  }) async {
+    final service = _aiGraph;
+    if (service == null || !canUseAiChat) return null;
+    try {
+      final sections = await _graphSectionsForWork(work);
+      return await service.analyzeNarration(
+        bookTitle: item.title,
+        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        sections: sections,
+      );
+    } catch (_) {
+      return null;
     }
   }
 
@@ -1756,6 +1828,13 @@ class BookReaderController extends ChangeNotifier {
   /// Graph-pipeline corpus: one piece per spine section (toc:false), cached
   /// separately from the outline/chat piece-level cache. Evidence quotes then
   /// resolve to the exact section instead of a multi-section work's start.
+  /// Graph corpus loader: **TOC mode** (`toc: true`). The user picked
+  /// "按目录读": sections are the book's own table-of-contents units, so the
+  /// pre-generation chooser shows readable titles (出版说明/中文版序言/第一
+  /// 章…) instead of file paths, and manual exclusion becomes trustworthy.
+  /// Evidence jumps land on the unit's starting spine (chapter-level), which
+  /// matches the graph's chapter-level granularity; books without a usable
+  /// TOC fall back to per-spine sections inside the JS engine.
   Future<String> _loadBookGraphPlainTextCached(int maxChars) async {
     final budget = maxChars.clamp(2000, 1500000);
     final cached = _cachedGraphPlainText;
@@ -1765,7 +1844,7 @@ class BookReaderController extends ChangeNotifier {
       return cached.length > budget ? cached.substring(0, budget) : cached;
     }
     final loaded =
-        ((await _getBookPlainText?.call(budget, toc: false)) ?? '').trim();
+        ((await _getBookPlainText?.call(budget, toc: true)) ?? '').trim();
     if (loaded.isNotEmpty) {
       _cachedGraphPlainText = loaded;
       _cachedGraphPlainTextBudget = budget;
