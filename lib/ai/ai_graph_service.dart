@@ -1499,9 +1499,13 @@ class AiBookGraphService {
       if (existing == null) {
         keep[key] = updated;
       } else {
-        keep[key] = existing.copyWith(
-          evidence: [...existing.evidence, ...updated.evidence],
-        );
+        // Quote-level dedupe, consistent with the entity side.
+        final seen = <String>{for (final e in existing.evidence) e.quote};
+        final evidence = [...existing.evidence];
+        for (final e in updated.evidence) {
+          if (seen.add(e.quote)) evidence.add(e);
+        }
+        keep[key] = existing.copyWith(evidence: evidence);
       }
     }
     relations..clear()..addAll(keep.values);

@@ -1028,43 +1028,85 @@ void main() {
 
     test('review batch is consumed once (no starvation, no re-submit)',
         () async {
-      // 11 mentions sharing the same ascending relation → 11 review pairs;
-      // the cap (10) must be consumed so the batch is never re-submitted.
-      final entities1 = <String>[];
-      final entities2 = <String>[];
-      for (var i = 1; i <= 11; i++) {
-        entities1.add('{"name":"母$i","type":"person","aliases":[],'
-            '"description":"万历之母。","evidence":[{"section":1,"quote":"母$i"}],'
-            '"scope":"setting"}');
-        entities2.add('{"name":"皇太后$i","type":"person","aliases":[],'
-            '"description":"万历之母。","evidence":[{"section":2,"quote":"皇太后$i"}],'
-            '"scope":"setting"}');
+      // 12 mentions sharing the same ascending relation, spread over 2
+      // batches (5 sections each): batch 1 reviews 10 pairs (cap), batch 2
+      // must review only the remaining 2 — the old code re-submitted the
+      // same 10 and starved the last pair.
+      final sections = <int, Map<String, Object?>>{};
+      for (var i = 1; i <= 12; i++) {
+        sections[i] = {
+          '母$i': '{"name":"母$i","type":"person","aliases":[],'
+              '"description":"万历之母。","evidence":[{"section":$i,"quote":"母$i"}],'
+              '"scope":"setting"}',
+          '皇$i': '{"name":"皇太后$i","type":"person","aliases":[],'
+              '"description":"万历之母。","evidence":[{"section":$i,"quote":"皇太后$i"}],'
+              '"scope":"setting"}',
+        };
+      }
+      // Six sections per 母/皇 half, two batches of five sections each
+      // (sections 1-5 then 6-10 then 11-12) — at least one boundary falls
+      // between 母 and 皇 groups.
+      final motherSections = [
+        for (var i = 1; i <= 6; i++) i,
+      ];
+      final queenSections = [
+        for (var i = 7; i <= 12; i++) i,
+      ];
+      final responses = <int, String>{};
+      for (final i in motherSections) {
+        responses[i] =
+            '{"entities":[${sections[i]!['母$i']}],'
+            '"relations":[{"source":"母$i","target":"万历皇帝","type":"亲属",'
+            '"kin":"母子","evidence":[{"section":$i,"quote":"母$i是万历之母"}]}]}';
+      }
+      for (final i in queenSections) {
+        responses[i] =
+            '{"entities":[${sections[i]!['皇$i']}],'
+            '"relations":[{"source":"皇太后$i","target":"万历皇帝","type":"亲属",'
+            '"kin":"母子","evidence":[{"section":$i,"quote":"皇太后$i是万历之母"}]}]}';
       }
       final provider = _GraphProvider(
         reviewVerdicts: '["different","different","different","different",'
             '"different","different","different","different","different","different"]',
-        responses: {
-          1: '{"entities":[${entities1.join(',')}],'
-              '"relations":[{"source":"母1","target":"万历皇帝","type":"亲属",'
-              '"kin":"母子","evidence":[{"section":1,"quote":"母1是万历之母"}]}]}',
-          2: '{"entities":[${entities2.join(',')}],'
-              '"relations":[{"source":"皇太后1","target":"万历皇帝","type":"亲属",'
-              '"kin":"母子","evidence":[{"section":2,"quote":"皇太后1是万历之母"}]}]}',
-        },
+        responses: responses,
       );
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [slice(1, '一', '母1。'), slice(2, '二', '皇太后1。')],
+        sections: [
+          for (final i in [...motherSections, ...queenSections])
+            slice(i, '第$i节', '母$i。'),
+        ],
         includesUnread: true,
       );
 
-      // Exactly one review call: the batch is consumed, never re-submitted.
-      final reviewCalls = provider.requests
+      final reviewRequests = provider.requests
           .where((r) => r.messages.any((m) => m.content.contains('人物身份判定引擎')))
           .toList();
-      expect(reviewCalls.length, 1);
-      expect(graph.coveredSections, [1, 2]);
+      // With consumption: later batches carry only the leftover pairs and
+      // never re-submit earlier ones — the last batch has 2 pending pairs
+      // (12 total, cap 10). Without consumption (the old bug) the last batch
+      // would re-submit the first 10 at full cap.
+      expect(reviewRequests.length, greaterThanOrEqualTo(2));
+      final lastPairCount =
+          '称谓A'.allMatches(reviewRequests.last.messages.last.content).length;
+      expect(lastPairCount, lessThan(10));
+      // And each review call submitted a different set of pairs.
+      final pairSets = [
+        for (final r in reviewRequests)
+          '称谓A「([^」]+)」'
+              .allMatches(r.messages.last.content)
+              .map((m) => m.group(1)!)
+              .toSet(),
+      ];
+      for (var i = 1; i < pairSets.length; i++) {
+        expect(
+          pairSets[i].intersection(pairSets[i - 1]),
+          isEmpty,
+          reason: '复核批次不得重复提交已消费的对',
+        );
+      }
+      expect(graph.coveredSections.length, 12);
     });
 
     test('post-review relations keep fusing instead of duplicating', () async {
