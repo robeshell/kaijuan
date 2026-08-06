@@ -85,12 +85,11 @@ enum _BookAiWorkspaceTab { chat, outline, graph }
 
 enum _OutlineAction { delete }
 
-enum _AiGraphFilter { all, person, location, event }
-
 /// Default view is the person card list (Kindle X-Ray style); the force
-/// layout stays available as a secondary「关系图」view. Events get their own
-/// chapter-ordered list so「发生了哪些事」is readable without the graph.
-enum _GraphViewMode { persons, events, graph }
+/// layout stays available as a secondary「关系图」view. Each entity type gets
+/// its own chapter-ordered list so「谁是谁 / 在哪里 / 发生了哪些事」are
+/// readable without the graph.
+enum _GraphViewMode { persons, locations, events, graph }
 
 class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
@@ -107,7 +106,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   final _expandedOutlineDetails = <String>{};
   final _outlineChildrenKeys = <String, GlobalKey>{};
   bool _outlineOverviewExpanded = false;
-  _AiGraphFilter _graphFilter = _AiGraphFilter.all;
   _GraphViewMode _graphViewMode = _GraphViewMode.persons;
 
   /// Isolated entities (0 relations) collapse into a single row until opened.
@@ -1262,6 +1260,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool get _allowUnread =>
       _c.aiSettingsController?.settings.allowUnreadContext ?? true;
 
+  /// Which entity type the current list view filters to; null on the graph
+  /// view (no list rendered there).
+  AiGraphEntityType? get _graphListEntityType => switch (_graphViewMode) {
+    _GraphViewMode.persons => AiGraphEntityType.person,
+    _GraphViewMode.locations => AiGraphEntityType.location,
+    _GraphViewMode.events => AiGraphEntityType.event,
+    _GraphViewMode.graph => null,
+  };
+
   Widget _buildGraphTab(BuildContext context) {
     final colors = context.appColors;
     final graph = _c.bookGraph;
@@ -1372,10 +1379,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     };
     final visibleEntities = graph.entities.where((entity) {
       if (gateByProgress && entity.firstSection > readThrough) return false;
-      if (_graphFilter != _AiGraphFilter.all &&
-          entity.type.name != _graphFilter.name) {
-        return false;
-      }
+      if (gateByProgress && entity.firstSection > readThrough) return false;
+      final listType = _graphListEntityType;
+      if (listType != null && entity.type != listType) return false;
       if (_graphQuery.trim().isNotEmpty) {
         final query = _graphQuery.trim();
         final hit = entity.name.contains(query) ||
@@ -1399,24 +1405,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // Search is allowed to surface mere mentions without the fold.
     final foldIsolated =
         isolatedEntities.isNotEmpty && _graphQuery.trim().isEmpty;
-    // 「发生了哪些事」: setting-scope events, ordered by first occurrence
-    // so the list reads as a chapter-by-chapter event flow.
-    final query = _graphQuery.trim();
-    final eventEntities = graph.entities
-        .where(
-          (e) =>
-              e.type == AiGraphEntityType.event &&
-              e.scope == AiGraphEntityScope.setting &&
-              (!gateByProgress || e.firstSection <= readThrough),
-        )
-        .where(
-          (e) =>
-              query.isEmpty ||
-              e.name.contains(query) ||
-              e.description.contains(query),
-        )
-        .toList(growable: false)
-      ..sort((a, b) => a.firstSection.compareTo(b.firstSection));
+    // Locations / events read as a chapter-by-chapter flow; persons stay in
+    // the service's frequency order (most important first).
+    final chapterOrder = _graphViewMode == _GraphViewMode.persons
+        ? null
+        : (AiGraphEntity a, AiGraphEntity b) =>
+              a.firstSection.compareTo(b.firstSection);
+    final orderedMain = [...mainEntities]..sort(chapterOrder);
+    final orderedIsolated = [...isolatedEntities]..sort(chapterOrder);
 
     final personCount = graph.entities
         .where(
@@ -1520,6 +1516,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 label: Text('人物'),
               ),
               ButtonSegment(
+                value: _GraphViewMode.locations,
+                label: Text('地点'),
+              ),
+              ButtonSegment(
                 value: _GraphViewMode.events,
                 label: Text('事件'),
               ),
@@ -1612,25 +1612,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
           const SizedBox(height: 10),
         ],
-        if (_graphViewMode == _GraphViewMode.persons) ...[
+        if (_graphViewMode != _GraphViewMode.graph) ...[
           const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final filter in _AiGraphFilter.values)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(_graphFilterLabel(filter)),
-                      selected: _graphFilter == filter,
-                      onSelected: (_) => setState(() => _graphFilter = filter),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
           TextField(
             controller: _graphQueryController,
             onChanged: (_) => setState(() {}),
@@ -1673,7 +1656,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             )
           else ...[
-            for (final entity in mainEntities)
+            for (final entity in orderedMain)
               KeyedSubtree(
                 key: _graphEntityKeys.putIfAbsent(
                   entity.name,
@@ -1689,12 +1672,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             if (foldIsolated)
               _buildIsolatedRow(
                 context,
-                isolatedEntities,
+                orderedIsolated,
                 gateByProgress,
                 readThrough,
               )
             else
-              for (final entity in isolatedEntities)
+              for (final entity in orderedIsolated)
                 KeyedSubtree(
                   key: _graphEntityKeys.putIfAbsent(
                     entity.name,
@@ -1708,64 +1691,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ),
                 ),
           ],
-        ],
-        if (_graphViewMode == _GraphViewMode.events) ...[
-          const SizedBox(height: 12),
-          TextField(
-            controller: _graphQueryController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText: '搜索事件',
-              isDense: true,
-              prefixIcon: const Icon(KaijuanIcons.search, size: 18),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (eventEntities.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Column(
-                children: [
-                  Text(
-                    query.isEmpty
-                        ? '本书没有抽取到事件。'
-                        : '没有匹配“$query”的事件。',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: _panelBodySize(context),
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                  if (query.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    TextButton(
-                      onPressed: () {
-                        _graphQueryController.clear();
-                        setState(() {});
-                      },
-                      child: const Text('清除搜索'),
-                    ),
-                  ],
-                ],
-              ),
-            )
-          else
-            for (final entity in eventEntities)
-              KeyedSubtree(
-                key: _graphEntityKeys.putIfAbsent(
-                  entity.name,
-                  () => GlobalKey(),
-                ),
-                child: _buildGraphEntityTile(
-                  context,
-                  entity,
-                  gateByProgress,
-                  readThrough,
-                ),
-              ),
         ],
       ],
     );
@@ -2477,13 +2402,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ? OrbTheme.dark
         : OrbTheme.light,
   );
-
-  String _graphFilterLabel(_AiGraphFilter filter) => switch (filter) {
-    _AiGraphFilter.all => '全部',
-    _AiGraphFilter.person => '人物',
-    _AiGraphFilter.location => '地点',
-    _AiGraphFilter.event => '事件',
-  };
 
   String _graphFilterLabelFor(AiGraphEntityType type) => switch (type) {
     AiGraphEntityType.person => '人物',
