@@ -298,6 +298,10 @@ class AiBookGraphService {
       model: _settings().resolvedModel,
       includesUnread: includesUnread,
       coveredSections: covered,
+      sectionTitles: {
+        for (final section in sections)
+          section.originSectionIndex: section.label,
+      },
       entities: entities,
       relations: relations,
     );

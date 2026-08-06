@@ -1786,6 +1786,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       grouped.putIfAbsent(event.firstSection, () => []).add(event);
     }
     final chapters = grouped.keys.toList()..sort();
+    final titles = _c.bookGraph?.sectionTitles ?? const {};
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1803,13 +1804,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  '第 $chapter 章',
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.3,
-                    color: context.appSecondaryText,
+                Flexible(
+                  child: Text(
+                    _graphChapterLabel(titles, chapter),
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.3,
+                      color: context.appSecondaryText,
+                    ),
                   ),
                 ),
               ],
@@ -1831,6 +1835,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ],
       ],
     );
+  }
+
+  /// Chapter header for the event timeline: the real section label when the
+  /// graph carries one, else a spine-safe fallback (spine numbers include
+  /// filtered front-matter units, so "章" would be misleading).
+  String _graphChapterLabel(Map<int, String> titles, int spine) {
+    final title = titles[spine]?.trim();
+    if (title != null && title.isNotEmpty) return title;
+    return '第 $spine 节';
   }
 
   Widget _buildGraphEventTile(

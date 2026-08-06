@@ -385,6 +385,7 @@ class AiBookGraph {
     this.model = '',
     this.includesUnread = false,
     this.coveredSections = const [],
+    this.sectionTitles = const {},
     this.entities = const [],
     this.relations = const [],
   });
@@ -403,6 +404,11 @@ class AiBookGraph {
 
   /// 1-based sections already extracted; drives incremental runs.
   final List<int> coveredSections;
+
+  /// spine (1-based) → section label, so views can show real chapter titles
+  /// instead of raw spine numbers. Empty for graphs made before this field.
+  final Map<int, String> sectionTitles;
+
   final List<AiGraphEntity> entities;
   final List<AiGraphRelation> relations;
 
@@ -413,6 +419,7 @@ class AiBookGraph {
     String? model,
     bool? includesUnread,
     List<int>? coveredSections,
+    Map<int, String>? sectionTitles,
     List<AiGraphEntity>? entities,
     List<AiGraphRelation>? relations,
   }) {
@@ -423,6 +430,7 @@ class AiBookGraph {
       model: model ?? this.model,
       includesUnread: includesUnread ?? this.includesUnread,
       coveredSections: coveredSections ?? this.coveredSections,
+      sectionTitles: sectionTitles ?? this.sectionTitles,
       entities: entities ?? this.entities,
       relations: relations ?? this.relations,
     );
@@ -438,6 +446,9 @@ class AiBookGraph {
     'model': model,
     'includesUnread': includesUnread,
     'coveredSections': coveredSections,
+    'sectionTitles': {
+      for (final entry in sectionTitles.entries) '${entry.key}': entry.value,
+    },
     'entities': [for (final e in entities) e.toJson()],
     'relations': [for (final r in relations) r.toJson()],
   };
@@ -473,6 +484,7 @@ class AiBookGraph {
       }
     }
     final rawCovered = json['coveredSections'];
+    final rawTitles = json['sectionTitles'];
     return AiBookGraph(
       contentHash: hash,
       generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
@@ -482,6 +494,13 @@ class AiBookGraph {
       coveredSections: rawCovered is List
           ? rawCovered.whereType<int>().toList(growable: false)
           : const [],
+      sectionTitles: rawTitles is Map
+          ? {
+              for (final entry in rawTitles.entries)
+                if (int.tryParse('${entry.key}') case final int key)
+                  key: '${entry.value}',
+            }
+          : const {},
       entities: entities,
       relations: relations,
     );

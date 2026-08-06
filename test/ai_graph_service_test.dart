@@ -29,6 +29,7 @@ void main() {
         model: 'graph-test',
         includesUnread: false,
         coveredSections: const [1, 2],
+        sectionTitles: const {2: '第二章'},
         entities: const [
           AiGraphEntity(
             name: '张三',
@@ -106,6 +107,7 @@ void main() {
       final event = restored.entities.firstWhere((e) => e.name == '城门相争');
       expect(event.eventType, AiGraphEventType.combat);
       expect(event.importance, 3);
+      expect(restored.sectionTitles, {2: '第二章'});
       expect(restored.relations.single.mergeKey, contains('meet'));
     });
 
