@@ -1772,77 +1772,34 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
   }
 
-  /// Timeline form of the events view: grouped by chapter with a type-dot
-  /// and importance badge per event (AI-Reader-V2 style).
+  /// Events view: chapter-ordered flat list of event cards. Chapter headers
+  /// were dropped — section labels from the graph pipeline are too unreliable
+  /// to show as headers, and the chapter order is already implied by the
+  /// sort (出场顺序).
   Widget _buildGraphEventTimeline(
     BuildContext context,
     List<AiGraphEntity> events,
     bool gateByProgress,
     int readThrough,
   ) {
-    final grouped = <int, List<AiGraphEntity>>{};
-    for (final event in events) {
-      grouped.putIfAbsent(event.firstSection, () => []).add(event);
-    }
-    final chapters = grouped.keys.toList()..sort();
-    final titles = _c.bookGraph?.sectionTitles ?? const {};
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final chapter in chapters) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
-            child: Row(
-              children: [
-                Container(
-                  width: 3,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: context.appColors.primary.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    _graphChapterLabel(titles, chapter),
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.3,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                ),
-              ],
+        for (final event in events)
+          KeyedSubtree(
+            key: _graphEntityKeys.putIfAbsent(
+              event.name,
+              () => GlobalKey(),
+            ),
+            child: _buildGraphEventTile(
+              context,
+              event,
+              gateByProgress,
+              readThrough,
             ),
           ),
-          for (final event in grouped[chapter]!)
-            KeyedSubtree(
-              key: _graphEntityKeys.putIfAbsent(
-                event.name,
-                () => GlobalKey(),
-              ),
-              child: _buildGraphEventTile(
-                context,
-                event,
-                gateByProgress,
-                readThrough,
-              ),
-            ),
-        ],
       ],
     );
-  }
-
-  /// Chapter header for the event timeline: the real section label when the
-  /// graph carries one, else a spine-safe fallback (spine numbers include
-  /// filtered front-matter units, so "章" would be misleading).
-  String _graphChapterLabel(Map<int, String> titles, int spine) {
-    final title = titles[spine]?.trim();
-    if (title != null && title.isNotEmpty) return title;
-    return '第 $spine 节';
   }
 
   Widget _buildGraphEventTile(
