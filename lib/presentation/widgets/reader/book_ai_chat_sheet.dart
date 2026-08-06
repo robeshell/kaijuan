@@ -88,8 +88,9 @@ enum _OutlineAction { delete }
 enum _AiGraphFilter { all, person, location, event }
 
 /// Default view is the person card list (Kindle X-Ray style); the force
-/// layout stays available as a secondary「关系图」view.
-enum _GraphViewMode { persons, graph }
+/// layout stays available as a secondary「关系图」view. Events get their own
+/// chapter-ordered list so「发生了哪些事」is readable without the graph.
+enum _GraphViewMode { persons, events, graph }
 
 class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
@@ -1398,6 +1399,24 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // Search is allowed to surface mere mentions without the fold.
     final foldIsolated =
         isolatedEntities.isNotEmpty && _graphQuery.trim().isEmpty;
+    // 「发生了哪些事」: setting-scope events, ordered by first occurrence
+    // so the list reads as a chapter-by-chapter event flow.
+    final query = _graphQuery.trim();
+    final eventEntities = graph.entities
+        .where(
+          (e) =>
+              e.type == AiGraphEntityType.event &&
+              e.scope == AiGraphEntityScope.setting &&
+              (!gateByProgress || e.firstSection <= readThrough),
+        )
+        .where(
+          (e) =>
+              query.isEmpty ||
+              e.name.contains(query) ||
+              e.description.contains(query),
+        )
+        .toList(growable: false)
+      ..sort((a, b) => a.firstSection.compareTo(b.firstSection));
 
     final personCount = graph.entities
         .where(
@@ -1499,6 +1518,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ButtonSegment(
                 value: _GraphViewMode.persons,
                 label: Text('人物'),
+              ),
+              ButtonSegment(
+                value: _GraphViewMode.events,
+                label: Text('事件'),
               ),
               ButtonSegment(
                 value: _GraphViewMode.graph,
@@ -1685,6 +1708,64 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ),
                 ),
           ],
+        ],
+        if (_graphViewMode == _GraphViewMode.events) ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _graphQueryController,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: '搜索事件',
+              isDense: true,
+              prefixIcon: const Icon(KaijuanIcons.search, size: 18),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (eventEntities.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                children: [
+                  Text(
+                    query.isEmpty
+                        ? '本书没有抽取到事件。'
+                        : '没有匹配“$query”的事件。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: _panelBodySize(context),
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                  if (query.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    TextButton(
+                      onPressed: () {
+                        _graphQueryController.clear();
+                        setState(() {});
+                      },
+                      child: const Text('清除搜索'),
+                    ),
+                  ],
+                ],
+              ),
+            )
+          else
+            for (final entity in eventEntities)
+              KeyedSubtree(
+                key: _graphEntityKeys.putIfAbsent(
+                  entity.name,
+                  () => GlobalKey(),
+                ),
+                child: _buildGraphEntityTile(
+                  context,
+                  entity,
+                  gateByProgress,
+                  readThrough,
+                ),
+              ),
         ],
       ],
     );
