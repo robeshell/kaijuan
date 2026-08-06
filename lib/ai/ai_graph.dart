@@ -504,6 +504,7 @@ class AiBookGraph {
     this.includesUnread = false,
     this.coveredSections = const [],
     this.sectionTitles = const {},
+    this.excludedGraphSections = const [],
     this.entities = const [],
     this.relations = const [],
     this.narration,
@@ -528,6 +529,11 @@ class AiBookGraph {
   /// instead of raw spine numbers. Empty for graphs made before this field.
   final Map<int, String> sectionTitles;
 
+  /// TOC-section indices (AiBookSectionSlice.index) the user excluded in the
+  /// pre-generation chooser. Persisted so a regeneration reopens with the
+  /// same manual slice (incremental runs keep excluding them too).
+  final List<int> excludedGraphSections;
+
   final List<AiGraphEntity> entities;
   final List<AiGraphRelation> relations;
 
@@ -543,6 +549,7 @@ class AiBookGraph {
     bool? includesUnread,
     List<int>? coveredSections,
     Map<int, String>? sectionTitles,
+    List<int>? excludedGraphSections,
     List<AiGraphEntity>? entities,
     List<AiGraphRelation>? relations,
     AiNarrationPlan? narration,
@@ -555,6 +562,8 @@ class AiBookGraph {
       includesUnread: includesUnread ?? this.includesUnread,
       coveredSections: coveredSections ?? this.coveredSections,
       sectionTitles: sectionTitles ?? this.sectionTitles,
+      excludedGraphSections:
+          excludedGraphSections ?? this.excludedGraphSections,
       entities: entities ?? this.entities,
       relations: relations ?? this.relations,
       narration: narration ?? this.narration,
@@ -571,6 +580,7 @@ class AiBookGraph {
     'model': model,
     'includesUnread': includesUnread,
     'coveredSections': coveredSections,
+    'excludedGraphSections': excludedGraphSections,
     'sectionTitles': {
       for (final entry in sectionTitles.entries) '${entry.key}': entry.value,
     },
@@ -610,6 +620,7 @@ class AiBookGraph {
       }
     }
     final rawCovered = json['coveredSections'];
+    final rawExcluded = json['excludedGraphSections'];
     final rawTitles = json['sectionTitles'];
     return AiBookGraph(
       contentHash: hash,
@@ -619,6 +630,9 @@ class AiBookGraph {
       includesUnread: json['includesUnread'] as bool? ?? false,
       coveredSections: rawCovered is List
           ? rawCovered.whereType<int>().toList(growable: false)
+          : const [],
+      excludedGraphSections: rawExcluded is List
+          ? rawExcluded.whereType<int>().toList(growable: false)
           : const [],
       sectionTitles: rawTitles is Map
           ? {

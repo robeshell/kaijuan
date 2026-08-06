@@ -1579,6 +1579,9 @@ class BookReaderController extends ChangeNotifier {
     AiNarrationPlan? narrationOverride,
     Set<int>? excludedGraphSectionIndices,
   }) async {
+    // Carry the manual slice so a failed partial save doesn't silently drop
+    // it for the next incremental run (catch block is out of try scope).
+    var carryExcluded = const <int>[];
     final service = _aiGraph;
     if (service == null || !canUseAiChat) {
       _bookGraphError = 'AI 未启用或未配置';
@@ -1600,10 +1603,15 @@ class BookReaderController extends ChangeNotifier {
     try {
       final allowUnread = _aiSettings?.settings.allowUnreadContext ?? true;
       final deduped = await _graphSectionsForWork(work);
-      final sections = excludeGraphSections(
-        deduped,
-        excludedGraphSectionIndices ?? const {},
-      );
+      // Manual slice persists on the graph: a fresh regeneration carries the
+      // previous exclusions unless the user changed them in the dialog;
+      // incremental runs keep excluding the same sections too.
+      final effectiveExcluded =
+          excludedGraphSectionIndices ??
+          existing?.excludedGraphSections.toSet() ??
+          const <int>{};
+      final sections = excludeGraphSections(deduped, effectiveExcluded);
+      carryExcluded = (effectiveExcluded.toList()..sort()).toList(growable: false);
       final graph = await service.generate(
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
@@ -1618,10 +1626,13 @@ class BookReaderController extends ChangeNotifier {
           if (!_disposed) notifyListeners();
         },
       );
-      _bookGraph = graph;
+      final saved = graph.copyWith(
+        excludedGraphSections: carryExcluded,
+      );
+      _bookGraph = saved;
       if (work != null) _activeGraphWork = work;
       _bookGraphProgress = null;
-      await _saveBookGraph(graph, workKey: workKey);
+      await _saveBookGraph(saved, workKey: workKey);
       if (!_disposed) notifyListeners();
     } on AiGraphGenerationException catch (error) {
       _bookGraphProgress = null;
@@ -1629,9 +1640,13 @@ class BookReaderController extends ChangeNotifier {
         final partial = error.partial;
         if (partial != null && !identical(partial, _bookGraph)) {
           // contentHash is re-stamped by _saveBookGraph; on a first
-          // generation the partial carries an empty hash.
-          _bookGraph = partial;
-          await _saveBookGraph(partial, workKey: workKey);
+          // generation the partial carries an empty hash. Keep the manual
+          // slice on the partial so incremental runs keep excluding.
+          final savedPartial = partial.copyWith(
+            excludedGraphSections: carryExcluded,
+          );
+          _bookGraph = savedPartial;
+          await _saveBookGraph(savedPartial, workKey: workKey);
         }
         _bookGraphError = error.message;
       }

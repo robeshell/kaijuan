@@ -160,6 +160,21 @@ void main() {
       expect(restored.narration!.feature('characterEnsemble'), 0.9);
     });
 
+    test('excluded section slice round-trips and defaults empty', () {
+      final source = AiBookGraph(
+        contentHash: 'h1',
+        excludedGraphSections: const [3, 5, 7],
+      );
+      final restored = AiBookGraph.fromJson(source.toJson());
+      expect(restored, isNotNull);
+      expect(restored!.excludedGraphSections, [3, 5, 7]);
+
+      // Old graphs (no field) default to no exclusions.
+      final old = Map<String, dynamic>.from(source.toJson())
+        ..remove('excludedGraphSections');
+      expect(AiBookGraph.fromJson(old)!.excludedGraphSections, isEmpty);
+    });
+
     test('old graph without narration falls back to null', () {
       final source = AiBookGraph(contentHash: 'h1').toJson();
       final restored = AiBookGraph.fromJson(source);

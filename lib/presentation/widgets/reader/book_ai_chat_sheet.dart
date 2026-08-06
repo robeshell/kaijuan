@@ -9,7 +9,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:thinking_orbs/thinking_orbs.dart';
 
 import '../../../ai/ai_chat.dart';
-import '../../../ai/ai_chat_retrieve.dart';
 import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_family_tree.dart';
 import '../../../ai/ai_log.dart';
@@ -26,10 +25,12 @@ import '../../screens/ai_settings_screen.dart';
 import '../app_components.dart';
 import '../app_overlays.dart';
 import 'ai_result_body.dart';
-import 'ai_relation_row.dart';
+import 'book_ai_entity_sheet.dart';
 import 'book_ai_graph_family_tree_view.dart';
+import 'book_ai_graph_tiles.dart';
 import 'book_ai_graph_fullscreen.dart';
 import 'book_ai_graph_view.dart';
+import 'book_ai_narration_dialog.dart';
 
 /// Book-scoped AI chat (M2). Session is isolated by contentHash.
 ///
@@ -1893,88 +1894,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     bool gateByProgress,
     int readThrough,
   ) {
-    final typeColor = _graphEventTypeColor(entity.eventType);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: typeColor.withValues(alpha: 0.18),
-          width: 1,
-        ),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 8, 2),
-        leading: Container(
-          width: 10,
-          height: 10,
-          margin: const EdgeInsets.symmetric(vertical: 18),
-          decoration: BoxDecoration(
-            color: typeColor,
-            shape: BoxShape.circle,
-          ),
-        ),
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(
-                entity.name,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: _panelBodySize(context),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            if (entity.importance >= 3) ...[
-              const SizedBox(width: 6),
-              _graphImportanceBadge(context, entity.importance),
-            ],
-          ],
-        ),
-        subtitle: entity.description.isEmpty
-            ? null
-            : Text(
-                entity.description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  height: 1.35,
-                  color: context.appSecondaryText,
-                ),
-              ),
-        trailing: Text(
-          entity.eventType.label,
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: typeColor,
-          ),
-        ),
-        onTap: () => _showEntityDetails(entity),
-      ),
-    );
-  }
-
-  Widget _graphImportanceBadge(BuildContext context, int importance) {
-    final (label, color) = switch (importance) {
-      3 => ('重要', context.appColors.error),
-      _ => ('一般', context.appColors.primary),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: context.appCaptionSize - 2,
-          color: color,
-        ),
-      ),
+    return GraphEventTile(
+      entity: entity,
+      bodySize: _panelBodySize(context),
+      onTap: () => _showEntityDetails(entity),
     );
   }
 
@@ -2083,113 +2006,25 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
   }
 
-  /// Text-only location chain (地图文字版, spec §6): setting locations strung
-  /// into an actual route — grouped by chapter, ordered by in-chapter
-  /// appearance (firstSection, then the resolved progress of the first
-  /// evidence), each location tappable to its entity card. No real map.
   Widget _buildLocationChain(
     BuildContext context,
     AiBookGraph graph,
     bool gateByProgress,
     int readThrough,
   ) {
-    final locations = graph.entities
-        .where(
-          (e) =>
-              e.type == AiGraphEntityType.location &&
-              e.scope == AiGraphEntityScope.setting,
-        )
-        .where((e) => !gateByProgress || e.firstSection <= readThrough)
-        .toList(growable: false)
-      ..sort((a, b) {
-        final bySection = a.firstSection.compareTo(b.firstSection);
-        if (bySection != 0) return bySection;
-        return _chainProgress(a).compareTo(_chainProgress(b));
-      });
-    if (locations.isEmpty) return const SizedBox.shrink();
-    const cap = 20;
-    final shown = locations.take(cap).toList(growable: false);
-    final total = locations.length;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: context.appColors.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '地点链 · 按书中出现顺序',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 5,
-            runSpacing: 5,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              for (var i = 0; i < shown.length; i++) ...[
-                if (i > 0)
-                  Text(
-                    '→',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize - 1,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                _LocationChainPill(
-                  name: shown[i].name,
-                  mentionCount: shown[i].chapterFreq.values
-                      .fold<int>(0, (sum, v) => sum + v),
-                  onTap: () => _onGraphVertexTap(shown[i].name),
-                ),
-              ],
-            ],
-          ),
-          if (total > cap)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                '等 ${total - cap} 处…',
-                style: TextStyle(
-                  fontSize: context.appCaptionSize - 1,
-                  color: context.appSecondaryText,
-                ),
-              ),
-            ),
-        ],
-      ),
+    return GraphLocationChain(
+      locations: graph.entities
+          .where(
+            (e) =>
+                e.type == AiGraphEntityType.location &&
+                e.scope == AiGraphEntityScope.setting,
+          )
+          .toList(growable: false),
+      gateByProgress: gateByProgress,
+      readThrough: readThrough,
+      onPillTap: _onGraphVertexTap,
     );
   }
-
-  /// In-chapter appearance progress: the resolved progress of the first
-  /// located evidence (0 when nothing resolved — sorts before located ones).
-  double _chainProgress(AiGraphEntity entity) {
-    for (final evidence in entity.evidence) {
-      final progress = evidence.progressInSection;
-      if (progress != null) return progress;
-    }
-    return 0;
-  }
-
-  Color _graphEventTypeColor(AiGraphEventType type) => switch (type) {
-    AiGraphEventType.combat => const Color(0xffef4444),
-    AiGraphEventType.growth => const Color(0xff3b82f6),
-    AiGraphEventType.social => const Color(0xff10b981),
-    AiGraphEventType.travel => const Color(0xfff97316),
-    AiGraphEventType.appearance => const Color(0xff8b5cf6),
-    AiGraphEventType.object => const Color(0xffeab308),
-    AiGraphEventType.organization => const Color(0xffec4899),
-    AiGraphEventType.relationship => const Color(0xff06b6d4),
-    AiGraphEventType.other => Colors.blueGrey,
-  };
 
   Widget _buildIsolatedRow(
     BuildContext context,
@@ -2198,40 +2033,25 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     int readThrough,
   ) {
     final expanded = _graphIsolatedExpanded;
-    return Column(
-      children: [
-        ListTile(
-          contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
-          minVerticalPadding: 0,
-          title: Text(
-            '其余 ${isolated.length} 个实体',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
+    return GraphIsolatedRow(
+      count: isolated.length,
+      expanded: expanded,
+      onToggle: () =>
+          setState(() => _graphIsolatedExpanded = !expanded),
+      expandedChildren: [
+        for (final entity in isolated)
+          KeyedSubtree(
+            key: _graphEntityKeys.putIfAbsent(
+              entity.name,
+              () => GlobalKey(),
+            ),
+            child: _buildGraphEntityTile(
+              context,
+              entity,
+              gateByProgress,
+              readThrough,
             ),
           ),
-          trailing: Icon(
-            expanded ? KaijuanIcons.chevronDown : KaijuanIcons.chevronRight,
-            size: 18,
-            color: context.appSecondaryText,
-          ),
-          onTap: () =>
-              setState(() => _graphIsolatedExpanded = !expanded),
-        ),
-        if (expanded)
-          for (final entity in isolated)
-            KeyedSubtree(
-              key: _graphEntityKeys.putIfAbsent(
-                entity.name,
-                () => GlobalKey(),
-              ),
-              child: _buildGraphEntityTile(
-                context,
-                entity,
-                gateByProgress,
-                readThrough,
-              ),
-            ),
       ],
     );
   }
@@ -2298,35 +2118,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
   }
 
-  Color _graphTypeColor(BuildContext context, AiGraphEntityType type) {
-    final colors = context.appColors;
-    return switch (type) {
-      AiGraphEntityType.person => colors.primary,
-      AiGraphEntityType.location => Colors.teal,
-      AiGraphEntityType.event => Colors.amber.shade700,
-      AiGraphEntityType.organization => const Color(0xffec4899),
-    };
-  }
-
-  Widget _graphCountBadge(BuildContext context, int count) {
-    final colors = context.appColors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-      decoration: BoxDecoration(
-        color: colors.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        '$count',
-        style: TextStyle(
-          fontSize: context.appCaptionSize,
-          fontWeight: FontWeight.w600,
-          color: colors.primary,
-        ),
-      ),
-    );
-  }
-
   Widget _buildGraphEntityTile(
     BuildContext context,
     AiGraphEntity entity,
@@ -2344,71 +2135,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       r.evidence.any((e) => e.sectionIndex <= readThrough)),
             )
             .length;
-    final occurrences = entity.chapterFreq.values.fold<int>(
-      0,
-      (sum, value) => sum + value,
-    );
-    final typeColor = _graphTypeColor(context, entity.type);
-    final highlighted = _graphHighlighted == entity.name;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      color: highlighted ? typeColor.withValues(alpha: 0.08) : null,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        // Structure only on the highlighted state; resting rows are plain
-        // like the rest of the workspace lists.
-        side: BorderSide(
-          color: highlighted
-              ? typeColor.withValues(alpha: 0.6)
-              : Colors.transparent,
-          width: highlighted ? 1.4 : 0,
-        ),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
-        leading: Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: typeColor,
-            shape: BoxShape.circle,
-          ),
-        ),
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(
-                entity.name,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: _panelBodySize(context),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        subtitle: entity.description.isEmpty
-            ? null
-            : Text(
-                entity.description,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  color: context.appSecondaryText,
-                ),
-              ),
-        trailing: Text(
-          '$occurrences 章 · $relationCount 关系',
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: context.appSecondaryText,
-          ),
-        ),
-        onTap: () => _showEntityDetails(entity),
-      ),
+    return GraphEntityTile(
+      entity: entity,
+      relationCount: relationCount,
+      typeColor: graphEntityTypeColor(context, entity.type),
+      highlighted: _graphHighlighted == entity.name,
+      bodySize: _panelBodySize(context),
+      onTap: () => _showEntityDetails(entity),
     );
   }
 
@@ -2417,191 +2150,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (graph == null) return;
     final readThrough = _c.sectionIndex + 1;
     final gateByProgress = !_allowUnread && graph.includesUnread;
-    final relations = graph.relations
-        .where(
-          (r) =>
-              (r.source == entity.name || r.target == entity.name) &&
-              (!gateByProgress ||
-                  r.evidence.any((e) => e.sectionIndex <= readThrough)),
-        )
-        .toList(growable: false);
-    final evidence = entity.evidence
-        .where((e) => !gateByProgress || e.sectionIndex <= readThrough)
-        .toList(growable: false);
     showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    entity.name,
-                    style: TextStyle(
-                      fontSize: _panelTitleSize(context),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                Text(
-                  _graphFilterLabelFor(entity.type),
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    color: context.appSecondaryText,
-                  ),
-                ),
-              ],
-            ),
-            if (entity.aliases.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                '别名：${entity.aliases.join('、')}',
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  color: context.appSecondaryText,
-                ),
-              ),
-            ],
-            if (entity.description.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                decoration: BoxDecoration(
-                  color: context.appColors.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  entity.description,
-                  style: TextStyle(
-                    fontSize: _panelBodySize(context),
-                    height: 1.5,
-                  ),
-                ),
-              ),
-            ],
-            if (relations.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Text(
-                    '关系',
-                    style: TextStyle(
-                      fontSize: _panelBodySize(context),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  _graphCountBadge(context, relations.length),
-                ],
-              ),
-              const SizedBox(height: 8),
-              for (final relation in relations)
-                AiRelationRow(
-                  relation: relation,
-                  selfName: entity.name,
-                ),
-            ],
-            if (evidence.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Text(
-                    '出处',
-                    style: TextStyle(
-                      fontSize: _panelBodySize(context),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  _graphCountBadge(context, evidence.length),
-                ],
-              ),
-              const SizedBox(height: 8),
-              for (final item in evidence)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Material(
-                    color: context.appColors.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(10),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(10),
-                      onTap: () {
-                        Navigator.of(sheetContext).pop();
-                        _goToGraphEvidence(item);
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 7,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: context.appColors.primary
-                                    .withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '§${item.sectionIndex}',
-                                style: TextStyle(
-                                  fontSize: context.appCaptionSize,
-                                  fontWeight: FontWeight.w600,
-                                  color: context.appColors.primary,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                item.quote,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: context.appCaptionSize,
-                                  height: 1.4,
-                                  color: item.spanResolved
-                                      ? context.appPrimaryText
-                                      : context.appSecondaryText,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3),
-                              child: Icon(
-                                KaijuanIcons.forward,
-                                size: 14,
-                                color: context.appSecondaryText,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-            if (relations.isEmpty && evidence.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Text(
-                  '该实体暂无可见内容。',
-                  style: TextStyle(
-                    fontSize: _panelBodySize(context),
-                    color: context.appSecondaryText,
-                  ),
-                ),
-              ),
-          ],
-        ),
+      builder: (_) => BookAiEntitySheet(
+        entity: entity,
+        graph: graph,
+        gateByProgress: gateByProgress,
+        readThrough: readThrough,
+        titleSize: _panelTitleSize(context),
+        bodySize: _panelBodySize(context),
+        onOpenEvidence: _goToGraphEvidence,
       ),
     );
   }
@@ -2686,7 +2246,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return showDialog<({AiNarrationPlan plan, Set<int> excludedSections})>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _NarrationPlanDialog(controller: _c, work: work),
+      builder: (_) => NarrationPlanDialog(
+        controller: _c,
+        work: work,
+        // Reopen with the previous manual slice (persisted on the graph).
+        initialExcluded:
+            _c.bookGraph?.excludedGraphSections.toSet() ?? const {},
+      ),
     );
   }
 
@@ -2938,12 +2504,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String _graphSortLabel(_GraphSortOrder order) => switch (order) {
     _GraphSortOrder.byAppearance => '出场顺序',
     _GraphSortOrder.byFrequency => '出现次数',
-  };
-
-  String _graphFilterLabelFor(AiGraphEntityType type) => switch (type) {    AiGraphEntityType.person => '人物',
-    AiGraphEntityType.location => '地点',
-    AiGraphEntityType.event => '事件',
-    AiGraphEntityType.organization => '势力',
   };
 
   @override
@@ -3622,414 +3182,6 @@ class _Bubble extends StatelessWidget {
               child: IntrinsicWidth(child: bubble),
             )
           : SizedBox(width: maxWidth, child: bubble),
-    );
-  }
-}
-
-/// Location pill inside the location chain: name + mention count when > 1,
-/// tappable to the entity card.
-class _LocationChainPill extends StatelessWidget {
-  const _LocationChainPill({
-    required this.name,
-    required this.mentionCount,
-    required this.onTap,
-  });
-
-  final String name;
-  final int mentionCount;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: colors.surfaceContainerHighest.withValues(alpha: 0.8),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                name,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
-              ),
-              if (mentionCount > 1) ...[
-                const SizedBox(width: 4),
-                Text(
-                  '×$mentionCount',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontSize: 10,
-                        color: colors.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Pre-generation display-plan confirm dialog (spec §3.2): runs the step-0
-/// call inside the dialog (loading → plan), shows the five-dimension
-/// features and lets the user confirm the recommended default view or pick
-/// another one. Pops the confirmed plan; null = cancelled.
-class _NarrationPlanDialog extends StatefulWidget {
-  const _NarrationPlanDialog({required this.controller, this.work});
-
-  final BookReaderController controller;
-  final AiGraphWorkCandidate? work;
-
-  @override
-  State<_NarrationPlanDialog> createState() => _NarrationPlanDialogState();
-}
-
-class _NarrationPlanDialogState extends State<_NarrationPlanDialog> {
-  static const _featureLabels = <String, String>{
-    'eventDriven': '事件驱动',
-    'characterEnsemble': '人物群像',
-    'organization': '组织博弈',
-    'geography': '地理叙事',
-    'essay': '散文随笔',
-  };
-
-  static const _viewLabels = <String, String>{
-    'persons': '人物',
-    'locations': '地点',
-    'events': '事件',
-    'graph': '关系图',
-    'family_tree': '家族树',
-    'org_tree': '组织树',
-  };
-
-  AiNarrationPlan? _plan;
-  bool _failed = false;
-  String? _selectedView;
-
-  /// Auto-filtered graph corpus (metadata/appendix removed, spine-deduped).
-  /// Shown for the user's manual second pass: uncheck to exclude a section.
-  List<AiBookSectionSlice>? _sections;
-  bool _sectionsFailed = false;
-  final Set<int> _excludedSections = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _analyze();
-    _loadSections();
-  }
-
-  Future<void> _loadSections() async {
-    setState(() {
-      _sections = null;
-      _sectionsFailed = false;
-    });
-    try {
-      final sections = await widget.controller
-          .graphSectionChoices(widget.work);
-      if (!mounted) return;
-      setState(() => _sections = sections);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _sectionsFailed = true);
-    }
-  }
-
-  Future<void> _analyze() async {
-    setState(() {
-      _plan = null;
-      _failed = false;
-    });
-    final plan = await widget.controller
-        .analyzeActiveGraphNarration(work: widget.work);
-    if (!mounted) return;
-    setState(() {
-      if (plan == null) {
-        _failed = true;
-      } else {
-        _plan = plan;
-        // org_tree has no rendered entry yet; if the model still picked it
-        // as the default, fall back to the first selectable view so the
-        // confirm button applies a view that actually exists.
-        final defaultView = plan.defaultView == 'org_tree'
-            ? plan.viewOrder.firstWhere(
-                (v) => v != 'org_tree',
-                orElse: () => 'persons',
-              )
-            : plan.defaultView;
-        _selectedView = defaultView;
-      }
-    });
-  }
-
-  String get _summary {
-    final plan = _plan!;
-    final ranked = [...AiNarrationPlan.knownFeatures]
-      ..sort((a, b) => plan.feature(b).compareTo(plan.feature(a)));
-    final top = ranked.firstWhere(
-      (key) => plan.feature(key) >= 0.5,
-      orElse: () => ranked.first,
-    );
-    return '${_featureLabels[top] ?? top}为主 · '
-        '推荐${_viewLabels[plan.defaultView] ?? plan.defaultView}';
-  }
-
-  /// All auto-filtered sections are excluded → generation would be empty.
-  bool get _allExcluded =>
-      _sections != null &&
-      _sections!.isNotEmpty &&
-      _excludedSections.length >= _sections!.length;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return AlertDialog(
-      title: const Text('展示方案'),
-      content: SizedBox(
-        width: 360,
-        child: _buildBody(context, colors),
-      ),
-      actions: [
-        if (_plan != null || _failed)
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-        if (_failed)
-          FilledButton(onPressed: _analyze, child: const Text('重试'))
-        else if (_plan != null)
-          FilledButton(
-            onPressed: _selectedView == null || _allExcluded
-                ? null
-                : () => Navigator.of(context).pop(
-                      (
-                        plan: _plan!.withDefaultView(_selectedView!),
-                        excludedSections: Set<int>.unmodifiable(
-                          _excludedSections,
-                        ),
-                      ),
-                    ),
-            child: const Text('生成图谱'),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildBody(BuildContext context, ColorScheme colors) {
-    if (_failed) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline, size: 32, color: colors.error),
-          const SizedBox(height: 10),
-          Text(
-            '展示方案分析失败',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '无法分析本书的展示方式，可重试或取消。',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      );
-    }
-    final plan = _plan;
-    if (plan == null) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            SizedBox(height: 12),
-            Text('正在分析本书的展示方案…'),
-          ],
-        ),
-      );
-    }
-    return SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _summary,
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 12),
-          for (final key in AiNarrationPlan.knownFeatures)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 56,
-                    child: Text(
-                      _featureLabels[key] ?? key,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                    ),
-                  ),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: plan.feature(key),
-                        minHeight: 5,
-                        backgroundColor: colors.surfaceContainerHighest,
-                        color: colors.primary,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 28,
-                    child: Text(
-                      plan.feature(key).toStringAsFixed(1),
-                      textAlign: TextAlign.right,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 10),
-          Text(
-            '默认视图',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              // org_tree is not a rendered entry yet — offering it as a
-              // default-view choice would be a silent no-op (mirrors the
-              // entryOrder filter in _buildNarrationCard).
-              for (final view in plan.viewOrder)
-                if (view != 'org_tree')
-                  ChoiceChip(
-                    label: Text(_viewLabels[view] ?? view),
-                    selected: _selectedView == view,
-                    onSelected: (_) => setState(() => _selectedView = view),
-                    visualDensity: VisualDensity.compact,
-                  ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '选择生成后首先展示的视图，其余入口按方案排序保留。',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Text(
-                '图谱正文范围',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              if (_sections != null) ...[
-                const SizedBox(width: 8),
-                Text(
-                  '已选 ${_sections!.length - _excludedSections.length} / ${_sections!.length} 节',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '已自动过滤前言/目录/附录等辅文；以下章节参与生成，'
-            '取消勾选可排除（如 序言/导读/出版说明）。',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 6),
-          if (_sectionsFailed)
-            Row(
-              children: [
-                Text(
-                  '章节列表加载失败',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.error,
-                      ),
-                ),
-                const SizedBox(width: 8),
-                TextButton(
-                  onPressed: _loadSections,
-                  child: const Text('重试'),
-                ),
-              ],
-            )
-          else if (_sections == null)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 10),
-                  Text('正在加载章节…'),
-                ],
-              ),
-            )
-          else
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final section in _sections!)
-                    CheckboxListTile(
-                      dense: true,
-                      value: !_excludedSections.contains(section.index),
-                      onChanged: (checked) => setState(() {
-                        if (checked == true) {
-                          _excludedSections.remove(section.index);
-                        } else {
-                          _excludedSections.add(section.index);
-                        }
-                      }),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        '§${section.index} ${section.label}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
     );
   }
 }
