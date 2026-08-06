@@ -1372,15 +1372,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       }
       return true;
     }).toList(growable: false);
+    // Main list = everything the book itself is about (setting), connected
+    // or not. Only referenced outsiders (罗素 etc.) fold away — in essay
+    // collections relations are sparse, so "connected only" would empty the
+    // list.
     final isolatedEntities = <AiGraphEntity>[
       for (final entity in visibleEntities)
-        if (entity.scope != AiGraphEntityScope.setting ||
-            !connectedNames.contains(entity.name)) entity,
+        if (entity.scope != AiGraphEntityScope.setting) entity,
     ];
     final mainEntities = <AiGraphEntity>[
       for (final entity in visibleEntities)
-        if (entity.scope == AiGraphEntityScope.setting &&
-            connectedNames.contains(entity.name)) entity,
+        if (entity.scope == AiGraphEntityScope.setting) entity,
     ];
     // Search is allowed to surface mere mentions without the fold.
     final foldIsolated =
