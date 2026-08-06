@@ -2125,21 +2125,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 ),
               ),
             ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: typeColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                _graphFilterLabelFor(entity.type),
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  color: typeColor,
-                ),
-              ),
-            ),
           ],
         ),
         subtitle: entity.description.isEmpty
