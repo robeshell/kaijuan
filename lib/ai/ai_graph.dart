@@ -148,7 +148,9 @@ enum AiGraphEventType {
   static AiGraphEventType fromWireName(Object? raw) {
     if (raw is String) {
       for (final value in values) {
-        if (value.wireName == raw) return value;
+        // The prompt asks the model for the Chinese label (战斗/成长/…),
+        // while persisted JSON uses the English enum name; accept both.
+        if (value.wireName == raw || value.label == raw) return value;
       }
     }
     return AiGraphEventType.other;

@@ -1395,7 +1395,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     };
     final visibleEntities = graph.entities.where((entity) {
       if (gateByProgress && entity.firstSection > readThrough) return false;
-      if (gateByProgress && entity.firstSection > readThrough) return false;
       final listType = _graphListEntityType;
       if (listType != null && entity.type != listType) return false;
       if (_graphQuery.trim().isNotEmpty) {

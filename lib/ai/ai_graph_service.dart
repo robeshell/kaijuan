@@ -328,6 +328,7 @@ class AiBookGraphService {
       model: _settings().resolvedModel,
       includesUnread: includesUnread,
       coveredSections: covered,
+      sectionTitles: existing?.sectionTitles ?? const {},
       entities: entities,
       relations: relations,
     );
@@ -578,7 +579,9 @@ class AiBookGraphService {
             '（如散文中引用的罗素、苏东坡）。'
             '标错 reference 会让该实体从图谱主视图中隐藏，'
             '所以只对真正的引用标 reference；'
-            '关系类型仅限以下中文：${_relationTypes.join('、')}，用最贴切的一个；'
+            '${_relationTypes.isEmpty
+                ? '关系类型不受限制，自由描述（中文，如 结盟、背叛）；'
+                : '关系类型仅限以下中文：${_relationTypes.join('、')}，用最贴切的一个；'}'
             '不要抽取书作者、作序者、编者、译者等元信息人物，'
             '除非他们作为故事角色实际登场；'
             '本章无实体或关系时对应数组输出 []。\n\n'

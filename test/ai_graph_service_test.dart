@@ -21,6 +21,17 @@ void main() {
   }
 
   group('AiBookGraph serialization', () {
+    test('event type parses both Chinese labels and English wire names',
+        () {
+      expect(AiGraphEventType.fromWireName('战斗'), AiGraphEventType.combat);
+      expect(AiGraphEventType.fromWireName('combat'), AiGraphEventType.combat);
+      expect(AiGraphEventType.fromWireName('关系变化'),
+          AiGraphEventType.relationship);
+      expect(AiGraphEventType.fromWireName('不存在的类型'),
+          AiGraphEventType.other);
+      expect(AiGraphEventType.fromWireName(null), AiGraphEventType.other);
+    });
+
     test('JSON round-trip preserves graph, entities, relations and evidence',
         () {
       final source = AiBookGraph(

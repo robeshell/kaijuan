@@ -275,7 +275,17 @@ class AiSettingsController extends ChangeNotifier {
 
     return sameList(a.appendixUnits, b.appendixUnits) &&
         sameList(a.metadataUnits, b.metadataUnits) &&
-        sameList(a.citationQuoteTemplates, b.citationQuoteTemplates);
+        sameList(a.citationQuoteTemplates, b.citationQuoteTemplates) &&
+        sameList(a.relationTypes, b.relationTypes) &&
+        _sameMap(a.relationTypeAliases, b.relationTypeAliases);
+  }
+
+  static bool _sameMap(Map<String, String> a, Map<String, String> b) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (b[entry.key] != entry.value) return false;
+    }
+    return true;
   }
 
   /// Builds a live provider when settings + key are complete. Null otherwise.
