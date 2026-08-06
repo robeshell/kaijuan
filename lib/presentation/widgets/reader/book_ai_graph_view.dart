@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter_graph_view/flutter_graph_view.dart';
@@ -102,6 +104,9 @@ class BookAiGraphView extends StatelessWidget {
 
     final options = Options()
       ..enableHit = true
+      ..backgroundBuilder = (context) {
+        return _DotGridBackground(color: colors.outlineVariant);
+      }
       ..graphStyle = (GraphStyle()
         ..tagColorByIndex = [
           colors.primary.withValues(alpha: 0.85),
@@ -113,12 +118,26 @@ class BookAiGraphView extends StatelessWidget {
         // Vertex state stays tracked (tap detection needs hoverVertex).
         ..hoverOpacity = 1.0
         ..vertexTextStyleGetter = (vertex, shape) => TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
           color: colors.onSurface,
+          // Soft halo around the label so it stays readable over edges and
+          // other nodes (flutter_graph_view draws labels on the canvas with
+          // no background of their own).
+          shadows: [
+            Shadow(
+              color: colors.surfaceContainerLow.withValues(alpha: 0.95),
+              blurRadius: 8,
+            ),
+            Shadow(
+              color: colors.surfaceContainerLow.withValues(alpha: 0.9),
+              blurRadius: 2,
+            ),
+          ],
         ))
-      ..vertexShape = VertexCircleShape()
-      ..edgeShape = EdgeLineShape()
+      ..vertexShape =
+          _RingVertexShape(ringColor: colors.surfaceContainerLow)
+      ..edgeShape = _FadedEdgeLineShape()
       ..onVertexTapUp = (vertex, _) {
         // Deferred: mutating state inside the pointer-event dispatch trips
         // Flutter's MouseTracker debug assertion on macOS (and onVertexTapDown
@@ -184,4 +203,93 @@ class BookAiGraphView extends StatelessWidget {
     }
     return SizedBox(height: height, width: double.infinity, child: graphArea);
   }
+}
+
+/// Circle vertex with a crisp surface-colored ring: at graph density the
+/// fill-only circles melt into each other, the ring keeps them separated
+/// (and doubles as a soft shadow edge against the dot grid).
+class _RingVertexShape extends VertexCircleShape {
+  _RingVertexShape({required this.ringColor});
+
+  final Color ringColor;
+
+  @override
+  void render(
+    Vertex vertex,
+    ui.Canvas canvas,
+    Paint paint,
+    List<Paint> paintLayers,
+  ) {
+    super.render(vertex, canvas, paint, paintLayers);
+    canvas.drawCircle(
+      ui.Offset.zero,
+      vertex.radiusZoom,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5 / vertex.zoom
+        ..color = ringColor,
+    );
+  }
+}
+
+/// Thinner, translucent edges so the vertices carry the visual weight.
+/// Hover still thickens the hovered edge (the only hover feedback left
+/// after the flicker fix).
+class _FadedEdgeLineShape extends EdgeLineShape {
+  @override
+  Paint getPaint(Edge edge) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = (edge.isHovered ? 3 : 1) / edge.zoom;
+    final from = edge.start.colors.lastOrNull ?? Colors.grey;
+    final to = edge.end?.colors.lastOrNull ?? from;
+    paint.shader = ui.Gradient.linear(
+      Offset.zero,
+      Offset(len(edge), 0),
+      [
+        from.withValues(alpha: 0.45),
+        to.withValues(alpha: 0.45),
+      ],
+    );
+    return paint;
+  }
+}
+
+/// Sparse dot grid behind the graph — reads as "map" instead of "floating
+/// circles on a blank panel".
+class _DotGridBackground extends StatelessWidget {
+  const _DotGridBackground({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _DotGridPainter(color: color.withValues(alpha: 0.6)),
+      child: const SizedBox.expand(),
+    );
+  }
+}
+
+class _DotGridPainter extends CustomPainter {
+  _DotGridPainter({required this.color});
+
+  final Color color;
+
+  static const double _step = 28;
+  static const double _dotRadius = 1.1;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    for (var y = _step / 2; y < size.height; y += _step) {
+      for (var x = _step / 2; x < size.width; x += _step) {
+        canvas.drawCircle(Offset(x, y), _dotRadius, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DotGridPainter oldDelegate) =>
+      oldDelegate.color != color;
 }

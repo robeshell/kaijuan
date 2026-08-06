@@ -99,8 +99,11 @@ void main() {
           1: '''
             {"entities":[{"name":"张三","type":"person","aliases":["张三爷"],
               "description":"主人公。",
+              "evidence":[{"section":1,"quote":"张三与李四在城门口相见"}]},
+             {"name":"李四","type":"person","aliases":[],
+              "description":"次要人物。",
               "evidence":[{"section":1,"quote":"张三与李四在城门口相见"}]}],
-             "relations":[{"source":"张三","target":"李四","type":"meet",
+             "relations":[{"source":"张三","target":"李四","type":"同僚",
               "description":"在城门相见。",
               "evidence":[{"section":1,"quote":"张三与李四在城门口相见"}]}]}
           ''',
@@ -113,7 +116,7 @@ void main() {
         includesUnread: true,
       );
 
-      final entity = graph.entities.single;
+      final entity = graph.entities.firstWhere((e) => e.name == '张三');
       expect(entity.name, '张三');
       expect(entity.aliases, ['张三爷']);
       expect(entity.evidence.single.spanResolved, isTrue);
@@ -123,7 +126,7 @@ void main() {
       final relation = graph.relations.single;
       expect(relation.source, '张三');
       expect(relation.target, '李四');
-      expect(relation.type, 'meet');
+      expect(relation.type, '同僚');
       expect(graph.coveredSections, [1]);
       expect(graph.model, 'graph-test');
     });
@@ -180,7 +183,7 @@ void main() {
       );
 
       expect(graph.entities.length, 1);
-      final entity = graph.entities.single;
+      final entity = graph.entities.firstWhere((e) => e.name == '张三');
       expect(entity.name, '张三');
       expect(entity.aliases, containsAll(['三哥']));
       expect(entity.evidence.length, 2);
