@@ -454,6 +454,18 @@ class AiBookGraphService {
     // normal book content, not citations. Low-frequency entities are kept
     // out of the graph by the top-N cut anyway.
     _applyScopeHardRules(entities);
+    // Model-noise protection: the model occasionally mislabels the book's
+    // protagonist as reference (张居正 in 万历十五年 — 全书主角被视图隐藏).
+    // A high-evidence entity with zero citation-template hits is正文人物,
+    // not a citation; true citations (罗素 in essays) always carry a
+    // template hit, so this never resurrects them.
+    _protectCoreEntities(entities);
+    // Directional-kin duplicate resolution: the model occasionally flips a
+    // 亲属 edge (万历→慈圣 母子 vs 慈圣→万历 母子). Keeping the flipped
+    // mirror makes the junior a "candidate parent" and pollutes the family
+    // tree (万历皇帝 marked complex, hidden under an odd branch). Keep the
+    // edge with more evidence, drop the weaker mirror.
+    _dedupeReverseKinEdges(relations);
 
     entities.sort(_byFrequencyThenName);
     relations.sort((a, b) => b.evidence.length.compareTo(a.evidence.length));
@@ -531,6 +543,62 @@ class AiBookGraphService {
     }
   }
 
+  /// Undoes model noise on scope: a reference-scoped entity with ≥5
+  /// quote-backed evidence and zero citation-template hits is正文人物 the
+  /// model mislabelled (张居正 in 万历十五年 — the book's protagonist would
+  /// otherwise vanish from every setting-only view, family tree included).
+  /// True citations (罗素 in essays) keep at least one template hit, so they
+  /// stay reference. Threshold keeps essay collections safe: a barely-cited
+  /// outsider never crosses 5 independent evidence quotes.
+  void _protectCoreEntities(List<AiGraphEntity> entities) {
+    if (entities.isEmpty) return;
+    for (var i = 0; i < entities.length; i++) {
+      final entity = entities[i];
+      if (entity.scope != AiGraphEntityScope.reference) continue;
+      if (entity.evidence.length < 5) continue;
+      final cited = entity.evidence.any(
+        (ev) => _isCitationQuote(ev.quote, entity.name, entity.aliases),
+      );
+      if (!cited) {
+        entities[i] = entity.copyWith(scope: AiGraphEntityScope.setting);
+      }
+    }
+  }
+
+  /// Directional-kin duplicate resolution (fusion consistency): when both
+  /// A→B and B→A carry the same 亲属 kin, keep the edge with more evidence
+  /// and drop the weaker mirror. The model occasionally flips a direction
+  /// (万历→慈圣 母子 vs the correct 慈圣→万历 母子); a flipped mirror makes
+  /// the junior a candidate parent and pollutes the family tree.
+  static void _dedupeReverseKinEdges(List<AiGraphRelation> relations) {
+    if (relations.isEmpty) return;
+    final best = <String, AiGraphRelation>{};
+    final order = <String>[];
+    final kept = <AiGraphRelation>[];
+    for (final r in relations) {
+      if (r.type != '亲属' || r.kin.isEmpty) {
+        kept.add(r);
+        continue;
+      }
+      final a = r.source;
+      final b = r.target;
+      final key = a.compareTo(b) <= 0
+          ? '$a\u0000$b\u0000${r.type}\u0000${r.kin}'
+          : '$b\u0000$a\u0000${r.type}\u0000${r.kin}';
+      final existing = best[key];
+      if (existing == null) {
+        best[key] = r;
+        order.add(key);
+      } else if (r.evidence.length > existing.evidence.length) {
+        best[key] = r;
+      }
+    }
+    for (final key in order) {
+      kept.add(best[key]!);
+    }
+    relations..clear()..addAll(kept);
+  }
+
   /// True when the quote frames [name] (or an alias) as an outside citation
   /// rather than a story event, e.g. 据X / 按X / 如X所言 / 正如X所说 / X曾说 /
   /// X写道 / X所言 / 据说X. Deliberately excludes 说/认为/指出 alone —
@@ -544,7 +612,17 @@ class AiBookGraphService {
     for (final n in {name, ...aliases}) {
       if (n.isEmpty) continue;
       for (final template in templates) {
-        if (quote.contains(template.replaceAll('{name}', n))) return true;
+        final filled = template.replaceAll('{name}', n);
+        // 据X must not match 根据X: 根据大学士张居正的安排 is narration
+        // (张居正 arranged the court), not a citation of him. The other
+        // templates (按/如所言/所说/曾说/写道) have no such collision.
+        if (template == '据{name}') {
+          if (RegExp('(?<!根)${RegExp.escape(filled)}').hasMatch(quote)) {
+            return true;
+          }
+        } else if (quote.contains(filled)) {
+          return true;
+        }
       }
     }
     return false;
@@ -764,6 +842,8 @@ class AiBookGraphService {
             '与 importance（1-3 整数，3=重大情节）；'
             'scope 判定：绝大多数实体都应是 setting——本书正文中出现的'
             '任何角色、地点、事件、讨论对象（包括作者亲历、叙述的主题）；'
+            '本书叙述/讨论的主角人物即使已故、或本身是历史人物，仍是 setting'
+            '（如张居正之于《万历十五年》）；'
             'reference 仅限明显的外部引用：举例、论证时引用的书外人名，'
             '典型句式「据X」「按X」「如X所言」「正如X所说」「X曾说」「X写道」'
             '（如散文中引用的罗素、苏东坡）。'

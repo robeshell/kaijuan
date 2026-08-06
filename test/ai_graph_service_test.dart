@@ -573,6 +573,76 @@ void main() {
       expect(graph.relations.length, 2);
     });
 
+    test('protagonist mislabelled reference is restored to setting (张居正)',
+        () async {
+      final quotes = List.generate(6, (i) => '张居正主持新政第${i + 1}条。');
+      final body = quotes.join();
+      final evidence = [
+        for (var i = 0; i < 6; i++)
+          '{"section":1,"quote":"张居正主持新政第${i + 1}条"}',
+      ].join(',');
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张居正","type":"person","aliases":[],
+              "description":"首辅。","evidence":[$evidence],
+              "scope":"reference"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', body)],
+        includesUnread: true,
+      );
+
+      // 6 quote-backed evidence quotes, zero citation templates: the model
+      // mislabelled the protagonist — restore to setting (family-tree scope).
+      final zjz = graph.entities.singleWhere((e) => e.name == '张居正');
+      expect(zjz.scope, AiGraphEntityScope.setting);
+    });
+
+    test('flipped kin mirror dedupes to the stronger direction (万历母子)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣皇太后是万历皇帝生母"},
+                          {"section":1,"quote":"皇太后劝万历读书"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣皇太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"慈圣皇太后是万历皇帝生母"},
+                          {"section":1,"quote":"皇太后劝万历读书"}]},
+             {"source":"万历皇帝","target":"慈圣皇太后",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"万历皇帝叩拜皇太后"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '慈圣皇太后是万历皇帝生母。皇太后劝万历读书。万历皇帝叩拜皇太后。')],
+        includesUnread: true,
+      );
+
+      // The flipped mirror (万历→慈圣 母子, weaker) is dropped; only the
+      // stronger, correct direction survives — the junior is no longer a
+      // candidate parent in the family tree.
+      expect(graph.relations.length, 1);
+      final kin = graph.relations.single;
+      expect(kin.source, '慈圣皇太后');
+      expect(kin.target, '万历皇帝');
+      expect(kin.kin, '母子');
+    });
+
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
         () async {
       final provider = _GraphProvider(
@@ -795,6 +865,33 @@ void main() {
       expect(
         graph.entities.single.scope,
         AiGraphEntityScope.reference,
+      );
+    });
+
+    test('根据X narration does not trigger the citation rule (张居正安排)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张居正","type":"person","scope":"setting",
+              "description":"首辅。",
+              "evidence":[{"section":1,"quote":"根据张居正的安排，逢三六九早朝"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '根据张居正的安排，逢三六九早朝。')],
+        includesUnread: true,
+      );
+
+      // 根据X is narration (X arranged something), not a citation of X: the
+      // 据X template must not fire here — the entity stays setting.
+      expect(
+        graph.entities.single.scope,
+        AiGraphEntityScope.setting,
       );
     });
 
