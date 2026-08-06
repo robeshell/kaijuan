@@ -116,7 +116,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   final _outlineChildrenKeys = <String, GlobalKey>{};
   bool _outlineOverviewExpanded = false;
   _GraphViewMode _graphViewMode = _GraphViewMode.persons;
-  _GraphSortOrder _graphSortOrder = _GraphSortOrder.byAppearance;
+
+  /// Per-view sort order, so 人物/地点/事件 keep their own choice. Defaults
+  /// to frequency (most-mentioned first).
+  final _graphSortOrders = <_GraphViewMode, _GraphSortOrder>{};
+
+  _GraphSortOrder get _graphSortOrder =>
+      _graphSortOrders[_graphViewMode] ?? _GraphSortOrder.byFrequency;
 
   /// Isolated entities (0 relations) collapse into a single row until opened.
   bool _graphIsolatedExpanded = false;
@@ -1653,8 +1659,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               PopupMenuButton<_GraphSortOrder>(
                 tooltip: '排序',
                 initialValue: _graphSortOrder,
-                onSelected: (order) =>
-                    setState(() => _graphSortOrder = order),
+                onSelected: (order) => setState(
+                  () => _graphSortOrders[_graphViewMode] = order,
+                ),
                 itemBuilder: (_) => const [
                   PopupMenuItem(
                     value: _GraphSortOrder.byAppearance,
