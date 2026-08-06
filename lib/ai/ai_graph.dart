@@ -128,6 +128,35 @@ class AiGraphEvidence {
   }
 }
 
+/// Event sub-category used by the timeline view (AI-Reader-V2 style).
+/// `other` is the fallback for old caches and unmatched model output.
+enum AiGraphEventType {
+  combat('战斗'),
+  growth('成长'),
+  social('社交'),
+  travel('旅行'),
+  appearance('角色登场'),
+  object('物品交接'),
+  organization('组织变动'),
+  relationship('关系变化'),
+  other('其他');
+
+  const AiGraphEventType(this.label);
+
+  final String label;
+
+  static AiGraphEventType fromWireName(Object? raw) {
+    if (raw is String) {
+      for (final value in values) {
+        if (value.wireName == raw) return value;
+      }
+    }
+    return AiGraphEventType.other;
+  }
+
+  String get wireName => name;
+}
+
 /// A book entity. Unique key is `name + type`.
 class AiGraphEntity {
   const AiGraphEntity({
@@ -140,6 +169,8 @@ class AiGraphEntity {
     this.chapterFreq = const {},
     this.firstSection = 0,
     this.lastSection = 0,
+    this.eventType = AiGraphEventType.other,
+    this.importance = 0,
   });
 
   /// Canonical name (never renamed on re-extraction).
@@ -167,6 +198,12 @@ class AiGraphEntity {
   final int firstSection;
   final int lastSection;
 
+  /// Event sub-category (meaningful only when [type] is event).
+  final AiGraphEventType eventType;
+
+  /// Event importance 0-3 (0 = unmarked, 3 = major plot event).
+  final int importance;
+
   String get id => '$name|${type.wireName}';
 
   AiGraphEntity copyWith({
@@ -177,6 +214,8 @@ class AiGraphEntity {
     Map<int, int>? chapterFreq,
     int? firstSection,
     int? lastSection,
+    AiGraphEventType? eventType,
+    int? importance,
   }) {
     return AiGraphEntity(
       name: name,
@@ -188,6 +227,8 @@ class AiGraphEntity {
       chapterFreq: chapterFreq ?? this.chapterFreq,
       firstSection: firstSection ?? this.firstSection,
       lastSection: lastSection ?? this.lastSection,
+      eventType: eventType ?? this.eventType,
+      importance: importance ?? this.importance,
     );
   }
 
@@ -204,6 +245,8 @@ class AiGraphEntity {
     },
     'firstSection': firstSection,
     'lastSection': lastSection,
+    'eventType': eventType.wireName,
+    'importance': importance,
   };
 
   static AiGraphEntity? fromJson(Map<String, dynamic> json) {
@@ -236,6 +279,10 @@ class AiGraphEntity {
       chapterFreq: freq,
       firstSection: json['firstSection'] as int? ?? 0,
       lastSection: json['lastSection'] as int? ?? 0,
+      eventType: AiGraphEventType.fromWireName(json['eventType']),
+      importance: json['importance'] is int
+          ? (json['importance'] as int).clamp(0, 3)
+          : 0,
     );
   }
 

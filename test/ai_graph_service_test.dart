@@ -58,6 +58,18 @@ void main() {
             firstSection: 2,
             lastSection: 2,
           ),
+          AiGraphEntity(
+            name: '城门相争',
+            type: AiGraphEntityType.event,
+            eventType: AiGraphEventType.combat,
+            importance: 3,
+            evidence: [
+              AiGraphEvidence(sectionIndex: 1, quote: '两军于城门外交战'),
+            ],
+            chapterFreq: {1: 1},
+            firstSection: 1,
+            lastSection: 1,
+          ),
         ],
         relations: const [
           AiGraphRelation(
@@ -91,6 +103,9 @@ void main() {
       final reference = restored.entities
           .firstWhere((e) => e.name == '罗素');
       expect(reference.scope, AiGraphEntityScope.reference);
+      final event = restored.entities.firstWhere((e) => e.name == '城门相争');
+      expect(event.eventType, AiGraphEventType.combat);
+      expect(event.importance, 3);
       expect(restored.relations.single.mergeKey, contains('meet'));
     });
 

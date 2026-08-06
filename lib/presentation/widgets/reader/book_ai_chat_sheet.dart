@@ -1725,19 +1725,27 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             )
           else ...[
-            for (final entity in orderedMain)
-              KeyedSubtree(
-                key: _graphEntityKeys.putIfAbsent(
-                  entity.name,
-                  () => GlobalKey(),
+            if (_graphViewMode == _GraphViewMode.events)
+              _buildGraphEventTimeline(
+                context,
+                orderedMain,
+                gateByProgress,
+                readThrough,
+              )
+            else
+              for (final entity in orderedMain)
+                KeyedSubtree(
+                  key: _graphEntityKeys.putIfAbsent(
+                    entity.name,
+                    () => GlobalKey(),
+                  ),
+                  child: _buildGraphEntityTile(
+                    context,
+                    entity,
+                    gateByProgress,
+                    readThrough,
+                  ),
                 ),
-                child: _buildGraphEntityTile(
-                  context,
-                  entity,
-                  gateByProgress,
-                  readThrough,
-                ),
-              ),
             if (foldIsolated)
               _buildIsolatedRow(
                 context,
@@ -1764,6 +1772,169 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       ],
     );
   }
+
+  /// Timeline form of the events view: grouped by chapter with a type-dot
+  /// and importance badge per event (AI-Reader-V2 style).
+  Widget _buildGraphEventTimeline(
+    BuildContext context,
+    List<AiGraphEntity> events,
+    bool gateByProgress,
+    int readThrough,
+  ) {
+    final grouped = <int, List<AiGraphEntity>>{};
+    for (final event in events) {
+      grouped.putIfAbsent(event.firstSection, () => []).add(event);
+    }
+    final chapters = grouped.keys.toList()..sort();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final chapter in chapters) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 3,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: context.appColors.primary.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '第 $chapter 章',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final event in grouped[chapter]!)
+            KeyedSubtree(
+              key: _graphEntityKeys.putIfAbsent(
+                event.name,
+                () => GlobalKey(),
+              ),
+              child: _buildGraphEventTile(
+                context,
+                event,
+                gateByProgress,
+                readThrough,
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildGraphEventTile(
+    BuildContext context,
+    AiGraphEntity entity,
+    bool gateByProgress,
+    int readThrough,
+  ) {
+    final typeColor = _graphEventTypeColor(entity.eventType);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: typeColor.withValues(alpha: 0.18),
+          width: 1,
+        ),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 8, 2),
+        leading: Container(
+          width: 10,
+          height: 10,
+          margin: const EdgeInsets.symmetric(vertical: 18),
+          decoration: BoxDecoration(
+            color: typeColor,
+            shape: BoxShape.circle,
+          ),
+        ),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(
+                entity.name,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: _panelBodySize(context),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (entity.importance >= 3) ...[
+              const SizedBox(width: 6),
+              _graphImportanceBadge(context, entity.importance),
+            ],
+          ],
+        ),
+        subtitle: entity.description.isEmpty
+            ? null
+            : Text(
+                entity.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  height: 1.35,
+                  color: context.appSecondaryText,
+                ),
+              ),
+        trailing: Text(
+          entity.eventType.label,
+          style: TextStyle(
+            fontSize: context.appCaptionSize,
+            color: typeColor,
+          ),
+        ),
+        onTap: () => _showEntityDetails(entity),
+      ),
+    );
+  }
+
+  Widget _graphImportanceBadge(BuildContext context, int importance) {
+    final (label, color) = switch (importance) {
+      3 => ('重要', context.appColors.error),
+      _ => ('一般', context.appColors.primary),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: context.appCaptionSize - 2,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Color _graphEventTypeColor(AiGraphEventType type) => switch (type) {
+    AiGraphEventType.combat => const Color(0xffef4444),
+    AiGraphEventType.growth => const Color(0xff3b82f6),
+    AiGraphEventType.social => const Color(0xff10b981),
+    AiGraphEventType.travel => const Color(0xfff97316),
+    AiGraphEventType.appearance => const Color(0xff8b5cf6),
+    AiGraphEventType.object => const Color(0xffeab308),
+    AiGraphEventType.organization => const Color(0xffec4899),
+    AiGraphEventType.relationship => const Color(0xff06b6d4),
+    AiGraphEventType.other => Colors.blueGrey,
+  };
 
   Widget _buildIsolatedRow(
     BuildContext context,

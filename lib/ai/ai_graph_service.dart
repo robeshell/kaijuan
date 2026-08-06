@@ -564,6 +564,9 @@ class AiBookGraphService {
             'description 用 1-2 句，紧扣证据；'
             'quote 必须逐字来自以下正文；evidence 至少 1 条；'
             'type 取值仅限 person/location/event；'
+            'type 为 event 时必须输出 eventType（仅限 战斗/成长/社交/旅行/'
+            '角色登场/物品交接/组织变动/关系变化 之一，用最贴切的一个）'
+            '与 importance（1-3 整数，3=重大情节）；'
             'scope 判定：绝大多数实体都应是 setting——本书正文中出现的'
             '任何角色、地点、事件、讨论对象（包括作者亲历、叙述的主题）；'
             'reference 仅限明显的外部引用：举例、论证时引用的书外人名，'
@@ -660,6 +663,13 @@ class AiBookGraphService {
         final scope = scopeRaw is String
             ? AiGraphEntityScope.fromWireName(scopeRaw)
             : AiGraphEntityScope.setting;
+        final eventType = type == AiGraphEntityType.event
+            ? AiGraphEventType.fromWireName(map['eventType'])
+            : AiGraphEventType.other;
+        final importance = type == AiGraphEntityType.event &&
+                map['importance'] is int
+            ? (map['importance'] as int).clamp(0, 3)
+            : 0;
         final originalName = name.trim();
         final canonicalName = _resolveCanonical(
           canonical,
@@ -702,9 +712,22 @@ class AiBookGraphService {
                   scope == AiGraphEntityScope.setting
               ? AiGraphEntityScope.setting
               : AiGraphEntityScope.reference;
-          final updated = mergedScope == existing.scope
+          // Event metadata: keep the first non-other category, max importance.
+          final mergedEventType =
+              existing.eventType == AiGraphEventType.other
+              ? eventType
+              : existing.eventType;
+          final mergedImportance =
+              existing.importance > importance ? existing.importance : importance;
+          final updated = mergedScope == existing.scope &&
+                  mergedEventType == existing.eventType &&
+                  mergedImportance == existing.importance
               ? next
-              : next.copyWith(scope: mergedScope);
+              : next.copyWith(
+                  scope: mergedScope,
+                  eventType: mergedEventType,
+                  importance: mergedImportance,
+                );
           entityIndex[key] = updated;
           final at = entities.indexOf(existing);
           if (at >= 0) entities[at] = updated;
@@ -726,6 +749,8 @@ class AiBookGraphService {
             chapterFreq: {sectionIndex: evidence.length},
             firstSection: first,
             lastSection: first,
+            eventType: eventType,
+            importance: importance,
           );
           entityIndex[key] = entity;
           entities.add(entity);
