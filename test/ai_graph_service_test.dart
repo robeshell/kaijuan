@@ -643,6 +643,40 @@ void main() {
       expect(kin.kin, '母子');
     });
 
+    test('kin-less 亲属 relation is dropped at merge time (恭妃非子)', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"},
+             {"name":"恭妃王氏","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"恭妃王氏"}],
+              "scope":"setting"}],
+             "relations":[{"source":"万历皇帝","target":"恭妃王氏",
+              "type":"亲属","description":"","kin":"",
+              "evidence":[{"section":1,"quote":"万历皇帝临幸恭妃王氏"}]},
+             {"source":"万历皇帝","target":"恭妃王氏",
+              "type":"婚配","description":"夫妻。","kin":"夫妻",
+              "evidence":[{"section":1,"quote":"万历皇帝与恭妃王氏为夫妻"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '万历皇帝临幸恭妃王氏。万历皇帝与恭妃王氏为夫妻。')],
+        includesUnread: true,
+      );
+
+      // The kin-less 亲属 edge is an unconfirmed guess — dropped. The real
+      // 婚配 edge survives (and is what the list/graph views should show).
+      expect(graph.relations.length, 1);
+      final relation = graph.relations.single;
+      expect(relation.type, '婚配');
+      expect(relation.kin, '夫妻');
+    });
+
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
         () async {
       final provider = _GraphProvider(

@@ -24,11 +24,13 @@ AiGraphRelation kin(
   String elder,
   String younger, {
   int evidenceCount = 1,
+  String label = '父子',
 }) {
   return AiGraphRelation(
     source: elder,
     target: younger,
     type: '亲属',
+    kin: label,
     description: '',
     evidence: [
       for (var i = 0; i < evidenceCount; i++)
@@ -203,6 +205,41 @@ void main() {
 
       expect(tree.roots.single.kin, isEmpty); // root has no parent edge
       expect(tree.roots.single.children.single.kin, '父子');
+    });
+
+    test('kin-less 亲属 edge never draws a child (恭妃≠万历之子)', () {
+      // The model emitted 万历 -[亲属 kin=空]-> 恭妃王氏 alongside the real
+      // 婚配 edge; the kin-less edge must not make the consort a child.
+      final tree = buildFamilyTree(
+        entities: [
+          person('万历皇帝', firstSection: 1),
+          person('恭妃王氏', firstSection: 1),
+          person('朱常洛', firstSection: 1),
+        ],
+        relations: [
+          AiGraphRelation(
+            source: '万历皇帝',
+            target: '恭妃王氏',
+            type: '亲属',
+            kin: '',
+            description: '',
+            evidence: [
+              AiGraphEvidence(sectionIndex: 1, quote: '万历与恭妃'),
+            ],
+            weight: 1,
+          ),
+          kin('万历皇帝', '朱常洛'),
+        ],
+      );
+
+      // 恭妃王氏 is isolated (her 婚配 edge is not a 亲属 tree edge), the
+      // emperor keeps only his real children.
+      expect(tree.isolatedCount, 1);
+      expect(tree.isolatedNames, contains('恭妃王氏'));
+      final wl = flatten(tree.roots.single);
+      expect(wl, contains('万历皇帝'));
+      expect(wl, contains('朱常洛'));
+      expect(wl, isNot(contains('恭妃王氏')));
     });
 
     test('reference people and non-kin relations never enter the tree', () {

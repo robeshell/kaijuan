@@ -1104,6 +1104,13 @@ class AiBookGraphService {
             targetRaw.trim();
         final type = normalizeRelationType(typeRaw);
         if (source.isEmpty || target.isEmpty || source == target) continue;
+        // A 亲属 edge must name the concrete relation (父子/母子/兄弟…):
+        // a kin-less one (万历 -[亲属]-> 恭妃王氏) is the model's unconfirmed
+        // guess and would draw a consort as the emperor's child in the tree.
+        if (type == '亲属' &&
+            (map['kin'] as String? ?? '').trim().isEmpty) {
+          continue;
+        }
 
         final key = '$source\u0000$target\u0000$type';
         final existing = relationIndex[key];

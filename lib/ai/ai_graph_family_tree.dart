@@ -71,10 +71,12 @@ AiFamilyTree buildFamilyTree({
   };
 
   // child -> candidate parent edges (strength-descending order preserved by
-  // the sort below).
+  // the sort below). Only 亲属 edges with a concrete kin label participate:
+  // 万历 -[亲属 kin=空]-> 恭妃王氏 would otherwise draw the consort as the
+  // emperor's child — a kin-less 亲属 edge is an unconfirmed relation.
   final incoming = <String, List<AiGraphRelation>>{};
   for (final r in relations) {
-    if (r.type != '亲属') continue;
+    if (r.type != '亲属' || r.kin.isEmpty) continue;
     final parent = r.source;
     final child = r.target;
     if (parent == child) continue;
