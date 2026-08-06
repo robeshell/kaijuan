@@ -435,6 +435,144 @@ void main() {
       expect(relation.weight, 2);
     });
 
+    test('generic honorific never absorbs a named person (皇帝≠万历皇帝)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"皇帝","type":"person","aliases":[],
+              "description":"当朝天子。",
+              "evidence":[{"section":1,"quote":"皇帝"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"万历皇帝","type":"person","aliases":[],
+              "description":"明朝皇帝。",
+              "evidence":[{"section":2,"quote":"万历皇帝"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '皇帝。'), slice(2, '二', '万历皇帝。')],
+        includesUnread: true,
+      );
+
+      // 皇帝 ⊂ 万历皇帝 is a suffix hit but 皇帝 is a role, not a name: the
+      // emperor's entity must survive (regression: it used to fold away).
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'皇帝', '万历皇帝'});
+      expect(graph.entities.length, 2);
+    });
+
+    test('generic honorific never absorbs a titled person (太后≠慈圣太后)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"太后","type":"person","aliases":[],
+              "description":"太后临朝。",
+              "evidence":[{"section":1,"quote":"太后"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"慈圣太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":2,"quote":"慈圣太后"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '太后。'), slice(2, '二', '慈圣太后。')],
+        includesUnread: true,
+      );
+
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'太后', '慈圣太后'});
+      expect(graph.entities.length, 2);
+    });
+
+    test('real substring aliases still merge locally (万历 ⊂ 万历皇帝)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"万历","type":"person","aliases":[],
+              "description":"明朝皇帝。",
+              "evidence":[{"section":1,"quote":"万历"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"万历皇帝","type":"person","aliases":[],
+              "description":"明朝皇帝。",
+              "evidence":[{"section":2,"quote":"万历皇帝"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '万历。'), slice(2, '二', '万历皇帝。')],
+        includesUnread: true,
+      );
+
+      // 万历 is a real name (not a role): the substring rule still folds it,
+      // keeping the first-seen canonical (万历).
+      expect(graph.entities.map((e) => e.name).toSet(), {'万历'});
+      expect(graph.entities.length, 1);
+    });
+
+    test('shared-relation review defaults to different (张居正≠冯保)',
+        () async {
+      final provider = _GraphProvider(
+        reviewVerdicts: '["different"]',
+        responses: {
+          1: '''
+            {"entities":[{"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"},
+             {"name":"张居正","type":"person","aliases":[],
+              "description":"内阁首辅。",
+              "evidence":[{"section":1,"quote":"张居正任首辅"}],
+              "scope":"setting"}],
+             "relations":[{"source":"张居正","target":"万历皇帝",
+              "type":"效力",
+              "evidence":[{"section":1,"quote":"张居正辅佐万历"}]}]}
+          ''',
+          2: '''
+            {"entities":[{"name":"冯保","type":"person","aliases":[],
+              "description":"司礼监掌印太监。",
+              "evidence":[{"section":2,"quote":"冯保掌司礼监"}],
+              "scope":"setting"}],
+             "relations":[{"source":"冯保","target":"万历皇帝",
+              "type":"效力",
+              "evidence":[{"section":2,"quote":"冯保辅佐万历"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一节', '张居正任首辅。'),
+          slice(2, '第二节', '冯保掌司礼监。'),
+        ],
+        includesUnread: true,
+      );
+
+      // Both serve 万历皇帝 (shared ascending relation → review) but are
+      // clearly different people: the model says different, no merge.
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'万历皇帝', '张居正', '冯保'});
+      expect(graph.relations.length, 2);
+    });
+
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
         () async {
       final provider = _GraphProvider(
