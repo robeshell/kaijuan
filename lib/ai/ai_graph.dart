@@ -754,3 +754,42 @@ class AiGraphStore {
     }
   }
 }
+
+/// Objective quality gate for a generated graph (docs/specs/ai-graph-pipeline.md
+/// §5). Computed by AiBookGraphService.assessGraphQuality — every metric is
+/// structure-self-consistency, requiring no human annotation, so ANY book can
+/// be screened automatically after generation.
+class AiGraphQualityReport {
+  const AiGraphQualityReport({
+    required this.reversedKinPairs,
+    required this.kinlessKinEdges,
+    required this.mislabelledReferences,
+    required this.mirrorPairs,
+    required this.isolatedEntityRatio,
+    required this.issues,
+  });
+
+  /// 亲属 edges where both A→B and B→A exist with the same kin (the flipped
+  /// mirror should have been deduped by _dedupeReverseKinEdges).
+  final int reversedKinPairs;
+
+  /// 亲属 edges with an empty kin label (should have been dropped at merge).
+  final int kinlessKinEdges;
+
+  /// reference persons with ≥5 evidence and zero citation-template hits
+  /// (should have been restored to setting by _protectCoreEntities).
+  final int mislabelledReferences;
+
+  /// Unordered pairs with the same type+kin in both directions (婚配 etc.;
+  /// informational — not a hard gate, mirrors outside 亲属 are tolerated).
+  final int mirrorPairs;
+
+  /// Share of setting persons touching no relation at all (informational:
+  /// essay collections are naturally high).
+  final double isolatedEntityRatio;
+
+  /// Human-readable problems; empty when the gate is clean.
+  final List<String> issues;
+
+  bool get hasIssues => issues.isNotEmpty;
+}

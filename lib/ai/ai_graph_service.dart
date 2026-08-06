@@ -570,6 +570,96 @@ class AiBookGraphService {
   /// and drop the weaker mirror. The model occasionally flips a direction
   /// (万历→慈圣 母子 vs the correct 慈圣→万历 母子); a flipped mirror makes
   /// the junior a candidate parent and pollutes the family tree.
+  /// Objective quality gate over a generated graph — pure structure
+  /// self-consistency, no human annotation, so any book can be screened
+  /// automatically after generation (docs/specs/ai-graph-pipeline.md §5).
+  /// Anything the pipeline is supposed to have fixed (flipped kin mirrors,
+  /// kin-less 亲属 edges, mislabelled high-evidence references) lands in
+  /// [AiGraphQualityReport.issues]; the other metrics are informational.
+  AiGraphQualityReport assessGraphQuality(AiBookGraph graph) {
+    final issues = <String>[];
+
+    // Reversed 亲属 mirrors (same unordered pair + kin in both directions).
+    final directions = <String, Set<String>>{};
+    for (final r in graph.relations) {
+      if (r.type != '亲属' || r.kin.isEmpty) continue;
+      final a = r.source;
+      final b = r.target;
+      final key = a.compareTo(b) <= 0
+          ? '$a\u0000$b\u0000${r.type}\u0000${r.kin}'
+          : '$b\u0000$a\u0000${r.type}\u0000${r.kin}';
+      directions.putIfAbsent(key, () => {}).add('$a>$b');
+    }
+    final reversed = directions.values.where((d) => d.length > 1).length;
+    if (reversed > 0) {
+      issues.add('发现 $reversed 组方向冲突的亲属边（A→B 与 B→A 同称谓并存）');
+    }
+
+    // Kin-less 亲属 edges surviving the merge-time drop.
+    final kinless = graph.relations
+        .where((r) => r.type == '亲属' && r.kin.isEmpty)
+        .length;
+    if (kinless > 0) {
+      issues.add('发现 $kinless 条未写具体称谓的亲属边（kin 为空）');
+    }
+
+    // High-evidence reference persons without any citation template — the
+    // model mislabelled them and _protectCoreEntities failed to restore.
+    final mislabelled = <String>[];
+    for (final e in graph.entities) {
+      if (e.type != AiGraphEntityType.person ||
+          e.scope != AiGraphEntityScope.reference ||
+          e.evidence.length < 5) {
+        continue;
+      }
+      final cited = e.evidence.any(
+        (ev) => _isCitationQuote(ev.quote, e.name, e.aliases),
+      );
+      if (!cited) mislabelled.add(e.name);
+    }
+    if (mislabelled.isNotEmpty) {
+      issues.add('高频人物被误标 reference：${mislabelled.join('、')}');
+    }
+
+    // Mirror pairs (any type+kin, both directions) — informational.
+    final unordered = <String, Set<String>>{};
+    for (final r in graph.relations) {
+      final a = r.source;
+      final b = r.target;
+      final key = a.compareTo(b) <= 0
+          ? '$a\u0000$b\u0000${r.type}\u0000${r.kin}'
+          : '$b\u0000$a\u0000${r.type}\u0000${r.kin}';
+      unordered.putIfAbsent(key, () => {}).add('$a>$b');
+    }
+    final mirrors = unordered.values.where((d) => d.length > 1).length;
+
+    // Isolated setting persons (touch no relation) — informational.
+    final connected = <String>{};
+    for (final r in graph.relations) {
+      connected.add(r.source);
+      connected.add(r.target);
+    }
+    final settingPersons = graph.entities
+        .where((e) =>
+            e.type == AiGraphEntityType.person &&
+            e.scope == AiGraphEntityScope.setting)
+        .toList(growable: false);
+    final isolated = settingPersons
+        .where((e) => !connected.contains(e.name))
+        .length;
+    final ratio =
+        settingPersons.isEmpty ? 0.0 : isolated / settingPersons.length;
+
+    return AiGraphQualityReport(
+      reversedKinPairs: reversed,
+      kinlessKinEdges: kinless,
+      mislabelledReferences: mislabelled.length,
+      mirrorPairs: mirrors,
+      isolatedEntityRatio: ratio,
+      issues: issues,
+    );
+  }
+
   static void _dedupeReverseKinEdges(List<AiGraphRelation> relations) {
     if (relations.isEmpty) return;
     final best = <String, AiGraphRelation>{};
