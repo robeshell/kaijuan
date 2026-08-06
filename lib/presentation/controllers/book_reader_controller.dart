@@ -18,6 +18,7 @@ import '../../ai/ai_models.dart';
 import '../../ai/ai_outline.dart';
 import '../../ai/ai_provider.dart';
 import '../../ai/ai_search.dart';
+import '../../ai/ai_settings.dart';
 import '../../ai/ai_translation.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../domain/reader_models.dart';
@@ -915,29 +916,69 @@ class BookReaderController extends ChangeNotifier {
   bool _isGraphAppendixSection(AiBookSectionSlice section) =>
       _isGraphAppendixLabel(section.label);
 
+  /// Word lists come from AI settings (defaults = built-in lists). Compiled
+  /// once per word-list change; empty lists disable the rule entirely.
+  String? _appendixWordsKey;
+  RegExp? _appendixWordsRegExp;
+  String? _metadataWordsKey;
+  RegExp? _metadataWordsRegExp;
+
+  AiGraphRuleWords get _graphRuleWords =>
+      _aiSettings?.settings.graphRuleWords ?? const AiGraphRuleWords();
+
+  /// Never-matches regex used when a word list is empty (rule disabled).
+  static final RegExp _neverMatches = RegExp(r'$.^');
+
+  /// Lines are prefix-matched; a leading `!` turns a line into a negative
+  /// lookahead (e.g. `!序曲` keeps 序曲, a body opening, out of the rule).
+  static RegExp _prefixWordsRegExp(List<String> words) {
+    final positives = <String>[];
+    final negatives = <String>[];
+    for (final word in words) {
+      final t = word.trim();
+      if (t.isEmpty) continue;
+      if (t.startsWith('!')) {
+        final exclude = t.substring(1).trim();
+        if (exclude.isNotEmpty) negatives.add(RegExp.escape(exclude));
+      } else {
+        positives.add(RegExp.escape(t));
+      }
+    }
+    if (positives.isEmpty) return _neverMatches; // rule disabled
+    final candidates = positives.join('|');
+    if (negatives.isEmpty) return RegExp('^(?:$candidates)');
+    return RegExp('^(?!(?:${negatives.join('|')}))(?:$candidates)');
+  }
+
+  static RegExp _exactWordsRegExp(List<String> words) {
+    final escaped = <String>[
+      for (final word in words)
+        if (word.trim().isNotEmpty) RegExp.escape(word.trim()),
+    ];
+    if (escaped.isEmpty) return _neverMatches; // rule disabled
+    return RegExp('^(?:${escaped.join('|')})\$');
+  }
+
   bool _isGraphAppendixLabel(String raw) {
     final label = raw.trim().replaceAll(RegExp(r'\s+'), '');
-    return RegExp(
-      r'^(附录|参考书目|参考文献|参考资料|(?:人名|地名|主题|关键词)?索引|致谢|谢辞|鸣谢|后记|跋|注释|'
-      r'年表|词汇表|术语表|缩略语表|勘误表?|卷末|书末|'
-      r'前言|序言|序(?!曲|章|幕|篇)|自序|代序|弁言|小引|凡例|出版说明|出版前言|出版后记|出版者的话|'
-      r'编者按|导读|题记|题词|题辞|题献|献词|献页|致献|'
-      r'重印前记|重印后记|再版前记|再版后记|再版说明|重印说明|'
-      r'修订说明|修订版说明|校订说明|点校说明|整理说明|编译说明|编写说明|'
-      r'译者序|译者前言|译者后记|译后记|译序|校后记|编后记?|'
-      r'文前辅文|文前|辅文|前置部分|卷首语?|扉页|书名页|版权页|'
-      r'衬页|环衬|飞页|插页|内容简介|内容提要|图书简介|作者简介|'
-      r'关于作者|关于本书|封面语|封底语)',
-    ).hasMatch(label);
+    final words = _graphRuleWords.appendixUnits;
+    final key = words.join('\u0001');
+    if (key != _appendixWordsKey) {
+      _appendixWordsKey = key;
+      _appendixWordsRegExp = _prefixWordsRegExp(words);
+    }
+    return _appendixWordsRegExp!.hasMatch(label);
   }
 
   bool _isOutlineMetadataTitle(String value) {
     final title = value.trim().replaceAll(RegExp(r'\s+'), '');
-    return RegExp(
-      r'^(目录|总目录|全书目录|章节目录|目次|版权(?:信息|页|记录)?|'
-      r'出版(?:信息|说明|记录|前言|后记)?|图书在版编目|版本记录|'
-      r'封面|封底|扉页|书名页|护封|腰封)$',
-    ).hasMatch(title);
+    final words = _graphRuleWords.metadataUnits;
+    final key = words.join('\u0001');
+    if (key != _metadataWordsKey) {
+      _metadataWordsKey = key;
+      _metadataWordsRegExp = _exactWordsRegExp(words);
+    }
+    return _metadataWordsRegExp!.hasMatch(title);
   }
 
   bool _isOutlineMetadataSection(AiBookSectionSlice section) {

@@ -379,7 +379,7 @@ class AiBookGraphService {
   /// says they are citations, not story. Only downgrades — a setting entity
   /// is never re-marked reference by the model's own word alone, and an
   /// entity the model called reference is never upgraded here.
-  static void _applyScopeHardRules(List<AiGraphEntity> entities) {
+  void _applyScopeHardRules(List<AiGraphEntity> entities) {
     if (entities.isEmpty) return;
     for (var i = 0; i < entities.length; i++) {
       final entity = entities[i];
@@ -394,25 +394,19 @@ class AiBookGraphService {
   }
 
   /// True when the quote frames [name] (or an alias) as an outside citation
-  /// rather than a story event: 据X / 按X / 如X所言 / 正如X所说 / X曾说 /
+  /// rather than a story event, e.g. 据X / 按X / 如X所言 / 正如X所说 / X曾说 /
   /// X写道 / X所言 / 据说X. Deliberately excludes 说/认为/指出 alone —
-  /// those are also ordinary narration verbs inside a story.
-  static bool _isCitationQuote(String quote, String name, List<String> aliases) {
+  /// those are also ordinary narration verbs inside a story. Templates come
+  /// from AI settings; `{name}` is replaced with the entity name.
+  bool _isCitationQuote(String quote, String name, List<String> aliases) {
     if (quote.isEmpty || name.isEmpty) return false;
+    final templates =
+        _settings().graphRuleWords.citationQuoteTemplates;
+    if (templates.isEmpty) return false;
     for (final n in {name, ...aliases}) {
       if (n.isEmpty) continue;
-      final patterns = <String>[
-        '据$n',
-        '按$n',
-        '如$n所言',
-        '正如$n所说',
-        '$n曾说',
-        '$n写道',
-        '$n所言',
-        '据说$n',
-      ];
-      for (final pattern in patterns) {
-        if (quote.contains(pattern)) return true;
+      for (final template in templates) {
+        if (quote.contains(template.replaceAll('{name}', n))) return true;
       }
     }
     return false;

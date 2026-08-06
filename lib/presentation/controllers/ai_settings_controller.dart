@@ -235,6 +235,7 @@ class AiSettingsController extends ChangeNotifier {
     required String apiKey,
     required String baseUrl,
     required String model,
+    AiGraphRuleWords? graphRuleWords,
   }) async {
     final key = apiKey;
     final url = baseUrl.trim();
@@ -251,10 +252,30 @@ class AiSettingsController extends ChangeNotifier {
       await settingsStore.write(_settings);
       changed = true;
     }
+    final words = graphRuleWords;
+    if (words != null && !_sameRuleWords(_settings.graphRuleWords, words)) {
+      _settings = _settings.copyWith(graphRuleWords: words);
+      await settingsStore.write(_settings);
+      changed = true;
+    }
     if (changed) {
       _clearTest();
       notifyListeners();
     }
+  }
+
+  static bool _sameRuleWords(AiGraphRuleWords a, AiGraphRuleWords b) {
+    bool sameList(List<String> x, List<String> y) {
+      if (x.length != y.length) return false;
+      for (var i = 0; i < x.length; i++) {
+        if (x[i] != y[i]) return false;
+      }
+      return true;
+    }
+
+    return sameList(a.appendixUnits, b.appendixUnits) &&
+        sameList(a.metadataUnits, b.metadataUnits) &&
+        sameList(a.citationQuoteTemplates, b.citationQuoteTemplates);
   }
 
   /// Builds a live provider when settings + key are complete. Null otherwise.

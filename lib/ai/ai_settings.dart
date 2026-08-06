@@ -7,6 +7,195 @@ import 'ai_provider_kind.dart';
 import 'ai_search.dart';
 import 'ai_translation.dart';
 
+/// Tunable word lists that drive the graph-pipeline hard rules. Kept in
+/// settings so the user can extend them without a code change; the const
+/// constructor carries today's built-in defaults.
+class AiGraphRuleWords {
+  const AiGraphRuleWords({
+    this.appendixUnits = defaultAppendixUnits,
+    this.metadataUnits = defaultMetadataUnits,
+    this.citationQuoteTemplates = defaultCitationQuoteTemplates,
+  });
+
+  /// Front/back-matter unit words matched as a PREFIX of a section label
+  /// (附录, 后记, 文前辅文, 序 ...). Lines starting with `!` are exclusions
+  /// applied as a leading negative lookahead (e.g. `!序曲` keeps 序曲 as a
+  /// body opening instead of a front-matter 序).
+  final List<String> appendixUnits;
+
+  /// Metadata titles matched EXACTLY (目录, 版权, 封面 ...).
+  final List<String> metadataUnits;
+
+  /// Citation-quote templates; `{name}` is replaced with the entity name
+  /// (e.g. `据{name}`, `{name}写道`).
+  final List<String> citationQuoteTemplates;
+
+  static const defaultAppendixUnits = <String>[
+    '附录',
+    '参考书目',
+    '参考文献',
+    '参考资料',
+    '人名索引',
+    '地名索引',
+    '主题索引',
+    '关键词索引',
+    '索引',
+    '致谢',
+    '谢辞',
+    '鸣谢',
+    '后记',
+    '跋',
+    '注释',
+    '年表',
+    '词汇表',
+    '术语表',
+    '缩略语表',
+    '勘误',
+    '勘误表',
+    '卷末',
+    '书末',
+    '前言',
+    '序言',
+    '序',
+    '自序',
+    '代序',
+    '弁言',
+    '小引',
+    '凡例',
+    '出版说明',
+    '出版前言',
+    '出版后记',
+    '出版者的话',
+    '编者按',
+    '导读',
+    '题记',
+    '题词',
+    '题辞',
+    '题献',
+    '献词',
+    '献页',
+    '致献',
+    '重印前记',
+    '重印后记',
+    '再版前记',
+    '再版后记',
+    '再版说明',
+    '重印说明',
+    '修订说明',
+    '修订版说明',
+    '校订说明',
+    '点校说明',
+    '整理说明',
+    '编译说明',
+    '编写说明',
+    '译者序',
+    '译者前言',
+    '译者后记',
+    '译后记',
+    '译序',
+    '校后记',
+    '编后',
+    '编后记',
+    '文前辅文',
+    '文前',
+    '辅文',
+    '前置部分',
+    '卷首',
+    '卷首语',
+    '扉页',
+    '书名页',
+    '版权页',
+    '衬页',
+    '环衬',
+    '飞页',
+    '插页',
+    '内容简介',
+    '内容提要',
+    '图书简介',
+    '作者简介',
+    '关于作者',
+    '关于本书',
+    '封面语',
+    '封底语',
+    '!序曲',
+    '!序章',
+    '!序幕',
+    '!序篇',
+  ];
+
+  static const defaultMetadataUnits = <String>[
+    '目录',
+    '总目录',
+    '全书目录',
+    '章节目录',
+    '目次',
+    '版权',
+    '版权信息',
+    '版权页',
+    '版权记录',
+    '出版',
+    '出版信息',
+    '出版说明',
+    '出版记录',
+    '出版前言',
+    '出版后记',
+    '图书在版编目',
+    '版本记录',
+    '封面',
+    '封底',
+    '扉页',
+    '书名页',
+    '护封',
+    '腰封',
+  ];
+
+  static const defaultCitationQuoteTemplates = <String>[
+    '据{name}',
+    '按{name}',
+    '如{name}所言',
+    '正如{name}所说',
+    '{name}曾说',
+    '{name}写道',
+    '{name}所言',
+    '据说{name}',
+  ];
+
+  AiGraphRuleWords copyWith({
+    List<String>? appendixUnits,
+    List<String>? metadataUnits,
+    List<String>? citationQuoteTemplates,
+  }) {
+    return AiGraphRuleWords(
+      appendixUnits: appendixUnits ?? this.appendixUnits,
+      metadataUnits: metadataUnits ?? this.metadataUnits,
+      citationQuoteTemplates:
+          citationQuoteTemplates ?? this.citationQuoteTemplates,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'appendixUnits': appendixUnits,
+    'metadataUnits': metadataUnits,
+    'citationQuoteTemplates': citationQuoteTemplates,
+  };
+
+  static AiGraphRuleWords fromJson(Object? json) {
+    if (json is! Map) return const AiGraphRuleWords();
+    final map = Map<String, dynamic>.from(json);
+    return AiGraphRuleWords(
+      appendixUnits:
+          (map['appendixUnits'] as List?)?.cast<String>() ??
+          const AiGraphRuleWords().appendixUnits,
+      metadataUnits:
+          (map['metadataUnits'] as List?)?.cast<String>() ??
+          const AiGraphRuleWords().metadataUnits,
+      citationQuoteTemplates:
+          (map['citationQuoteTemplates'] as List?)?.cast<String>() ??
+          const AiGraphRuleWords().citationQuoteTemplates,
+    );
+  }
+}
+
 /// Non-secret AI preferences. The API key lives only in secure storage.
 class AiSettings {
   const AiSettings({
@@ -18,6 +207,7 @@ class AiSettings {
     this.allowUnreadContext = false,
     this.translation = const AiTranslationPreferences(),
     this.searchProviderKind = AiSearchProviderKind.tavily,
+    this.graphRuleWords = const AiGraphRuleWords(),
   });
 
   final bool enabled;
@@ -41,6 +231,9 @@ class AiSettings {
 
   /// Web search backend for book-chat「联网」(key in secure storage).
   final AiSearchProviderKind searchProviderKind;
+
+  /// Word lists driving the graph pipeline hard rules.
+  final AiGraphRuleWords graphRuleWords;
 
   /// Resolved protocol for the current provider selection.
   AiApiProtocol get resolvedProtocol =>
@@ -75,6 +268,7 @@ class AiSettings {
     bool? allowUnreadContext,
     AiTranslationPreferences? translation,
     AiSearchProviderKind? searchProviderKind,
+    AiGraphRuleWords? graphRuleWords,
   }) {
     return AiSettings(
       enabled: enabled ?? this.enabled,
@@ -85,6 +279,7 @@ class AiSettings {
       allowUnreadContext: allowUnreadContext ?? this.allowUnreadContext,
       translation: translation ?? this.translation,
       searchProviderKind: searchProviderKind ?? this.searchProviderKind,
+      graphRuleWords: graphRuleWords ?? this.graphRuleWords,
     );
   }
 
@@ -97,6 +292,7 @@ class AiSettings {
     'allowUnreadContext': allowUnreadContext,
     'translation': translation.toJson(),
     'searchProviderKind': searchProviderKind.storageValue,
+    'graphRuleWords': graphRuleWords.toJson(),
   };
 
   static AiSettings fromJson(Map<String, dynamic> json) {
@@ -118,6 +314,7 @@ class AiSettings {
       searchProviderKind: AiSearchProviderKind.fromStorage(
         json['searchProviderKind'] as String?,
       ),
+      graphRuleWords: AiGraphRuleWords.fromJson(json['graphRuleWords']),
     );
   }
 

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_provider_kind.dart';
 import '../../ai/ai_search.dart';
+import '../../ai/ai_settings.dart';
 import '../../ai/ai_translation.dart';
 import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
@@ -41,6 +42,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   late final TextEditingController _baseUrl;
   late final TextEditingController _model;
   late final TextEditingController _searchApiKey;
+  late final TextEditingController _appendixWords;
+  late final TextEditingController _metadataWords;
+  late final TextEditingController _citationTemplates;
   bool _obscureKey = true;
   bool _obscureSearchKey = true;
   bool _seeded = false;
@@ -63,12 +67,18 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     _baseUrl = TextEditingController();
     _model = TextEditingController();
     _searchApiKey = TextEditingController();
+    _appendixWords = TextEditingController();
+    _metadataWords = TextEditingController();
+    _citationTemplates = TextEditingController();
     // Rebuild only this State when text changes — never push keystrokes into
     // ChangeNotifier (that rebuilds the form mid-paste on macOS).
     _apiKey.addListener(_onDraftChanged);
     _baseUrl.addListener(_onDraftChanged);
     _model.addListener(_onDraftChanged);
     _searchApiKey.addListener(_onDraftChanged);
+    _appendixWords.addListener(_onDraftChanged);
+    _metadataWords.addListener(_onDraftChanged);
+    _citationTemplates.addListener(_onDraftChanged);
     unawaited(_ensureLoaded());
   }
 
@@ -110,6 +120,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         offset: controller.searchApiKey.length,
       ),
     );
+    _appendixWords.text = settings.graphRuleWords.appendixUnits.join('\n');
+    _metadataWords.text = settings.graphRuleWords.metadataUnits.join('\n');
+    _citationTemplates.text = settings
+        .graphRuleWords
+        .citationQuoteTemplates
+        .join('\n');
     _seeded = true;
     setState(() {});
   }
@@ -120,10 +136,21 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         apiKey: _apiKey.text,
         baseUrl: _baseUrl.text,
         model: _model.text,
+        graphRuleWords: AiGraphRuleWords(
+          appendixUnits: _parseWords(_appendixWords.text),
+          metadataUnits: _parseWords(_metadataWords.text),
+          citationQuoteTemplates: _parseWords(_citationTemplates.text),
+        ),
       );
       await controller.setSearchApiKey(_searchApiKey.text, notify: true);
     }
   }
+
+  /// Splits a word-list textarea into trimmed, non-empty lines.
+  static List<String> _parseWords(String text) => [
+    for (final line in text.split('\n'))
+      if (line.trim().isNotEmpty) line.trim(),
+  ];
 
   @override
   void dispose() {
@@ -133,6 +160,11 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         apiKey: _apiKey.text,
         baseUrl: _baseUrl.text,
         model: _model.text,
+        graphRuleWords: AiGraphRuleWords(
+          appendixUnits: _parseWords(_appendixWords.text),
+          metadataUnits: _parseWords(_metadataWords.text),
+          citationQuoteTemplates: _parseWords(_citationTemplates.text),
+        ),
       ),
     );
     unawaited(
@@ -148,6 +180,15 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       ..removeListener(_onDraftChanged)
       ..dispose();
     _searchApiKey
+      ..removeListener(_onDraftChanged)
+      ..dispose();
+    _appendixWords
+      ..removeListener(_onDraftChanged)
+      ..dispose();
+    _metadataWords
+      ..removeListener(_onDraftChanged)
+      ..dispose();
+    _citationTemplates
       ..removeListener(_onDraftChanged)
       ..dispose();
     super.dispose();
@@ -838,11 +879,54 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                   children: [
                     AppSettingsSwitchRow(
                       title: '允许未读上下文',
-                      subtitle: '关闭时，对话与摘要默认不包含当前进度之后的内容',
+                      subtitle: '关闭时，知识图谱仅覆盖已读章节（防剧透）；开启则分析全书。对话与大纲不受影响',
                       value: settings.allowUnreadContext,
                       onChanged: (value) => unawaited(
                         controller.setAllowUnreadContext(value),
                       ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSettingsMetrics.sectionGap),
+                const _SectionLabel('知识图谱规则'),
+                const SizedBox(height: 10),
+                AppSettingsGroup(
+                  padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+                  children: [
+                    _GraphRuleWordsField(
+                      label: '图谱排除单元',
+                      helper: '每行一个词，按开头匹配；以 ! 开头的行表示排除，如 !序曲',
+                      controller: _appendixWords,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _appendixWords.text = AiGraphRuleWords
+                            .defaultAppendixUnits
+                            .join('\n');
+                      }),
+                    ),
+                    const SizedBox(height: 20),
+                    _GraphRuleWordsField(
+                      label: '元数据标题',
+                      helper: '每行一个词，完全匹配，如 目录',
+                      controller: _metadataWords,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _metadataWords.text = AiGraphRuleWords
+                            .defaultMetadataUnits
+                            .join('\n');
+                      }),
+                    ),
+                    const SizedBox(height: 20),
+                    _GraphRuleWordsField(
+                      label: '引用句式',
+                      helper: '每行一个句式，{name} 替换为实体名，如 据{name}',
+                      controller: _citationTemplates,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _citationTemplates.text = AiGraphRuleWords
+                            .defaultCitationQuoteTemplates
+                            .join('\n');
+                      }),
                     ),
                   ],
                 ),
@@ -864,11 +948,90 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   }
 }
 
+/// Multi-line editor for one graph rule word list, with a per-list
+/// restore-defaults action. Edits are drafts flushed on page exit.
+class _GraphRuleWordsField extends StatelessWidget {
+  const _GraphRuleWordsField({
+    required this.label,
+    required this.helper,
+    required this.controller,
+    required this.enabled,
+    required this.onReset,
+  });
+
+  final String label;
+  final String helper;
+  final TextEditingController controller;
+  final bool enabled;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return AppSettingsFormField(
+      label: label,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppTextField(
+            controller: controller,
+            enabled: enabled,
+            maxLines: 7,
+            minLines: 4,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            decoration: InputDecoration(
+              hintText: helper,
+              isDense: true,
+              filled: true,
+              fillColor: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : Colors.black.withValues(alpha: 0.04),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.control),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  helper,
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    height: 1.35,
+                    color: context.settingsSecondary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: enabled ? onReset : null,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: colors.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('恢复默认'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel(this.text);
 
   final String text;
-
   @override
   Widget build(BuildContext context) {
     return Padding(
