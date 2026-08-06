@@ -119,10 +119,10 @@ _BookChatToolHost（5 个）：get_toc / get_current_chapter / get_chapter / sea
 
 按价值从高到低：
 
-### G1. 工具执行对用户不可见（最明显）
+### G1. 工具执行对用户不可见（✅ 已落地）
 模型在后台跑 `get_toc`/`search_book` 等时，界面无任何反馈；工具回合可能重复 4 次才出正文，用户看着输入框像卡死。
 - AnxReader 的做法：时间线信封（`<tool-step status>`）+ 前端渲染成步骤 tile（进行中/成功/失败），失败还能看到错误。
-- 开卷可选方案（未落地）：不引入 XML 信封。给 `AiChatService.streamReply` 加 `onToolStatus(String?)` 回调——执行工具前触发（如「正在检索『张居正』…」），进入最终流式前清空；`_BookAiChatSheet` 渲染一个带 spinner 的小进度条。
+- 开卷方案（**已落地**）：不引入 XML 信封。`AiChatService.streamReply` 带 `onToolStatus(String?)` 回调——执行工具前触发（如「正在检索『张居正』…」），进入最终流式前清空；`_BookAiChatSheet` 渲染带 spinner 的进度行。
 
 ### G2. 深思考模型把思考混进正文（已闭环，勿改）
 `streamReply` 直接把流式文本当 markdown 渲染，但 provider 层已把思考隔离在正文之外：
@@ -130,8 +130,8 @@ _BookChatToolHost（5 个）：get_toc / get_current_chapter / get_chapter / sea
 - `openai_compatible_provider.dart`：DeepSeek 默认发 `thinking: {type: disabled}`；`_coerceText` 优先 `content`，`reasoning_content` 只在 content 为空时兜底。
 - 结论：**无需改动**。若以后要让用户看到思考流，另开「思考折叠面板」功能（AnxReader 用 `<think>` 信封剥离 + 折叠面板），不在本文范围。
 
-### G3. 429 / 限流无提示
-撞到 DeepSeek 等限流时开卷给「请求失败：…」。可把 429/`rate limit` 映射为「服务限流，稍后重试」，并可加一个**可配 RPM 滑窗**（复制 AnxReader `_throttleIfNeeded` 很便宜）。
+### G3. 429 / 限流无提示（✅ 已落地）
+撞到 DeepSeek 等限流时开卷给「请求失败：…」。已把 429/`rate limit` 映射为「服务限流，稍后重试」（`ai_provider.dart` 短请求 1 次重试 + provider 层文案）；可配 RPM 滑窗（复制 AnxReader `_throttleIfNeeded`）仍未做，留作可选。
 
 ### G4. 会话无「续聊/历史」入口
 spec 说 v1 不做跨书列表，但**同一本书**至少应有：进入面板默认续当前会话 ✓（已有）、「清空对话」✓（已有）；缺的是**本会话的 model/provider 记录**——切了模型后旧消息没有归属信息，重新生成时会用新模型。AnxReader 在会话条目里记 `serviceId`/`model`。
@@ -145,9 +145,9 @@ spec 说 v1 不做跨书列表，但**同一本书**至少应有：进入面板�
 
 | 优先级 | 项 | 对应 ai.md | 工作量 |
 |--------|----|-----------|--------|
-| P0 | **G1 工具状态流**：`streamReply` 加 `onToolStatus` 回调 + 进度条 | M2 收尾 | 小 |
+| P0 | **G1 工具状态流**：`streamReply` 带 `onToolStatus` 回调 + 进度行 ✅ 已落地 | M2 收尾 | 小 |
 | P0 | **G2 剥思考字段**：✅ 已确认闭环（provider 层隔离，见 §5，勿改） | M2 收尾 | — |
-| P1 | **G3 429 文案 + 可选 RPM 滑窗** | M2 收尾 | 小 |
+| P1 | **G3 429 文案** ✅ 已落地（RPM 滑窗可选，未做） | M2 收尾 | 小 |
 | P1 | **G4 会话记录 model/provider** | M2 收尾 | 小 |
 | P2 | G5 可编辑快捷问法 / 自定义 prompt | 并入 M3+ | 中 |
 | P2 | 书内检索升级（可选，headless WebView 太重，不抄） | — | 大 |
@@ -158,6 +158,7 @@ spec 说 v1 不做跨书列表，但**同一本书**至少应有：进入面板�
 
 ## 7. 结论回写
 
-- [ ] 若采纳 G1：ai.md §4.3 补一句「工具回合以状态文本流式可见」
-- [ ] G2 已确认闭环（provider 层剥离），ai.md §4.3 可注明深思考模型隔离
-- [ ] 落地后删除本文「差距」列或移到已办
+- [x] G1 已落地：`streamReply` 带 `onToolStatus` 回调，工具回合以状态文本流式可见
+- [x] G2 已确认闭环（provider 层剥离），ai.md §4.3 注明深思考模型隔离
+- [x] G3 已落地：429/`rate limit` 映射「服务限流，稍后重试」文案
+- [ ] G4 会话记录 model/provider、G5 可编辑快捷问法仍为待办

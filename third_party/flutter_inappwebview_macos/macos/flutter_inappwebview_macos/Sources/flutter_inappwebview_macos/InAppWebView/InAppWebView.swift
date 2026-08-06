@@ -2624,6 +2624,18 @@ if(window.\(JavaScriptBridgeJS.get_JAVASCRIPT_BRIDGE_NAME())[\(_callHandlerID)] 
         guard let window = self.superview?.window ?? self.window else {
             return false
         }
+        // Only take first responder away from this WebView (or its descendants).
+        // When Flutter text input is active, the engine keeps its
+        // TextInputPlugin as first responder; forcing FlutterView here would
+        // break keyboard input (flutter/flutter#134906) — the plugin stays
+        // attached but never receives text events again.
+        if let first = window.firstResponder {
+            let ownedByWebView =
+                first === self || (first as? NSView)?.isDescendant(of: self) == true
+            if !ownedByWebView {
+                return true
+            }
+        }
         var candidate: NSView? = self.superview
         while let view = candidate {
             let name = NSStringFromClass(type(of: view))

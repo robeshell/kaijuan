@@ -10,7 +10,6 @@
 |------|------|
 | 单 App 双引擎功能 | [PRODUCT.md](./PRODUCT.md) |
 | 书库 / 书架 / 搜索 / 书单 / chrome | [specs/](./specs/) |
-| Open Design | [opendesign/](./opendesign/)（可按品牌各出一套） |
 
 ---
 

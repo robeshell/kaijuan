@@ -24,12 +24,12 @@
 | 方式 | 说明 | 状态 |
 |------|------|------|
 | 本地文件 | 系统文件选择器选择一个或多个文件 | 已有 |
-| 目录扫描 / 自动扫描 | 自动递归扫描 App Documents 与系统 Downloads 目录；先展示候选清单，用户确认后再导入；显式目录也可复用同一能力 | 首批 |
+| 目录扫描 / 自动扫描 | 自动递归扫描 App Documents 与系统 Downloads 目录；先展示候选清单，用户确认后再导入；显式目录也可复用同一能力 | 已有 |
 | 拖拽 | 桌面把文件拖入书库 | 后续 |
 | 系统分享 | iOS / Android 分享到开卷，落成一个候选文件 | 后续 |
 | WiFi 传书 | App 临时开启局域网上传入口 | MVP 已有；见 [wifi-transfer.md](./wifi-transfer.md) |
-| WebDAV / 云端存储 | 用户配置的远程文件源；选择后下载并导入 | 首批 |
-| OPDS / 在线书库 | 用户配置的远程目录源；浏览、搜索后下载并导入 | 首批 |
+| WebDAV / 云端存储 | 用户配置的远程文件源；选择后下载并导入 | 已有 |
+| OPDS / 在线书库 | 用户配置的远程目录源；浏览、搜索后下载并导入 | 已有 |
 
 方式层的实现约束：
 
@@ -51,12 +51,12 @@
 | CBZ / ZIP | 漫画页图 | 直接列图、提取首图、保存原文件 | 已有 |
 | EPUB 页图 | 漫画页图 | Dart ZIP/OPF spine 抽样后自动路由 | 已有 |
 | EPUB 正文 | 图书 reflow | Foliate metadata probe + 原文件阅读 | 已有 |
-| FB2 | 图书 reflow | Foliate `makeFB2` | 首批 |
-| MOBI | 图书 reflow | Foliate `MOBI` | 首批 |
-| AZW3 / KF8 | 图书 reflow | Foliate `MOBI` 内容探测 | 首批 |
-| PDF | 图书固定版式 | Foliate `makePDF`，保留为 book | 首批 |
-| TXT | 图书 reflow | 转换为规范 EPUB 后导入 | 首批 |
-| Markdown | 图书 reflow | 受限 Markdown 转换为规范 EPUB | 首批 |
+| FB2 | 图书 reflow | Foliate `makeFB2` | 已有 |
+| MOBI | 图书 reflow | Foliate `MOBI` | 已有 |
+| AZW3 / KF8 | 图书 reflow | Foliate `MOBI` 内容探测 | 已有 |
+| PDF | 图书固定版式 | Foliate `makePDF`，保留为 book | 已有 |
+| TXT | 图书 reflow | 转换为规范 EPUB 后导入 | 已有 |
+| Markdown | 图书 reflow | 受限 Markdown 转换为规范 EPUB | 已有 |
 
 格式层的处理原则：
 
@@ -65,7 +65,7 @@
 - 文件扩展名只用于候选初判；格式服务仍必须检查文件是否存在、是否可解析和是否有可阅读内容。
 - 原始格式保存在数据库 `format` 字段；TXT / Markdown 的正式阅读文件是确定性生成的 EPUB，使用生成内容 hash，源文件名只作为标题 fallback。
 
-## 首批验收
+## 验收（首批已全部完成）
 
 - 本地单文件、多文件批量、目录递归扫描都走同一个 `ImportPipeline`。
 - 同一个文件从本地文件或目录扫描进入时，content hash 去重行为一致。

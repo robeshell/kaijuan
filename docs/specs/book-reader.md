@@ -4,7 +4,7 @@
 |--|--|
 | **PRODUCT** | [§5.7](../PRODUCT.md) · [§7 格式矩阵](../PRODUCT.md) |
 | **相关** | [reader-chrome.md](./reader-chrome.md)、[library.md](./library.md) |
-| **状态** | 规格 + **reflow 已落地**（Kaika controller + Anx Reader foliate-js/WebView） |
+| **状态** | 已实现（开卷 controller + Anx Reader foliate-js/WebView；选区槽位、书摘、搜索、TTS、AI 词典/翻译已落地） |
 
 ## 目标
 
@@ -24,16 +24,16 @@
 
 ### 不做（本阶段）
 
-- 在线书城；云端 AI 音色。听书见 [book-tts.md](./book-tts.md)（方案，系统 TTS）。词典/翻译另案（暂缓）。  
+- 在线书城；云端 AI 音色。听书 v1 用系统 TTS，见 [book-tts.md](./book-tts.md)；词典/翻译已实现（系统能力 + AI 增强，见 [ai.md](./ai.md) 与 [ai-translation.md](./ai-translation.md)）。  
 - 固定版式双栏 / 全页 `@page` / 复杂 flex-grid 还原（远）。
 
 ### EPUB CSS
 
 EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版，滚动和翻页共用同一浏览器 CSS 实现。OPF / 章节样式、class、选择器、媒体查询、图片与 `@font-face` 均按包内相对路径解析；用户字号、行距、页边距和阅读主题通过 style bridge 覆盖内容基准。不在 Dart 中维护第二套 CSS 解析器。
 
-### Kaika 阅读基线（覆盖作者默认）
+### 开卷阅读基线（覆盖作者默认）
 
-默认 `useBookStyles: false`：Kaika 注入的阅读 CSS **强制**覆盖作者默认字体、段首缩进、段距、正文色与链接色；EPUB class 的粗体 / 斜体等局部强调仍可生效。版式手感对齐微信读书：宽版心、上下留白、页眉页脚弱信息。
+默认 `useBookStyles: false`：开卷注入的阅读 CSS **强制**覆盖作者默认字体、段首缩进、段距、正文色与链接色；EPUB class 的粗体 / 斜体等局部强调仍可生效。版式手感对齐微信读书：宽版心、上下留白、页眉页脚弱信息。
 
 | 项 | 默认 |
 |----|------|
@@ -64,7 +64,7 @@ EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版�
 
 - **正文字体（三源）**：
   - **图书自带** → Foliate `fontName: 'book'`（不强制 `font-family`，用 EPUB 内字体/样式）
-  - **系统字体** → 精选 CSS 族名（默认 = 上表 Kaika 黑体栈；另有宋体/楷体/`system-ui` 等）
+  - **系统字体** → 精选 CSS 族名（默认 = 上表默认黑体栈；另有宋体/楷体/`system-ui` 等）
   - **用户字体** → 推荐清单下载（国内镜像、SIL OFL）或本地导入 TTF/OTF；经 loopback `fontPath` 注入 `@font-face`
 - **链接**：使用主题 `linkColor`；脚注上标仍弱化、无下划线。
 - **用户字号 / 行距 / 边距**仍覆盖 `body` 基准；主题色覆盖作者 CSS 的正文/链接/标题默认。
@@ -94,7 +94,7 @@ EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版�
 
 ### 选区菜单与划线（规范）
 
-> 权威行为契约。参照微信读书式两段交互；视觉对齐见下方示意。新增动作前先改槽位表。实现刀序见 [book-reader-next-plan.md](./book-reader-next-plan.md)。
+> 权威行为契约。参照微信读书式两段交互；视觉对齐见下方示意。新增动作前先改槽位表。
 
 #### 参照
 
@@ -103,7 +103,7 @@ EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版�
 | **① 选区动作条**（样式面板不出） | ![phase1](./assets/selection-menu-phase1.png) |
 | **② 划线编辑面板**（点「划线」或点已有划线后） | ![phase2](./assets/selection-menu-phase2.png) |
 
-视觉方向：浅色圆角卡片 + 底/顶小三角锚点；图标+短标签横排。Kaika 用自身 token 实现，不追像素。
+视觉方向：浅色圆角卡片 + 底/顶小三角锚点；图标+短标签横排。开卷用自身 token 实现，不追像素。
 
 #### 两段交互（核心）
 
@@ -139,12 +139,12 @@ EPUB 原始 HTML/CSS 由 Anx Reader 的 foliate-js 在系统 WebView 中排版�
 | 划线 | **已有** | 进 ② 并**立即落库**默认实线划线+黄；关闭菜单不删（清空才删） |
 | 笔记 | **已有** | 打开编辑 sheet；写入 `book_annotations.note`；无标注时默认实线划线+黄 |
 | 复制 | **已有** | 剪贴板 |
-| 词典 | **已有** | Android 打开系统选择器调用已安装词典/文本处理应用；Apple 调用系统词典；其他平台安全提示 |
-| 翻译 | **已有** | Android 打开系统文本处理选择器；Apple 使用系统 Translation framework；AI Provider 作为后续替换点 |
+| 词典 | **已有** | AI 就绪时应用内流式结果（见 [ai.md](./ai.md)）；否则 Android 打开系统选择器调用已安装词典/文本处理应用；Apple 调用系统词典；其他平台安全提示 |
+| 翻译 | **已有** | AI 就绪时应用内流式结果（见 [ai.md](./ai.md)）；否则 Android 打开系统文本处理选择器；Apple 使用系统 Translation framework |
 | 书摘 | **已有** | 关菜单 → 金句卡片（排版/配色/底色；保存图·系统分享·复制图） |
 | 搜索 | **已有** | 关菜单 → 打开搜索并以选区词预填 |
 | 朗读 | **隐藏** | 跟听书 |
-| 分享 / AI | **本程不做** | — |
+| 分享 / AI | **已有（AI 增强）** | AI 开启时词典/翻译为应用内结果；「更多」内含「问 AI」；分享走书摘金句卡 |
 
 ① 槽位全集：划线 · 笔记 · 复制 · 词典 · 翻译 · **搜索** · 书摘（书摘置末）。  
 **compact（手机）**：默认露出 划线 · 笔记 · 复制 · 搜索 · **更多**；更多内为 词典 · 翻译 · 书摘 · 收起。  
@@ -228,7 +228,7 @@ markup
 
 菜单打开后：文案与 CFI **立即快照**。桌面点气泡会塌缩系统蓝选，**进 ② 后以 Overlayer 标注为准**。后续动作优先认快照。
 
-移动端：关闭 WebView 系统选区菜单（`disableContextMenu` + `-webkit-touch-callout: none` + `contextmenu` preventDefault）；只保留 Kaika 选区气泡。**松手立刻出菜单**；仅拖动手柄且吞掉 pointerup 时，用短防抖（~160ms）补一次。
+移动端：关闭 WebView 系统选区菜单（`disableContextMenu` + `-webkit-touch-callout: none` + `contextmenu` preventDefault）；只保留开卷选区气泡。**松手立刻出菜单**；仅拖动手柄且吞掉 pointerup 时，用短防抖（~160ms）补一次。
 
 #### 弹出方向与贴边（兼容）
 
@@ -282,13 +282,13 @@ markup
 
 #### 非目标
 
-- 在线书城。云端神经 TTS / AI 音色（听书 v1 用系统 TTS，见 [book-tts.md](./book-tts.md)）。词典/翻译另案（暂缓）。
+- 在线书城。云端神经 TTS / AI 音色（听书 v1 用系统 TTS，见 [book-tts.md](./book-tts.md)）。词典/翻译已实现（系统能力 + AI 增强）。
 
 ## 引擎决策
 
 | 方案 | 说明 |
 |------|------|
-| **当前** | 导入探测、封面/元数据与阅读渲染统一使用 MIT `Anxcye/anx-reader` 的 foliate-js；导入使用不可见 WebView probe，阅读通过 Kaika 的 `flutter_inappwebview` adapter 接回 controller / CFI / TOC。 |
+| **当前** | 导入探测、封面/元数据与阅读渲染统一使用 MIT `Anxcye/anx-reader` 的 foliate-js；导入使用不可见 WebView probe，阅读通过开卷的 `flutter_inappwebview` adapter 接回 controller / CFI / TOC。 |
 | **演进边界** | 不建设通用“可换引擎”接口；围绕自研管线拆分包解析、内容准备、定位、排版、输入适配与缓存策略。locator 契约继续保持不透明。 |
 
 原则：**DB 不解析 locator**；节索引 + 节内进度分数属 format-owned JSON。包结构解析走库，不手写 OPF/NCX。

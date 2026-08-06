@@ -1,8 +1,8 @@
-# Anx Reader 全链路研究与 Kaika 取舍
+# Anx Reader 全链路研究与开卷取舍
 
-研究基线：[`Anxcye/anx-reader`](https://github.com/Anxcye/anx-reader) commit `107f4fa74db0e7247c846c49d6211df3edf9887c`，MIT License。Kaika 已在 `assets/book/` 保留来源说明与许可证。
+研究基线：[`Anxcye/anx-reader`](https://github.com/Anxcye/anx-reader) commit `107f4fa74db0e7247c846c49d6211df3edf9887c`，MIT License。开卷已在 `assets/book/` 保留来源说明与许可证。
 
-本文是实现决策记录，不把 Anx Reader 当成 Kaika 的产品规格。我们复用成熟的 EPUB rendition 行为，但不照搬其 UI、数据库或大文件组织。
+本文是实现决策记录，不把 Anx Reader 当成开卷的产品规格。我们复用成熟的 EPUB rendition 行为，但不照搬其 UI、数据库或大文件组织。
 
 ## 1. Anx 的实际全链路
 
@@ -46,7 +46,7 @@
 
 ## 3. 不照搬的部分
 
-| Anx 做法 | Kaika 取舍 |
+| Anx 做法 | 开卷取舍 |
 |---|---|
 | `service/book.dart` 同时做对话框、hash、转换、文件删除、metadata、DAO | 导入 UI 只调 `LibraryController`；编排留在 import service，文件与 DB 操作有各自边界。 |
 | `EpubPlayer` 同时管理 WebView、阅读状态、DAO、provider 和大量功能 | `BookReaderScreen → BookReaderController → FoliateJsBookEngineAdapter`；adapter 不直接访问 drift。 |
@@ -54,10 +54,10 @@
 | Book model 含路径、进度、删除状态和展示字段 | `ReadingItem`、format-owned locator、偏好与 rendition 状态分开。 |
 | MD5 去重、按标题和时间生成文件名 | 继续使用 SHA-256 content-addressed storage，同一内容只存一份。 |
 | 全局 server / headless WebView 单例 | **共享 loopback listener + 固定/记忆端口**（体验热路径）；每书仍是独立 mount，WebView/lease 仍由 session 拥有。导入探针可与阅读并行挂载，互不覆盖 `/books/<id>.epub`。不照搬 Anx 的绝对路径 `/book/<path>` 或 DAO 直连。 |
-| loopback URL 携带绝对路径 | Kaika server 暴露固定 `/book.epub`，不接受客户端传入任意文件路径。 |
-| 一次扩展 mobi/azw3/fb2/txt/pdf 并统一转换 | 当前只保证 EPUB/CBZ/ZIP；新增格式必须单独定产品与转换策略。 |
+| loopback URL 携带绝对路径 | 开卷 server 暴露固定 `/book.epub`，不接受客户端传入任意文件路径。 |
+| 一次扩展 mobi/azw3/fb2/txt/pdf 并统一转换 | 当时只保证 EPUB/CBZ/ZIP；后续已扩展 FB2/MOBI/AZW3/PDF/TXT/MD 并统一转换（见 [PRODUCT.md §7](../PRODUCT.md) 格式矩阵）。 |
 
-## 4. Kaika 目标链路
+## 4. 开卷目标链路
 
 ```text
 presentation
@@ -98,7 +98,7 @@ reading
 ### 已完成
 
 - 阅读主链切到 Anx 维护的 foliate-js，保留完整上游资源与许可证。
-- CFI 首屏恢复、TOC、relocation、样式、翻页/滚动与折叠屏恢复由 Foliate adapter 接回 Kaika controller。
+- CFI 首屏恢复、TOC、relocation、样式、翻页/滚动与折叠屏恢复由 Foliate adapter 接回开卷 controller。
 - 删除 Flutter HTML / TextPainter 自有分页器及其 pageMap 状态，避免双渲染链继续漂移。
 - EPUB kind 探测改为 file-backed probe，不再整本读入 Dart 内存后重复解析。
 - `BookLoopbackServer` 在 App 生命周期内复用固定 origin；`BookRenditionSession` 只拥有 book mount 与 WebView generation lease，被替换 renderer 的迟到回调不再能修改当前阅读状态。
