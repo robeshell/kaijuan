@@ -228,8 +228,11 @@ void main() {
       );
     });
 
-    test('single-chapter entity is folded out of a multi-chapter book',
+    test('single-chapter appearance does not demote an essay person',
         () async {
+      // Essay collections: every chapter is standalone, so a person who
+      // appears in exactly one chapter is still book content, not a
+      // citation. The demotion must come from the model or quote patterns.
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -262,29 +265,6 @@ void main() {
       );
       expect(
         graph.entities.firstWhere((e) => e.name == '过客').scope,
-        AiGraphEntityScope.reference,
-      );
-    });
-
-    test('single-chapter book keeps its cast as setting', () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
-            {"entities":[{"name":"张三","type":"person","scope":"setting",
-              "evidence":[{"section":1,"quote":"张三登场"}]}],
-             "relations":[]}
-          ''',
-        },
-      );
-
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', '张三登场。')],
-        includesUnread: true,
-      );
-
-      expect(
-        graph.entities.single.scope,
         AiGraphEntityScope.setting,
       );
     });

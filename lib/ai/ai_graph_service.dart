@@ -320,12 +320,13 @@ class AiBookGraphService {
     }
 
     // Hard rules that only downgrade (never upgrade) the model's scope:
-    // 1. a quote matching a citation pattern (据X / 如X所言 / X写道 ...) marks
-    //    the entity as a reference — e.g. 罗素 in an essay collection;
-    // 2. an entity that appears in exactly one chapter of a multi-chapter
-    //    book is a marginal mention, not part of the readable core.
-    // Single-chapter books are exempt so their cast is not all folded away.
-    _applyScopeHardRules(entities, totalSections: covered.length);
+    // a quote matching a citation pattern (据X / 如X所言 / X写道 ...) marks
+    // the entity as a reference — e.g. 罗素 in an essay collection.
+    // There is deliberately no single-chapter rule: in essay collections
+    // every chapter is a standalone piece, so single-chapter people are
+    // normal book content, not citations. Low-frequency entities are kept
+    // out of the graph by the top-N cut anyway.
+    _applyScopeHardRules(entities);
 
     entities.sort(_byFrequencyThenName);
     relations.sort((a, b) => b.evidence.length.compareTo(a.evidence.length));
@@ -378,20 +379,15 @@ class AiBookGraphService {
   /// says they are citations, not story. Only downgrades — a setting entity
   /// is never re-marked reference by the model's own word alone, and an
   /// entity the model called reference is never upgraded here.
-  static void _applyScopeHardRules(
-    List<AiGraphEntity> entities, {
-    required int totalSections,
-  }) {
+  static void _applyScopeHardRules(List<AiGraphEntity> entities) {
     if (entities.isEmpty) return;
-    final multiChapterBook = totalSections > 1;
     for (var i = 0; i < entities.length; i++) {
       final entity = entities[i];
       if (entity.scope == AiGraphEntityScope.reference) continue;
       final citedByQuote = entity.evidence.any(
         (ev) => _isCitationQuote(ev.quote, entity.name, entity.aliases),
       );
-      final appearsOnce = multiChapterBook && entity.chapterFreq.length <= 1;
-      if (citedByQuote || appearsOnce) {
+      if (citedByQuote) {
         entities[i] = entity.copyWith(scope: AiGraphEntityScope.reference);
       }
     }
