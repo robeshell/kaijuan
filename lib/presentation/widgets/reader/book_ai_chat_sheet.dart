@@ -87,6 +87,10 @@ enum _OutlineAction { delete }
 
 enum _AiGraphFilter { all, person, location, event }
 
+/// Default view is the person card list (Kindle X-Ray style); the force
+/// layout stays available as a secondary「关系图」view.
+enum _GraphViewMode { persons, graph }
+
 class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
@@ -103,6 +107,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   final _outlineChildrenKeys = <String, GlobalKey>{};
   bool _outlineOverviewExpanded = false;
   _AiGraphFilter _graphFilter = _AiGraphFilter.all;
+  _GraphViewMode _graphViewMode = _GraphViewMode.persons;
 
   /// Isolated entities (0 relations) collapse into a single row until opened.
   bool _graphIsolatedExpanded = false;
@@ -1487,6 +1492,32 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             ),
           ),
+        if (!generating && mainEntities.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          SegmentedButton<_GraphViewMode>(
+            segments: const [
+              ButtonSegment(
+                value: _GraphViewMode.persons,
+                label: Text('人物'),
+              ),
+              ButtonSegment(
+                value: _GraphViewMode.graph,
+                label: Text('关系图'),
+              ),
+            ],
+            selected: {_graphViewMode},
+            onSelectionChanged: (selection) =>
+                setState(() => _graphViewMode = selection.first),
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: WidgetStatePropertyAll(
+                TextStyle(fontSize: context.appCaptionSize),
+              ),
+            ),
+          ),
+        ],
         if (generating) ...[
           const SizedBox(height: 10),
           Row(
@@ -1519,7 +1550,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
           ),
         ],
-        if (!generating && mainEntities.isNotEmpty) ...[
+        if (!generating &&
+            mainEntities.isNotEmpty &&
+            _graphViewMode == _GraphViewMode.graph) ...[
           const SizedBox(height: 12),
           Stack(
             children: [
@@ -1556,83 +1589,68 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
           const SizedBox(height: 10),
         ],
-        const SizedBox(height: 12),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final filter in _AiGraphFilter.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(_graphFilterLabel(filter)),
-                    selected: _graphFilter == filter,
-                    onSelected: (_) => setState(() => _graphFilter = filter),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _graphQueryController,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            hintText: '搜索',
-            isDense: true,
-            prefixIcon: const Icon(KaijuanIcons.search, size: 18),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (visibleEntities.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Column(
+        if (_graphViewMode == _GraphViewMode.persons) ...[
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
               children: [
-                Text(
-                  _graphQuery.trim().isEmpty
-                      ? '没有匹配的实体。'
-                      : '没有匹配“${_graphQuery.trim()}”的实体。',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: _panelBodySize(context),
-                    color: context.appSecondaryText,
+                for (final filter in _AiGraphFilter.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(_graphFilterLabel(filter)),
+                      selected: _graphFilter == filter,
+                      onSelected: (_) => setState(() => _graphFilter = filter),
+                    ),
                   ),
-                ),
-                if (_graphQuery.trim().isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  TextButton(
-                    onPressed: () {
-                      _graphQueryController.clear();
-                      setState(() {});
-                    },
-                    child: const Text('清除搜索'),
-                  ),
-                ],
               ],
             ),
-          )
-        else ...[
-          for (final entity in mainEntities)
-            KeyedSubtree(
-              key: _graphEntityKeys.putIfAbsent(
-                entity.name,
-                () => GlobalKey(),
-              ),
-              child: _buildGraphEntityTile(
-                context,
-                entity,
-                gateByProgress,
-                readThrough,
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _graphQueryController,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: '搜索',
+              isDense: true,
+              prefixIcon: const Icon(KaijuanIcons.search, size: 18),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
-          if (foldIsolated)
-            _buildIsolatedRow(context, isolatedEntities, gateByProgress, readThrough)
-          else
-            for (final entity in isolatedEntities)
+          ),
+          const SizedBox(height: 8),
+          if (visibleEntities.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                children: [
+                  Text(
+                    _graphQuery.trim().isEmpty
+                        ? '没有匹配的实体。'
+                        : '没有匹配“${_graphQuery.trim()}”的实体。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: _panelBodySize(context),
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                  if (_graphQuery.trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    TextButton(
+                      onPressed: () {
+                        _graphQueryController.clear();
+                        setState(() {});
+                      },
+                      child: const Text('清除搜索'),
+                    ),
+                  ],
+                ],
+              ),
+            )
+          else ...[
+            for (final entity in mainEntities)
               KeyedSubtree(
                 key: _graphEntityKeys.putIfAbsent(
                   entity.name,
@@ -1645,6 +1663,28 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   readThrough,
                 ),
               ),
+            if (foldIsolated)
+              _buildIsolatedRow(
+                context,
+                isolatedEntities,
+                gateByProgress,
+                readThrough,
+              )
+            else
+              for (final entity in isolatedEntities)
+                KeyedSubtree(
+                  key: _graphEntityKeys.putIfAbsent(
+                    entity.name,
+                    () => GlobalKey(),
+                  ),
+                  child: _buildGraphEntityTile(
+                    context,
+                    entity,
+                    gateByProgress,
+                    readThrough,
+                  ),
+                ),
+          ],
         ],
       ],
     );
