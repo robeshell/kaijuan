@@ -47,6 +47,17 @@ void main() {
             firstSection: 1,
             lastSection: 2,
           ),
+          AiGraphEntity(
+            name: '罗素',
+            type: AiGraphEntityType.person,
+            scope: AiGraphEntityScope.reference,
+            evidence: [
+              AiGraphEvidence(sectionIndex: 2, quote: '如罗素所言'),
+            ],
+            chapterFreq: {2: 1},
+            firstSection: 2,
+            lastSection: 2,
+          ),
         ],
         relations: const [
           AiGraphRelation(
@@ -68,13 +79,18 @@ void main() {
       expect(restored!.contentHash, 'h1');
       expect(restored.includesUnread, isFalse);
       expect(restored.coveredSections, [1, 2]);
-      final entity = restored.entities.single;
+      final entity = restored.entities
+          .firstWhere((e) => e.name == '张三');
       expect(entity.name, '张三');
       expect(entity.type, AiGraphEntityType.person);
+      expect(entity.scope, AiGraphEntityScope.setting);
       expect(entity.aliases, ['三哥']);
       expect(entity.chapterFreq, {1: 1});
       expect(entity.evidence.single.spanResolved, isTrue);
       expect(entity.evidence.single.progressInSection, 0.5);
+      final reference = restored.entities
+          .firstWhere((e) => e.name == '罗素');
+      expect(reference.scope, AiGraphEntityScope.reference);
       expect(restored.relations.single.mergeKey, contains('meet'));
     });
 
@@ -153,6 +169,124 @@ void main() {
       expect(evidence.spanResolved, isFalse);
       expect(evidence.progressInSection, isNull);
       expect(evidence.sectionIndex, 1);
+    });
+
+    test('model scope survives extraction', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","scope":"setting",
+              "description":"主角。",
+              "evidence":[{"section":1,"quote":"张三进京"}]},
+             {"name":"罗素","type":"person","scope":"reference",
+              "description":"引用的哲学家。",
+              "evidence":[{"section":1,"quote":"如罗素所言"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '张三进京。如罗素所言。')],
+        includesUnread: true,
+      );
+
+      expect(
+        graph.entities
+            .firstWhere((e) => e.name == '张三')
+            .scope,
+        AiGraphEntityScope.setting,
+      );
+      expect(
+        graph.entities.firstWhere((e) => e.name == '罗素').scope,
+        AiGraphEntityScope.reference,
+      );
+    });
+
+    test('citation-quote hard rule downgrades a setting entity', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"罗素","type":"person","scope":"setting",
+              "description":"哲学家。",
+              "evidence":[{"section":1,"quote":"如罗素所言，思考要独立"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '如罗素所言，思考要独立。')],
+        includesUnread: true,
+      );
+
+      expect(
+        graph.entities.single.scope,
+        AiGraphEntityScope.reference,
+      );
+    });
+
+    test('single-chapter entity is folded out of a multi-chapter book',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","scope":"setting",
+              "evidence":[{"section":1,"quote":"张三登场"}]},
+             {"name":"过客","type":"person","scope":"setting",
+              "evidence":[{"section":1,"quote":"过客匆匆路过"}]}],
+             "relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"张三","type":"person","scope":"setting",
+              "evidence":[{"section":2,"quote":"张三继续"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一回', '张三登场。过客匆匆路过。'),
+          slice(2, '第二回', '张三继续。'),
+        ],
+        includesUnread: true,
+      );
+
+      expect(
+        graph.entities.firstWhere((e) => e.name == '张三').scope,
+        AiGraphEntityScope.setting,
+      );
+      expect(
+        graph.entities.firstWhere((e) => e.name == '过客').scope,
+        AiGraphEntityScope.reference,
+      );
+    });
+
+    test('single-chapter book keeps its cast as setting', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","scope":"setting",
+              "evidence":[{"section":1,"quote":"张三登场"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '张三登场。')],
+        includesUnread: true,
+      );
+
+      expect(
+        graph.entities.single.scope,
+        AiGraphEntityScope.setting,
+      );
     });
 
     test('sequential merge folds aliases into one canonical entity', () async {

@@ -1374,11 +1374,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }).toList(growable: false);
     final isolatedEntities = <AiGraphEntity>[
       for (final entity in visibleEntities)
-        if (!connectedNames.contains(entity.name)) entity,
+        if (entity.scope != AiGraphEntityScope.setting ||
+            !connectedNames.contains(entity.name)) entity,
     ];
     final mainEntities = <AiGraphEntity>[
       for (final entity in visibleEntities)
-        if (connectedNames.contains(entity.name)) entity,
+        if (entity.scope == AiGraphEntityScope.setting &&
+            connectedNames.contains(entity.name)) entity,
     ];
     // Search is allowed to surface mere mentions without the fold.
     final foldIsolated =
@@ -1653,7 +1655,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
           minVerticalPadding: 0,
           title: Text(
-            '仅提及的 ${isolated.length} 个实体',
+            '其余 ${isolated.length} 个实体',
             style: TextStyle(
               fontSize: context.appCaptionSize,
               color: context.appSecondaryText,

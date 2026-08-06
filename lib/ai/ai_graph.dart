@@ -62,6 +62,26 @@ enum AiGraphEntityType {
   };
 }
 
+/// Whether an entity is part of the book's own story/setting or merely
+/// referenced by it.
+///
+/// - [setting]: protagonists, recurring cast, world-building — the entities
+///   that form the readable core of the graph.
+/// - [reference]: people / places / events the book only cites or digresses
+///   to (e.g. 罗素 in 王小波's essays). Kept in the data, folded out of the
+///   main graph view.
+enum AiGraphEntityScope {
+  setting,
+  reference;
+
+  String get wireName => name;
+
+  static AiGraphEntityScope fromWireName(Object? value) => switch (value) {
+    'reference' => AiGraphEntityScope.reference,
+    _ => AiGraphEntityScope.setting,
+  };
+}
+
 /// One quote-backed provenance record.
 ///
 /// The LLM only supplies [sectionIndex] and [quote]; [progressInSection] is
@@ -113,6 +133,7 @@ class AiGraphEntity {
   const AiGraphEntity({
     required this.name,
     required this.type,
+    this.scope = AiGraphEntityScope.setting,
     this.aliases = const [],
     this.description = '',
     this.evidence = const [],
@@ -124,6 +145,11 @@ class AiGraphEntity {
   /// Canonical name (never renamed on re-extraction).
   final String name;
   final AiGraphEntityType type;
+
+  /// Whether this entity is part of the book's own setting or only
+  /// referenced by it. Old caches without the field default to [setting]
+  /// (never wrong, just less precise).
+  final AiGraphEntityScope scope;
 
   /// Alternative names merged into this entity.
   final List<String> aliases;
@@ -144,6 +170,7 @@ class AiGraphEntity {
   String get id => '$name|${type.wireName}';
 
   AiGraphEntity copyWith({
+    AiGraphEntityScope? scope,
     List<String>? aliases,
     String? description,
     List<AiGraphEvidence>? evidence,
@@ -154,6 +181,7 @@ class AiGraphEntity {
     return AiGraphEntity(
       name: name,
       type: type,
+      scope: scope ?? this.scope,
       aliases: aliases ?? this.aliases,
       description: description ?? this.description,
       evidence: evidence ?? this.evidence,
@@ -166,6 +194,7 @@ class AiGraphEntity {
   Map<String, Object?> toJson() => {
     'name': name,
     'type': type.wireName,
+    'scope': scope.wireName,
     'aliases': aliases,
     'description': description,
     'evidence': [for (final e in evidence) e.toJson()],
@@ -194,6 +223,7 @@ class AiGraphEntity {
     return AiGraphEntity(
       name: name.trim(),
       type: AiGraphEntityType.fromWireName(json['type']),
+      scope: AiGraphEntityScope.fromWireName(json['scope']),
       aliases: rawAliases is List
           ? rawAliases
                 .whereType<String>()

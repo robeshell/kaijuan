@@ -43,7 +43,12 @@ class BookAiGraphView extends StatelessWidget {
   static const int _maxVertices = 60;
 
   List<AiGraphEntity> _topEntities() {
-    final sorted = [...entities]..sort(_byFrequencyThenName);
+    // Reference entities (cited outsiders like 罗素 in an essay) never make
+    // it into the force-directed core, even if they are frequent.
+    final core = entities
+        .where((e) => e.scope == AiGraphEntityScope.setting)
+        .toList(growable: false);
+    final sorted = [...core]..sort(_byFrequencyThenName);
     return sorted.take(_maxVertices).toList(growable: false);
   }
 

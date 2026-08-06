@@ -319,6 +319,14 @@ class AiBookGraphService {
       );
     }
 
+    // Hard rules that only downgrade (never upgrade) the model's scope:
+    // 1. a quote matching a citation pattern (据X / 如X所言 / X写道 ...) marks
+    //    the entity as a reference — e.g. 罗素 in an essay collection;
+    // 2. an entity that appears in exactly one chapter of a multi-chapter
+    //    book is a marginal mention, not part of the readable core.
+    // Single-chapter books are exempt so their cast is not all folded away.
+    _applyScopeHardRules(entities, totalSections: covered.length);
+
     entities.sort(_byFrequencyThenName);
     relations.sort((a, b) => b.evidence.length.compareTo(a.evidence.length));
     return AiBookGraph(
@@ -364,6 +372,54 @@ class AiBookGraphService {
     final fb = b.chapterFreq.values.fold<int>(0, (sum, v) => sum + v);
     if (fa != fb) return fb.compareTo(fa);
     return a.name.compareTo(b.name);
+  }
+
+  /// Downgrades entities to [AiGraphEntityScope.reference] when hard evidence
+  /// says they are citations, not story. Only downgrades — a setting entity
+  /// is never re-marked reference by the model's own word alone, and an
+  /// entity the model called reference is never upgraded here.
+  static void _applyScopeHardRules(
+    List<AiGraphEntity> entities, {
+    required int totalSections,
+  }) {
+    if (entities.isEmpty) return;
+    final multiChapterBook = totalSections > 1;
+    for (var i = 0; i < entities.length; i++) {
+      final entity = entities[i];
+      if (entity.scope == AiGraphEntityScope.reference) continue;
+      final citedByQuote = entity.evidence.any(
+        (ev) => _isCitationQuote(ev.quote, entity.name, entity.aliases),
+      );
+      final appearsOnce = multiChapterBook && entity.chapterFreq.length <= 1;
+      if (citedByQuote || appearsOnce) {
+        entities[i] = entity.copyWith(scope: AiGraphEntityScope.reference);
+      }
+    }
+  }
+
+  /// True when the quote frames [name] (or an alias) as an outside citation
+  /// rather than a story event: 据X / 按X / 如X所言 / 正如X所说 / X曾说 /
+  /// X写道 / X所言 / 据说X. Deliberately excludes 说/认为/指出 alone —
+  /// those are also ordinary narration verbs inside a story.
+  static bool _isCitationQuote(String quote, String name, List<String> aliases) {
+    if (quote.isEmpty || name.isEmpty) return false;
+    for (final n in {name, ...aliases}) {
+      if (n.isEmpty) continue;
+      final patterns = <String>[
+        '据$n',
+        '按$n',
+        '如$n所言',
+        '正如$n所说',
+        '$n曾说',
+        '$n写道',
+        '$n所言',
+        '据说$n',
+      ];
+      for (final pattern in patterns) {
+        if (quote.contains(pattern)) return true;
+      }
+    }
+    return false;
   }
 
   /// Split a chapter into bounded chunks with overlap.
@@ -547,6 +603,7 @@ class AiBookGraphService {
             '$knownBlock'
             '抽取要求：只输出如下结构的 JSON：\n'
             '{"entities":[{"name":"规范名","type":"person|location|event",'
+            '"scope":"setting|reference",'
             '"aliases":["别名"],"description":"1-2句","evidence":[{"section":'
             '$sectionIndex,"quote":"原文连续片段"}]}],'
             '"relations":[{"source":"实体A","target":"实体B",'
@@ -556,6 +613,11 @@ class AiBookGraphService {
             'description 用 1-2 句，紧扣证据；'
             'quote 必须逐字来自以下正文；evidence 至少 1 条；'
             'type 取值仅限 person/location/event；'
+            'scope 判定：setting = 本书叙述中的角色/地点/事件（主角配角、'
+            '反复登场的人物、故事发生的场所）；'
+            'reference = 本书只是举例、论证、引述时提到的名字，典型句式 '
+            '「据X」「按X」「如X所言」「正如X所说」「X曾说」「X写道」'
+            '（如散文中引用的罗素、苏东坡）。拿不准时归 reference；'
             '关系类型仅限以下中文：${relationTypes.join('、')}，用最贴切的一个；'
             '不要抽取书作者、作序者、编者、译者等元信息人物，'
             '除非他们作为故事角色实际登场；'
@@ -641,6 +703,10 @@ class AiBookGraphService {
           continue;
         }
         final type = AiGraphEntityType.fromWireName(typeRaw);
+        final scopeRaw = map['scope'];
+        final scope = scopeRaw is String
+            ? AiGraphEntityScope.fromWireName(scopeRaw)
+            : AiGraphEntityScope.setting;
         final originalName = name.trim();
         final canonicalName = _resolveCanonical(
           canonical,
@@ -677,9 +743,18 @@ class AiBookGraphService {
             rawEvidence: map['evidence'],
             sectionText: sectionText,
           );
-          entityIndex[key] = next;
+          // Any source marking the entity as setting wins: the model is more
+          // reliable at recognizing story entities than at excluding them.
+          final mergedScope = existing.scope == AiGraphEntityScope.setting ||
+                  scope == AiGraphEntityScope.setting
+              ? AiGraphEntityScope.setting
+              : AiGraphEntityScope.reference;
+          final updated = mergedScope == existing.scope
+              ? next
+              : next.copyWith(scope: mergedScope);
+          entityIndex[key] = updated;
           final at = entities.indexOf(existing);
-          if (at >= 0) entities[at] = next;
+          if (at >= 0) entities[at] = updated;
         } else {
           final evidence = _evidenceFor(
             map['evidence'],
@@ -691,6 +766,7 @@ class AiBookGraphService {
           final entity = AiGraphEntity(
             name: canonicalName,
             type: type,
+            scope: scope,
             aliases: aliases,
             description: map['description'] as String? ?? '',
             evidence: evidence,
