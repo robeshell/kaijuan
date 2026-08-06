@@ -91,6 +91,15 @@ enum _OutlineAction { delete }
 /// readable without the graph.
 enum _GraphViewMode { persons, locations, events, graph }
 
+/// Sort order for the entity list views.
+enum _GraphSortOrder {
+  /// First appearance in the book (firstSection ascending).
+  byAppearance,
+
+  /// Total mentions (chapterFreq sum) descending — the service's default.
+  byFrequency,
+}
+
 class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
@@ -107,6 +116,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   final _outlineChildrenKeys = <String, GlobalKey>{};
   bool _outlineOverviewExpanded = false;
   _GraphViewMode _graphViewMode = _GraphViewMode.persons;
+  _GraphSortOrder _graphSortOrder = _GraphSortOrder.byAppearance;
 
   /// Isolated entities (0 relations) collapse into a single row until opened.
   bool _graphIsolatedExpanded = false;
@@ -1405,13 +1415,23 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // Search is allowed to surface mere mentions without the fold.
     final foldIsolated =
         isolatedEntities.isNotEmpty && _graphQuery.trim().isEmpty;
-    // Every list view reads as a chapter-by-chapter flow: entities are
-    // ordered by first appearance (出场顺序), so the lists mirror the
-    // reading experience.
-    int chapterOrder(AiGraphEntity a, AiGraphEntity b) =>
-        a.firstSection.compareTo(b.firstSection);
-    final orderedMain = [...mainEntities]..sort(chapterOrder);
-    final orderedIsolated = [...isolatedEntities]..sort(chapterOrder);
+    // Every list view can be read by 出场顺序 (first appearance) or by
+    // total mentions. The service already emits frequency-descending order,
+    // so byFrequency just keeps the source list.
+    List<AiGraphEntity> ordered(List<AiGraphEntity> source) {
+      switch (_graphSortOrder) {
+        case _GraphSortOrder.byFrequency:
+          return source;
+        case _GraphSortOrder.byAppearance:
+          return [...source]
+            ..sort(
+              (a, b) => a.firstSection.compareTo(b.firstSection),
+            );
+      }
+    }
+
+    final orderedMain = ordered(mainEntities);
+    final orderedIsolated = ordered(isolatedEntities);
 
     final personCount = graph.entities
         .where(
@@ -1613,17 +1633,60 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ],
         if (_graphViewMode != _GraphViewMode.graph) ...[
           const SizedBox(height: 12),
-          TextField(
-            controller: _graphQueryController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText: '搜索',
-              isDense: true,
-              prefixIcon: const Icon(KaijuanIcons.search, size: 18),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _graphQueryController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: '搜索',
+                    isDense: true,
+                    prefixIcon: const Icon(KaijuanIcons.search, size: 18),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              PopupMenuButton<_GraphSortOrder>(
+                tooltip: '排序',
+                initialValue: _graphSortOrder,
+                onSelected: (order) =>
+                    setState(() => _graphSortOrder = order),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: _GraphSortOrder.byAppearance,
+                    child: Text('出场顺序'),
+                  ),
+                  PopupMenuItem(
+                    value: _GraphSortOrder.byFrequency,
+                    child: Text('出现次数'),
+                  ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(KaijuanIcons.sort, size: 18),
+                      const SizedBox(width: 4),
+                      Text(
+                        _graphSortLabel(_graphSortOrder),
+                        style: TextStyle(
+                          fontSize: context.appCaptionSize,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           if (visibleEntities.isEmpty)
@@ -2402,8 +2465,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         : OrbTheme.light,
   );
 
-  String _graphFilterLabelFor(AiGraphEntityType type) => switch (type) {
-    AiGraphEntityType.person => '人物',
+  String _graphSortLabel(_GraphSortOrder order) => switch (order) {
+    _GraphSortOrder.byAppearance => '出场顺序',
+    _GraphSortOrder.byFrequency => '出现次数',
+  };
+
+  String _graphFilterLabelFor(AiGraphEntityType type) => switch (type) {    AiGraphEntityType.person => '人物',
     AiGraphEntityType.location => '地点',
     AiGraphEntityType.event => '事件',
   };
