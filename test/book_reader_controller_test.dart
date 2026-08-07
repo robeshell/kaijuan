@@ -4,7 +4,7 @@ import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
-import 'package:kaijuan/ai/ai_chat_tools.dart';
+import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
@@ -507,7 +507,7 @@ void main() {
       );
 
       final scoped = scopeChatBodyToWork(body, work, wholeBook: false);
-      final sections = AiChatBookCorpus.parseSections(scoped);
+      final sections = AiChatRetrieve.splitSections(scoped);
       expect(sections.map((s) => s.label), ['狂人日记', '孔乙己']);
       expect(sections.map((s) => s.index), [2, 3]);
       expect(sections.map((s) => s.originSectionIndex), [4, 4]);

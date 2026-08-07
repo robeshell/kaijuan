@@ -220,10 +220,6 @@ When you have enough context, answer the user in normal prose (no tool fence).
 
 /// Helpers to slice [getBookPlainText] corpus for tools.
 abstract final class AiChatBookCorpus {
-  static List<AiBookSectionSlice> parseSections(String bookBody) {
-    return AiChatRetrieve.splitSections(bookBody);
-  }
-
   static String formatTocFromSlices(List<AiBookSectionSlice> sections) {
     if (sections.isEmpty) return '(no sections)';
     final buf = StringBuffer();

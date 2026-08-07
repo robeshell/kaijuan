@@ -139,7 +139,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// Collection works (null = plain book or not resolved yet). Resolved
   /// lazily: sync from the outline, else via a one-shot structure
   /// recognition; gates the collection UI and 当前阅读 follow.
-  List<AiGraphWorkCandidate>? _graphWorks;
   bool _graphWorksLoading = false;
   String _graphQuery = '';
   String? _graphHighlighted;
@@ -150,6 +149,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// Attached highlight; null when cleared by user.
   String? _selection;
   bool _loadingSession = true;
+  String? _loadError;
   bool _sending = false;
 
   /// Draft cleared for the active send. Restored only when the user has not
@@ -334,24 +334,34 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _bootstrap() async {
-    final session = await _c.loadChatSession();
-    // The outline shares the same session JSON; avoid decoding it twice while
-    // the side sheet is animating in.
-    await _c.loadBookOutline(session: session);
-    await _c.loadBookGraph();
-    if (!mounted) return;
-    setState(() {
-      _session = session;
-      _loadingSession = false;
-    });
-    // Open on the latest turn (history starts at top of the list).
-    if (session.messages.isNotEmpty) {
-      _scrollToEnd(animated: false);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    try {
+      final session = await _c.loadChatSession();
+      // The outline shares the same session JSON; avoid decoding it twice
+      // while the side sheet is animating in.
+      await _c.loadBookOutline(session: session);
+      await _c.loadBookGraph();
       if (!mounted) return;
-      unawaited(_focusComposer());
-    });
+      setState(() {
+        _session = session;
+        _loadingSession = false;
+      });
+      // Open on the latest turn (history starts at top of the list).
+      if (session.messages.isNotEmpty) {
+        _scrollToEnd(animated: false);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_focusComposer());
+      });
+    } catch (error) {
+      // A read/decode failure must not leave the sheet on an eternal
+      // spinner: show the error with a retry instead.
+      if (!mounted) return;
+      setState(() {
+        _loadingSession = false;
+        _loadError = error.toString();
+      });
+    }
   }
 
   /// Focus the composer. Order matters on macOS: request Flutter focus first
@@ -1469,7 +1479,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // picker list anymore. With a generated graph the detail view shows
     // (opened by _followReadingWorkForGraph); without one, an entry card
     // offers to generate this work's graph. Plain books keep the single view.
-    if (_c.hasCollectionWorks && !_c.hasActiveWorkGraph && !_c.viewingWholeBookGraph) {
+    if (_c.hasCollectionWorks && !_c.hasActiveWorkGraph) {
       final reading = _c.currentReadingWork;
       if (reading == null) {
         return Center(
@@ -1542,6 +1552,20 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ),
                 ),
                 const SizedBox(height: 16),
+                if (_c.bookGraphError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      _c.bookGraphError!,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: context.appCaptionSize,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
                 if (generating)
                   Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1563,6 +1587,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                         label: const Text('停止'),
                       ),
                     ],
+                  )
+                else if (!_ready)
+                  _AiUnavailable(
+                    message: '添加 API Key 后，就可以生成本书的人物、地点与事件图谱。',
+                    onOpenSettings: () => unawaited(_openSettings()),
                   )
                 else
                   FilledButton.icon(
@@ -1591,7 +1620,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       // fails (or this is a plain book that will never have works), fall
       // through to the actionable empty state — otherwise the tab would be
       // stuck on「正在识别著作范围…」forever.
-      final works = _graphWorks ?? _c.graphWorkCandidates;
+      final works = _c.resolvedGraphWorks ?? _c.graphWorkCandidates;
       if (works == null && _graphWorksLoading) {
         return Center(
           child: Padding(
@@ -1623,11 +1652,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if ((_c.activeGraphWork != null || _c.viewingWholeBookGraph) &&
-                  !_c.hasCollectionWorks) ...[
-                _graphBackRow(),
-                const SizedBox(height: 8),
-              ],
               Icon(
                 KaijuanIcons.collections,
                 size: 34,
@@ -1770,11 +1794,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       controller: _graphScrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        if ((_c.activeGraphWork != null || _c.viewingWholeBookGraph) &&
-            !_c.hasCollectionWorks) ...[
-          _graphBackRow(),
-          const SizedBox(height: 8),
-        ],
         Row(
           children: [
             Expanded(
@@ -1783,9 +1802,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     ? '《${_c.activeGraphWork!.title}》图谱'
                     : (graph.excludedGraphSections.isNotEmpty
                         ? '部分章节图谱'
-                        : (_c.viewingWholeBookGraph
-                            ? '整本图谱'
-                            : (graph.includesUnread ? '全书图谱' : '已读章节图谱'))),
+                        : (graph.includesUnread ? '全书图谱' : '已读章节图谱')),
                 style: TextStyle(
                   fontSize: _panelTitleSize(context),
                   fontWeight: FontWeight.w600,
@@ -2351,7 +2368,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ? '《${_c.activeGraphWork!.title}》图谱'
               : (graph.excludedGraphSections.isNotEmpty
                   ? '部分章节图谱'
-                  : (_c.viewingWholeBookGraph ? '整本图谱' : '知识图谱')),
+                  : '知识图谱'),
           entities: graph.entities
               .where(
                 (entity) =>
@@ -2437,11 +2454,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _ensureGraphWorks() async {
-    if (_graphWorks != null || _graphWorksLoading || !mounted) return;
+    // Already resolved (outline path, or the outline generation ran the
+    // recognition first): follow the reading work now — the entry card's
+    // "正在打开" spinner is only dismissed by _followReadingWorkForGraph.
+    if (_c.resolvedGraphWorks != null) {
+      _followReadingWorkForGraph();
+      return;
+    }
+    if (_graphWorksLoading || !mounted) return;
     final sync = _c.graphWorkCandidates;
     if (sync != null) {
-      setState(() => _graphWorks = sync);
-      unawaited(_c.loadGraphActualSectionCounts());
       _followReadingWorkForGraph();
       return;
     }
@@ -2451,8 +2473,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (!mounted) return;
     _graphWorksLoading = false;
     if (resolved != null && resolved.isNotEmpty) {
-      setState(() => _graphWorks = resolved);
-      unawaited(_c.loadGraphActualSectionCounts());
       _followReadingWorkForGraph();
     }
   }
@@ -2563,17 +2583,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final parts = [if (timeText.isNotEmpty) timeText, if (durationText.isNotEmpty) durationText];
     return parts.join(' · ');
   }
-
-  /// Back row for legacy whole-book graph detail; hidden for collections
-  /// (the graph tab IS the current work — nothing to go back to).
-  Widget _graphBackRow() => Align(
-    alignment: Alignment.centerLeft,
-    child: TextButton.icon(
-      onPressed: _c.closeWorkGraph,
-      icon: const Icon(KaijuanIcons.back, size: 16),
-      label: const Text('全部著作'),
-    ),
-  );
 
   /// Inline thinking indicator, same animation family as the chat bubbles.
   Widget _thinkingOrb(BuildContext context) => ThinkingOrb(
@@ -2735,7 +2744,47 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       ),
                     ),
                   )
-                : ListView(
+                : _loadError != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '会话加载失败',
+                                style: TextStyle(
+                                  fontSize: context.appBodySize,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _loadError!,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: context.appCaptionSize,
+                                  color: context.appSecondaryText,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton.tonal(
+                                onPressed: () {
+                                  setState(() {
+                                    _loadError = null;
+                                    _loadingSession = true;
+                                  });
+                                  unawaited(_bootstrap());
+                                },
+                                child: const Text('重试'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView(
                     controller: _scroll,
                     padding: EdgeInsets.fromLTRB(
                       16,

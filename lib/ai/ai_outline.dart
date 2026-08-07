@@ -83,7 +83,6 @@ class AiBookOutlineChapter {
     String? summary,
     List<String>? keyPoints,
     List<AiBookOutlineChapter>? children,
-    bool clearChildren = false,
   }) => AiBookOutlineChapter(
     sectionIndex: sectionIndex,
     title: title ?? this.title,
@@ -93,7 +92,7 @@ class AiBookOutlineChapter {
     nodeId: nodeId,
     endSectionIndexExclusive: endSectionIndexExclusive,
     source: source,
-    children: clearChildren ? null : (children ?? this.children),
+    children: children ?? this.children,
   );
 
   Map<String, Object?> toJson() => {

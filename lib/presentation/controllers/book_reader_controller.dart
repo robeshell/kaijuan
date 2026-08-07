@@ -305,15 +305,10 @@ class BookReaderController extends ChangeNotifier {
   /// (null for whole-book graphs / plain books).
   AiGraphWorkCandidate? _activeGraphWork;
 
-  /// True while the legacy whole-book graph ($hash.json of a collection) is
-  /// being viewed — keeps the picker from swallowing it.
-  bool _wholeBookGraphView = false;
-
   /// Per-work graphs of the current collection, keyed by workKey.
   Map<String, AiBookGraph> _workGraphs = {};
 
   /// Work being generated right now (null = whole book / not generating).
-  AiGraphWorkCandidate? _generatingGraphWork;
   AiGraphProgress? _bookGraphProgress;
   String? _bookGraphError;
 
@@ -888,7 +883,7 @@ class BookReaderController extends ChangeNotifier {
         final body = await _loadBookPlainTextCached(
           AiBookOutlineService.maxBookBodyChars,
         );
-        sections = AiChatBookCorpus.parseSections(body);
+        sections = AiChatRetrieve.splitSections(body);
       }
       if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
       AiLog.d(
@@ -900,19 +895,10 @@ class BookReaderController extends ChangeNotifier {
       // current spine position turns a collection opened at its front matter
       // into a one-item "outline".
       const includeUnread = true;
-      final titled = [
-        for (final section in sections)
-          AiBookSectionSlice(
-            index: section.index,
-            label: section.label.trim().isNotEmpty
-                ? section.label.trim()
-                : _titleForOutlineSection(section.index),
-            text: section.text,
-            sourceSectionIndex: section.sourceSectionIndex,
-            isNavigationUnit: section.isNavigationUnit,
-            level: section.level,
-          ),
-      ];
+      final titled = _withTitles(
+        sections,
+        fallback: _titleForOutlineSection,
+      );
       final outlineSections = _filterOutlineSections(titled);
       if (outlineSections.isEmpty) {
         throw AiProviderException('没有可用于生成大纲的正文');
@@ -1362,21 +1348,13 @@ class BookReaderController extends ChangeNotifier {
 
   bool get hasActiveWorkGraph => _activeGraphWork != null;
 
-  /// True while the legacy whole-book graph of a collection is being viewed.
-  bool get viewingWholeBookGraph => _wholeBookGraphView;
-
-  /// Opens the legacy whole-book graph ($hash.json — pre-per-work files).
-  void openWholeBookGraph() {
-    if (_bookGraph == null || _activeGraphWork != null) return;
-    _wholeBookGraphView = true;
-    if (!_disposed) notifyListeners();
-  }
-
-  /// Work currently being generated, or null (whole book / idle). The graph
-  /// picker uses this to show per-row progress.
-  AiGraphWorkCandidate? get generatingGraphWork => _generatingGraphWork;
-
   static String workKeyFor(AiGraphWorkCandidate work) => 's${work.startSection}';
+
+  /// Single source for the collection's works: the one-shot structural
+  /// recognition (work-granular, stable keys) wins; outline-derived
+  /// candidates are the fallback. All collection getters must read this.
+  List<AiGraphWorkCandidate>? get _works =>
+      _resolvedGraphWorks ?? graphWorkCandidates;
 
   /// The collection work the reader is currently inside (current spine →
   /// work range), or null when the current section belongs to no work (plain
@@ -1387,7 +1365,7 @@ class BookReaderController extends ChangeNotifier {
     // 作品级 works（结构识别）优先：大纲章节推导的 works 在合集下可能是
     // 篇目级伪作品，用它们算 workKey 会漂移（s5 生成 → s7 查询），大纲
     // 因此查空。结构识别结果稳定在作品粒度，先于大纲章节来源使用。
-    final works = _resolvedGraphWorks ?? graphWorkCandidates;
+    final works = _works;
     if (works == null) return null;
     final spine = _sectionIndex + 1; // reader is 0-based
     for (final work in works) {
@@ -1398,24 +1376,23 @@ class BookReaderController extends ChangeNotifier {
 
   /// Chat context scope: false = only the work under the reading position is
   /// sampled for tools (「读到哪本跟哪本」); true = the whole book.
-  bool _chatScopeWholeBook = false;
-  bool get chatScopeWholeBook => _chatScopeWholeBook;
-  set chatScopeWholeBook(bool value) {
-    if (_chatScopeWholeBook == value) return;
-    _chatScopeWholeBook = value;
-    notifyListeners();
-  }
+  /// Collection decision: always the current work — the whole-book switch was
+  /// removed, so this is a constant false and kept only for tool plumbing.
 
   /// Last structural-recognition result (no-outline collections), cached so
   /// [currentReadingWork] and other sync getters see the same works the
   /// graph picker lists.
   List<AiGraphWorkCandidate>? _resolvedGraphWorks;
 
+  /// Public view of the cached structural-recognition result (null = not
+  /// resolved yet or no works); the sheet uses it to decide the loading
+  /// state without holding a duplicate cache.
+  List<AiGraphWorkCandidate>? get resolvedGraphWorks => _resolvedGraphWorks;
+
   /// Whether this book is a collection (works known from the outline or from
   /// the one-shot structural recognition) — gates the collection-only UI
   /// (graph picker, chat scope switch) without waiting for the outline.
-  bool get hasCollectionWorks =>
-      (_resolvedGraphWorks ?? graphWorkCandidates)?.isNotEmpty ?? false;
+  bool get hasCollectionWorks => _works?.isNotEmpty ?? false;
 
   /// True when a graph was already generated for [work] of this collection.
   bool hasWorkGraph(AiGraphWorkCandidate work) =>
@@ -1430,30 +1407,18 @@ class BookReaderController extends ChangeNotifier {
   AiBookGraph? workGraphFor(AiGraphWorkCandidate work) =>
       _workGraphs[workKeyFor(work)];
 
-  /// Opens the graph view of [work] even while it is generating (the picker
-  /// lets you jump back into the in-flight generation to watch/stop it).
-  void enterGraphWork(AiGraphWorkCandidate work) {
-    if (_activeGraphWork == work) return;
-    _activeGraphWork = work;
-    _wholeBookGraphView = false;
-    _bookGraph = _workGraphs[workKeyFor(work)];
-    if (!_disposed) notifyListeners();
-  }
-
   /// Shows the generated graph of [work] (collection picker → work view).
   void openWorkGraph(AiGraphWorkCandidate work) {
     final graph = _workGraphs[workKeyFor(work)];
     if (graph == null) return;
     _bookGraph = graph;
     _activeGraphWork = work;
-    _wholeBookGraphView = false;
     if (!_disposed) notifyListeners();
   }
 
   /// Back to the collection picker (work view → list).
   void closeWorkGraph() {
     _activeGraphWork = null;
-    _wholeBookGraphView = false;
     _bookGraph = null;
     if (!_disposed) notifyListeners();
   }
@@ -1535,7 +1500,6 @@ class BookReaderController extends ChangeNotifier {
   }) {
     final active = _bookGraphGeneration;
     if (active != null) return active;
-    _generatingGraphWork = only ?? _activeGraphWork;
     final done = Completer<void>();
     _bookGraphGeneration = done.future;
     unawaited(() async {
@@ -1555,7 +1519,6 @@ class BookReaderController extends ChangeNotifier {
       done.future.whenComplete(() {
         _bookGraphGeneration = null;
         _bookGraphCancel = null;
-        _generatingGraphWork = null;
         if (!_disposed) notifyListeners();
       }),
     );
@@ -1571,63 +1534,6 @@ class BookReaderController extends ChangeNotifier {
   /// (see real collection caches), so a work's end is derived from the next
   /// unit's start; the last work is open-ended (spans to the book's tail).
 
-
-  /// Actual extractable section count per work (after metadata/empty-section
-  /// filtering), so the picker and the generation progress agree. Loaded
-  /// lazily from the graph corpus; null until loaded.
-  Map<String, int>? _graphActualSectionCounts;
-
-  Map<String, int>? get graphActualSectionCounts => _graphActualSectionCounts;
-
-  Future<void> loadGraphActualSectionCounts() async {
-    if (_graphActualSectionCounts != null) return;
-    try {
-      // Per-work counts follow the per-work generation range: spine mode
-      // (piece granularity), no spine dedupe — the picker count then equals
-      // the chooser items and the progress total for that work.
-      final body = await _loadBookGraphSpineTextCached(
-        AiBookGraphService.maxBookBodyChars,
-      );
-      var sections = AiChatBookCorpus.parseSections(body);
-      if (sections.isEmpty) return;
-      // Same metadata/outline filtering the generation pipeline applies, so
-      // the picker count and the progress total agree exactly.
-      final titled = [
-        for (final section in sections)
-          AiBookSectionSlice(
-            index: section.index,
-            label: section.label.trim().isNotEmpty
-                ? section.label.trim()
-                : _titleForOutlineSection(section.index),
-            text: section.text,
-            sourceSectionIndex: section.sourceSectionIndex,
-            isNavigationUnit: section.isNavigationUnit,
-            level: section.level,
-          ),
-      ];
-      sections = _graphEligibleSections(_filterOutlineSections(titled));
-      final works = graphWorkCandidates ?? const [];
-      final counts = <String, int>{};
-      for (final work in works) {
-        var count = 0;
-        for (final section in sections) {
-          if (section.text.trim().isEmpty) continue; // container node
-          if (!work.contains(section.sourceSectionIndex ?? section.index)) {
-            continue;
-          }
-          count++;
-        }
-        counts[workKeyFor(work)] = count;
-      }
-      _graphActualSectionCounts = counts;
-      if (!_disposed) notifyListeners();
-    } catch (_) {
-      // Counts are cosmetic; mark the pass as done so the picker falls
-      // back to the spine-range estimate instead of '计算中' forever.
-      _graphActualSectionCounts = const {};
-      if (!_disposed) notifyListeners();
-    }
-  }
 
   List<AiGraphWorkCandidate>? get graphWorkCandidates {
     final outline = _bookOutline;
@@ -1658,21 +1564,12 @@ class BookReaderController extends ChangeNotifier {
         AiBookOutlineService.maxBookBodyChars,
       );
       cancel?.throwIfCancelled();
-      var sections = AiChatBookCorpus.parseSections(body);
+      var sections = AiChatRetrieve.splitSections(body);
       if (sections.isEmpty) return fromOutline;
-      final titled = [
-        for (final section in sections)
-          AiBookSectionSlice(
-            index: section.index,
-            label: section.label.trim().isNotEmpty
-                ? section.label.trim()
-                : _titleForOutlineSection(section.index),
-            text: section.text,
-            sourceSectionIndex: section.sourceSectionIndex,
-            isNavigationUnit: section.isNavigationUnit,
-            level: section.level,
-          ),
-      ];
+      final titled = _withTitles(
+        sections,
+        fallback: _titleForOutlineSection,
+      );
       final eligible =
           _graphEligibleSections(_filterOutlineSections(titled));
       if (eligible.isEmpty) return fromOutline;
@@ -1828,6 +1725,27 @@ class BookReaderController extends ChangeNotifier {
     }
   }
 
+  /// Wraps raw slices with a non-empty label, falling back to a title for
+  /// untitled pieces (metadata blocks produce empty labels). Shared by the
+  /// outline, graph and recognition pipelines so they see identical labels.
+  List<AiBookSectionSlice> _withTitles(
+    List<AiBookSectionSlice> sections, {
+    String Function(int index)? fallback,
+  }) =>
+      [
+        for (final section in sections)
+          AiBookSectionSlice(
+            index: section.index,
+            label: section.label.trim().isNotEmpty
+                ? section.label.trim()
+                : (fallback?.call(section.index) ?? section.label),
+            text: section.text,
+            sourceSectionIndex: section.sourceSectionIndex,
+            isNavigationUnit: section.isNavigationUnit,
+            level: section.level,
+          ),
+      ];
+
   /// Loads + slices the graph corpus for [work] (null = whole book) with the
   /// exact same filtering / spine-dedupe as generation, so re-analysis and
   /// generation always agree on scope (single source of truth).
@@ -1841,23 +1759,14 @@ class BookReaderController extends ChangeNotifier {
         : await _loadBookGraphSpineTextCached(
             AiBookGraphService.maxBookBodyChars,
           );
-    final sections = AiChatBookCorpus.parseSections(body);
+    final sections = AiChatRetrieve.splitSections(body);
     if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
-    final titled = [
-      for (final section in sections)
-        AiBookSectionSlice(
-          index: section.index,
-          label: section.label.trim().isNotEmpty
-              ? section.label.trim()
-              : (work == null
-                  ? _titleForOutlineSection(section.index)
-                  : '第 ${section.index} 节'),
-          text: section.text,
-          sourceSectionIndex: section.sourceSectionIndex,
-          isNavigationUnit: section.isNavigationUnit,
-          level: section.level,
-        ),
-    ];
+    final titled = _withTitles(
+      sections,
+      fallback: (index) => work == null
+          ? _titleForOutlineSection(index)
+          : '第 $index 节',
+    );
     final graphSections = _graphEligibleSections(
       _filterOutlineSections(titled),
     );
@@ -1961,12 +1870,10 @@ class BookReaderController extends ChangeNotifier {
     }
     if (workKey == null) {
       _bookGraph = null;
-      _wholeBookGraphView = false;
     } else {
       _workGraphs.remove(workKey);
       _bookGraph = null;
       _activeGraphWork = null;
-      _wholeBookGraphView = false;
     }
     _bookGraphError = null;
     if (!_disposed) notifyListeners();
@@ -3657,7 +3564,9 @@ class _BookChatToolHost implements AiChatToolHost {
   String _scopedBody(String body) => scopeChatBodyToWork(
         body,
         _c.currentReadingWork,
-        wholeBook: _c.chatScopeWholeBook,
+        // Collection decision: always the current work, never the whole
+        // book — the switch UI was removed.
+        wholeBook: false,
       );
 
   @override
@@ -3667,7 +3576,7 @@ class _BookChatToolHost implements AiChatToolHost {
       final body = _scopedBody(
         await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
       );
-      final sections = AiChatBookCorpus.parseSections(body);
+      final sections = AiChatRetrieve.splitSections(body);
       if (sections.isNotEmpty) {
         return AiChatBookCorpus.formatTocFromSlices(sections);
       }
@@ -3709,7 +3618,7 @@ class _BookChatToolHost implements AiChatToolHost {
     final body = _scopedBody(
       await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
     );
-    final sections = AiChatBookCorpus.parseSections(body);
+    final sections = AiChatRetrieve.splitSections(body);
     if (sections.isEmpty) {
       // Fallback: only current chapter known.
       if (sectionIndex1Based == _c.sectionIndex + 1) {
@@ -3778,7 +3687,7 @@ String scopeChatBodyToWork(
   required bool wholeBook,
 }) {
   if (wholeBook || work == null) return body;
-  final sections = AiChatBookCorpus.parseSections(body);
+  final sections = AiChatRetrieve.splitSections(body);
   final kept = sections
       .where((s) => work.contains(s.originSectionIndex))
       .toList(growable: false);

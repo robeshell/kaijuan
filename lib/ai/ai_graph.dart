@@ -35,9 +35,6 @@ class AiGraphWorkCandidate {
   /// Outline summary sample, used as the dialog subtitle.
   final String sample;
 
-  int get sectionCount =>
-      endSectionExclusive == null ? 0 : endSectionExclusive! - startSection;
-
   bool get isOpenEnded => endSectionExclusive == null;
 
   bool contains(int spineSection) =>
@@ -45,8 +42,7 @@ class AiGraphWorkCandidate {
       (isOpenEnded || spineSection < endSectionExclusive!);
 }
 
-/// Entity kinds extracted for v1. `item / concept` are reserved for later
-/// versions and never generated today; `organization` is only generated when
+/// Entity kinds extracted for v1. `organization` is only generated when
 /// the narration plan says the book is organization-driven (§3.3).
 enum AiGraphEntityType {
   person,
@@ -635,8 +631,6 @@ class AiBookGraph {
       narration: narration ?? this.narration,
     );
   }
-
-  bool get isEmpty => entities.isEmpty && relations.isEmpty;
 
   Map<String, Object?> toJson() => {
     'version': currentVersion,

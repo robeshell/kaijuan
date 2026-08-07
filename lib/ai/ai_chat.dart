@@ -27,8 +27,6 @@ class AiChatMessage {
   /// One answer-specific follow-up generated after an assistant reply.
   final List<String> suggestedQuestions;
 
-  bool get usedWebSearch => webHitCount != null;
-
   AiChatMessage copyWith({
     AiMessageRole? role,
     String? content,
@@ -107,13 +105,6 @@ class AiChatContextBundle {
 
   /// Section titles only (cheap). Full list also available via get_toc tool.
   final List<String> tocOutline;
-
-  bool get hasSelection => selectionText.trim().isNotEmpty;
-
-  bool get hasAnyBody =>
-      bookBody.trim().isNotEmpty ||
-      chapterText.trim().isNotEmpty ||
-      selectionText.trim().isNotEmpty;
 }
 
 /// One-tap prompts shown at contextual points in the book chat.

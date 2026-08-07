@@ -56,9 +56,6 @@ class AiChatPackedBody {
   /// All section labels (for "五讲" structure even when samples are short).
   final List<String> sectionOutline;
 
-  bool get usedRetrieval =>
-      mode == AiChatPackMode.focused && note.startsWith('keyword');
-
   String formatRelatedForPrompt({int maxChars = 28000}) {
     if (relatedSections.isEmpty) return '';
     final buf = StringBuffer();

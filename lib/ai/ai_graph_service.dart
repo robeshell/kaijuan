@@ -275,16 +275,20 @@ class AiBookGraphService {
       // existing graph used the same scheme — otherwise every piece is
       // re-extracted (indices of a different scheme are meaningless here).
       if (schemeMatches &&
-          (existing?.coveredSections.contains(
-                sectionScheme == 'spine' ? s.index : origin,
-              ) ??
-              false)) {
+          (existing?.coveredSections.contains(_coveredKeyOf(s, sectionScheme)) ?? false)) {
         continue;
       }
       working.add(s);
     }
 
-    final covered = <int>[...?existing?.coveredSections];
+    final covered = <int>[
+      // Only carry coverage keys forward when the scheme matches — a scheme
+      // switch invalidates every index (toc keys are spine, spine keys are
+      // logical sections), so the new run must re-extract everything instead
+      // of trusting a mixed list. (Entities/relations are content, not
+      // indices, and stay: re-extraction merges into them by name.)
+      if (schemeMatches) ...?existing?.coveredSections,
+    ];
     final entities = <AiGraphEntity>[...?existing?.entities];
     final relations = <AiGraphRelation>[...?existing?.relations];
 
@@ -391,9 +395,8 @@ class AiBookGraphService {
               priorAliases: priorAliases,
             );
           }
-          if (!covered
-              .contains(sectionScheme == 'spine' ? section.index : origin)) {
-            covered.add(sectionScheme == 'spine' ? section.index : origin);
+          if (!covered.contains(_coveredKeyOf(section, sectionScheme))) {
+            covered.add(_coveredKeyOf(section, sectionScheme));
           }
           covered.sort();
           onProgress?.call(
@@ -1203,6 +1206,13 @@ class AiBookGraphService {
 
   /// Sequential incremental merge: alias→canonical by type bucket, unique
   /// `name+type` / `source+target+type`, evidence appended never overwritten.
+  /// Coverage-list key of one slice: per-work (spine) runs key by the
+  /// logical-section index, whole-book (toc) runs by the spine index. Single
+  /// definition so the skip check, the covered recording and any future
+  /// consumer always agree.
+  int _coveredKeyOf(AiBookSectionSlice section, String scheme) =>
+      scheme == 'spine' ? section.index : section.originSectionIndex;
+
   void _mergeChunk({
     required Map<AiGraphEntityType, Map<String, String>> canonical,
     required Map<String, AiGraphEntity> entityIndex,
