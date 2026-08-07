@@ -3008,9 +3008,16 @@ const logicalSectionsFromDocument = (doc, fallbackLabel, tocLabels = []) => {
   }
   const bookLevelOf = heading => Number(heading.localName.slice(1))
   const inside = (heading, start, end) => {
-    const pos = doc.compareDocumentPosition(heading)
-    const afterStart = pos & Node.DOCUMENT_POSITION_FOLLOWING
-    const beforeEnd = !end || (pos & Node.DOCUMENT_POSITION_PRECEDING)
+    // compareDocumentPosition is relative to the receiver: ask each boundary
+    // whether the heading follows it (or precedes the end) — the previous
+    // `doc.compareDocumentPosition(heading)` compared against the document
+    // root, which made every piece appear inside the last book heading and
+    // dumped all pieces into the last volume (e.g. 第三辑).
+    const afterStart =
+      start.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING
+    const beforeEnd =
+      !end ||
+      (end.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_PRECEDING)
     return afterStart && beforeEnd
   }
   const output = []
