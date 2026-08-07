@@ -75,13 +75,17 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
 
   /// Groups the chooser list into book/volume containers (level 1, empty
   /// body) with their level-2 pieces as children; plain sections stay roots.
+  /// Empty level-2 pieces (adjacent headings with no body) are dropped.
   List<_ChooserNode> get _tree {
     final out = <_ChooserNode>[];
     _ChooserNode? container;
     for (final s in _sections ?? const <AiBookSectionSlice>[]) {
-      if (s.text.trim().isEmpty) {
+      final empty = s.text.trim().isEmpty;
+      if (empty && s.level <= 1) {
         container = _ChooserNode(slice: s);
         out.add(container);
+      } else if (empty) {
+        continue; // level-2 empty piece — nothing to select
       } else if (s.level > 1 && container != null) {
         container.children.add(_ChooserNode(slice: s));
       } else {

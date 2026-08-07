@@ -3314,7 +3314,9 @@ window.getBookPlainText = async (opts = {}) => {
           // the Dart side can rebuild the work → book → piece tree; the
           // chooser shows it as an expandable parent, extraction skips it.
           // The explicit #level distinguishes it from an empty metadata
-          // section (目录/版权) that must still be filtered out.
+          // section (目录/版权) that must still be filtered out. A level-2
+          // empty piece (two adjacent headings with no body) is dropped.
+          if (piece.level > 1) continue
           if (out.length >= maxChars) break
           logicalIndex += 1
           out += `\n\n[§${logicalIndex}@${i + 1}#${piece.level} ${piece.label}]\n`
