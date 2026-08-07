@@ -481,20 +481,35 @@ class AiNarrationPlan {
       final raw = rawFeatures[key];
       features[key] = (raw is num ? raw.toDouble() : 0.0).clamp(0.0, 1.0);
     }
+    // Essays (散文/杂文/评论) carry no lineage or faction structure — a
+    // family tree / org tree entry makes no sense there, even when the model
+    // guessed one (a collection judged as a whole can still score
+    // organization high). Drop both views and fall back to the plain graph.
+    final essayHigh = (features['essay'] ?? 0.0) >= 0.5;
     final view = json['defaultView'];
     final derived = _deriveDefaultView(features);
-    final resolvedView =
+    var resolvedView =
         (view is String && knownViews.contains(view)) ? view : derived;
+    if (essayHigh &&
+        (resolvedView == 'family_tree' || resolvedView == 'org_tree')) {
+      resolvedView = 'graph';
+    }
     final rawOrder =
         json['viewOrder'] is List ? json['viewOrder'] as List : const <dynamic>[];
-    final modelOrder =
-        rawOrder.whereType<String>().where(knownViews.contains).toList();
+    final modelOrder = rawOrder
+        .whereType<String>()
+        .where(knownViews.contains)
+        .where((v) => !essayHigh || (v != 'family_tree' && v != 'org_tree'))
+        .toList();
     final viewOrder = [
       resolvedView,
       for (final v in modelOrder)
         if (v != resolvedView) v,
       for (final v in knownViews)
-        if (v != resolvedView && !modelOrder.contains(v)) v,
+        if (v != resolvedView &&
+            !modelOrder.contains(v) &&
+            (!essayHigh || (v != 'family_tree' && v != 'org_tree')))
+          v,
     ];
     return AiNarrationPlan(
       features: features,

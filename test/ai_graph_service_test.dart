@@ -281,6 +281,25 @@ void main() {
       expect(AiNarrationPlan.fromJson(null), isNull);
       expect(AiNarrationPlan.fromJson({'features': 'not-a-map'}), isNull);
 
+      // An essay book never gets lineage/faction views, even when the model
+      // guessed one (a collection judged as a whole scores organization).
+      final essay = AiNarrationPlan.fromJson({
+        'features': {
+          'eventDriven': 0.1,
+          'characterEnsemble': 0.3,
+          'organization': 0.9,
+          'geography': 0.2,
+          'essay': 1.0,
+        },
+        'defaultView': 'family_tree',
+        'viewOrder': ['family_tree', 'org_tree', 'graph', 'locations'],
+      });
+      expect(essay, isNotNull);
+      expect(essay!.defaultView, 'graph');
+      expect(essay.viewOrder, isNot(contains('family_tree')));
+      expect(essay.viewOrder, isNot(contains('org_tree')));
+      expect(essay.viewOrder.first, 'graph');
+
       // Out-of-range values clamp instead of invalidating the plan.
       final clamped = AiNarrationPlan.fromJson({
         'features': {
