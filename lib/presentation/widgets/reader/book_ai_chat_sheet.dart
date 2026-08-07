@@ -136,9 +136,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// Isolated entities (0 relations) collapse into a single row until opened.
   bool _graphIsolatedExpanded = false;
 
-  /// Collection works shown as the graph-tab picker (null = plain book or
-  /// not resolved yet). Resolved lazily: sync from the outline, else via a
-  /// one-shot structure recognition.
+  /// Collection works (null = plain book or not resolved yet). Resolved
+  /// lazily: sync from the outline, else via a one-shot structure
+  /// recognition; gates the collection UI and 当前阅读 follow.
   List<AiGraphWorkCandidate>? _graphWorks;
   bool _graphWorksLoading = false;
   String _graphQuery = '';
