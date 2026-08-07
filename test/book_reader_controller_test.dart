@@ -3,9 +3,11 @@ import 'dart:io';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_models.dart';
+import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/app/book_reading_preferences.dart';
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
@@ -113,6 +115,101 @@ void main() {
     expect(controller.sectionCount, 3);
     expect(controller.tocTitles, tocTitles);
     expect(controller.sectionLabel, '1 / 3');
+
+    controller.dispose();
+  });
+
+  test('saveChatSession keeps freshly generated work outlines', () async {
+    final item = await insertBook(id: 'chat-session');
+    final controller = BookReaderController(database: database, item: item);
+    await controller.attachEngine(sectionMap, tocTitles);
+    controller.attachChatHistoryStore(JsonAiChatHistoryStore(tempDir));
+
+    final outline = AiBookOutline(
+      createdAt: DateTime.utc(2026, 1, 1),
+      model: 'test',
+      includesUnread: false,
+      overview: '概述',
+      chapters: [
+        AiBookOutlineChapter(
+          title: '狂人日记',
+          summary: '摘要',
+          sectionIndex: 1,
+        ),
+      ],
+    );
+    final fresh = AiChatSession(
+      contentHash: item.contentHash,
+      itemId: item.id,
+      workOutlines: {'s1': outline},
+    );
+    await controller.saveChatSession(fresh);
+
+    // A stale sheet snapshot (no work outlines, e.g. before generation)
+    // must not wipe the freshly generated outline on save.
+    final snapshot = AiChatSession(
+      contentHash: item.contentHash,
+      itemId: item.id,
+    );
+    await controller.saveChatSession(snapshot);
+
+    final reloaded = await controller.loadChatSession();
+    expect(reloaded.workOutlines['s1']?.overview, '概述');
+    expect(reloaded.outline, isNull);
+
+    controller.dispose();
+  });
+
+  test('saveChatSession stale snapshot never rolls back disk outlines', () async {
+    final item = await insertBook(id: 'chat-session-v2');
+    final controller = BookReaderController(database: database, item: item);
+    await controller.attachEngine(sectionMap, tocTitles);
+    controller.attachChatHistoryStore(JsonAiChatHistoryStore(tempDir));
+
+    final v1 = AiBookOutline(
+      createdAt: DateTime.utc(2026, 1, 1),
+      model: 'test',
+      includesUnread: false,
+      overview: '旧版',
+      chapters: [
+        AiBookOutlineChapter(title: '狂人日记', summary: '摘要', sectionIndex: 1),
+      ],
+    );
+    final v2 = AiBookOutline(
+      createdAt: DateTime.utc(2026, 1, 2),
+      model: 'test',
+      includesUnread: false,
+      overview: '新版',
+      chapters: [
+        AiBookOutlineChapter(title: '孔乙己', summary: '摘要', sectionIndex: 1),
+      ],
+    );
+    // Disk already holds V2 (fresh generation); the sheet snapshot is stale
+    // V1 plus a new chat message — saving it must keep V2.
+    await controller.saveChatSession(
+      AiChatSession(
+        contentHash: item.contentHash,
+        itemId: item.id,
+        workOutlines: {'s1': v2},
+      ),
+    );
+    final stale = AiChatSession(
+      contentHash: item.contentHash,
+      itemId: item.id,
+      workOutlines: {'s1': v1},
+      messages: [
+        AiChatMessage(
+          role: AiMessageRole.user,
+          content: 'hi',
+          createdAt: DateTime.utc(2026, 1, 3),
+        ),
+      ],
+    );
+    await controller.saveChatSession(stale);
+
+    final reloaded = await controller.loadChatSession();
+    expect(reloaded.workOutlines['s1']?.overview, '新版');
+    expect(reloaded.messages.length, 1);
 
     controller.dispose();
   });

@@ -740,7 +740,18 @@ class BookReaderController extends ChangeNotifier {
       await store.write(
         current?.outline != null && session.outline == null
             ? session.copyWith(outline: current!.outline)
-            : session,
+            : (current != null && current.workOutlines.isNotEmpty
+                // Disk holds the latest per-work outlines (generation writes
+                // there); the sheet snapshot predates them. Disk wins, so a
+                // freshly generated outline is never rolled back by an older
+                // snapshot — same direction as the outline branch above.
+                ? session.copyWith(
+                    workOutlines: {
+                      ...session.workOutlines,
+                      ...current.workOutlines,
+                    },
+                  )
+                : session),
       );
     });
   }
@@ -781,9 +792,15 @@ class BookReaderController extends ChangeNotifier {
   /// Loads the cached outline for this exact content hash. This does not call
   /// the model; a book is only generated when the user explicitly requests it.
   Future<AiBookOutline?> loadBookOutline({AiChatSession? session}) async {
-    final resolvedSession = session ?? await loadChatSession();
     final work = currentReadingWork;
     final workKey = work == null ? null : workKeyFor(work);
+    // Memory already holds this work's outline (just generated, still in the
+    // async write queue, or freshly loaded) — trust it instead of re-reading
+    // the disk snapshot which may be stale and would wipe the result.
+    if (_bookOutlineWorkKey == workKey && _bookOutline != null) {
+      return _bookOutline;
+    }
+    final resolvedSession = session ?? await loadChatSession();
     final outline = workKey == null
         ? resolvedSession.outline
         : resolvedSession.workOutlines[workKey];
@@ -897,16 +914,12 @@ class BookReaderController extends ChangeNotifier {
           if (!_disposed) notifyListeners();
         },
       );
-      // 数据始终存到 startWorkKey；UI 只在用户仍停留在原作品时才回拨——
-      // 生成期间翻页后，保留当前作品的大纲（loadBookOutline 已加载），
-      // 避免标题/内容错位。
-      final currentKey = currentReadingWork == null
-          ? null
-          : workKeyFor(currentReadingWork!);
-      if (startWorkKey == currentKey) {
-        _bookOutline = outline;
-        _bookOutlineWorkKey = startWorkKey;
-      }
+      // The user explicitly asked for this outline — show it. A page flip
+      // during generation must not hide the result: the saved data is keyed
+      // by startWorkKey and the following 翻页/切 Tab reload switches to the
+      // then-current work. (A plain book has no work key and always matches.)
+      _bookOutline = outline;
+      _bookOutlineWorkKey = startWorkKey;
       _bookOutlineProgress = null;
       await _saveBookOutline(outline, workKey: startWorkKey);
       if (!_disposed) notifyListeners();
@@ -1184,6 +1197,7 @@ class BookReaderController extends ChangeNotifier {
         return;
       }
       _bookOutline = outline.copyWith(chapters: updatedChapters);
+      _bookOutlineWorkKey = workKeyAtStart;
       if (!_disposed) notifyListeners();
       // The result is ready for the open sheet. Persistence is serialized with
       // chat writes and must not delay replacing the expanded tree on screen.
@@ -1351,10 +1365,10 @@ class BookReaderController extends ChangeNotifier {
   /// behavior: graph/dialog/outline anchor to the work under the reading
   /// position instead of the whole collection.
   AiGraphWorkCandidate? get currentReadingWork {
-    // Works may come from the outline OR from the one-shot structural
-    // recognition (no outline yet) — the graph picker and the chat scope
-    // must agree with the list the user actually sees.
-    final works = graphWorkCandidates ?? _resolvedGraphWorks;
+    // 作品级 works（结构识别）优先：大纲章节推导的 works 在合集下可能是
+    // 篇目级伪作品，用它们算 workKey 会漂移（s5 生成 → s7 查询），大纲
+    // 因此查空。结构识别结果稳定在作品粒度，先于大纲章节来源使用。
+    final works = _resolvedGraphWorks ?? graphWorkCandidates;
     if (works == null) return null;
     final spine = _sectionIndex + 1; // reader is 0-based
     for (final work in works) {
@@ -1382,7 +1396,7 @@ class BookReaderController extends ChangeNotifier {
   /// the one-shot structural recognition) — gates the collection-only UI
   /// (graph picker, chat scope switch) without waiting for the outline.
   bool get hasCollectionWorks =>
-      (graphWorkCandidates ?? _resolvedGraphWorks)?.isNotEmpty ?? false;
+      (_resolvedGraphWorks ?? graphWorkCandidates)?.isNotEmpty ?? false;
 
   /// True when a graph was already generated for [work] of this collection.
   bool hasWorkGraph(AiGraphWorkCandidate work) =>
@@ -1615,15 +1629,15 @@ class BookReaderController extends ChangeNotifier {
   /// on recognition failure → caller falls back to full-book generation.
   Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates() async {
     final fromOutline = graphWorkCandidates;
-    if (fromOutline != null || _bookOutline != null) return fromOutline;
+    if (_resolvedGraphWorks != null) return _resolvedGraphWorks;
     final service = _aiOutline;
-    if (service == null || !canUseAiChat) return null;
+    if (service == null || !canUseAiChat) return fromOutline;
     try {
       final body = await _loadBookGraphPlainTextCached(
         AiBookOutlineService.maxBookBodyChars,
       );
       var sections = AiChatBookCorpus.parseSections(body);
-      if (sections.isEmpty) return null;
+      if (sections.isEmpty) return fromOutline;
       final titled = [
         for (final section in sections)
           AiBookSectionSlice(
@@ -1639,7 +1653,7 @@ class BookReaderController extends ChangeNotifier {
       ];
       final eligible =
           _graphEligibleSections(_filterOutlineSections(titled));
-      if (eligible.isEmpty) return null;
+      if (eligible.isEmpty) return fromOutline;
       final units = await service.planStructure(
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
@@ -1654,7 +1668,10 @@ class BookReaderController extends ChangeNotifier {
       if (!_disposed) notifyListeners();
       return resolved;
     } catch (_) {
-      return null;
+      // Recognition failed — fall back to outline-derived candidates so a
+      // collection still works (its keys may be piece-level; the user can
+      // regenerate).
+      return fromOutline;
     }
   }
 
