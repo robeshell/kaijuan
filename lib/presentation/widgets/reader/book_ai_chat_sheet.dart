@@ -1432,8 +1432,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       // works are known, there is no valid range to generate — show a
       // loading state instead of the actionable empty-state button, or a
       // tap would start a whole-book dialog against a half-loaded book.
-      final outlinePending = _c.bookOutline == null;
-      if (works == null && (_graphWorksLoading || outlinePending)) {
+      // Only a recognition IN PROGRESS shows the loading state; once it
+      // fails (or this is a plain book that will never have works), fall
+      // through to the actionable empty state — otherwise the tab would be
+      // stuck on「正在识别著作范围…」forever.
+      if (works == null && _graphWorksLoading) {
         return Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 32),
