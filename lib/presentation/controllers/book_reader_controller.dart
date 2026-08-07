@@ -1531,6 +1531,9 @@ class BookReaderController extends ChangeNotifier {
   ) {
     if (_tocEntries.isEmpty) return null;
     final endBound = work?.endSectionExclusive;
+    // 收集全部目录项（不按作品范围过滤——子项可能挂在范围外的 spine
+    // 上，即「穿透到下一集读取目录」：先建全书树，再只按范围过滤顶层
+    // root，root 的整棵子树原样保留）。
     final entries = <({String title, int spine, int depth})>[];
     final seenSpines = <int>{};
     for (final entry in _tocEntries) {
@@ -1539,11 +1542,6 @@ class BookReaderController extends ChangeNotifier {
       // 同一 spine 的重复目录项（如「正文」「全文」指向同一章）只保留首个，
       // 否则两个 root 区间相同 → 相同 index 的两个 unit → 摘要校验必失败。
       if (!seenSpines.add(spine)) continue;
-      if (work != null &&
-          (spine < work.startSection ||
-              (endBound != null && spine >= endBound))) {
-        continue;
-      }
       final title = entry.title.trim();
       if (title.isEmpty) continue;
       entries.add((title: title, spine: spine, depth: entry.depth));
@@ -1572,6 +1570,18 @@ class BookReaderController extends ChangeNotifier {
       stack.add(node);
     }
 
+    // 范围过滤只作用于顶层 root：合集当前作品 = 其 spine 区间内的 root
+    // （含整棵子树）；单本（work null）= 全部。
+    final scopedRoots = work == null
+        ? roots
+        : [
+            for (final root in roots)
+              if (root.spine >= work.startSection &&
+                  (endBound == null || root.spine < endBound))
+                root,
+          ];
+    if (scopedRoots.isEmpty) return null;
+
     // One unit per root: its body is the range of sections up to the next
     // root's spine (目录项覆盖自己的 spine 区间). Roots whose spine was
     // filtered out (封面/目录/版权…) still contribute their range — the
@@ -1579,9 +1589,11 @@ class BookReaderController extends ChangeNotifier {
     // to the unit's, so the AI summary merges back reliably.
     final units = <AiBookSectionSlice>[];
     final effectiveRoots = <(_TocOutlineNode, int)>[];
-    for (var i = 0; i < roots.length; i++) {
-      final root = roots[i];
-      final endSpine = i + 1 < roots.length ? roots[i + 1].spine : null;
+    for (var i = 0; i < scopedRoots.length; i++) {
+      final root = scopedRoots[i];
+      final endSpine = i + 1 < scopedRoots.length
+          ? scopedRoots[i + 1].spine
+          : null;
       final matched = sections
           .where((section) {
             final src = section.sourceSectionIndex ?? section.index;
