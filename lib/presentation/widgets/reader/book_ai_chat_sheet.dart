@@ -1537,9 +1537,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               child: Text(
                 _c.activeGraphWork != null
                     ? '《${_c.activeGraphWork!.title}》图谱'
-                    : (_c.viewingWholeBookGraph
-                        ? '整本图谱'
-                        : (graph.includesUnread ? '全书图谱' : '已读章节图谱')),
+                    : (graph.excludedGraphSections.isNotEmpty
+                        ? '部分章节图谱'
+                        : (_c.viewingWholeBookGraph
+                            ? '整本图谱'
+                            : (graph.includesUnread ? '全书图谱' : '已读章节图谱'))),
                 style: TextStyle(
                   fontSize: _panelTitleSize(context),
                   fontWeight: FontWeight.w600,
@@ -2096,7 +2098,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         builder: (_) => BookAiGraphFullscreen(
           title: _c.activeGraphWork != null
               ? '《${_c.activeGraphWork!.title}》图谱'
-              : (_c.viewingWholeBookGraph ? '整本图谱' : '知识图谱'),
+              : (graph.excludedGraphSections.isNotEmpty
+                  ? '部分章节图谱'
+                  : (_c.viewingWholeBookGraph ? '整本图谱' : '知识图谱')),
           entities: graph.entities
               .where(
                 (entity) =>
@@ -2224,7 +2228,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       await _c.generateBookGraph(
         only: work,
         force: force,
-        narrationOverride: confirmed.plan,
+        // The dialog's plan was judged over the whole corpus; when the user
+        // excluded any section, re-judge over the actual generation range so
+        // the default view matches the content (a 散文 slice must not inherit
+        // the collection's family_tree plan).
+        narrationOverride:
+            confirmed.excludedSections.isEmpty ? confirmed.plan : null,
         excludedGraphSectionIndices: confirmed.excludedSections.isEmpty
             ? null
             : confirmed.excludedSections,
@@ -2348,7 +2357,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Widget _buildWholeBookGraphRow(BuildContext context) {
     final colors = context.appColors;
     final graph = _c.bookGraph!;
-    final range = graph.includesUnread ? '全书' : '已读';
+    final range = graph.excludedGraphSections.isNotEmpty
+        ? '已排除 ${graph.excludedGraphSections.length} 节'
+        : (graph.includesUnread ? '全书' : '已读');
     return ListTile(
       contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 4, 2),
       leading: Icon(
@@ -2357,7 +2368,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         color: context.appSecondaryText,
       ),
       title: Text(
-        '整本图谱',
+        graph.excludedGraphSections.isNotEmpty ? '部分章节图谱' : '整本图谱',
         style: TextStyle(
           fontSize: _panelBodySize(context),
           fontWeight: FontWeight.w600,
