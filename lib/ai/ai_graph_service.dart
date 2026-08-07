@@ -482,6 +482,10 @@ class AiBookGraphService {
       for (final e in entities) e.name: e.firstSection,
     };
     _dedupeReverseKinEdges(relations, firstSections);
+    // Marital kin refinement: 夫妻 is informal for imperial consorts. When an
+    // endpoint carries a rank term (皇后/贵妃/妃嫔), rewrite the kin label —
+    // 王皇后→皇后, 恭妃王氏→妃嫔, 郑氏(郑贵妃)→贵妃; commoners keep 夫妻.
+    _refineMaritalKin(relations, entities);
     // Hallucination grounding (borrowed from AI-Reader-V2): an entity whose
     // name and all aliases never appear verbatim in the book body was almost
     // certainly invented by the model (leaked from pretraining) — drop it
@@ -744,6 +748,39 @@ class AiBookGraphService {
   /// the earlier-appearing source ([firstSections] — 长辈先出场), matching
   /// buildFamilyTree's own tie-break. Same-direction duplicates with
   /// different kin (A→B 父子 + A→B 母子, rare) are kept untouched.
+  /// Marital kin refinement (婚配关系词精确化): the model labels imperial
+  /// consorts as 夫妻, which is informal for a 后妃. When one endpoint's name
+  /// or aliases carry a rank term, rewrite the kin label: 皇后 (name contains
+  /// 皇后), 贵妃 (contains 贵妃), 妃嫔 (contains 妃/嫔). Unknown ranks and
+  /// commoner couples keep the model's label. Only 夫妻-labelled edges are
+  /// touched; 翁婿/婆媳 etc. stay untouched.
+  static void _refineMaritalKin(
+    List<AiGraphRelation> relations,
+    List<AiGraphEntity> entities,
+  ) {
+    if (relations.isEmpty) return;
+    final byName = <String, AiGraphEntity>{for (final e in entities) e.name: e};
+    for (var i = 0; i < relations.length; i++) {
+      final r = relations[i];
+      final isMarital = r.type == '婚配' || (r.type == '亲属' && r.kin == '夫妻');
+      if (!isMarital || r.kin != '夫妻') continue;
+      final rank = _maritalRankFor(byName[r.source]) ??
+          _maritalRankFor(byName[r.target]);
+      if (rank == null) continue;
+      relations[i] = r.copyWith(kin: rank);
+    }
+  }
+
+  /// 皇后 > 贵妃 > 妃嫔, judged over name + aliases (郑氏 → aliases 郑贵妃).
+  static String? _maritalRankFor(AiGraphEntity? entity) {
+    if (entity == null) return null;
+    final texts = [entity.name, ...entity.aliases];
+    if (texts.any((t) => t.contains('皇后'))) return '皇后';
+    if (texts.any((t) => t.contains('贵妃'))) return '贵妃';
+    if (texts.any((t) => t.contains('妃') || t.contains('嫔'))) return '妃嫔';
+    return null;
+  }
+
   static void _dedupeReverseKinEdges(
     List<AiGraphRelation> relations,
     Map<String, int> firstSections,
@@ -1059,6 +1096,9 @@ class AiBookGraphService {
             'source=长辈/师父/上级/被效力方/被追随者，'
             'target=晚辈/徒弟/下级/效力者/追随者，方向颠倒即为错误；'
             '婚配/同盟/敌对等无方向关系不做方向要求；'
+            '婚配关系的 kin 用词规范：民间/士人用「夫妻」或「配偶」；'
+            '帝王与后妃按身份用词——正妻「皇后」、妃妾「贵妃/妃嫔/嫔」、'
+            '身份不明用「配偶」，避免对妃妾用「夫妻」；'
             '关系只抽取原文直接陈述的（正文句子明确描述的关系），'
             '禁止根据人物身份、头衔、时代背景自行推断血缘/亲属/隶属关系，'
             '特别是跨代或不同时期的历史人物——'

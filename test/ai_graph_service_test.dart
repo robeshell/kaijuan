@@ -674,7 +674,7 @@ void main() {
       expect(graph.relations.length, 1);
       final relation = graph.relations.single;
       expect(relation.type, '婚配');
-      expect(relation.kin, '夫妻');
+      expect(relation.kin, '妃嫔'); // 恭妃王氏 → rank term, not informal 夫妻
     });
 
     test('hallucinated entity with no verbatim mention is grounded out',
@@ -1097,6 +1097,53 @@ void main() {
       );
 
       expect(graph.entities.single.name, '静玄师太');
+    });
+
+    test('marital kin refines to rank terms for imperial consorts',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[
+             {"name":"万历皇帝","type":"person","aliases":[],"scope":"setting",
+              "evidence":[{"section":1,"quote":"万历皇帝"}],"relations":[]},
+             {"name":"王皇后","type":"person","aliases":["孝端皇后"],"scope":"setting",
+              "evidence":[{"section":1,"quote":"王皇后"}],"relations":[]},
+             {"name":"恭妃王氏","type":"person","aliases":[],"scope":"setting",
+              "evidence":[{"section":1,"quote":"恭妃王氏"}],"relations":[]},
+             {"name":"郑氏","type":"person","aliases":["郑贵妃"],"scope":"setting",
+              "evidence":[{"section":1,"quote":"郑氏"}],"relations":[]},
+             {"name":"张三","type":"person","aliases":[],"scope":"setting",
+              "evidence":[{"section":1,"quote":"张三"}],"relations":[]},
+             {"name":"李四","type":"person","aliases":[],"scope":"setting",
+              "evidence":[{"section":1,"quote":"李四"}],"relations":[]}],
+             "relations":[
+              {"source":"万历皇帝","target":"王皇后","type":"婚配","kin":"夫妻",
+               "evidence":[{"section":1,"quote":"万历皇帝与王皇后成婚"}]},
+              {"source":"万历皇帝","target":"恭妃王氏","type":"婚配","kin":"夫妻",
+               "evidence":[{"section":1,"quote":"万历皇帝与恭妃王氏成婚"}]},
+              {"source":"万历皇帝","target":"郑氏","type":"婚配","kin":"夫妻",
+               "evidence":[{"section":1,"quote":"万历皇帝与郑氏成婚"}]},
+              {"source":"张三","target":"李四","type":"婚配","kin":"夫妻",
+               "evidence":[{"section":1,"quote":"张三与李四结为夫妻"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '万历皇帝与王皇后成婚。万历皇帝与恭妃王氏成婚。万历皇帝与郑氏成婚。张三与李四结为夫妻。')],
+        includesUnread: true,
+      );
+
+      final kinByTarget = {
+        for (final r in graph.relations.where((r) => r.type == '婚配'))
+          r.target: r.kin,
+      };
+      expect(kinByTarget['王皇后'], '皇后', reason: '王皇后是正妻');
+      expect(kinByTarget['恭妃王氏'], '妃嫔', reason: '恭妃是妃妾');
+      expect(kinByTarget['郑氏'], '贵妃', reason: '郑氏即郑贵妃（aliases）');
+      expect(kinByTarget['李四'], '夫妻', reason: '平民夫妻保持原词');
     });
 
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
