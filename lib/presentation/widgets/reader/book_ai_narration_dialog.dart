@@ -229,28 +229,31 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
   }
 
   /// One row of the range chooser: a leaf checkbox, or a book/volume
-  /// container whose checkbox toggles all its pieces at once.
+  /// container whose checkbox toggles all its pieces at once. Rows use the
+  /// outline-tab ListTile language: airy spacing, one line, no cramming.
   Widget _buildChooserNode(_ChooserNode node) {
     final theme = Theme.of(context);
     final s = node.slice;
     if (node.children.isEmpty) {
-      return CheckboxListTile(
-        dense: true,
-        value: !_excludedSections.contains(s.index),
-        onChanged: (checked) => setState(() {
-          if (checked == true) {
-            _excludedSections.remove(s.index);
-          } else {
-            _excludedSections.add(s.index);
-          }
-        }),
-        controlAffinity: ListTileControlAffinity.leading,
-        contentPadding: EdgeInsets.zero,
-        title: Text(
-          s.label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall,
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: CheckboxListTile(
+          value: !_excludedSections.contains(s.index),
+          onChanged: (checked) => setState(() {
+            if (checked == true) {
+              _excludedSections.remove(s.index);
+            } else {
+              _excludedSections.add(s.index);
+            }
+          }),
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: const EdgeInsetsDirectional.fromSTEB(0, 0, 4, 0),
+          title: Text(
+            s.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium,
+          ),
         ),
       );
     }
@@ -264,65 +267,66 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ListTile(
-          dense: true,
-          leading: Checkbox(
-            value: triState,
-            tristate: true,
-            onChanged: (checked) => setState(() {
-              // Container click = select all ⇄ select none (never the dash
-              // state); the dash only reflects a partial child selection.
-              if (checked == true) {
-                for (final c in node.children) {
-                  _excludedSections.remove(c.slice.index);
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: ListTile(
+            leading: Checkbox(
+              value: triState,
+              tristate: true,
+              onChanged: (checked) => setState(() {
+                // Container click = select all ⇄ select none (never the dash
+                // state); the dash only reflects a partial child selection.
+                if (checked == true) {
+                  for (final c in node.children) {
+                    _excludedSections.remove(c.slice.index);
+                  }
+                } else {
+                  for (final c in node.children) {
+                    _excludedSections.add(c.slice.index);
+                  }
                 }
+              }),
+            ),
+            contentPadding: const EdgeInsetsDirectional.fromSTEB(0, 0, 4, 0),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    s.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Text(
+                  '${node.children.length} 篇',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+            onTap: () => setState(() {
+              if (expanded) {
+                _expandedContainers.remove(s.index);
               } else {
-                for (final c in node.children) {
-                  _excludedSections.add(c.slice.index);
-                }
+                _expandedContainers.add(s.index);
               }
             }),
           ),
-          contentPadding: EdgeInsets.zero,
-          title: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  s.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-              Icon(
-                expanded ? Icons.expand_less : Icons.expand_more,
-                size: 16,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-          subtitle: Text(
-            '${node.children.length} 篇',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontSize: 10,
-            ),
-          ),
-          onTap: () => setState(() {
-            if (expanded) {
-              _expandedContainers.remove(s.index);
-            } else {
-              _expandedContainers.add(s.index);
-            }
-          }),
         ),
         if (expanded)
           for (final child in node.children)
             Padding(
-              padding: const EdgeInsets.only(left: 26),
+              padding: const EdgeInsets.only(left: 24),
               child: CheckboxListTile(
-                dense: true,
                 value: !_excludedSections.contains(child.slice.index),
                 onChanged: (checked) => setState(() {
                   if (checked == true) {
@@ -332,12 +336,12 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
                   }
                 }),
                 controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
+                contentPadding: const EdgeInsetsDirectional.fromSTEB(0, 0, 4, 0),
                 title: Text(
                   child.slice.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall,
+                  style: theme.textTheme.bodyMedium,
                 ),
               ),
             ),
@@ -523,7 +527,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
             )
           else
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
+              constraints: const BoxConstraints(maxHeight: 260),
               child: ListView(
                 shrinkWrap: true,
                 children: [
