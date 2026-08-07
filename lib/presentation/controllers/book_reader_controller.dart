@@ -837,6 +837,11 @@ class BookReaderController extends ChangeNotifier {
       // may flip pages — the content must be stored under the key it was
       // generated from, never re-read at save time.
       final work = currentReadingWork;
+      // A collection has no whole-book outline surface — refusing generation
+      // outside any work beats producing an outline nothing can display.
+      if (hasCollectionWorks && work == null) {
+        throw AiProviderException('翻到某部作品后，再生成它的知识图谱大纲');
+      }
       final startWorkKey = work == null ? null : workKeyFor(work);
       final List<AiBookSectionSlice> sections;
       if (work != null) {

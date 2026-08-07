@@ -832,6 +832,34 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
     }
     if (outline == null) {
+      // 合集下不在任何作品内（目录/前言）：没有可生成的大纲范围——整本
+      // 大纲无处显示（合集没有全书总览），引导翻到某部作品。
+      if (_c.hasCollectionWorks && _c.currentReadingWork == null) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  KaijuanIcons.toc,
+                  size: 34,
+                  color: context.appSecondaryText,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '翻到某部作品后，这里显示它的知识图谱大纲',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
       return Center(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
