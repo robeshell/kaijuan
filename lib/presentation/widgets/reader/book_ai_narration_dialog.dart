@@ -247,7 +247,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
         controlAffinity: ListTileControlAffinity.leading,
         contentPadding: EdgeInsets.zero,
         title: Text(
-          '§${s.index} ${s.label}',
+          s.label,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodySmall,
@@ -334,7 +334,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
                 controlAffinity: ListTileControlAffinity.leading,
                 contentPadding: EdgeInsets.zero,
                 title: Text(
-                  '§${child.slice.index} ${child.slice.label}',
+                  child.slice.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall,

@@ -1715,7 +1715,7 @@ class BookReaderController extends ChangeNotifier {
               ? section.label.trim()
               : (work == null
                   ? _titleForOutlineSection(section.index)
-                  : '§${section.index}'),
+                  : '第 ${section.index} 节'),
           text: section.text,
           sourceSectionIndex: section.sourceSectionIndex,
           isNavigationUnit: section.isNavigationUnit,

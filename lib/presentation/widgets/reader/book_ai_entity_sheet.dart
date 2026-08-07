@@ -190,7 +190,7 @@ class BookAiEntitySheet extends StatelessWidget {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              '§${item.sectionIndex}',
+                              '第 ${item.sectionIndex} 节',
                               style: TextStyle(
                                 fontSize: context.appCaptionSize,
                                 fontWeight: FontWeight.w600,

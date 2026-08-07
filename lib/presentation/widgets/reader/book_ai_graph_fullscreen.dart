@@ -213,7 +213,7 @@ class BookAiGraphFullscreen extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                '§${item.sectionIndex}',
+                                '第 ${item.sectionIndex} 节',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
