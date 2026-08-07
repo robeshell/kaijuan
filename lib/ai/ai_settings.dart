@@ -19,6 +19,7 @@ class AiGraphRuleWords {
     this.relationTypeAliases = defaultRelationTypeAliases,
     this.personTitleSuffixes = defaultPersonTitleSuffixes,
     this.genericPersonTerms = defaultGenericPersonTerms,
+    this.bookNamePriors = defaultBookNamePriors,
   });
 
   /// Front/back-matter unit words matched as a PREFIX of a section label
@@ -51,6 +52,13 @@ class AiGraphRuleWords {
   /// named person via the substring rule (皇帝/太后/哥哥/先生…). Configurable
   /// so book-specific 称谓 systems can be tuned without touching the pipeline.
   final List<String> genericPersonTerms;
+
+  /// Book-specific alias→canonical priors, keyed by book title (matched
+  /// against the graph's bookTitle). Populated for the four classics out of
+  /// the box; any other book can add its own entry via settings — this is a
+  /// config library, never pipeline code. Aliases here are resolved before
+  /// every generic merge rule (they are certain, not probabilistic).
+  final Map<String, Map<String, String>> bookNamePriors;
 
   static const defaultAppendixUnits = <String>[
     '附录',
@@ -254,6 +262,40 @@ class AiGraphRuleWords {
     '郎君', '大姐', '大婶', '大妈', '堂兄', '堂弟', '表兄', '表弟',
   ];
 
+  /// Alias→canonical priors for the four classics (公版、测试常客、别名共指
+  /// 出错率高的作品). Only aliases that unambiguously name one person are
+  /// listed; generic terms (丞相/师父) are deliberately excluded. Matched by
+  /// bookTitle; empty map when the book is not listed.
+  static const defaultBookNamePriors = <String, Map<String, String>>{
+    '红楼梦': {
+      '宝二爷': '贾宝玉', '怡红公子': '贾宝玉', '绛珠仙子': '林黛玉',
+      '潇湘妃子': '林黛玉', '颦儿': '林黛玉', '蘅芜君': '薛宝钗',
+      '凤辣子': '王熙凤', '琏二爷': '贾琏', '老祖宗': '贾母',
+      '史太君': '贾母', '稻香老农': '李纨', '蕉下客': '贾探春',
+    },
+    '西游记': {
+      '行者': '孙悟空', '孙行者': '孙悟空', '美猴王': '孙悟空',
+      '齐天大圣': '孙悟空', '斗战胜佛': '孙悟空', '泼猴': '孙悟空',
+      '弼马温': '孙悟空', '金蝉子': '唐僧', '玄奘': '唐僧',
+      '唐长老': '唐僧', '圣僧': '唐僧', '天蓬元帅': '猪八戒',
+      '猪悟能': '猪八戒', '净坛使者': '猪八戒', '卷帘大将': '沙僧',
+      '沙悟净': '沙僧',
+    },
+    '三国演义': {
+      '孟德': '曹操', '曹孟德': '曹操', '云长': '关羽', '关云长': '关羽',
+      '美髯公': '关羽', '孔明': '诸葛亮', '诸葛孔明': '诸葛亮',
+      '卧龙': '诸葛亮', '玄德': '刘备', '刘玄德': '刘备',
+      '翼德': '张飞', '张翼德': '张飞', '奉先': '吕布', '吕奉先': '吕布',
+      '子龙': '赵云', '赵子龙': '赵云', '仲谋': '孙权', '孙仲谋': '孙权',
+    },
+    '水浒传': {
+      '公明': '宋江', '宋公明': '宋江', '及时雨': '宋江',
+      '豹子头': '林冲', '林教头': '林冲', '智多星': '吴用', '吴学究': '吴用',
+      '黑旋风': '李逵', '铁牛': '李逵', '花和尚': '鲁智深', '鲁提辖': '鲁智深',
+      '武二郎': '武松', '青面兽': '杨志', '玉麒麟': '卢俊义',
+    },
+  };
+
   AiGraphRuleWords copyWith({
     List<String>? appendixUnits,
     List<String>? metadataUnits,
@@ -262,6 +304,7 @@ class AiGraphRuleWords {
     Map<String, String>? relationTypeAliases,
     List<String>? personTitleSuffixes,
     List<String>? genericPersonTerms,
+    Map<String, Map<String, String>>? bookNamePriors,
   }) {
     return AiGraphRuleWords(
       appendixUnits: appendixUnits ?? this.appendixUnits,
@@ -274,6 +317,7 @@ class AiGraphRuleWords {
       personTitleSuffixes:
           personTitleSuffixes ?? this.personTitleSuffixes,
       genericPersonTerms: genericPersonTerms ?? this.genericPersonTerms,
+      bookNamePriors: bookNamePriors ?? this.bookNamePriors,
     );
   }
 
@@ -285,6 +329,7 @@ class AiGraphRuleWords {
     'relationTypeAliases': relationTypeAliases,
     'personTitleSuffixes': personTitleSuffixes,
     'genericPersonTerms': genericPersonTerms,
+    'bookNamePriors': bookNamePriors,
   };
 
   static AiGraphRuleWords fromJson(Object? json) {
@@ -318,6 +363,18 @@ class AiGraphRuleWords {
       genericPersonTerms:
           (map['genericPersonTerms'] as List?)?.cast<String>() ??
           defaults.genericPersonTerms,
+      bookNamePriors:
+          map['bookNamePriors'] is Map
+              ? {
+                  for (final entry
+                      in (map['bookNamePriors'] as Map).entries)
+                    entry.key.toString(): {
+                      for (final alias in
+                          (entry.value as Map? ?? const {}).entries)
+                        alias.key.toString(): alias.value.toString(),
+                    },
+                }
+              : defaults.bookNamePriors,
     );
   }
 }

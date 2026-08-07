@@ -1004,6 +1004,101 @@ void main() {
           {'刘爷爷', '老爷子'});
     });
 
+    test('book priors resolve classics aliases before generic rules (行者→孙悟空)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"行者","type":"person","aliases":[],
+              "description":"取经人。",
+              "evidence":[{"section":1,"quote":"行者"}],
+              "scope":"setting"}],
+             "relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"孙悟空","type":"person","aliases":[],
+              "description":"","evidence":[{"section":2,"quote":"孙悟空"}],
+              "scope":"setting"},
+             {"name":"唐僧","type":"person","aliases":[],
+              "description":"","evidence":[{"section":2,"quote":"唐僧"}],
+              "scope":"setting"}],
+             "relations":[{"source":"行者","target":"唐僧","type":"师徒",
+              "kin":"师徒",
+              "evidence":[{"section":2,"quote":"行者拜唐僧为师"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '西游记',
+        sections: [slice(1, '一', '行者。'), slice(2, '二', '孙悟空。唐僧。行者拜唐僧为师。')],
+        includesUnread: true,
+      );
+
+      // 行者 is a prior alias of 孙悟空 (config library, matched by title):
+      // the entity canonicalizes immediately, later mentions merge into it,
+      // and the relation endpoint follows the prior.
+      final names = graph.entities.map((e) => e.name).toSet();
+      expect(names, isNot(contains('行者')));
+      expect(names, contains('孙悟空'));
+      expect(graph.entities.length, 2); // 孙悟空 + 唐僧
+      final relation = graph.relations.single;
+      expect(relation.source, '孙悟空');
+      expect(relation.target, '唐僧');
+    });
+
+    test('book priors are inert for unmatched titles', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"行者","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"行者"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '无名书',
+        sections: [slice(1, '一', '行者。')],
+        includesUnread: true,
+      );
+
+      // No priors for this title: 行者 stays its own entity (no forced merge).
+      expect(graph.entities.map((e) => e.name), ['行者']);
+    });
+
+    test('configured book priors take effect (config library, not code)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"师太","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"师太"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+      final service = AiBookGraphService(
+        isAvailable: () => true,
+        openProvider: () => provider,
+        settings: () => const AiSettings(
+          model: 'graph-test',
+          graphRuleWords: AiGraphRuleWords(
+            bookNamePriors: {'江湖志': {'师太': '静玄师太'}},
+          ),
+        ),
+      );
+
+      final graph = await service.generate(
+        bookTitle: '江湖志',
+        sections: [slice(1, '一', '师太。')],
+        includesUnread: true,
+      );
+
+      expect(graph.entities.single.name, '静玄师太');
+    });
+
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
         () async {
       final provider = _GraphProvider(

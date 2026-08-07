@@ -267,6 +267,12 @@ class AiBookGraphService {
     final entities = <AiGraphEntity>[...?existing?.entities];
     final relations = <AiGraphRelation>[...?existing?.relations];
 
+    // Book-name priors (config library, e.g. the four classics): certain
+    // alias→canonical mappings resolved before any probabilistic rule.
+    final priorAliases =
+        _settings().graphRuleWords.bookNamePriors[bookTitle.trim()] ??
+        const <String, String>{};
+
     // ER pipeline state: fuzzy merges queued for LLM review + audit trail.
     final pendingMerges = <_PendingMerge>[];
     final mergeLog = <Map<String, Object?>>[
@@ -361,6 +367,7 @@ class AiBookGraphService {
               raw: raw,
               pendingMerges: pendingMerges,
               mergeLog: mergeLog,
+              priorAliases: priorAliases,
             );
           }
           if (!covered.contains(origin)) covered.add(origin);
@@ -1136,6 +1143,7 @@ class AiBookGraphService {
     required Map<String, Object?> raw,
     required List<_PendingMerge> pendingMerges,
     required List<Map<String, Object?>> mergeLog,
+    Map<String, String> priorAliases = const {},
   }) {
     final rawEntities = raw['entities'];
     if (rawEntities is List) {
@@ -1166,11 +1174,12 @@ class AiBookGraphService {
             ? (map['importance'] as int).clamp(0, 3)
             : 0;
         final originalName = name.trim();
-        final canonicalName = _resolveCanonical(
-          canonical,
-          type,
-          originalName,
-        ) ??
+        final canonicalName = priorAliases[originalName] ??
+            _resolveCanonical(
+              canonical,
+              type,
+              originalName,
+            ) ??
             _resolveAliases(canonical, type, map['aliases']) ??
             _resolveMergeCandidate(
               canonical: canonical,
@@ -1284,11 +1293,11 @@ class AiBookGraphService {
         }
         final sourceType = _typeOf(entities, entityIndex, sourceRaw.trim());
         final targetType = _typeOf(entities, entityIndex, targetRaw.trim());
-        final source =
+        final source = priorAliases[sourceRaw.trim()] ??
             _resolveCanonical(canonical, sourceType, sourceRaw.trim()) ??
             _resolveEndpointName(canonical, sourceType, sourceRaw.trim()) ??
             sourceRaw.trim();
-        final target =
+        final target = priorAliases[targetRaw.trim()] ??
             _resolveCanonical(canonical, targetType, targetRaw.trim()) ??
             _resolveEndpointName(canonical, targetType, targetRaw.trim()) ??
             targetRaw.trim();
