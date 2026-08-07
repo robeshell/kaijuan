@@ -1155,9 +1155,10 @@ class BookReaderController extends ChangeNotifier {
       cancel.throwIfCancelled();
       final outline = _bookOutline;
       if (outline == null) return;
-      // Same 读哪本跟哪本 guard as full generation: capture the work key at
-      // expansion start — the user may flip pages while the AI runs, and the
-      // result must be stored under the key it was expanded from.
+      // Capture the work key together with the outline being replaced, just
+      // before the sync update: the saved content and its key always belong
+      // to the same work (a page flip during the AI run must not write the
+      // expansion result under a different work's key).
       final workKeyAtStart = _bookOutlineWorkKey;
       final updatedChapters = _replaceOutlineChildren(
         outline.chapters,
