@@ -9,6 +9,17 @@ library;
 
 import 'ai_graph.dart';
 
+/// Affinal (姻亲) kinship labels that never enter the blood-line family tree.
+/// The model occasionally emits 夫妻 as 亲属/夫妻 (alongside the correct 婚配
+/// edge); a spouse is not a member of the lineage, so such edges are skipped
+/// at tree build time. Kin-less 亲属 edges are filtered separately (empty kin
+/// is an unconfirmed relation).
+const _affinalKinTerms = {
+  '夫妻', '妻', '妾', '夫', '丈夫', '妻子', '配偶', '正妻', '继室',
+  '侧室', '偏房', '后妃', '妃', '嫔', '皇后', '贵妃', '夫人', '娘子',
+  '翁婿', '婆媳', '妯娌', '连襟', '亲家',
+};
+
 /// One family-tree node. [children] are kept in book order (firstSection).
 class AiFamilyTreeNode {
   AiFamilyTreeNode({
@@ -71,12 +82,14 @@ AiFamilyTree buildFamilyTree({
   };
 
   // child -> candidate parent edges (strength-descending order preserved by
-  // the sort below). Only 亲属 edges with a concrete kin label participate:
-  // 万历 -[亲属 kin=空]-> 恭妃王氏 would otherwise draw the consort as the
-  // emperor's child — a kin-less 亲属 edge is an unconfirmed relation.
+  // the sort below). Only 亲属 edges with a concrete KIN-SHIP label
+  // participate — and affinal (姻亲) labels never enter the blood-line tree:
+  // the model sometimes emits 夫妻 as 亲属/夫妻 (alongside the real 婚配 edge),
+  // which would draw the consort as a member of the lineage.
   final incoming = <String, List<AiGraphRelation>>{};
   for (final r in relations) {
     if (r.type != '亲属' || r.kin.isEmpty) continue;
+    if (_affinalKinTerms.contains(r.kin)) continue;
     final parent = r.source;
     final child = r.target;
     if (parent == child) continue;

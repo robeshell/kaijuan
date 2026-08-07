@@ -207,6 +207,40 @@ void main() {
       expect(tree.roots.single.children.single.kin, '父子');
     });
 
+    test('affinal kin (夫妻) never enters the blood-line tree', () {
+      // The model emits 万历 -[亲属 kin=夫妻]-> 王皇后 alongside the real
+      // 婚配 edge; the spouse is not a member of the lineage.
+      final tree = buildFamilyTree(
+        entities: [
+          person('万历皇帝', firstSection: 1),
+          person('王皇后', firstSection: 1),
+          person('朱常洛', firstSection: 1),
+        ],
+        relations: [
+          AiGraphRelation(
+            source: '万历皇帝',
+            target: '王皇后',
+            type: '亲属',
+            kin: '夫妻',
+            description: '',
+            evidence: [
+              AiGraphEvidence(sectionIndex: 1, quote: '万历与王皇后为夫妻'),
+            ],
+            weight: 1,
+          ),
+          kin('万历皇帝', '朱常洛'),
+        ],
+      );
+
+      // 王皇后 is isolated (her 婚配 edge is not a tree edge either); the
+      // emperor keeps only his real children in the lineage.
+      expect(tree.isolatedNames, contains('王皇后'));
+      final wl = flatten(tree.roots.single);
+      expect(wl, contains('万历皇帝'));
+      expect(wl, contains('朱常洛'));
+      expect(wl, isNot(contains('王皇后')));
+    });
+
     test('kin-less 亲属 edge never draws a child (恭妃≠万历之子)', () {
       // The model emitted 万历 -[亲属 kin=空]-> 恭妃王氏 alongside the real
       // 婚配 edge; the kin-less edge must not make the consort a child.
