@@ -59,6 +59,10 @@ class _PendingMerge {
   final int section;
 }
 
+/// Graph calls carry long prompts and emit large JSON; the provider default
+/// (45s) is a chat-friendly budget and too tight for one extraction pass.
+const Duration _graphCallTimeout = Duration(seconds: 120);
+
 /// The caller owns persistence (AiGraphStore) and cancellation tokens.
 class AiBookGraphService {
   AiBookGraphService({
@@ -190,6 +194,7 @@ class AiBookGraphService {
         messages: messages,
         maxTokens: narrationMaxTokens,
         temperature: 0,
+        timeout: _graphCallTimeout,
       );
       final result = await completeWithRetry(
         provider,
@@ -1085,6 +1090,7 @@ class AiBookGraphService {
       messages: messages,
       maxTokens: extractionMaxTokens,
       temperature: 0,
+      timeout: _graphCallTimeout,
     );
 
     final firstResult = await completeWithRetry(
@@ -1112,6 +1118,7 @@ class AiBookGraphService {
         ],
         maxTokens: extractionMaxTokens,
         temperature: 0,
+        timeout: _graphCallTimeout,
       );
       decoded = _decodeJsonObject(
         (await completeWithRetry(provider, retryRequest, cancelToken: cancelToken))
@@ -1627,6 +1634,7 @@ class AiBookGraphService {
           ],
           maxTokens: 512,
           temperature: 0,
+          timeout: _graphCallTimeout,
         ),
         cancelToken: cancelToken,
       );

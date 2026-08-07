@@ -21,11 +21,16 @@ class AiCompletionRequest {
     required this.messages,
     this.maxTokens = 1024,
     this.temperature = 0.3,
+    this.timeout,
   });
 
   final List<AiMessage> messages;
   final int maxTokens;
   final double temperature;
+
+  /// Per-call network timeout; null uses the provider default (45s). Graph
+  /// extraction passes a longer budget (long prompts + big JSON output).
+  final Duration? timeout;
 }
 
 /// Result of a non-streaming completion (used by test connection and short tools).

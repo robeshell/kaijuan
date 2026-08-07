@@ -234,7 +234,7 @@ class OpenAiCompatibleAiProvider implements AiProvider {
             headers: _headers,
             body: jsonEncode(_body(request, stream: false)),
           )
-          .timeout(const Duration(seconds: 45));
+          .timeout(request.timeout ?? const Duration(seconds: 45));
     } catch (error) {
       AiLog.d('openai POST complete network error after ${sw.elapsedMilliseconds}ms: $error');
       rethrow;
