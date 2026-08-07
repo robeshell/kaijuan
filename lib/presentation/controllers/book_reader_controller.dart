@@ -3634,7 +3634,12 @@ class _BookChatToolHost implements AiChatToolHost {
       return '(目录不可用)';
     }
     final buf = StringBuffer();
+    // 读哪本跟哪本: the toc tool must answer for the reading work only —
+    // a collection's whole-book toc would let the model talk about all 30
+    // works even though chat scope is the current one.
+    final work = _c.currentReadingWork;
     for (var i = 0; i < titles.length; i++) {
+      if (work != null && !work.contains(i + 1)) continue;
       final t = titles[i].trim();
       buf.writeln('§${i + 1} ${t.isEmpty ? '（无标题）' : t}');
     }
