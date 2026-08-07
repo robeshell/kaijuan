@@ -150,7 +150,22 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
             child: const Text('取消'),
           ),
         if (_failed)
-          FilledButton(onPressed: _analyze, child: const Text('重试'))
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton(onPressed: _analyze, child: const Text('重试')),
+              const SizedBox(width: 8),
+              TextButton(
+                // The display plan only tunes views; failing to analyze it
+                // must not block generation (default view fallback).
+                onPressed: () => Navigator.of(context).pop((
+                  plan: null,
+                  excludedSections: Set<int>.unmodifiable(_excludedSections),
+                )),
+                child: const Text('跳过，按默认生成'),
+              ),
+            ],
+          )
         else if (_plan != null)
           FilledButton(
             onPressed: _selectedView == null || _allExcluded

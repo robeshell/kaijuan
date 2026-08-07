@@ -2237,13 +2237,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// Pre-generation confirm dialog: runs the step-0 display plan (features +
   /// recommended view, user may pick another default view) **and** the
   /// auto-filtered graph corpus with a manual section chooser (uncheck to
-  /// exclude a chapter). Returns the confirmed plan + excluded section
-  /// indices. Null = cancelled.
-  Future<({AiNarrationPlan plan, Set<int> excludedSections})?>
+  /// exclude a chapter). Returns the confirmed plan (null = keep the default
+  /// view) + excluded section indices. Null = cancelled.
+  Future<({AiNarrationPlan? plan, Set<int> excludedSections})?>
       _confirmNarrationPlan(
     AiGraphWorkCandidate? work,
   ) {
-    return showDialog<({AiNarrationPlan plan, Set<int> excludedSections})>(
+    return showDialog<({AiNarrationPlan? plan, Set<int> excludedSections})>(
       context: context,
       barrierDismissible: false,
       builder: (_) => NarrationPlanDialog(

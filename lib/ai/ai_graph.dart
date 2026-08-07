@@ -467,8 +467,11 @@ class AiNarrationPlan {
 
   /// Null when the payload is missing or invalid — caller falls back to the
   /// default person list (same behavior as graphs generated before this
-  /// feature). Values are clamped, not rejected, so a slightly out-of-range
-  /// model number never invalidates an otherwise good plan.
+  /// feature). Tolerant parsing: a missing feature dimension defaults to 0,
+  /// an unknown/absent defaultView falls back to the strongest feature's
+  /// view, and an empty or invalid viewOrder is rebuilt — a slightly
+  /// incomplete model reply never invalidates an otherwise good plan (this
+  /// only drives display preferences, so degrading beats failing).
   static AiNarrationPlan? fromJson(Map<String, dynamic>? json) {
     if (json == null) return null;
     final rawFeatures = json['features'];
@@ -476,21 +479,50 @@ class AiNarrationPlan {
     final features = <String, double>{};
     for (final key in knownFeatures) {
       final raw = rawFeatures[key];
-      if (raw is! num) return null;
-      features[key] = raw.toDouble().clamp(0.0, 1.0);
+      features[key] = (raw is num ? raw.toDouble() : 0.0).clamp(0.0, 1.0);
     }
     final view = json['defaultView'];
-    final order = json['viewOrder'];
-    if (view is! String || !knownViews.contains(view)) return null;
-    final viewOrder =
-        order is List ? order.whereType<String>().toList(growable: false) : <String>[];
-    if (viewOrder.isEmpty || !viewOrder.contains(view)) return null;
+    final derived = _deriveDefaultView(features);
+    final resolvedView =
+        (view is String && knownViews.contains(view)) ? view : derived;
+    final rawOrder =
+        json['viewOrder'] is List ? json['viewOrder'] as List : const <dynamic>[];
+    final modelOrder =
+        rawOrder.whereType<String>().where(knownViews.contains).toList();
+    final viewOrder = [
+      resolvedView,
+      for (final v in modelOrder)
+        if (v != resolvedView) v,
+      for (final v in knownViews)
+        if (v != resolvedView && !modelOrder.contains(v)) v,
+    ];
     return AiNarrationPlan(
       features: features,
-      defaultView: view,
+      defaultView: resolvedView,
       viewOrder: viewOrder,
       wantMap: json['wantMap'] as bool? ?? false,
     );
+  }
+
+  /// The strongest feature's recommended view; ties keep the earlier entry,
+  /// essays default to the plain relation graph.
+  static String _deriveDefaultView(Map<String, double> features) {
+    const mapping = <String, String>{
+      'organization': 'family_tree',
+      'characterEnsemble': 'persons',
+      'eventDriven': 'events',
+      'geography': 'locations',
+    };
+    var best = 'graph';
+    var highest = -1.0;
+    for (final entry in mapping.entries) {
+      final value = features[entry.key] ?? 0.0;
+      if (value > highest) {
+        highest = value;
+        best = entry.value;
+      }
+    }
+    return best;
   }
 }
 

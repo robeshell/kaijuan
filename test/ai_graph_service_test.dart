@@ -191,7 +191,14 @@ void main() {
       expect(restored, isNotNull);
       expect(restored!.narration, isNotNull);
       expect(restored.narration!.defaultView, 'family_tree');
-      expect(restored.narration!.viewOrder, ['family_tree', 'persons', 'events', 'graph']);
+      expect(restored.narration!.viewOrder, [
+        'family_tree',
+        'persons',
+        'events',
+        'graph',
+        'locations',
+        'org_tree',
+      ]);
       expect(restored.narration!.wantMap, isTrue);
       expect(restored.narration!.feature('characterEnsemble'), 0.9);
     });
@@ -237,18 +244,43 @@ void main() {
       final old = Map<String, dynamic>.from(relation.toJson())..remove('kin');
       expect(AiGraphRelation.fromJson(old)!.kin, isEmpty);
     });
-    test('invalid narration payload is rejected (falls back to default view)',
-        () {
-      expect(
-        AiNarrationPlan.fromJson({
-          'features': {'eventDriven': 0.5}, // missing the other four
-          'defaultView': 'persons',
-          'viewOrder': ['persons'],
-          'wantMap': false,
-        }),
-        isNull,
-      );
+    test('incomplete narration payload degrades instead of failing', () {
+      // Missing feature dimensions default to 0; unknown defaultView falls
+      // back to the strongest feature's view; empty viewOrder is rebuilt.
+      final degraded = AiNarrationPlan.fromJson({
+        'features': {'eventDriven': 0.5}, // missing the other four
+        'defaultView': 'persons',
+        'viewOrder': ['persons'],
+        'wantMap': false,
+      });
+      expect(degraded, isNotNull);
+      expect(degraded!.feature('eventDriven'), 0.5);
+      expect(degraded.feature('essay'), 0.0);
+      expect(degraded.defaultView, 'persons');
+      expect(degraded.viewOrder.first, 'persons');
+
+      // Unknown defaultView + empty viewOrder → derived from the strongest
+      // feature (organization → family_tree), order rebuilt around it.
+      final derived = AiNarrationPlan.fromJson({
+        'features': {
+          'eventDriven': 0.2,
+          'characterEnsemble': 0.4,
+          'organization': 0.9,
+          'geography': 0.1,
+          'essay': 0.1,
+        },
+        'defaultView': 'some_future_view',
+        'viewOrder': <dynamic>[],
+      });
+      expect(derived, isNotNull);
+      expect(derived!.defaultView, 'family_tree');
+      expect(derived.viewOrder.first, 'family_tree');
+      expect(derived.viewOrder.toSet(), containsAll(AiNarrationPlan.knownViews));
+
+      // Only a structurally missing payload is rejected.
       expect(AiNarrationPlan.fromJson(null), isNull);
+      expect(AiNarrationPlan.fromJson({'features': 'not-a-map'}), isNull);
+
       // Out-of-range values clamp instead of invalidating the plan.
       final clamped = AiNarrationPlan.fromJson({
         'features': {
