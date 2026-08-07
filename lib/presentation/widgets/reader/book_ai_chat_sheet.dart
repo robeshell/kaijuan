@@ -319,6 +319,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _graphViewMode = wanted;
       }
     }
+    // 读哪本跟哪本: as the reader moves, the graph tab follows to the work
+    // under the reading position (opens its graph when one exists).
+    if (_activeTab == _BookAiWorkspaceTab.graph && _c.hasCollectionWorks) {
+      _followReadingWorkForGraph();
+    }
     setState(() {});
   }
 
@@ -1412,14 +1417,116 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final progress = _c.bookGraphProgress;
     final generating = _c.isGeneratingBookGraph;
     final error = _c.bookGraphError;
-    // Collection books: the picker lists every work; entering one shows its
-    // graph (whole-book / plain-book graphs keep the single view below).
-    final works = _graphWorks ?? _c.graphWorkCandidates;
-    if (works != null &&
-        works.isNotEmpty &&
-        !_c.hasActiveWorkGraph &&
-        !_c.viewingWholeBookGraph) {
-      return _buildGraphWorksList(context, works);
+    // Collection books: the graph tab IS the current reading work — no
+    // picker list anymore. With a generated graph the detail view shows
+    // (opened by _followReadingWorkForGraph); without one, an entry card
+    // offers to generate this work's graph. Plain books keep the single view.
+    if (_c.hasCollectionWorks && !_c.hasActiveWorkGraph && !_c.viewingWholeBookGraph) {
+      final reading = _c.currentReadingWork;
+      if (reading == null) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  KaijuanIcons.collections,
+                  size: 34,
+                  color: context.appSecondaryText,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '翻到某部作品后，这里显示它的知识图谱',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      final ready = _c.hasWorkGraph(reading);
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (ready) ...[
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '正在打开《${reading.title}》图谱…',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ] else ...[
+                Icon(
+                  KaijuanIcons.collections,
+                  size: 34,
+                  color: context.appSecondaryText,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '当前阅读：《${reading.title}》',
+                  style: TextStyle(
+                    fontSize: context.appBodySize,
+                    fontWeight: FontWeight.w600,
+                    color: context.appPrimaryText,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '生成这本的知识图谱',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (generating)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _thinkingOrb(context),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          progress?.label ?? '正在生成图谱…',
+                          style: TextStyle(
+                            fontSize: context.appCaptionSize,
+                            color: context.appSecondaryText,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _c.cancelBookGraphGeneration,
+                        icon: const Icon(KaijuanIcons.stop, size: 16),
+                        label: const Text('停止'),
+                      ),
+                    ],
+                  )
+                else
+                  FilledButton.icon(
+                    onPressed: () => unawaited(_generateGraph(work: reading)),
+                    icon: const Icon(KaijuanIcons.collections, size: 18),
+                    label: const Text('生成图谱'),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      );
     }
     if (!_ready) {
       return _AiUnavailable(
@@ -1436,6 +1543,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       // fails (or this is a plain book that will never have works), fall
       // through to the actionable empty state — otherwise the tab would be
       // stuck on「正在识别著作范围…」forever.
+      final works = _graphWorks ?? _c.graphWorkCandidates;
       if (works == null && _graphWorksLoading) {
         return Center(
           child: Padding(
@@ -1467,7 +1575,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_c.activeGraphWork != null || _c.viewingWholeBookGraph) ...[
+              if ((_c.activeGraphWork != null || _c.viewingWholeBookGraph) &&
+                  !_c.hasCollectionWorks) ...[
                 _graphBackRow(),
                 const SizedBox(height: 8),
               ],
@@ -1613,7 +1722,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       controller: _graphScrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        if (_c.activeGraphWork != null || _c.viewingWholeBookGraph) ...[
+        if ((_c.activeGraphWork != null || _c.viewingWholeBookGraph) &&
+            !_c.hasCollectionWorks) ...[
           _graphBackRow(),
           const SizedBox(height: 8),
         ],
@@ -2284,6 +2394,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (sync != null) {
       setState(() => _graphWorks = sync);
       unawaited(_c.loadGraphActualSectionCounts());
+      _followReadingWorkForGraph();
       return;
     }
     if (_c.bookOutline != null) return; // has outline, not a collection
@@ -2294,6 +2405,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (resolved != null && resolved.isNotEmpty) {
       setState(() => _graphWorks = resolved);
       unawaited(_c.loadGraphActualSectionCounts());
+      _followReadingWorkForGraph();
+    }
+  }
+
+  /// 图谱 Tab = 当前阅读作品: when that work already has a graph, open its
+  /// detail view automatically (读哪本跟哪本); otherwise the tab keeps the
+  /// current-work entry card.
+  void _followReadingWorkForGraph() {
+    final reading = _c.currentReadingWork;
+    if (reading == null) return;
+    if (_c.hasWorkGraph(reading) && _c.activeGraphWork != reading) {
+      _c.openWorkGraph(reading);
     }
   }
 
@@ -2393,267 +2516,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return parts.join(' · ');
   }
 
-  /// Anchored entry for the work under the reading position: one tap opens
-  /// that work's graph (or starts it). Only shown on the collection picker.
-  Widget _buildCurrentReadingGraphCard(
-    BuildContext context,
-    AiGraphWorkCandidate reading,
-  ) {
-    final colors = context.appColors;
-    final ready = _c.hasWorkGraph(reading);
-    return Card(
-      margin: const EdgeInsetsDirectional.fromSTEB(8, 4, 8, 0),
-      elevation: 0,
-      color: colors.surfaceContainerHighest.withValues(alpha: 0.45),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: ListTile(
-        dense: true,
-        leading: Icon(
-          Icons.menu_book_outlined,
-          size: 18,
-          color: colors.primary,
-        ),
-        title: Text(
-          '当前阅读：《${reading.title}》',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: context.appBodySize,
-            fontWeight: FontWeight.w600,
-            color: context.appPrimaryText,
-          ),
-        ),
-        subtitle: Text(
-          ready ? '这本的图谱已生成' : '生成本书的图谱',
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: context.appSecondaryText,
-          ),
-        ),
-        trailing: Text(
-          ready ? '查看' : '生成',
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            fontWeight: FontWeight.w600,
-            color: colors.primary,
-          ),
-        ),
-        onTap: ready
-            ? () => _c.openWorkGraph(reading)
-            : () => unawaited(_generateGraph(work: reading)),
-      ),
-    );
-  }
-
-  /// Collection picker: one native ListTile per work (same visual language
-  /// as the outline tab). Tapping opens the work's graph or starts it.
-  Widget _buildGraphWorksList(
-    BuildContext context,
-    List<AiGraphWorkCandidate> works,
-  ) {
-    final generating = _c.isGeneratingBookGraph;
-    final progress = _c.bookGraphProgress;
-    return ListView(
-      key: ValueKey<int>(_graphListEpoch),
-      controller: _graphScrollController,
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
-      children: [
-        Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 16, 4),
-          child: Text(
-            '知识图谱',
-            style: TextStyle(
-              fontSize: _panelTitleSize(context),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        // 「读到哪本跟哪本」: the picker opens anchored to the work the
-        // reader is currently inside — one tap enters that work's graph.
-        if (_c.currentReadingWork case final AiGraphWorkCandidate? reading
-            when reading != null) ...[
-          _buildCurrentReadingGraphCard(context, reading),
-          const SizedBox(height: 4),
-        ],
-        if (generating) ...[
-          Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 16, 4),
-            child: Row(
-              children: [
-                _thinkingOrb(context),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    progress?.label ?? '正在生成…',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: _c.cancelBookGraphGeneration,
-                  icon: const Icon(KaijuanIcons.stop, size: 16),
-                  label: const Text('停止'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-        ],
-        // Core: one native ListTile per work, no separators — spacing and
-        // the shared leading edge carry the structure (outline-tab language).
-        for (final work in works) _buildGraphWorkRow(context, work),
-        // Legacy whole-book graph ($hash.json, pre-per-work files) is a
-        // fallback row, kept last per importance ordering.
-        if (_c.bookGraph != null) ...[
-          const SizedBox(height: 8),
-          _buildWholeBookGraphRow(context),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildWholeBookGraphRow(BuildContext context) {
-    final colors = context.appColors;
-    final graph = _c.bookGraph!;
-    final range = graph.excludedGraphSections.isNotEmpty
-        ? '已排除 ${graph.excludedGraphSections.length} 节'
-        : (graph.includesUnread ? '全书' : '已读');
-    return ListTile(
-      contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 4, 2),
-      leading: Icon(
-        KaijuanIcons.collections,
-        size: 18,
-        color: context.appSecondaryText,
-      ),
-      title: Text(
-        graph.excludedGraphSections.isNotEmpty ? '部分章节图谱' : '整本图谱',
-        style: TextStyle(
-          fontSize: _panelBodySize(context),
-          fontWeight: FontWeight.w600,
-          color: context.appPrimaryText,
-        ),
-      ),
-      subtitle: Text(
-        range,
-        style: TextStyle(
-          fontSize: context.appCaptionSize,
-          color: context.appSecondaryText,
-        ),
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '已生成',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              fontWeight: FontWeight.w600,
-              color: colors.primary,
-            ),
-          ),
-          const SizedBox(width: 4),
-          Icon(
-            KaijuanIcons.chevronRight,
-            size: 16,
-            color: colors.onSurfaceVariant,
-          ),
-        ],
-      ),
-      onTap: () => _c.openWholeBookGraph(),
-    );
-  }
-
-  Widget _buildGraphWorkRow(BuildContext context, AiGraphWorkCandidate work) {
-    final colors = context.appColors;
-    final key = BookReaderController.workKeyFor(work);
-    final ready = _c.hasWorkGraph(work);
-    final generatingWork = _c.generatingGraphWork;
-    final generatingThis = generatingWork != null &&
-        BookReaderController.workKeyFor(generatingWork) == key;
-    final busy = generatingThis || _c.isGeneratingBookGraph;
-    final dimmed = busy && !generatingThis;
-    final actual = _c.graphActualSectionCounts?[key];
-    final String range;
-    if (actual != null) {
-      range = '$actual 节';
-    } else if (work.isOpenEnded) {
-      range = '至书末';
-    } else if (_c.graphActualSectionCounts != null) {
-      // Count pass finished but this row has no data (fallback path):
-      // show the spine-range estimate rather than a stale placeholder.
-      range = '${work.sectionCount} 节';
-    } else {
-      range = '计算中';
-    }
-    return Opacity(
-      opacity: dimmed ? 0.55 : 1,
-      child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 4, 2),
-        leading: Icon(
-          KaijuanIcons.collections,
-          size: 18,
-          color: context.appSecondaryText,
-        ),
-        title: Text(
-          work.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: _panelBodySize(context),
-            fontWeight: FontWeight.w600,
-            color: context.appPrimaryText,
-          ),
-        ),
-        subtitle: Text(
-          range,
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: context.appSecondaryText,
-          ),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (generatingThis)
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: _thinkingOrb(context),
-              )
-            else
-              Text(
-                ready ? '已生成' : '生成',
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  fontWeight: FontWeight.w600,
-                  color: colors.primary,
-                ),
-              ),
-            const SizedBox(width: 4),
-            Icon(
-              KaijuanIcons.chevronRight,
-              size: 16,
-              color: colors.onSurfaceVariant,
-            ),
-          ],
-        ),
-        onTap: generatingThis
-            ? () => _c.enterGraphWork(work)
-            : busy
-                ? null
-                : () {
-                    if (ready) {
-                      _c.openWorkGraph(work);
-                    } else {
-                      unawaited(_generateGraph(work: work));
-                    }
-                  },
-      ),
-    );
-  }
-
+  /// Back row for legacy whole-book graph detail; hidden for collections
+  /// (the graph tab IS the current work — nothing to go back to).
   Widget _graphBackRow() => Align(
     alignment: Alignment.centerLeft,
     child: TextButton.icon(
