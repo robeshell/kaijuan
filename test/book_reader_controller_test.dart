@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/app/book_reading_preferences.dart';
 import 'package:kaijuan/domain/reader_models.dart';
@@ -424,6 +425,56 @@ void main() {
       // compound title 中文版序言 slips past the prefix word list — exactly
       // the case the dialog's manual section chooser exists for.
       expect(labels, ['中文版序言', '第一章 万历皇帝']);
+      controller.dispose();
+    });
+
+    test('per-work choices keep the heading level (tree rebuild input)',
+        () async {
+      final item = await insertBook(id: 'graph-levels');
+      final controller = BookReaderController(
+        database: database,
+        item: item,
+      );
+      controller.attachAnnotationBridge(
+        renderAll: (_) {},
+        add: (_) {},
+        remove: (_) {},
+        clearSelection: () {},
+        getSelectedText: () async => '',
+        setMenuCursorZone: (_) {},
+        setMenuOpen: (_) {},
+        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+[§1@4#1 呐喊]
+
+[§2@4#2 狂人日记]
+某君昆仲。
+
+[§3@4#2 孔乙己]
+鲁镇的酒店的格局。
+
+[§4@5 故乡]
+我冒了严寒。
+''',
+      );
+
+      // A collection work covering spine 4..5; per-work range reads in spine
+      // mode (toc:false), which is what this mock body represents.
+      final sections = await controller.graphSectionChoices(
+        AiGraphWorkCandidate(
+          title: '鲁迅小说精品',
+          startSection: 4,
+          endSectionExclusive: 6,
+        ),
+      );
+      expect(sections, hasLength(4));
+      expect(sections[0].label, '呐喊');
+      expect(sections[0].text, isEmpty); // container
+      expect(sections[0].level, 1);
+      expect(sections[1].label, '狂人日记');
+      expect(sections[1].level, 2);
+      expect(sections[2].level, 2);
+      expect(sections[3].label, '故乡');
+      expect(sections[3].level, 1); // plain book-less piece
       controller.dispose();
     });
 

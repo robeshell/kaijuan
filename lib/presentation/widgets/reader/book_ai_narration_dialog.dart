@@ -58,6 +58,40 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
   bool _sectionsFailed = false;
   final Set<int> _excludedSections = {};
 
+  /// Book/volume container indices currently expanded in the tree chooser.
+  final Set<int> _expandedContainers = {};
+
+  /// Leaf sections (containers have no body and are never generated).
+  List<AiBookSectionSlice> get _leaves => [
+        for (final s in _sections ?? const <AiBookSectionSlice>[])
+          if (s.text.trim().isNotEmpty) s,
+      ];
+
+  int get _leafCount => _leaves.length;
+
+  int get _selectedLeafCount => _leaves
+      .where((s) => !_excludedSections.contains(s.index))
+      .length;
+
+  /// Groups the chooser list into book/volume containers (level 1, empty
+  /// body) with their level-2 pieces as children; plain sections stay roots.
+  List<_ChooserNode> get _tree {
+    final out = <_ChooserNode>[];
+    _ChooserNode? container;
+    for (final s in _sections ?? const <AiBookSectionSlice>[]) {
+      if (s.text.trim().isEmpty) {
+        container = _ChooserNode(slice: s);
+        out.add(container);
+      } else if (s.level > 1 && container != null) {
+        container.children.add(_ChooserNode(slice: s));
+      } else {
+        container = null;
+        out.add(_ChooserNode(slice: s));
+      }
+    }
+    return out;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -128,11 +162,17 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
         '推荐${_viewLabels[plan.defaultView] ?? plan.defaultView}';
   }
 
-  /// All auto-filtered sections are excluded → generation would be empty.
-  bool get _allExcluded =>
-      _sections != null &&
-      _sections!.isNotEmpty &&
-      _excludedSections.length >= _sections!.length;
+  /// All auto-filtered leaves are excluded → generation would be empty.
+  bool get _allExcluded {
+    final sections = _sections;
+    if (sections == null || sections.isEmpty) return false;
+    final leaves = [
+      for (final s in sections)
+        if (s.text.trim().isNotEmpty) s.index,
+    ];
+    return leaves.isNotEmpty &&
+        leaves.every(_excludedSections.contains);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -180,6 +220,123 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
                     ),
             child: const Text('生成图谱'),
           ),
+      ],
+    );
+  }
+
+  /// One row of the range chooser: a leaf checkbox, or a book/volume
+  /// container whose checkbox toggles all its pieces at once.
+  Widget _buildChooserNode(_ChooserNode node) {
+    final theme = Theme.of(context);
+    final s = node.slice;
+    if (node.children.isEmpty) {
+      return CheckboxListTile(
+        dense: true,
+        value: !_excludedSections.contains(s.index),
+        onChanged: (checked) => setState(() {
+          if (checked == true) {
+            _excludedSections.remove(s.index);
+          } else {
+            _excludedSections.add(s.index);
+          }
+        }),
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: EdgeInsets.zero,
+        title: Text(
+          '§${s.index} ${s.label}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall,
+        ),
+      );
+    }
+    final selected = node.children
+        .where((c) => !_excludedSections.contains(c.slice.index))
+        .length;
+    final triState = selected == 0
+        ? false
+        : (selected == node.children.length ? true : null);
+    final expanded = _expandedContainers.contains(s.index);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          dense: true,
+          leading: Checkbox(
+            value: triState,
+            tristate: true,
+            onChanged: (checked) => setState(() {
+              // Container click = select all ⇄ select none (never the dash
+              // state); the dash only reflects a partial child selection.
+              if (checked == true) {
+                for (final c in node.children) {
+                  _excludedSections.remove(c.slice.index);
+                }
+              } else {
+                for (final c in node.children) {
+                  _excludedSections.add(c.slice.index);
+                }
+              }
+            }),
+          ),
+          contentPadding: EdgeInsets.zero,
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  s.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+              Icon(
+                expanded ? Icons.expand_less : Icons.expand_more,
+                size: 16,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+          subtitle: Text(
+            '${node.children.length} 篇',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 10,
+            ),
+          ),
+          onTap: () => setState(() {
+            if (expanded) {
+              _expandedContainers.remove(s.index);
+            } else {
+              _expandedContainers.add(s.index);
+            }
+          }),
+        ),
+        if (expanded)
+          for (final child in node.children)
+            Padding(
+              padding: const EdgeInsets.only(left: 26),
+              child: CheckboxListTile(
+                dense: true,
+                value: !_excludedSections.contains(child.slice.index),
+                onChanged: (checked) => setState(() {
+                  if (checked == true) {
+                    _excludedSections.remove(child.slice.index);
+                  } else {
+                    _excludedSections.add(child.slice.index);
+                  }
+                }),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  '§${child.slice.index} ${child.slice.label}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ),
       ],
     );
   }
@@ -312,7 +469,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
               if (_sections != null) ...[
                 const SizedBox(width: 8),
                 Text(
-                  '已选 ${_sections!.length - _excludedSections.length} / ${_sections!.length} 节',
+                  '已选 $_selectedLeafCount / $_leafCount 节',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.onSurfaceVariant,
                       ),
@@ -366,26 +523,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
               child: ListView(
                 shrinkWrap: true,
                 children: [
-                  for (final section in _sections!)
-                    CheckboxListTile(
-                      dense: true,
-                      value: !_excludedSections.contains(section.index),
-                      onChanged: (checked) => setState(() {
-                        if (checked == true) {
-                          _excludedSections.remove(section.index);
-                        } else {
-                          _excludedSections.add(section.index);
-                        }
-                      }),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        '§${section.index} ${section.label}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
+                  for (final node in _tree) _buildChooserNode(node),
                 ],
               ),
             ),
@@ -393,4 +531,13 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
       ),
     );
   }
+}
+
+/// One node of the range-chooser tree: a plain section (leaf) or a
+/// book/volume container ([AiBookSectionSlice.text] empty) whose [children]
+/// are its level-2 pieces.
+class _ChooserNode {
+  _ChooserNode({required this.slice}) : children = [];
+  final AiBookSectionSlice slice;
+  final List<_ChooserNode> children;
 }

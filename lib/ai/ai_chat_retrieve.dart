@@ -9,6 +9,7 @@ class AiBookSectionSlice {
     required this.text,
     this.sourceSectionIndex,
     this.isNavigationUnit = false,
+    this.level = 1,
   });
 
   final int index;
@@ -20,6 +21,12 @@ class AiBookSectionSlice {
 
   /// True when the reader formed this slice from a navigation target range.
   final bool isNavigationUnit;
+
+  /// Heading depth inside the spine document: 1 = book/volume, 2 = piece.
+  /// Container nodes (level 1 with empty [text]) group their level-2 pieces
+  /// into the work → book → piece tree the range chooser renders; generation
+  /// extracts the leaves only.
+  final int level;
 
   int get originSectionIndex => sourceSectionIndex ?? index;
 }
@@ -104,7 +111,8 @@ abstract final class AiChatRetrieve {
     final text = bookBody.trim();
     if (text.isEmpty) return const [];
 
-    final re = RegExp(r'\[§(\d+)(?:@(\d+)(~)?)?\s*([^\]]*)\]\s*');
+    final re =
+        RegExp(r'\[§(\d+)(?:@(\d+)(~)?(?:#(\d+))?)?\s*([^\]]*)\]\s*');
     final matches = re.allMatches(text).toList();
     if (matches.isEmpty) {
       return [AiBookSectionSlice(index: 1, label: 'body', text: text)];
@@ -116,7 +124,10 @@ abstract final class AiChatRetrieve {
       final start = m.end;
       final end = i + 1 < matches.length ? matches[i + 1].start : text.length;
       final slice = text.substring(start, end).trim();
-      if (slice.isEmpty) continue;
+      final label = (m.group(5) ?? '').trim();
+      // Containers (book/volume level, no body) carry only a marker: keep
+      // them so the range chooser can rebuild the work → book → piece tree.
+      if (slice.isEmpty && label.isEmpty) continue;
       final sourceSectionIndex = int.tryParse(m.group(2) ?? '');
       out.add(
         AiBookSectionSlice(
@@ -126,7 +137,8 @@ abstract final class AiChatRetrieve {
               ? sourceSectionIndex
               : null,
           isNavigationUnit: m.group(3) != null,
-          label: (m.group(4) ?? '').trim(),
+          level: int.tryParse(m.group(4) ?? '') ?? 1,
+          label: label,
           text: slice,
         ),
       );

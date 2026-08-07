@@ -845,6 +845,7 @@ class BookReaderController extends ChangeNotifier {
             text: section.text,
             sourceSectionIndex: section.sourceSectionIndex,
             isNavigationUnit: section.isNavigationUnit,
+            level: section.level,
           ),
       ];
       final outlineSections = _filterOutlineSections(titled);
@@ -993,7 +994,12 @@ class BookReaderController extends ChangeNotifier {
     // treating the prefix as global metadata would discard the whole work.
     if (section.isNavigationUnit) return false;
     final text = section.text.trim();
-    if (text.isEmpty) return true;
+    if (text.isEmpty) {
+      // An empty body is metadata — unless it is a book/volume container
+      // (JS emits an explicit #level marker with a real title like 呐喊),
+      // which must survive to rebuild the chooser tree.
+      return section.label.trim().isEmpty;
+    }
     final prefix = text.length > 640 ? text.substring(0, 640) : text;
     final compact = prefix.replaceAll(RegExp(r'\s+'), '');
     if (RegExp(r'^(目录|目次)(?:[：:]|$)').hasMatch(compact)) return true;
@@ -1470,6 +1476,7 @@ class BookReaderController extends ChangeNotifier {
             text: section.text,
             sourceSectionIndex: section.sourceSectionIndex,
             isNavigationUnit: section.isNavigationUnit,
+            level: section.level,
           ),
       ];
       sections = _graphEligibleSections(_filterOutlineSections(titled));
@@ -1478,6 +1485,7 @@ class BookReaderController extends ChangeNotifier {
       for (final work in works) {
         var count = 0;
         for (final section in sections) {
+          if (section.text.trim().isEmpty) continue; // container node
           if (!work.contains(section.sourceSectionIndex ?? section.index)) {
             continue;
           }
@@ -1533,6 +1541,7 @@ class BookReaderController extends ChangeNotifier {
             text: section.text,
             sourceSectionIndex: section.sourceSectionIndex,
             isNavigationUnit: section.isNavigationUnit,
+            level: section.level,
           ),
       ];
       final eligible =
@@ -1625,7 +1634,14 @@ class BookReaderController extends ChangeNotifier {
           excludedGraphSectionIndices ??
           existing?.excludedGraphSections.toSet() ??
           const <int>{};
-      final sections = excludeGraphSections(deduped, effectiveExcluded);
+      final sections = excludeGraphSections(deduped, effectiveExcluded)
+          // Container nodes (book/volume level, empty body) exist only to
+          // group the chooser tree — extraction works on the leaves.
+          .where((s) => s.text.trim().isNotEmpty)
+          .toList(growable: false);
+      if (sections.isEmpty) {
+        throw AiProviderException('所选章节都被排除了，请至少保留一节正文');
+      }
       carryExcluded = (effectiveExcluded.toList()..sort()).toList(growable: false);
       final graph = await service.generate(
         bookTitle: item.title,
@@ -1703,6 +1719,7 @@ class BookReaderController extends ChangeNotifier {
           text: section.text,
           sourceSectionIndex: section.sourceSectionIndex,
           isNavigationUnit: section.isNavigationUnit,
+          level: section.level,
         ),
     ];
     final graphSections = _graphEligibleSections(

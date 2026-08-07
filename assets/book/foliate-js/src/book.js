@@ -2984,17 +2984,19 @@ const logicalSectionsFromDocument = (doc, fallbackLabel, tocLabels = []) => {
   const bodyText = plainText(body.textContent)
   const allHeadings = [...body.querySelectorAll('h1, h2, h3, h4, h5, h6')]
     .filter(heading => plainText(heading.textContent))
-  let headings = []
-  for (let level = 1; level <= 6; level++) {
+  // 书级：文档内最粗的重复标题级别（h1 起）。合集作品的 spine 文档常以
+  // 书/集名为 h1（《呐喊》《彷徨》），书内篇目为 h2（狂人日记/孔乙己）。
+  let bookHeadings = []
+  for (let level = 1; level <= 3; level++) {
     const matches = allHeadings.filter(heading => heading.localName === `h${level}`)
     if (matches.length >= 2) {
-      headings = matches
+      bookHeadings = matches
       break
     }
   }
-  if (!headings.length) {
+  if (!bookHeadings.length) {
     const fromToc = logicalSectionsFromToc(bodyText, tocLabels, fallbackLabel)
-    return fromToc.length ? fromToc : (bodyText ? [{ label: fallbackLabel, text: bodyText }] : [])
+    return fromToc.length ? fromToc : (bodyText ? [{ label: fallbackLabel, text: bodyText, level: 1 }] : [])
   }
 
   const textBetween = (start, end) => {
@@ -3004,14 +3006,45 @@ const logicalSectionsFromDocument = (doc, fallbackLabel, tocLabels = []) => {
     if (end) range.setEndBefore(end)
     return plainText(range.toString())
   }
+  const bookLevelOf = heading => Number(heading.localName.slice(1))
+  const inside = (heading, start, end) => {
+    const pos = doc.compareDocumentPosition(heading)
+    const afterStart = pos & Node.DOCUMENT_POSITION_FOLLOWING
+    const beforeEnd = !end || (pos & Node.DOCUMENT_POSITION_PRECEDING)
+    return afterStart && beforeEnd
+  }
   const output = []
-  const prelude = textBetween(null, headings[0])
-  if (prelude) output.push({ label: fallbackLabel, text: prelude })
-  for (let i = 0; i < headings.length; i++) {
-    const label = plainText(headings[i].textContent)
-    const text = textBetween(headings[i], headings[i + 1])
-    // Keep a heading-only unit: it can still be useful to the structure plan.
-    if (label || text) output.push({ label: label || fallbackLabel, text })
+  const prelude = textBetween(null, bookHeadings[0])
+  if (prelude) output.push({ label: fallbackLabel, text: prelude, level: 1 })
+  for (let i = 0; i < bookHeadings.length; i++) {
+    const book = bookHeadings[i]
+    const bookEnd = bookHeadings[i + 1]
+    const bookLabel = plainText(book.textContent)
+    // 书内的篇级标题：级别比书细、位置在本书区间内的重复标题（h2 起）。
+    const inner = allHeadings.filter(h =>
+      bookLevelOf(h) > bookLevelOf(book) && inside(h, book, bookEnd))
+    let pieceHeadings = []
+    for (let level = bookLevelOf(book) + 1; level <= 6; level++) {
+      const matches = inner.filter(h => h.localName === `h${level}`)
+      if (matches.length >= 2) {
+        pieceHeadings = matches
+        break
+      }
+    }
+    if (pieceHeadings.length >= 2) {
+      // 书 = 容器（空正文，Dart 侧用来组树），篇 = 叶子。书前奏并入第一篇。
+      output.push({ label: bookLabel, text: '', level: 1 })
+      const bookPrelude = textBetween(book, pieceHeadings[0])
+      for (let j = 0; j < pieceHeadings.length; j++) {
+        const text = textBetween(pieceHeadings[j], pieceHeadings[j + 1])
+        const merged = j === 0 && bookPrelude ? `${bookPrelude}\n\n${text}` : text
+        output.push({ label: plainText(pieceHeadings[j].textContent), text: merged, level: 2 })
+      }
+    } else {
+      // 书即正文（无篇级子标题）——书是叶子。
+      const text = textBetween(book, bookEnd)
+      if (bookLabel || text) output.push({ label: bookLabel || fallbackLabel, text, level: 1 })
+    }
   }
   return output
 }
@@ -3200,11 +3233,15 @@ window.getBookPlainText = async (opts = {}) => {
     if (activeTocPiece?.text.trim()) tocPieces.push(activeTocPiece)
     activeTocPiece = null
   }
-  const appendPiece = (label, text, sourceSectionIndex, navigation = false) => {
+  const appendPiece = (label, text, sourceSectionIndex, navigation = false, level = 1) => {
     if (out.length >= maxChars || !text.trim()) return false
     logicalIndex += 1
     const navigationUnit = navigation ? '~' : ''
-    const piece = `\n\n[§${logicalIndex}@${sourceSectionIndex}${navigationUnit} ${label}]\n${text.trim()}`
+    // #level carries the heading depth (1 = book/volume, 2 = piece) so the
+    // Dart side can rebuild the work → book → piece tree for the range
+    // chooser; plain books emit level 1 everywhere (no tree).
+    const levelUnit = level > 1 ? `#${level}` : ''
+    const piece = `\n\n[§${logicalIndex}@${sourceSectionIndex}${navigationUnit}${levelUnit} ${label}]\n${text.trim()}`
     const room = maxChars - out.length
     if (piece.length > room) {
       out += piece.slice(0, room)
@@ -3271,8 +3308,19 @@ window.getBookPlainText = async (opts = {}) => {
         'pieces=', pieces.length,
         'labels=', JSON.stringify(pieces.slice(0, 24).map(piece => piece.label)),
       )
-      for (const { label, text } of pieces) {
-        if (!appendPiece(label, text, i + 1)) break
+      for (const piece of pieces) {
+        if (!piece.text.trim()) {
+          // Container (book/volume level, no body): emit the bare marker so
+          // the Dart side can rebuild the work → book → piece tree; the
+          // chooser shows it as an expandable parent, extraction skips it.
+          // The explicit #level distinguishes it from an empty metadata
+          // section (目录/版权) that must still be filtered out.
+          if (out.length >= maxChars) break
+          logicalIndex += 1
+          out += `\n\n[§${logicalIndex}@${i + 1}#${piece.level} ${piece.label}]\n`
+          continue
+        }
+        if (!appendPiece(piece.label, piece.text, i + 1, false, piece.level)) break
       }
     } catch (e) {
       console.warn('[Kaika] getBookPlainText section failed', i, e)

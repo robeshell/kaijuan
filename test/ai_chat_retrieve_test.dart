@@ -45,6 +45,31 @@ void main() {
     expect(section.label, '第一部');
   });
 
+  test('splitSections parses heading level and keeps empty containers', () {
+    // Book-level container (level 1, empty body) + piece (level 2): the
+    // chooser rebuilds the work → book → piece tree from this.
+    const logicalBook = '''
+[§1@4#1 呐喊]
+
+[§2@4#2 狂人日记]
+某君昆仲。
+
+[§3@4#2 孔乙己]
+鲁镇的酒店的格局。
+''';
+
+    final sections = AiChatRetrieve.splitSections(logicalBook);
+
+    expect(sections, hasLength(3));
+    expect(sections[0].level, 1);
+    expect(sections[0].text, isEmpty);
+    expect(sections[0].label, '呐喊');
+    expect(sections[1].level, 2);
+    expect(sections[1].label, '狂人日记');
+    expect(sections[1].originSectionIndex, 4);
+    expect(sections[2].level, 2);
+  });
+
   test('whole-book query samples every lecture', () {
     expect(
       AiChatRetrieve.isWholeBookQuery('请根据提供的各部分正文，概括**整本书**的主线与主题'),
