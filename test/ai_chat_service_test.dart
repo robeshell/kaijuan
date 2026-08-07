@@ -448,6 +448,45 @@ void main() {
       expect(restored.outline?.chapters.single.sectionIndex, 1);
     });
 
+    test('session JSON round-trips per-work outlines and key clearing', () {
+      AiBookOutline makeOutline(String title) => AiBookOutline(
+            createdAt: DateTime.utc(2026, 8, 5),
+            model: 'm',
+            includesUnread: false,
+            overview: title,
+            chapters: const [
+              AiBookOutlineChapter(
+                sectionIndex: 1,
+                title: '第一章',
+                summary: '摘要',
+              ),
+            ],
+          );
+
+      final session = AiChatSession(
+        contentHash: 'h1',
+        itemId: 'a',
+        workOutlines: {'s4': makeOutline('鲁迅'), 's8': makeOutline('郁达夫')},
+      );
+
+      final restored = AiChatSession.fromJson(
+        Map<String, dynamic>.from(session.toJson()),
+      );
+      expect(restored.workOutlines.keys, ['s4', 's8']);
+      expect(restored.workOutlines['s4']?.overview, '鲁迅');
+
+      // Legacy data without the field stays empty, not null.
+      final legacy = AiChatSession.fromJson(
+        Map<String, dynamic>.from(session.toJson())..remove('workOutlines'),
+      );
+      expect(legacy.workOutlines, isEmpty);
+
+      // Clearing one work leaves the others intact.
+      final cleared = restored.copyWith(clearWorkOutlineKey: 's4');
+      expect(cleared.workOutlines.keys, ['s8']);
+      expect(cleared.outline, isNull);
+    });
+
     test('session JSON preserves answer-specific questions', () {
       const message = AiChatMessage(
         role: AiMessageRole.assistant,

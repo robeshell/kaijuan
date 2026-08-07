@@ -259,8 +259,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _graphListEpoch++;
       unawaited(_ensureGraphWorks());
     } else if (_activeTab == _BookAiWorkspaceTab.outline) {
-      // 「读到哪本跟哪本」: landing on the outline tab expands the chain
-      // down to the work currently under the reading position.
+      // 「读到哪本跟哪本」: landing on the outline tab loads the current
+      // work's outline (per-work storage) and expands its chain.
+      unawaited(_c.loadBookOutline());
       _revealOutlineForReadingWork();
     }
   }
@@ -320,9 +321,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       }
     }
     // 读哪本跟哪本: as the reader moves, the graph tab follows to the work
-    // under the reading position (opens its graph when one exists).
+    // under the reading position (opens its graph when one exists); the
+    // outline tab reloads that work's outline (no-op when the work key is
+    // unchanged — loadBookOutline diffs on the work key).
     if (_activeTab == _BookAiWorkspaceTab.graph && _c.hasCollectionWorks) {
       _followReadingWorkForGraph();
+    } else if (_activeTab == _BookAiWorkspaceTab.outline &&
+        _c.hasCollectionWorks) {
+      unawaited(_c.loadBookOutline());
     }
     setState(() {});
   }
@@ -835,7 +841,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               Icon(KaijuanIcons.toc, size: 34, color: context.appSecondaryText),
               const SizedBox(height: 14),
               Text(
-                generating ? '正在生成大纲' : '本书大纲',
+                generating
+                    ? '正在生成大纲'
+                    : (_c.currentReadingWork != null
+                        ? '《${_c.currentReadingWork!.title}》大纲'
+                        : '本书大纲'),
                 style: TextStyle(
                   fontSize: _panelTitleSize(context),
                   fontWeight: FontWeight.w600,
@@ -999,6 +1009,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
         ],
         SizedBox(height: context.appIsCompact ? 20 : 28),
+        if (_c.currentReadingWork case final reading?) ...[
+          Text(
+            '《${reading.title}》',
+            style: TextStyle(
+              fontSize: context.appCaptionSize,
+              color: context.appSecondaryText,
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
         Text(
           '章节大纲',
           style: TextStyle(

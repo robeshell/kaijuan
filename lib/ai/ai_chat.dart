@@ -242,25 +242,42 @@ class AiChatSession {
     required this.itemId,
     this.messages = const [],
     this.outline,
+    this.workOutlines = const {},
   });
 
   final String contentHash;
   final String itemId;
   final List<AiChatMessage> messages;
+
+  /// Whole-book outline (plain books; collections keep per-work outlines in
+  /// [workOutlines] instead).
   final AiBookOutline? outline;
+
+  /// Per-work outlines of a collection, keyed by the work key (graph
+  /// workKey, e.g. 's4'). The 读哪本跟哪本 model: each work generates and
+  /// loads its own outline; the tab follows the reading position.
+  final Map<String, AiBookOutline> workOutlines;
 
   AiChatSession copyWith({
     String? contentHash,
     String? itemId,
     List<AiChatMessage>? messages,
     AiBookOutline? outline,
+    Map<String, AiBookOutline>? workOutlines,
     bool clearOutline = false,
+    String? clearWorkOutlineKey,
   }) {
     return AiChatSession(
       contentHash: contentHash ?? this.contentHash,
       itemId: itemId ?? this.itemId,
       messages: messages ?? this.messages,
       outline: clearOutline ? null : (outline ?? this.outline),
+      workOutlines: clearWorkOutlineKey != null
+          ? {
+              for (final entry in (workOutlines ?? this.workOutlines).entries)
+                if (entry.key != clearWorkOutlineKey) entry.key: entry.value,
+            }
+          : (workOutlines ?? this.workOutlines),
     );
   }
 
@@ -269,6 +286,10 @@ class AiChatSession {
     'itemId': itemId,
     'messages': messages.map((m) => m.toJson()).toList(growable: false),
     if (outline != null) 'outline': outline!.toJson(),
+    if (workOutlines.isNotEmpty)
+      'workOutlines': workOutlines.map(
+        (key, value) => MapEntry(key, value.toJson()),
+      ),
   };
 
   static AiChatSession fromJson(Map<String, dynamic> json) {
@@ -281,11 +302,26 @@ class AiChatSession {
         }
       }
     }
+    final rawWorkOutlines = json['workOutlines'];
+    final workOutlines = <String, AiBookOutline>{};
+    if (rawWorkOutlines is Map) {
+      for (final entry in rawWorkOutlines.entries) {
+        if (entry.value is Map) {
+          final parsed = AiBookOutline.fromJson(
+            Map<String, dynamic>.from(entry.value as Map),
+          );
+          if (parsed != null) {
+            workOutlines[entry.key] = parsed;
+          }
+        }
+      }
+    }
     return AiChatSession(
       contentHash: json['contentHash'] as String? ?? '',
       itemId: json['itemId'] as String? ?? '',
       messages: messages,
       outline: AiBookOutline.fromJson(json['outline']),
+      workOutlines: workOutlines,
     );
   }
 }

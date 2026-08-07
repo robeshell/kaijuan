@@ -290,6 +290,11 @@ class BookReaderController extends ChangeNotifier {
   AiChatHistoryStore? _chatHistoryStore;
   AiGraphStore? _aiGraphStore;
   AiBookOutline? _bookOutline;
+
+  /// Work key of [_bookOutline] for collections (null = plain book / whole
+  /// book). The outline tab follows the reading position: loading/saving
+  /// routes to `session.workOutlines[key]`.
+  String? _bookOutlineWorkKey;
   AiOutlineProgress? _bookOutlineProgress;
   String? _bookOutlineError;
   CancelToken? _bookOutlineCancel;
@@ -759,8 +764,9 @@ class BookReaderController extends ChangeNotifier {
         contentHash: item.contentHash,
         itemId: item.id,
       );
-      if (current?.outline != null) {
-        await store.write(current!.copyWith(messages: const []));
+      if (current != null &&
+          (current.outline != null || current.workOutlines.isNotEmpty)) {
+        await store.write(current.copyWith(messages: const []));
       } else {
         await store.delete(item.contentHash);
       }
@@ -776,9 +782,14 @@ class BookReaderController extends ChangeNotifier {
   /// the model; a book is only generated when the user explicitly requests it.
   Future<AiBookOutline?> loadBookOutline({AiChatSession? session}) async {
     final resolvedSession = session ?? await loadChatSession();
-    final outline = resolvedSession.outline;
-    if (!identical(_bookOutline, outline)) {
+    final work = currentReadingWork;
+    final workKey = work == null ? null : workKeyFor(work);
+    final outline = workKey == null
+        ? resolvedSession.outline
+        : resolvedSession.workOutlines[workKey];
+    if (!identical(_bookOutline, outline) || _bookOutlineWorkKey != workKey) {
       _bookOutline = outline;
+      _bookOutlineWorkKey = workKey;
       if (!_disposed) notifyListeners();
     }
     return outline;
@@ -821,10 +832,23 @@ class BookReaderController extends ChangeNotifier {
     _bookOutlineCancel = cancel;
     if (!_disposed) notifyListeners();
     try {
-      final body = await _loadBookPlainTextCached(
-        AiBookOutlineService.maxBookBodyChars,
-      );
-      var sections = AiChatBookCorpus.parseSections(body);
+      // 合集：大纲 = 当前阅读作品（篇目级，与图谱同源）；单本：整本。
+      // Capture the work key ONCE: generation runs for seconds and the user
+      // may flip pages — the content must be stored under the key it was
+      // generated from, never re-read at save time.
+      final work = currentReadingWork;
+      final startWorkKey = work == null ? null : workKeyFor(work);
+      final List<AiBookSectionSlice> sections;
+      if (work != null) {
+        sections = (await _graphSectionsForWork(work))
+            .where((s) => s.text.trim().isNotEmpty)
+            .toList(growable: false);
+      } else {
+        final body = await _loadBookPlainTextCached(
+          AiBookOutlineService.maxBookBodyChars,
+        );
+        sections = AiChatBookCorpus.parseSections(body);
+      }
       if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
       AiLog.d(
         'outline extracted=${sections.length} '
@@ -869,8 +893,9 @@ class BookReaderController extends ChangeNotifier {
         },
       );
       _bookOutline = outline;
+      _bookOutlineWorkKey = startWorkKey;
       _bookOutlineProgress = null;
-      await _saveBookOutline(outline);
+      await _saveBookOutline(outline, workKey: startWorkKey);
       if (!_disposed) notifyListeners();
     } on AiProviderException catch (error) {
       _bookOutlineProgress = null;
@@ -1009,7 +1034,7 @@ class BookReaderController extends ChangeNotifier {
     return hasCopyrightSignal && RegExp(r'出版|出版社|版权|编目').hasMatch(prefix);
   }
 
-  Future<void> _saveBookOutline(AiBookOutline outline) async {
+  Future<void> _saveBookOutline(AiBookOutline outline, {String? workKey}) async {
     await _enqueueChatSessionWrite(() async {
       final store = _chatHistoryStore;
       if (store == null) return;
@@ -1017,10 +1042,14 @@ class BookReaderController extends ChangeNotifier {
         contentHash: item.contentHash,
         itemId: item.id,
       );
+      final base = current ??
+          AiChatSession(contentHash: item.contentHash, itemId: item.id);
       await store.write(
-        (current ??
-                AiChatSession(contentHash: item.contentHash, itemId: item.id))
-            .copyWith(outline: outline),
+        workKey == null
+            ? base.copyWith(outline: outline)
+            : base.copyWith(
+                workOutlines: {...base.workOutlines, workKey: outline},
+              ),
       );
     });
   }
@@ -1144,7 +1173,7 @@ class BookReaderController extends ChangeNotifier {
         'outline children ready parent=${chapter.stableNodeId} '
         'count=${children.length} attached=$attachedCount',
       );
-      await _saveBookOutline(_bookOutline!);
+      await _saveBookOutline(_bookOutline!, workKey: _bookOutlineWorkKey);
       AiLog.d('outline children persisted parent=${chapter.stableNodeId}');
     } on AiProviderException catch (error) {
       if (!cancel.isCancelled) {
@@ -1246,12 +1275,19 @@ class BookReaderController extends ChangeNotifier {
           if (current.messages.isEmpty) {
             await store.delete(item.contentHash);
           } else {
-            await store.write(current.copyWith(clearOutline: true));
+            final work = currentReadingWork;
+            final workKey = work == null ? null : workKeyFor(work);
+            await store.write(
+              workKey == null
+                  ? current.copyWith(clearOutline: true)
+                  : current.copyWith(clearWorkOutlineKey: workKey),
+            );
           }
         }
       }
     });
     _bookOutline = null;
+    _bookOutlineWorkKey = null;
     _bookOutlineError = null;
     if (!_disposed) notifyListeners();
   }
