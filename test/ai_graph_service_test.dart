@@ -560,8 +560,8 @@ void main() {
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
         sections: [
-          slice(1, '第一节', '张居正任首辅。'),
-          slice(2, '第二节', '冯保掌司礼监。'),
+          slice(1, '第一节', '张居正任首辅。万历皇帝年幼。'),
+          slice(2, '第二节', '冯保掌司礼监。万历皇帝倚重。'),
         ],
         includesUnread: true,
       );
@@ -677,6 +677,123 @@ void main() {
       expect(relation.kin, '夫妻');
     });
 
+    test('hallucinated entity with no verbatim mention is grounded out',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","aliases":[],
+              "description":"主角。",
+              "evidence":[{"section":1,"quote":"张三登场"}],
+              "scope":"setting"},
+             {"name":"八爪星人","type":"person","aliases":[],
+              "description":"外星来客。",
+              "evidence":[{"section":1,"quote":"八爪星人降临"}],
+              "scope":"setting"}],
+             "relations":[{"source":"张三","target":"八爪星人","type":"敌对",
+              "evidence":[{"section":1,"quote":"张三与八爪星人交战"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '张三登场。')],
+        includesUnread: true,
+      );
+
+      // 八爪星人 never appears in the book body — the model invented it
+      // (pre-training leakage); the entity and its edge are grounded out.
+      expect(graph.entities.map((e) => e.name), ['张三']);
+      expect(graph.relations, isEmpty);
+      // A real alias keeps the entity grounded (今上 = 万历皇帝 in body).
+      expect(graph.coveredSections, [1]);
+    });
+
+    test('aliases keep an entity grounded when the canonical name is absent',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"万历皇帝","type":"person","aliases":["今上"],
+              "description":"天子。",
+              "evidence":[{"section":1,"quote":"今上"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '今上临朝。')],
+        includesUnread: true,
+      );
+
+      // Canonical 万历皇帝 never appears verbatim, but alias 今上 does — the
+      // entity stays (grounding checks name AND aliases).
+      expect(graph.entities.map((e) => e.name), ['万历皇帝']);
+    });
+
+    test('contextual kinship terms never absorb named people (哥哥≠刘哥哥)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"刘哥哥","type":"person","aliases":[],
+              "description":"结义大哥。",
+              "evidence":[{"section":1,"quote":"刘哥哥"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"哥哥","type":"person","aliases":[],
+              "description":"家中长兄。",
+              "evidence":[{"section":2,"quote":"哥哥"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '刘哥哥。'), slice(2, '二', '哥哥。')],
+        includesUnread: true,
+      );
+
+      // 哥哥 ⊂ 刘哥哥 is a suffix hit, but 哥哥 is a contextual kinship term
+      // that refers to different people in different chapters — never a merge
+      // key (AI-Reader-V2 dangerous-alias table).
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'刘哥哥', '哥哥'});
+    });
+
+    test('先生 never absorbs a titled person (先生≠陈先生)', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"陈先生","type":"person","aliases":[],
+              "description":"塾师。",
+              "evidence":[{"section":1,"quote":"陈先生"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"先生","type":"person","aliases":[],
+              "description":"尊称。",
+              "evidence":[{"section":2,"quote":"先生"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '陈先生。'), slice(2, '二', '先生。')],
+        includesUnread: true,
+      );
+
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'陈先生', '先生'});
+    });
+
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
         () async {
       final provider = _GraphProvider(
@@ -764,8 +881,8 @@ void main() {
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
         sections: [
-          slice(1, '第一节', '朱常洛是万历长子。'),
-          slice(2, '第二节', '朱常洵是万历之子。'),
+          slice(1, '第一节', '朱常洛是万历长子。万历皇帝登基。'),
+          slice(2, '第二节', '朱常洵是万历之子。万历皇帝下诏。'),
         ],
         includesUnread: true,
       );
@@ -835,7 +952,7 @@ void main() {
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [slice(1, '第一回', '完全不相关的正文内容。')],
+        sections: [slice(1, '第一回', '张三登场。完全不相关的正文内容。')],
         includesUnread: true,
       );
 

@@ -91,6 +91,17 @@ scope 硬规则（引用句式降级）、evidence 锚定（quote→原文 span�
   方向冲突亲属边（A→B 与 B→A 同 kin）、kin 空亲属边、高频人物误标 reference
   （证据 ≥5 且零引用句式）——这三个是管线本该修掉的东西，残留即进 issues；
   镜像重复对与孤立实体率为信息项（散文集孤立率天然偏高，不设硬阈值）。
+- **开源借鉴已落地**（深度调研 AI-Reader-V2 / ReadAny / 中文 GraphRAG 后）：
+  - 幻觉接地过滤（`_dropUngroundedEntities`，AI-Reader-V2 借鉴）：实体名+全部
+    别名在全书正文零字面命中 → 模型编造（预训练泄漏），剔除实体及关联边，
+    零成本纯子串证据
+  - 危险别名表（AI-Reader-V2 借鉴）：`_genericPersonTerms` 扩到 80+ 词，
+    上下文称谓（哥哥/母亲/道友/那怪/先生/夫人…）禁止当子串合并键——
+    它们跨章指人不同，用当键会造成假桥接
+  - **挂起**：LLM 收敛合并描述（GraphRAG 做法）——description 非当前痛点，
+    验证期避免新增一次 LLM 调用；预扫描词典（AI-Reader-V2）与段落级 CFI
+    引用回链（ReadAny）改动大，另行排期
+
 
 ## 4. 出处链接
 

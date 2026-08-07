@@ -466,6 +466,11 @@ class AiBookGraphService {
     // tree (万历皇帝 marked complex, hidden under an odd branch). Keep the
     // edge with more evidence, drop the weaker mirror.
     _dedupeReverseKinEdges(relations);
+    // Hallucination grounding (borrowed from AI-Reader-V2): an entity whose
+    // name and all aliases never appear verbatim in the book body was almost
+    // certainly invented by the model (leaked from pretraining) — drop it
+    // together with any edge touching it. Zero-cost pure substring evidence.
+    _dropUngroundedEntities(entities, relations, sections);
 
     entities.sort(_byFrequencyThenName);
     relations.sort((a, b) => b.evidence.length.compareTo(a.evidence.length));
@@ -658,6 +663,41 @@ class AiBookGraphService {
       isolatedEntityRatio: ratio,
       issues: issues,
     );
+  }
+
+  /// Hallucination grounding (AI-Reader-V2 `hallucination_filter.py` 借鉴):
+  /// a setting entity whose name and every alias never occur verbatim in the
+  /// book body was invented by the model (pre-training leakage — a small
+  /// model "remembering" characters from other novels). Substring evidence is
+  /// free and zero-risk: real entities are mentioned by name somewhere. The
+  /// entity and any edge touching it are dropped.
+  static void _dropUngroundedEntities(
+    List<AiGraphEntity> entities,
+    List<AiGraphRelation> relations,
+    List<AiBookSectionSlice> sections,
+  ) {
+    if (entities.isEmpty) return;
+    final body = StringBuffer();
+    for (final s in sections) {
+      body.write(s.text);
+      body.write('\n');
+    }
+    final text = body.toString();
+    if (text.isEmpty) return;
+    final storyNames = <String>{};
+    entities.removeWhere((e) {
+      final grounded = (e.name.isNotEmpty && text.contains(e.name)) ||
+          e.aliases.any((a) => a.isNotEmpty && text.contains(a));
+      if (grounded) {
+        storyNames.add(e.name);
+      }
+      return !grounded;
+    });
+    if (storyNames.isNotEmpty) {
+      relations.removeWhere(
+        (r) => !storyNames.contains(r.source) || !storyNames.contains(r.target),
+      );
+    }
   }
 
   static void _dedupeReverseKinEdges(List<AiGraphRelation> relations) {
@@ -1279,10 +1319,26 @@ class AiBookGraphService {
   /// substring rule: 皇帝 ⊂ 万历皇帝 would fold the emperor's entity into a
   /// generic mention (and the canonical name disappears from the tree). The
   /// stem rule (慈圣太后↔慈圣皇太后) still handles real title upgrades.
+  /// Contextual kinship/address terms (哥哥/母亲/道友/那怪/先生…) are in
+  /// the same class — they refer to different people chapter by chapter, so
+  /// using them as a merge key would create false bridges (AI-Reader-V2's
+  /// dangerous-alias table idea).
   static const _genericPersonTerms = {
+    // 身份/爵位
     '皇帝', '皇上', '陛下', '万岁', '太后', '皇后', '贵妃', '娘娘',
     '殿下', '王爷', '亲王', '大人', '将军', '尚书', '侍郎', '都督',
     '公主', '太子', '皇子', '世子', '圣母', '先帝', '朕',
+    // 亲属称谓（上下文相关，跨章指人不同）
+    '哥哥', '弟弟', '姐姐', '妹妹', '兄长', '贤弟', '母亲', '父亲',
+    '娘亲', '爹爹', '爷爷', '奶奶', '祖父', '祖母', '外公', '外婆',
+    '叔叔', '婶婶', '舅舅', '舅母', '姑姑', '姑母', '伯父', '伯母',
+    '叔父', '叔母', '侄儿', '侄子', '侄女', '外甥', '外甥女', '孙子',
+    '孙女', '儿子', '女儿', '兄弟', '姐妹',
+    // 身份/称谓
+    '师父', '师傅', '师尊', '弟子', '徒弟', '徒儿', '道友', '道兄',
+    '那怪', '妖怪', '妇人', '老汉', '老翁', '老妪', '书生', '和尚',
+    '道士', '先生', '小姐', '公子', '夫人', '姑娘', '娘子', '官人',
+    '郎君', '大姐', '大婶', '大妈', '堂兄', '堂弟', '表兄', '表弟',
   };
 
   static double? _nameSimilarityScore(String a, String b) {
