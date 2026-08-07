@@ -1147,7 +1147,17 @@ class BookReaderController extends ChangeNotifier {
       if (!_disposed) notifyListeners();
       return;
     }
-    final range = _outlineRangeFor(chapter, current.chapters);
+    // The chapter belongs to the work whose outline is displayed — cap its
+    // children range at that work's boundary. Without it, the LAST chapter
+    // of a per-work (collection) outline has no next sibling: the range
+    // would run to the book tail and extract the remaining works' chapters
+    // (生成整本的大纲). A plain book has no work → whole-book range stays.
+    final workBoundary = _outlineWorkBoundary();
+    final range = _outlineRangeFor(
+      chapter,
+      current.chapters,
+      workEndSectionExclusive: workBoundary,
+    );
     final cancel = CancelToken();
     _bookOutlineDetailCancels[chapter.stableNodeId] = cancel;
     _bookOutlineDetailErrors.remove(chapter.stableNodeId);
@@ -1225,10 +1235,25 @@ class BookReaderController extends ChangeNotifier {
     }
   }
 
+  /// Spine index just past the work whose outline is on screen, or null for
+  /// a plain book (whole-book outline). Resolved from [_bookOutlineWorkKey]
+  /// so a page flip during generation cannot change the boundary mid-run.
+  int? _outlineWorkBoundary() {
+    final key = _bookOutlineWorkKey;
+    if (key == null) return null;
+    for (final work in _works ?? const <AiGraphWorkCandidate>[]) {
+      if (workKeyFor(work) == key) return work.endSectionExclusive;
+    }
+    AiLog.d('outline work boundary: no work for key=$key '
+        'works=${(_works ?? const []).map(workKeyFor).join(',')}');
+    return null;
+  }
+
   ({int startSectionIndex, int? endSectionIndexExclusive}) _outlineRangeFor(
     AiBookOutlineChapter target,
-    List<AiBookOutlineChapter> roots,
-  ) {
+    List<AiBookOutlineChapter> roots, {
+    int? workEndSectionExclusive,
+  }) {
     ({int startSectionIndex, int? endSectionIndexExclusive})? find(
       List<AiBookOutlineChapter> siblings,
     ) {
@@ -1240,7 +1265,9 @@ class BookReaderController extends ChangeNotifier {
               ? siblings[index + 1].sourceSectionIndex ??
                     siblings[index + 1].sectionIndex
               : null;
-          final end = node.endSectionIndexExclusive ?? nextStart;
+          final end = node.endSectionIndexExclusive ??
+              nextStart ??
+              workEndSectionExclusive;
           return (
             startSectionIndex: start,
             endSectionIndexExclusive: end != null && end > start ? end : null,
@@ -1258,7 +1285,8 @@ class BookReaderController extends ChangeNotifier {
     return find(roots) ??
         (
           startSectionIndex: target.sourceSectionIndex ?? target.sectionIndex,
-          endSectionIndexExclusive: target.endSectionIndexExclusive,
+          endSectionIndexExclusive:
+              target.endSectionIndexExclusive ?? workEndSectionExclusive,
         );
   }
 
