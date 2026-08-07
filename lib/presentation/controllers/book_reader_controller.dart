@@ -853,7 +853,26 @@ class BookReaderController extends ChangeNotifier {
       // Capture the work key ONCE: generation runs for seconds and the user
       // may flip pages — the content must be stored under the key it was
       // generated from, never re-read at save time.
-      final work = currentReadingWork;
+      var work = currentReadingWork;
+      // First generation of a collection: no outline and no graph yet, so
+      // both work sources are empty and currentReadingWork is null — without
+      // this we would silently generate a whole-book (30 works) outline that
+      // no collection surface can display. Resolve the structure once, then
+      // locate the work under the reading position. A single-group book is
+      // not a collection — keep the whole-book path (its groups already came
+      // back from the same structural call).
+      if (work == null) {
+        final resolved = await resolveGraphWorkCandidates(
+          cancel: cancel,
+        );
+        // >=2 groups is a real reading-range split — either a collection's
+        // works or a volume-split single book (上卷/下卷). Both mean "follow
+        // the range under the reading position": generating the current
+        // volume's outline is the same behavior as the current work's.
+        if (resolved != null && resolved.length > 1) {
+          work = currentReadingWork;
+        }
+      }
       // A collection has no whole-book outline surface — refusing generation
       // outside any work beats producing an outline nothing can display.
       if (hasCollectionWorks && work == null) {
@@ -1627,7 +1646,9 @@ class BookReaderController extends ChangeNotifier {
   /// one-shot structural recognition (a single short call vs. the dozens of
   /// extraction calls a generation makes) to detect collections. Returns null
   /// on recognition failure → caller falls back to full-book generation.
-  Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates() async {
+  Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates({
+    CancelToken? cancel,
+  }) async {
     final fromOutline = graphWorkCandidates;
     if (_resolvedGraphWorks != null) return _resolvedGraphWorks;
     final service = _aiOutline;
@@ -1636,6 +1657,7 @@ class BookReaderController extends ChangeNotifier {
       final body = await _loadBookGraphPlainTextCached(
         AiBookOutlineService.maxBookBodyChars,
       );
+      cancel?.throwIfCancelled();
       var sections = AiChatBookCorpus.parseSections(body);
       if (sections.isEmpty) return fromOutline;
       final titled = [
@@ -1658,6 +1680,7 @@ class BookReaderController extends ChangeNotifier {
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
         sections: eligible,
+        cancelToken: cancel,
       );
       final rows = <(int?, String, int?, String)>[
         for (final unit in units)
