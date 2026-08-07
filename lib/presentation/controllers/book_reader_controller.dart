@@ -1601,7 +1601,7 @@ class BookReaderController extends ChangeNotifier {
     _bookGraphCancel = cancel;
     if (!_disposed) notifyListeners();
     try {
-      final allowUnread = _aiSettings?.settings.allowUnreadContext ?? true;
+      final allowUnread = _aiSettings?.settings.allowUnreadContext ?? false;
       final deduped = await _graphSectionsForWork(work);
       // Manual slice persists on the graph: a fresh regeneration carries the
       // previous exclusions unless the user changed them in the dialog;

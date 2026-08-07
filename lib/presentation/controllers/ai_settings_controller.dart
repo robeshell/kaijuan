@@ -39,6 +39,10 @@ class AiSettingsController extends ChangeNotifier {
   String get searchApiKey => _searchApiKey;
   bool get isLoaded => _loaded;
   bool get isTesting => _testing;
+  bool _testingSearch = false;
+  bool get isTestingSearch => _testingSearch;
+  String? _searchTestMessage;
+  String? get searchTestMessage => _searchTestMessage;
   bool get isListingModels => _listingModels;
   bool get isBusy => _testing || _listingModels;
   String? get testMessage => _testMessage;
@@ -307,6 +311,30 @@ class AiSettingsController extends ChangeNotifier {
     if (!_settings.enabled) return null;
     if (_settings.resolvedModel.isEmpty) return null;
     return providerFactory.create(settings: _settings, apiKey: _apiKey);
+  }
+
+  /// Probes the configured search provider with one trivial query.
+  Future<void> testSearch() async {
+    if (_testingSearch) return;
+    _testingSearch = true;
+    _searchTestMessage = null;
+    notifyListeners();
+    try {
+      final hits = await AiWebSearchService().search(
+        provider: _settings.searchProviderKind,
+        apiKey: _searchApiKey,
+        query: '开卷阅读器联网搜索测试',
+        maxResults: 1,
+      );
+      _searchTestMessage = hits.isEmpty
+          ? '搜索服务可用，但返回了空结果'
+          : '搜索服务可用（测试返回 ${hits.length} 条结果）';
+    } catch (e) {
+      _searchTestMessage = '搜索失败：$e';
+    } finally {
+      _testingSearch = false;
+      notifyListeners();
+    }
   }
 
   Future<AiConnectionTestResult> testConnection({

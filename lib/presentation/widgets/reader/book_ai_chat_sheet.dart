@@ -1296,7 +1296,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   bool get _allowUnread =>
-      _c.aiSettingsController?.settings.allowUnreadContext ?? true;
+      _c.aiSettingsController?.settings.allowUnreadContext ?? false;
 
   /// Which entity types the current list view shows; empty on the graph
   /// view (no list rendered there). The persons view also folds in
