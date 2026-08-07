@@ -258,7 +258,51 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (_activeTab == _BookAiWorkspaceTab.graph) {
       _graphListEpoch++;
       unawaited(_ensureGraphWorks());
+    } else if (_activeTab == _BookAiWorkspaceTab.outline) {
+      // 「读到哪本跟哪本」: landing on the outline tab expands the chain
+      // down to the work currently under the reading position.
+      _revealOutlineForReadingWork();
     }
+  }
+
+  /// Expands the outline nodes leading to the work the reader is currently
+  /// inside (match by the work's start spine). No-op for plain books or when
+  /// the outline is not loaded yet; scrolling to the row is skipped — the
+  /// expanded chain makes the anchor visible without fighting the scroll
+  /// controller.
+  void _revealOutlineForReadingWork() {
+    final work = _c.currentReadingWork;
+    if (work == null) return;
+    final outline = _c.bookOutline;
+    if (outline == null) return;
+    final chain = <AiBookOutlineChapter>[];
+    final ancestors = <AiBookOutlineChapter>[];
+    void walk(AiBookOutlineChapter node) {
+      if (chain.isNotEmpty) return;
+      if (node.sectionIndex == work.startSection ||
+          node.sourceSectionIndex == work.startSection) {
+        chain.add(node);
+        return;
+      }
+      for (final child in node.children ?? const <AiBookOutlineChapter>[]) {
+        if (chain.isNotEmpty) return;
+        ancestors.add(node);
+        walk(child);
+        if (chain.isNotEmpty) return;
+        ancestors.removeLast();
+      }
+    }
+
+    for (final root in outline.chapters) {
+      walk(root);
+      if (chain.isNotEmpty) break;
+    }
+    if (chain.isEmpty) return;
+    for (final ancestor in ancestors) {
+      _expandedOutlineSections.add(ancestor.stableNodeId);
+    }
+    _expandedOutlineSections.add(chain.first.stableNodeId);
+    setState(() {});
   }
 
   void _onReaderControllerChanged() {
@@ -2346,6 +2390,58 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return parts.join(' · ');
   }
 
+  /// Anchored entry for the work under the reading position: one tap opens
+  /// that work's graph (or starts it). Only shown on the collection picker.
+  Widget _buildCurrentReadingGraphCard(
+    BuildContext context,
+    AiGraphWorkCandidate reading,
+  ) {
+    final colors = context.appColors;
+    final ready = _c.hasWorkGraph(reading);
+    return Card(
+      margin: const EdgeInsetsDirectional.fromSTEB(8, 4, 8, 0),
+      elevation: 0,
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.45),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: ListTile(
+        dense: true,
+        leading: Icon(
+          Icons.menu_book_outlined,
+          size: 18,
+          color: colors.primary,
+        ),
+        title: Text(
+          '当前阅读：《${reading.title}》',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: context.appBodySize,
+            fontWeight: FontWeight.w600,
+            color: context.appPrimaryText,
+          ),
+        ),
+        subtitle: Text(
+          ready ? '这本的图谱已生成' : '生成本书的图谱',
+          style: TextStyle(
+            fontSize: context.appCaptionSize,
+            color: context.appSecondaryText,
+          ),
+        ),
+        trailing: Text(
+          ready ? '查看' : '生成',
+          style: TextStyle(
+            fontSize: context.appCaptionSize,
+            fontWeight: FontWeight.w600,
+            color: colors.primary,
+          ),
+        ),
+        onTap: ready
+            ? () => _c.openWorkGraph(reading)
+            : () => unawaited(_generateGraph(work: reading)),
+      ),
+    );
+  }
+
   /// Collection picker: one native ListTile per work (same visual language
   /// as the outline tab). Tapping opens the work's graph or starts it.
   Widget _buildGraphWorksList(
@@ -2369,6 +2465,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
           ),
         ),
+        // 「读到哪本跟哪本」: the picker opens anchored to the work the
+        // reader is currently inside — one tap enters that work's graph.
+        if (_c.currentReadingWork case final AiGraphWorkCandidate? reading
+            when reading != null) ...[
+          _buildCurrentReadingGraphCard(context, reading),
+          const SizedBox(height: 4),
+        ],
         if (generating) ...[
           Padding(
             padding: const EdgeInsetsDirectional.fromSTEB(16, 4, 16, 4),
@@ -2726,6 +2829,55 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       compact ? 8 : 12,
                     ),
                     children: [
+                      if (_c.graphWorkCandidates != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Text(
+                                '对话范围',
+                                style: TextStyle(
+                                  fontSize: context.appCaptionSize,
+                                  color: context.appSecondaryText,
+                                ),
+                              ),
+                              const Spacer(),
+                              SegmentedButton<bool>(
+                                segments: const [
+                                  ButtonSegment(
+                                    value: false,
+                                    label: Text('当前作品'),
+                                  ),
+                                  ButtonSegment(
+                                    value: true,
+                                    label: Text('全书'),
+                                  ),
+                                ],
+                                selected: {_c.chatScopeWholeBook},
+                                onSelectionChanged: (selection) => setState(
+                                  () => _c.chatScopeWholeBook =
+                                      selection.first,
+                                ),
+                                showSelectedIcon: false,
+                                style: ButtonStyle(
+                                  visualDensity: VisualDensity.compact,
+                                  textStyle: WidgetStatePropertyAll(
+                                    TextStyle(
+                                      fontSize: context.appCaptionSize,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  padding: const WidgetStatePropertyAll(
+                                    EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 2,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       Semantics(
                         container: true,
                         liveRegion: true,

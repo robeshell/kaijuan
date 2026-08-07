@@ -1291,6 +1291,31 @@ class BookReaderController extends ChangeNotifier {
 
   static String workKeyFor(AiGraphWorkCandidate work) => 's${work.startSection}';
 
+  /// The collection work the reader is currently inside (current spine →
+  /// work range), or null when the current section belongs to no work (plain
+  /// book / front matter / whole-book view). Drives the「读到哪本跟哪本」
+  /// behavior: graph/dialog/outline anchor to the work under the reading
+  /// position instead of the whole collection.
+  AiGraphWorkCandidate? get currentReadingWork {
+    final works = graphWorkCandidates;
+    if (works == null) return null;
+    final spine = _sectionIndex + 1; // reader is 0-based
+    for (final work in works) {
+      if (work.contains(spine)) return work;
+    }
+    return null;
+  }
+
+  /// Chat context scope: false = only the work under the reading position is
+  /// sampled for tools (「读到哪本跟哪本」); true = the whole book.
+  bool _chatScopeWholeBook = false;
+  bool get chatScopeWholeBook => _chatScopeWholeBook;
+  set chatScopeWholeBook(bool value) {
+    if (_chatScopeWholeBook == value) return;
+    _chatScopeWholeBook = value;
+    notifyListeners();
+  }
+
   /// True when a graph was already generated for [work] of this collection.
   bool hasWorkGraph(AiGraphWorkCandidate work) =>
       _workGraphs.containsKey(workKeyFor(work));
@@ -3514,12 +3539,22 @@ class _BookChatToolHost implements AiChatToolHost {
 
   final BookReaderController _c;
 
+  /// Restricts [body] to the work under the reading position unless the user
+  /// switched chat scope to the whole book. Plain books (no works) pass
+  /// through unchanged. The re-assembled text keeps the original logical
+  /// indices so toolGetChapter/sectionText still address the same slices.
+  String _scopedBody(String body) => scopeChatBodyToWork(
+        body,
+        _c.currentReadingWork,
+        wholeBook: _c.chatScopeWholeBook,
+      );
+
   @override
   Future<String> toolGetToc() async {
     final titles = _c.tocTitles;
     if (titles.isEmpty) {
-      final body = await _c._loadBookPlainTextCached(
-        AiChatService.maxBookBodyChars,
+      final body = _scopedBody(
+        await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
       );
       final sections = AiChatBookCorpus.parseSections(body);
       if (sections.isNotEmpty) {
@@ -3555,8 +3590,8 @@ class _BookChatToolHost implements AiChatToolHost {
     int sectionIndex1Based, {
     int maxChars = 10000,
   }) async {
-    final body = await _c._loadBookPlainTextCached(
-      AiChatService.maxBookBodyChars,
+    final body = _scopedBody(
+      await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
     );
     final sections = AiChatBookCorpus.parseSections(body);
     if (sections.isEmpty) {
@@ -3575,8 +3610,8 @@ class _BookChatToolHost implements AiChatToolHost {
 
   @override
   Future<String> toolSearchBook(String query, {int maxChars = 12000}) async {
-    final body = await _c._loadBookPlainTextCached(
-      AiChatService.maxBookBodyChars,
+    final body = _scopedBody(
+      await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
     );
     if (body.isEmpty) return '(书中无正文可检索)';
     final packed = AiChatRetrieve.pack(
@@ -3595,8 +3630,8 @@ class _BookChatToolHost implements AiChatToolHost {
 
   @override
   Future<String> toolSampleBook({int maxChars = 36000}) async {
-    final body = await _c._loadBookPlainTextCached(
-      AiChatService.maxBookBodyChars,
+    final body = _scopedBody(
+      await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
     );
     if (body.isEmpty) return '(书中无正文可取样)';
     final packed = AiChatRetrieve.pack(
@@ -3613,4 +3648,31 @@ class _BookChatToolHost implements AiChatToolHost {
     if (formatted.isEmpty) return '$outline(empty samples)';
     return '$outline$formatted';
   }
+}
+
+/// Restricts a getBookPlainText body to [work]'s spine range (「读到哪本跟
+/// 哪本」chat scope). `wholeBook` or a null work passes the body through
+/// unchanged. The re-assembled text keeps the original logical indices and
+/// navigation markers so downstream parseSections / pack / sectionText keep
+/// addressing the same slices.
+@visibleForTesting
+String scopeChatBodyToWork(
+  String body,
+  AiGraphWorkCandidate? work, {
+  required bool wholeBook,
+}) {
+  if (wholeBook || work == null) return body;
+  final sections = AiChatBookCorpus.parseSections(body);
+  final kept = sections
+      .where((s) => work.contains(s.originSectionIndex))
+      .toList(growable: false);
+  if (kept.isEmpty || kept.length == sections.length) return body;
+  final buf = StringBuffer();
+  for (final s in kept) {
+    final nav = s.isNavigationUnit ? '~' : '';
+    buf.writeln('[§${s.index}@${s.sourceSectionIndex ?? s.index}$nav ${s.label}]');
+    buf.writeln(s.text.trim());
+    buf.writeln();
+  }
+  return buf.toString().trim();
 }

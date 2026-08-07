@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/app/book_reading_preferences.dart';
@@ -384,6 +385,42 @@ void main() {
   });
 
   group('graph section chooser', () {
+    test('chat scope narrows the body to the reading work, indices round-trip',
+        () {
+      const body = '''
+[§1@1 目录]
+目录列表
+[§2@4 狂人日记]
+某君昆仲。
+[§3@4 孔乙己]
+鲁镇的酒店的格局。
+[§4@9 故乡]
+我冒了严寒。
+''';
+      const work = AiGraphWorkCandidate(
+        title: '鲁迅小说精品',
+        startSection: 4,
+        endSectionExclusive: 8,
+      );
+
+      // Whole-book scope passes through untouched.
+      expect(
+        scopeChatBodyToWork(body, work, wholeBook: true),
+        body,
+      );
+
+      final scoped = scopeChatBodyToWork(body, work, wholeBook: false);
+      final sections = AiChatBookCorpus.parseSections(scoped);
+      expect(sections.map((s) => s.label), ['狂人日记', '孔乙己']);
+      expect(sections.map((s) => s.index), [2, 3]);
+      expect(sections.map((s) => s.originSectionIndex), [4, 4]);
+
+      // A null work (plain book) is untouched too.
+      expect(
+        scopeChatBodyToWork(body, null, wholeBook: false),
+        body,
+      );
+    });
     test('auto-filter drops front/back matter, keeps body chapters',
         () async {
       final item = await insertBook(id: 'graph-sections');
