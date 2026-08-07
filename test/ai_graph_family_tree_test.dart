@@ -52,6 +52,9 @@ List<String> flatten(AiFamilyTreeNode root) {
   return out;
 }
 
+List<AiFamilyTreeNode> _flattenNodes(AiFamilyTreeNode node) =>
+    [node, for (final c in node.children) ..._flattenNodes(c)];
+
 void main() {
   group('buildFamilyTree', () {
     test('plain lineage builds one root with nested children', () {
@@ -239,6 +242,109 @@ void main() {
       expect(wl, contains('万历皇帝'));
       expect(wl, contains('朱常洛'));
       expect(wl, isNot(contains('王皇后')));
+    });
+
+    test('marriage attaches spouses; maternal link becomes an extra edge',
+        () {
+      final tree = buildFamilyTree(
+        entities: [
+          person('万历皇帝', firstSection: 1),
+          person('王皇后', firstSection: 1),
+          person('恭妃王氏', firstSection: 1),
+          person('朱常洛', firstSection: 2),
+          person('常洵', firstSection: 3),
+        ],
+        relations: [
+          AiGraphRelation(
+            source: '万历皇帝',
+            target: '王皇后',
+            type: '婚配',
+            kin: '皇后',
+            description: '',
+            evidence: [AiGraphEvidence(sectionIndex: 1, quote: '成婚')],
+            weight: 1,
+          ),
+          AiGraphRelation(
+            source: '万历皇帝',
+            target: '恭妃王氏',
+            type: '婚配',
+            kin: '妃嫔',
+            description: '',
+            evidence: [AiGraphEvidence(sectionIndex: 1, quote: '册封')],
+            weight: 1,
+          ),
+          kin('万历皇帝', '朱常洛', evidenceCount: 3),
+          kin('万历皇帝', '常洵'),
+          // 恭妃 is 朱常洛's birth mother; the father wins the single-parent
+          // race, so her 母子 edge surfaces as a dashed extra link.
+          AiGraphRelation(
+            source: '恭妃王氏',
+            target: '朱常洛',
+            type: '亲属',
+            kin: '母子',
+            description: '',
+            evidence: [AiGraphEvidence(sectionIndex: 2, quote: '所生')],
+            weight: 1,
+          ),
+        ],
+      );
+
+      // Spouses attach to the node card instead of being lineage children.
+      final wanli = tree.roots
+          .expand((r) => _flattenNodes(r))
+          .firstWhere((n) => n.name == '万历皇帝');
+      expect(wanli.spouses.map((s) => '${s.kin}:${s.name}'),
+          containsAll(['皇后:王皇后', '妃嫔:恭妃王氏']));
+
+      // 王皇后 has no lineage edge → no tree card (folded as isolated); she
+      // is visible only on 万历's card. 恭妃 participates as 朱常洛's mother
+      // and joins the tree.
+      expect(tree.isolatedNames, contains('王皇后'));
+      expect(tree.isolatedNames, isNot(contains('恭妃王氏')));
+      final wang = wanli.spouses.firstWhere((s) => s.name == '王皇后');
+      expect(wang.kin, '皇后');
+
+      // The maternal link survives as an extra edge; 恭妃 is not "complex".
+      expect(tree.extraEdges, hasLength(1));
+      final extra = tree.extraEdges.single;
+      expect(extra.source, '恭妃王氏');
+      expect(extra.target, '朱常洛');
+      expect(extra.kin, '母子');
+      expect(tree.complexNames, isNot(contains('恭妃王氏')));
+
+      // The lineage spine still shows 万历 → 朱常洛 (father wins).
+      final zhu = tree.roots
+          .expand((r) => _flattenNodes(r))
+          .firstWhere((n) => n.name == '朱常洛');
+      expect(zhu.kin, '父子');
+    });
+
+    test('lost maternal edge with no marriage edge falls back to complex', () {
+      final tree = buildFamilyTree(
+        entities: [
+          person('万历皇帝', firstSection: 1),
+          person('恭妃王氏', firstSection: 1),
+          person('朱常洛', firstSection: 2),
+        ],
+        relations: [
+          kin('万历皇帝', '朱常洛', evidenceCount: 3),
+          AiGraphRelation(
+            source: '恭妃王氏',
+            target: '朱常洛',
+            type: '亲属',
+            kin: '母子',
+            description: '',
+            evidence: [AiGraphEvidence(sectionIndex: 2, quote: '所生')],
+            weight: 1,
+          ),
+        ],
+      );
+
+      // The mother has no tree seat (no marriage edge, lost the parent race):
+      // the extra line cannot be drawn — she surfaces as complex instead of
+      // silently vanishing.
+      expect(tree.extraEdges, isEmpty);
+      expect(tree.complexNames, contains('恭妃王氏'));
     });
 
     test('kin-less 亲属 edge never draws a child (恭妃≠万历之子)', () {

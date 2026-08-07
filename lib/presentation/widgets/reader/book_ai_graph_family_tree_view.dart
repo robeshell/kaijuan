@@ -51,6 +51,7 @@ class BookAiGraphFamilyTreeView extends StatefulWidget {
 
   static const double nodeWidth = 88;
   static const double nodeHeight = 44;
+  static const double _spouseRowHeight = 14;
   static const double horizontalPadding = 24;
 
   /// Edge kinship-label chip size (父子/夫妻…). Fixed so Positioned math
@@ -125,6 +126,7 @@ class _BookAiGraphFamilyTreeViewState
       depth: depth,
       complex: complex.contains(node.name),
       kin: node.kin,
+      spouses: node.spouses,
     );
     for (final child in node.children) {
       layout.children.add(_toLayoutNode(child, depth + 1, complex));
@@ -219,7 +221,10 @@ class _BookAiGraphFamilyTreeViewState
               parentCenterX: node.x,
               parentBottomY:
                   node.depth * widget.levelHeight +
-                  BookAiGraphFamilyTreeView.nodeHeight,
+                  BookAiGraphFamilyTreeView.nodeHeight +
+                  (node.spouses.isNotEmpty
+                      ? BookAiGraphFamilyTreeView._spouseRowHeight
+                      : 0),
               childCenterX: child.x + offsetX,
               childTopY: child.depth * widget.levelHeight,
               label: child.kin,
@@ -230,6 +235,28 @@ class _BookAiGraphFamilyTreeViewState
 
         for (final root in roots) {
           collect(root);
+        }
+
+        // Maternal extra links (母子/母女) the single-parent selection dropped:
+        // dashed lines from the consort/mother node to her child.
+        final nodeByName = {for (final n in nodes) n.name: n};
+        final extraEdges = <_LayoutEdge>[];
+        for (final extra in widget.tree.extraEdges) {
+          final source = nodeByName[extra.source];
+          final target = nodeByName[extra.target];
+          if (source == null || target == null) continue;
+          extraEdges.add(_LayoutEdge(
+            parentCenterX: source.x,
+            parentBottomY:
+                source.depth * widget.levelHeight +
+                BookAiGraphFamilyTreeView.nodeHeight +
+                (source.spouses.isNotEmpty
+                    ? BookAiGraphFamilyTreeView._spouseRowHeight
+                    : 0),
+            childCenterX: target.x,
+            childTopY: target.depth * widget.levelHeight,
+            label: extra.kin,
+          ));
         }
 
         if (!_fitted) {
@@ -266,11 +293,12 @@ class _BookAiGraphFamilyTreeViewState
                     child: CustomPaint(
                       painter: _FamilyTreeEdgePainter(
                         edges: edges,
+                        extraEdges: extraEdges,
                         color: colors.outlineVariant,
                       ),
                     ),
                   ),
-                  for (final edge in edges)
+                  for (final edge in [...edges, ...extraEdges])
                     if (edge.label.isNotEmpty)
                       Positioned(
                         left: (edge.parentCenterX + edge.childCenterX) / 2 -
@@ -291,8 +319,8 @@ class _BookAiGraphFamilyTreeViewState
                       child: _TreeNodeCard(
                         name: node.name,
                         width: BookAiGraphFamilyTreeView.nodeWidth,
-                        height: BookAiGraphFamilyTreeView.nodeHeight,
                         complex: node.complex,
+                        spouses: node.spouses,
                         onTap: () => widget.onVertexTap(node.name),
                       ),
                     ),
@@ -346,25 +374,31 @@ class _TreeNodeCard extends StatelessWidget {
   const _TreeNodeCard({
     required this.name,
     required this.width,
-    required this.height,
     required this.complex,
+    required this.spouses,
     required this.onTap,
   });
 
   final String name;
   final double width;
-  final double height;
   final bool complex;
+
+  /// 旁挂配偶 rows (皇后：王皇后 / 妃嫔：恭妃王氏), empty hides the row.
+  final List<AiFamilySpouse> spouses;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final hasSpouses = spouses.isNotEmpty;
     final card = Container(
       width: width,
-      height: height,
+      height: hasSpouses
+          ? BookAiGraphFamilyTreeView.nodeHeight +
+              BookAiGraphFamilyTreeView._spouseRowHeight
+          : BookAiGraphFamilyTreeView.nodeHeight,
       alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
         color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(8),
@@ -373,7 +407,7 @@ class _TreeNodeCard extends StatelessWidget {
           width: complex ? 1.6 : 1.0,
         ),
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Flexible(
@@ -387,6 +421,19 @@ class _TreeNodeCard extends StatelessWidget {
                   ),
             ),
           ),
+          if (hasSpouses)
+            Flexible(
+              child: Text(
+                spouses.map((s) => '${s.kin}：${s.name}').join('  '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9,
+                  height: 1.2,
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -407,6 +454,7 @@ class _LayoutNode {
     required this.depth,
     required this.complex,
     this.kin = '',
+    this.spouses = const [],
   });
 
   final String name;
@@ -415,6 +463,9 @@ class _LayoutNode {
 
   /// Kinship label of the edge to its parent (父子/夫妻…), empty for roots.
   final String kin;
+
+  /// 旁挂配偶 (婚配 edges), shown as a small row on the card.
+  final List<AiFamilySpouse> spouses;
   double x = 0;
   final List<_LayoutNode> children = [];
 }
@@ -438,9 +489,16 @@ class _LayoutEdge {
 }
 
 class _FamilyTreeEdgePainter extends CustomPainter {
-  _FamilyTreeEdgePainter({required this.edges, required this.color});
+  _FamilyTreeEdgePainter({
+    required this.edges,
+    required this.extraEdges,
+    required this.color,
+  });
 
   final List<_LayoutEdge> edges;
+
+  /// Maternal links drawn dashed, slightly weaker than the parent spine.
+  final List<_LayoutEdge> extraEdges;
   final Color color;
 
   @override
@@ -458,9 +516,26 @@ class _FamilyTreeEdgePainter extends CustomPainter {
         ..lineTo(edge.childCenterX, edge.childTopY);
       canvas.drawPath(path, paint);
     }
+    if (extraEdges.isNotEmpty) {
+      final extraPaint = Paint()
+        ..color = color.withValues(alpha: 0.75)
+        ..strokeWidth = 1.0
+        ..style = PaintingStyle.stroke;
+      for (final edge in extraEdges) {
+        final midY = (edge.parentBottomY + edge.childTopY) / 2;
+        final path = Path()
+          ..moveTo(edge.parentCenterX, edge.parentBottomY)
+          ..lineTo(edge.parentCenterX, midY)
+          ..lineTo(edge.childCenterX, midY)
+          ..lineTo(edge.childCenterX, edge.childTopY);
+        canvas.drawPath(path, extraPaint);
+      }
+    }
   }
 
   @override
   bool shouldRepaint(_FamilyTreeEdgePainter oldDelegate) =>
-      oldDelegate.edges != edges || oldDelegate.color != color;
+      oldDelegate.edges != edges ||
+      oldDelegate.extraEdges != extraEdges ||
+      oldDelegate.color != color;
 }

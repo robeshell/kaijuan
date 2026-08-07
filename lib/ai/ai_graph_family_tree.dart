@@ -26,6 +26,7 @@ class AiFamilyTreeNode {
     required this.name,
     required this.firstSection,
     this.kin = '',
+    this.spouses = const [],
   });
 
   final String name;
@@ -33,7 +34,31 @@ class AiFamilyTreeNode {
 
   /// Kinship label of the edge to its parent (父子/夫妻…), empty for roots.
   final String kin;
+
+  /// Spouses from 婚配 edges (旁挂配偶), e.g. 王皇后/皇后, 恭妃王氏/妃嫔.
+  final List<AiFamilySpouse> spouses;
   final List<AiFamilyTreeNode> children = [];
+}
+
+/// A spouse attached to a tree node (婚配 edge, 旁挂显示).
+class AiFamilySpouse {
+  const AiFamilySpouse({required this.name, required this.kin});
+  final String name;
+  final String kin;
+}
+
+/// An extra lineage edge drawn alongside the parent spine: the maternal
+/// (母子/母女) edge a child's single-parent selection dropped — the consort
+/// node then visibly links to her child (恭妃王氏 → 朱常洛 母子).
+class AiFamilyExtraEdge {
+  const AiFamilyExtraEdge({
+    required this.source,
+    required this.target,
+    required this.kin,
+  });
+  final String source;
+  final String target;
+  final String kin;
 }
 
 /// Result of [buildFamilyTree].
@@ -43,6 +68,7 @@ class AiFamilyTree {
     required this.isolatedCount,
     required this.isolatedNames,
     required this.complexNames,
+    required this.extraEdges,
   });
 
   /// Forest roots, book order. Every root is part of at least one 亲属 edge
@@ -58,6 +84,10 @@ class AiFamilyTree {
   /// People whose tree edge was dropped (multi-parent runner-ups, ring
   /// members). Sorted by first appearance.
   final List<String> complexNames;
+
+  /// Maternal links a single-parent selection dropped (母子/母女 runner-ups),
+  /// drawn as dashed lines from the consort/mother node to the child.
+  final List<AiFamilyExtraEdge> extraEdges;
 }
 
 /// Builds the family forest from a graph.
@@ -97,9 +127,38 @@ AiFamilyTree buildFamilyTree({
     incoming.putIfAbsent(child, () => []).add(r);
   }
 
+  // 婚配 edges attach spouses (旁挂) instead of lineage parents. Only
+  // spouses who also participate in a 亲属 edge join the tree (恭妃王氏 as
+  // 朱常洛's mother); a spouse with no lineage edge (王皇后) shows only on
+  // the partner's card — no lone root card at the top.
+  final spouses = <String, List<AiFamilySpouse>>{};
+  final spouseMembers = <String>{};
+  final kinParticipants = <String>{
+    for (final edges in incoming.values)
+      for (final edge in edges) ...[edge.source, edge.target],
+  };
+  for (final r in relations) {
+    if (r.type != '婚配') continue;
+    if (!persons.containsKey(r.source) || !persons.containsKey(r.target)) {
+      continue;
+    }
+    final forwardKin = r.kin.isEmpty ? '配偶' : r.kin;
+    spouses
+        .putIfAbsent(r.source, () => [])
+        .add(AiFamilySpouse(name: r.target, kin: forwardKin));
+    // Reverse end labels the partner as plain 配偶 (王皇后 is 万历's 皇后,
+    // not the other way round).
+    spouses
+        .putIfAbsent(r.target, () => [])
+        .add(AiFamilySpouse(name: r.source, kin: '配偶'));
+    if (kinParticipants.contains(r.source)) spouseMembers.add(r.source);
+    if (kinParticipants.contains(r.target)) spouseMembers.add(r.target);
+  }
+
   final parentOf = <String, String>{};
   final kinOf = <String, String>{};
   final complex = <String>{};
+  final extraEdges = <AiFamilyExtraEdge>[];
   for (final entry in incoming.entries) {
     final child = entry.key;
     final candidates = entry.value;
@@ -112,7 +171,17 @@ AiFamilyTree buildFamilyTree({
     parentOf[child] = candidates.first.source;
     kinOf[child] = candidates.first.kin;
     for (final runnerUp in candidates.skip(1)) {
-      complex.add(runnerUp.source);
+      if (_maternalKin.contains(runnerUp.kin)) {
+        // The mother's edge lost the single-parent race to the father, but
+        // she is a real parent — keep it as a visible extra link (dashed).
+        extraEdges.add(AiFamilyExtraEdge(
+          source: runnerUp.source,
+          target: child,
+          kin: runnerUp.kin,
+        ));
+      } else {
+        complex.add(runnerUp.source);
+      }
     }
   }
 
@@ -165,12 +234,33 @@ AiFamilyTree buildFamilyTree({
         name: name,
         firstSection: persons[name]!.firstSection,
         kin: kinOf[name] ?? '',
+        spouses: spouses[name] ?? const [],
       ),
   };
   // Participating = everyone touched by a candidate 亲属 edge (multi-parent
-  // runner-ups included — they are "complex", not isolated). Isolated =
-  // setting persons with no kin edge at all.
-  final treeMembers = <String>{...parentOf.keys, ...parentOf.values};
+  // runner-ups included — they are "complex", not isolated) plus 婚配
+  // spouses who also hold a lineage edge. Isolated = setting persons with no
+  // 亲属 edge at all — a marriage-only spouse (王皇后) has no tree seat and
+  // is folded too, visible only on the partner's card.
+  final treeMembers = <String>{
+    ...parentOf.keys,
+    ...parentOf.values,
+    ...spouseMembers,
+  };
+
+  // The child always sits in the tree (parentOf key); the mother may not — a
+  // consort with only a lost maternal edge and no marriage edge would leave
+  // the extra line with no source node. Fall back to complex so she is not
+  // silently invisible.
+  final finalExtraEdges = <AiFamilyExtraEdge>[];
+  for (final extra in extraEdges) {
+    if (treeMembers.contains(extra.source) &&
+        treeMembers.contains(extra.target)) {
+      finalExtraEdges.add(extra);
+    } else {
+      complex.add(extra.source);
+    }
+  }
   final roots = <AiFamilyTreeNode>[
     for (final name in treeMembers)
       if (!parentOf.containsKey(name)) nodes[name]!,
@@ -186,6 +276,7 @@ AiFamilyTree buildFamilyTree({
     ...incoming.keys,
     for (final edges in incoming.values)
       for (final edge in edges) ...[edge.source, edge.target],
+    ...spouseMembers,
   };
   final isolatedCount = persons.length - participating.length;
   final isolatedNames = <String>[
@@ -201,8 +292,13 @@ AiFamilyTree buildFamilyTree({
     isolatedCount: isolatedCount,
     isolatedNames: isolatedNames,
     complexNames: complexNames,
+    extraEdges: finalExtraEdges,
   );
 }
+
+/// Maternal kinship labels kept as visible extra links when the father won
+/// the single-parent race (母子/母女).
+const _maternalKin = {'母子', '母女'};
 
 /// Edge strength = evidence count (more chapters corroborate → stronger).
 int _edgeStrength(AiGraphRelation relation) => relation.evidence.length;
