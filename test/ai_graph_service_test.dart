@@ -794,6 +794,176 @@ void main() {
           {'陈先生', '先生'});
     });
 
+    test('依据X/按照X narration does not trigger the citation rule',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张居正","type":"person","scope":"setting",
+              "description":"首辅。",
+              "evidence":[{"section":1,"quote":"依据张居正的奏疏办事"},
+                          {"section":1,"quote":"按张居正的意思办"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '依据张居正的奏疏办事。按张居正的意思办。')],
+        includesUnread: true,
+      );
+
+      // 依据X/按X describe the court acting per 张居正 — narration, not a
+      // citation of him; the entity must stay setting (S3 regression).
+      expect(graph.entities.single.scope, AiGraphEntityScope.setting);
+    });
+
+    test('relation endpoint without an entity is dropped (先生 泛称端点)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"陈先生","type":"person","aliases":[],
+              "description":"塾师。",
+              "evidence":[{"section":1,"quote":"陈先生"}],
+              "scope":"setting"}],
+             "relations":[{"source":"先生","target":"陈先生","type":"师生",
+              "evidence":[{"section":1,"quote":"先生教陈先生读书"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '先生教陈先生读书。')],
+        includesUnread: true,
+      );
+
+      // 先生 never appeared as an entity mention → the dangling edge is
+      // dropped instead of shipping an unclickable node (S2 regression).
+      expect(graph.relations, isEmpty);
+      expect(graph.entities.map((e) => e.name), ['陈先生']);
+    });
+
+    test('cross-kin reversed mirrors dedupe to the stronger direction',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣皇太后"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣皇太后","target":"万历皇帝",
+              "type":"亲属","kin":"父子",
+              "evidence":[{"section":1,"quote":"慈圣皇太后教导万历"},
+                          {"section":1,"quote":"皇太后训子"}]},
+             {"source":"万历皇帝","target":"慈圣皇太后",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"万历皇帝拜见皇太后"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '慈圣皇太后教导万历。皇太后训子。万历皇帝拜见皇太后。')],
+        includesUnread: true,
+      );
+
+      // A→B 父子 vs B→A 母子 — different kin, same conflict: only the
+      // stronger direction survives (S4 regression).
+      expect(graph.relations.length, 1);
+      final kin = graph.relations.single;
+      expect(kin.source, '慈圣皇太后');
+      expect(kin.target, '万历皇帝');
+    });
+
+    test('equal-strength mirror keeps the earlier-appearing source', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣皇太后"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"慈圣皇太后","target":"万历皇帝",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"皇太后召见万历"}]},
+             {"source":"万历皇帝","target":"慈圣皇太后",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"万历皇帝叩拜皇太后"}]}]}
+          ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一回', '慈圣皇太后召见万历。万历皇帝叩拜皇太后。')],
+        includesUnread: true,
+      );
+
+      // Both mirrors carry one evidence quote: the tie resolves to the
+      // earlier-appearing source (慈圣皇太后 firstSection 1) so the emperor
+      // is never drawn as his mother's parent (S5 regression).
+      expect(graph.relations.length, 1);
+      expect(graph.relations.single.source, '慈圣皇太后');
+      expect(graph.relations.single.target, '万历皇帝');
+    });
+
+    test('re-run with an excluded section does not ground out its entities',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"甲","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"甲"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"乙","type":"person","aliases":[],
+              "description":"序言人物。",
+              "evidence":[{"section":2,"quote":"乙"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          4: '{"entities":[],"relations":[]}',
+        },
+      );
+      final service = serviceWith(provider);
+
+      final first = await service.generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '一', '甲。'),
+          slice(2, '二', '乙。'),
+        ],
+        includesUnread: true,
+      );
+      expect(first.entities.map((e) => e.name), contains('乙'));
+
+      // Re-run excluding section 2, adding section 4: 乙's evidence lives in
+      // a section that is no longer in the body — grounding must skip it,
+      // not treat the exclusion as a hallucination (S1 regression).
+      final second = await service.generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '一', '甲。'),
+          slice(4, '四', '新内容。'),
+        ],
+        existing: first,
+        includesUnread: true,
+      );
+      expect(second.entities.map((e) => e.name), contains('乙'));
+      expect(second.coveredSections, containsAll([1, 2, 4]));
+    });
+
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
         () async {
       final provider = _GraphProvider(
@@ -1440,9 +1610,15 @@ void main() {
         for (var i = 7; i <= 12; i++) i,
       ];
       final responses = <int, String>{};
+      // Section 1 also establishes the shared relation object as a real
+      // entity (endpoint grounding drops relations to non-entities).
+      const emperor = '{"name":"万历皇帝","type":"person","aliases":[],'
+          '"description":"天子。","evidence":[{"section":1,"quote":"万历皇帝"}],'
+          '"scope":"setting"}';
       for (final i in motherSections) {
         responses[i] =
-            '{"entities":[${sections[i]!['母$i']}],'
+            '{"entities":[${sections[i]!['母$i']}'
+            '${i == 1 ? ',$emperor' : ''}],'
             '"relations":[{"source":"母$i","target":"万历皇帝","type":"亲属",'
             '"kin":"母子","evidence":[{"section":$i,"quote":"母$i是万历之母"}]}]}';
       }

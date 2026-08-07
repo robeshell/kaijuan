@@ -461,11 +461,15 @@ class AiBookGraphService {
     // template hit, so this never resurrects them.
     _protectCoreEntities(entities);
     // Directional-kin duplicate resolution: the model occasionally flips a
-    // 亲属 edge (万历→慈圣 母子 vs 慈圣→万历 母子). Keeping the flipped
-    // mirror makes the junior a "candidate parent" and pollutes the family
-    // tree (万历皇帝 marked complex, hidden under an odd branch). Keep the
-    // edge with more evidence, drop the weaker mirror.
-    _dedupeReverseKinEdges(relations);
+    // 亲属 edge (万历→慈圣 母子 vs 慈圣→万历 母子) — sometimes even with
+    // different kin (A→B 父子 vs B→A 母子). Keeping a flipped mirror makes
+    // the junior a "candidate parent" and pollutes the family tree. Group by
+    // unordered pair + type (kin-insensitive), keep the strongest direction
+    // when both exist; ties pick the earlier-appearing source (长辈先出场).
+    final firstSections = <String, int>{
+      for (final e in entities) e.name: e.firstSection,
+    };
+    _dedupeReverseKinEdges(relations, firstSections);
     // Hallucination grounding (borrowed from AI-Reader-V2): an entity whose
     // name and all aliases never appear verbatim in the book body was almost
     // certainly invented by the model (leaked from pretraining) — drop it
@@ -584,16 +588,19 @@ class AiBookGraphService {
   AiGraphQualityReport assessGraphQuality(AiBookGraph graph) {
     final issues = <String>[];
 
-    // Reversed 亲属 mirrors (same unordered pair + kin in both directions).
+    // Reversed 亲属 mirrors (same unordered pair, both directions, ANY kin —
+    // A→B 父子 vs B→A 母子 is the same conflict as A→B 母子 vs B→A 母子).
     final directions = <String, Set<String>>{};
     for (final r in graph.relations) {
       if (r.type != '亲属' || r.kin.isEmpty) continue;
       final a = r.source;
       final b = r.target;
       final key = a.compareTo(b) <= 0
-          ? '$a\u0000$b\u0000${r.type}\u0000${r.kin}'
-          : '$b\u0000$a\u0000${r.type}\u0000${r.kin}';
-      directions.putIfAbsent(key, () => {}).add('$a>$b');
+          ? '$a\u0000$b\u0000${r.type}'
+          : '$b\u0000$a\u0000${r.type}';
+      directions.putIfAbsent(key, () => {}).add(
+            a.compareTo(b) <= 0 ? 'ab' : 'ba',
+          );
     }
     final reversed = directions.values.where((d) => d.length > 1).length;
     if (reversed > 0) {
@@ -684,8 +691,25 @@ class AiBookGraphService {
     }
     final text = body.toString();
     if (text.isEmpty) return;
+    final sectionIndexes = <int>{
+      for (final s in sections) s.originSectionIndex,
+    };
     final storyNames = <String>{};
     entities.removeWhere((e) {
+      // Entities whose evidence lives outside the current section set (e.g.
+      // a section the user newly excluded on a re-run) cannot be grounded
+      // against this body — keep them, never treat exclusion as hallucination.
+      final inRange = e.evidence
+          .every((ev) => sectionIndexes.contains(ev.sectionIndex));
+      if (!inRange) {
+        storyNames.add(e.name);
+        return false;
+      }
+      // Single-character names (王/李) hit any body text — not a signal.
+      if (e.name.length <= 1) {
+        storyNames.add(e.name);
+        return false;
+      }
       final grounded = (e.name.isNotEmpty && text.contains(e.name)) ||
           e.aliases.any((a) => a.isNotEmpty && text.contains(a));
       if (grounded) {
@@ -700,10 +724,21 @@ class AiBookGraphService {
     }
   }
 
-  static void _dedupeReverseKinEdges(List<AiGraphRelation> relations) {
+  /// Directional-kin duplicate resolution (fusion consistency): when both
+  /// A→B and B→A carry 亲属 edges of the same type (any kin — the model
+  /// occasionally flips a direction, even 父子 vs 母子), keep the edge with
+  /// the most evidence and drop the weaker mirror. A flipped mirror makes
+  /// the junior a candidate parent and pollutes the family tree. Ties pick
+  /// the earlier-appearing source ([firstSections] — 长辈先出场), matching
+  /// buildFamilyTree's own tie-break. Same-direction duplicates with
+  /// different kin (A→B 父子 + A→B 母子, rare) are kept untouched.
+  static void _dedupeReverseKinEdges(
+    List<AiGraphRelation> relations,
+    Map<String, int> firstSections,
+  ) {
     if (relations.isEmpty) return;
-    final best = <String, AiGraphRelation>{};
-    final order = <String>[];
+    final groups = <String, List<AiGraphRelation>>{};
+    final groupOrder = <String>[];
     final kept = <AiGraphRelation>[];
     for (final r in relations) {
       if (r.type != '亲属' || r.kin.isEmpty) {
@@ -713,18 +748,38 @@ class AiBookGraphService {
       final a = r.source;
       final b = r.target;
       final key = a.compareTo(b) <= 0
-          ? '$a\u0000$b\u0000${r.type}\u0000${r.kin}'
-          : '$b\u0000$a\u0000${r.type}\u0000${r.kin}';
-      final existing = best[key];
-      if (existing == null) {
-        best[key] = r;
-        order.add(key);
-      } else if (r.evidence.length > existing.evidence.length) {
-        best[key] = r;
+          ? '$a\u0000$b\u0000${r.type}'
+          : '$b\u0000$a\u0000${r.type}';
+      if (!groups.containsKey(key)) {
+        groupOrder.add(key);
+        groups[key] = [];
       }
+      groups[key]!.add(r);
     }
-    for (final key in order) {
-      kept.add(best[key]!);
+    for (final key in groupOrder) {
+      final group = groups[key]!;
+      if (group.length == 1) {
+        kept.add(group.single);
+        continue;
+      }
+      final a = group.first.source.compareTo(group.first.target) <= 0
+          ? group.first.source
+          : group.first.target;
+      final b = a == group.first.source ? group.first.target : group.first.source;
+      final hasAB = group.any((r) => r.source == a);
+      final hasBA = group.any((r) => r.source == b);
+      if (hasAB && hasBA) {
+        group.sort((x, y) {
+          final byEvidence = y.evidence.length.compareTo(x.evidence.length);
+          if (byEvidence != 0) return byEvidence;
+          final xFirst = firstSections[x.source] ?? 0x7fffffff;
+          final yFirst = firstSections[y.source] ?? 0x7fffffff;
+          return xFirst.compareTo(yFirst);
+        });
+        kept.add(group.first);
+      } else {
+        kept.addAll(group);
+      }
     }
     relations..clear()..addAll(kept);
   }
@@ -743,11 +798,20 @@ class AiBookGraphService {
       if (n.isEmpty) continue;
       for (final template in templates) {
         final filled = template.replaceAll('{name}', n);
-        // 据X must not match 根据X: 根据大学士张居正的安排 is narration
-        // (张居正 arranged the court), not a citation of him. The other
-        // templates (按/如所言/所说/曾说/写道) have no such collision.
+        // 据X must not match 根据X/依据X/遵照X, and 按X must not match
+        // 按照X: 根据大学士张居正的安排 / 按张居正的意思办 are narration
+        // (张居正 runs the court / obeys), not citations of him. The other
+        // templates (如所言/所说/曾说/写道) have no such collision.
         if (template == '据{name}') {
-          if (RegExp('(?<!根)${RegExp.escape(filled)}').hasMatch(quote)) {
+          if (RegExp('(?<![根依遵])${RegExp.escape(filled)}')
+              .hasMatch(quote)) {
+            return true;
+          }
+        } else if (template == '按{name}') {
+          // 按X is a citation only when followed by a quoting suffix
+          // (按张居正所言/之说); 按张居正的意思办 is narration.
+          if (RegExp('${RegExp.escape(filled)}(?=所言|所说|之意|之见|观点|说法|之语)')
+              .hasMatch(quote)) {
             return true;
           }
         } else if (quote.contains(filled)) {
@@ -1241,6 +1305,14 @@ class AiBookGraphService {
             (map['kin'] as String? ?? '').trim().isEmpty) {
           continue;
         }
+        // Endpoints must resolve to real entities: a relation whose source or
+        // target never appeared as an entity mention is a dangling edge (the
+        // model wrote a generic 先生/夫人/哥哥 endpoint that no entity backs).
+        // Drop the edge rather than ship an unclickable node.
+        if (entityIndex['$source|${sourceType.wireName}'] == null ||
+            entityIndex['$target|${targetType.wireName}'] == null) {
+          continue;
+        }
 
         final key = '$source\u0000$target\u0000$type';
         final existing = relationIndex[key];
@@ -1348,9 +1420,13 @@ class AiBookGraphService {
     // Substring merges only when the short name is a prefix or suffix of the
     // long one (万历 ⊂ 万历皇帝, 居正 ⊂ 张居正) AND the short side is not a
     // generic honorific (皇帝/太后/皇后… are roles, not names — matching
-    // them would fold 万历皇帝 into 皇帝 and the entity vanishes).
+    // them would fold 万历皇帝 into 皇帝 and the entity vanishes) AND the
+    // short side is a real part of the name (short*2 >= long: 万历⊂万历皇帝
+    // passes, but 北京 ⊂ 北京理工大学 does not — the short 2-char word is a
+    // common token, not the person's name).
     if ((long.startsWith(short) || long.endsWith(short)) &&
-        !_genericPersonTerms.contains(short)) {
+        !_genericPersonTerms.contains(short) &&
+        short.length * 2 >= long.length) {
       return 0.5;
     }
     final stemA = _titleStem(a);
