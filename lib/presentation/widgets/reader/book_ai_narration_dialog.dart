@@ -63,15 +63,14 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
 
   /// Leaf sections (containers have no body and are never generated).
   List<AiBookSectionSlice> get _leaves => [
-        for (final s in _sections ?? const <AiBookSectionSlice>[])
-          if (s.text.trim().isNotEmpty) s,
-      ];
+    for (final s in _sections ?? const <AiBookSectionSlice>[])
+      if (s.text.trim().isNotEmpty) s,
+  ];
 
   int get _leafCount => _leaves.length;
 
-  int get _selectedLeafCount => _leaves
-      .where((s) => !_excludedSections.contains(s.index))
-      .length;
+  int get _selectedLeafCount =>
+      _leaves.where((s) => !_excludedSections.contains(s.index)).length;
 
   /// Groups the chooser list into book/volume containers (level 1, empty
   /// body) with their level-2 pieces as children; plain sections stay roots.
@@ -110,8 +109,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
       _sectionsFailed = false;
     });
     try {
-      final sections = await widget.controller
-          .graphSectionChoices(widget.work);
+      final sections = await widget.controller.graphSectionChoices(widget.work);
       if (!mounted) return;
       setState(() {
         _sections = sections;
@@ -132,8 +130,9 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
       _plan = null;
       _failed = false;
     });
-    final plan = await widget.controller
-        .analyzeActiveGraphNarration(work: widget.work);
+    final plan = await widget.controller.analyzeActiveGraphNarration(
+      work: widget.work,
+    );
     if (!mounted) return;
     setState(() {
       if (plan == null) {
@@ -174,57 +173,62 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
       for (final s in sections)
         if (s.text.trim().isNotEmpty) s.index,
     ];
-    return leaves.isNotEmpty &&
-        leaves.every(_excludedSections.contains);
+    return leaves.isNotEmpty && leaves.every(_excludedSections.contains);
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return AlertDialog(
-      title: const Text('展示方案'),
-      content: SizedBox(
-        width: 360,
-        child: _buildBody(context, colors),
-      ),
-      actions: [
-        if (_plan != null || _failed)
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-        if (_failed)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              FilledButton(onPressed: _analyze, child: const Text('重试')),
-              const SizedBox(width: 8),
-              TextButton(
-                // The display plan only tunes views; failing to analyze it
-                // must not block generation (default view fallback).
-                onPressed: () => Navigator.of(context).pop((
-                  plan: null,
-                  excludedSections: Set<int>.unmodifiable(_excludedSections),
-                )),
-                child: const Text('跳过，按默认生成'),
-              ),
-            ],
-          )
-        else if (_plan != null)
-          FilledButton(
-            onPressed: _selectedView == null || _allExcluded
-                ? null
-                : () => Navigator.of(context).pop(
-                      (
-                        plan: _plan!.withDefaultView(_selectedView!),
-                        excludedSections: Set<int>.unmodifiable(
-                          _excludedSections,
-                        ),
+    // PopScope(canPop:false) blocks Esc / system-back during the run — the
+    // dialog is a multi-step confirm (plan + range + view) and closing it
+    // mid-analyze loses context; the explicit 取消 button still pops.
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        title: const Text('展示方案'),
+        content: SizedBox(
+          // Airy: the collection chooser needs room for the work→book→piece
+          // tree; 360 was cramped and made the dialog look like a tooltip.
+          width: 480,
+          child: _buildBody(context, colors),
+        ),
+        actions: [
+          if (_plan != null || _failed)
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+          if (_failed)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton(onPressed: _analyze, child: const Text('重试')),
+                const SizedBox(width: 8),
+                TextButton(
+                  // The display plan only tunes views; failing to analyze it
+                  // must not block generation (default view fallback).
+                  onPressed: () => Navigator.of(context).pop((
+                    plan: null,
+                    excludedSections: Set<int>.unmodifiable(_excludedSections),
+                  )),
+                  child: const Text('跳过，按默认生成'),
+                ),
+              ],
+            )
+          else if (_plan != null)
+            FilledButton(
+              onPressed: _selectedView == null || _allExcluded
+                  ? null
+                  : () => Navigator.of(context).pop((
+                      plan: _plan!.withDefaultView(_selectedView!),
+                      excludedSections: Set<int>.unmodifiable(
+                        _excludedSections,
                       ),
-                    ),
-            child: const Text('生成图谱'),
-          ),
-      ],
+                    )),
+              child: const Text('生成图谱'),
+            ),
+        ],
+      ),
     );
   }
 
@@ -236,7 +240,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
     final s = node.slice;
     if (node.children.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(vertical: 3),
         child: CheckboxListTile(
           value: !_excludedSections.contains(s.index),
           onChanged: (checked) => setState(() {
@@ -268,7 +272,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: 3),
           child: ListTile(
             leading: Checkbox(
               value: triState,
@@ -295,8 +299,9 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
                     s.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w600),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 Text(
@@ -336,7 +341,12 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
                   }
                 }),
                 controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: const EdgeInsetsDirectional.fromSTEB(0, 0, 4, 0),
+                contentPadding: const EdgeInsetsDirectional.fromSTEB(
+                  0,
+                  0,
+                  4,
+                  0,
+                ),
                 title: Text(
                   child.slice.label,
                   maxLines: 1,
@@ -356,16 +366,13 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
         children: [
           Icon(Icons.error_outline, size: 32, color: colors.error),
           const SizedBox(height: 10),
-          Text(
-            '展示方案分析失败',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text('展示方案分析失败', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
             '无法分析本书的展示方式，可重试或取消。',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
         ],
@@ -394,10 +401,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _summary,
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          Text(_summary, style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 12),
           for (final key in AiNarrationPlan.knownFeatures)
             Padding(
@@ -409,8 +413,8 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
                     child: Text(
                       _featureLabels[key] ?? key,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   Expanded(
@@ -430,18 +434,15 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
                       plan.feature(key).toStringAsFixed(1),
                       textAlign: TextAlign.right,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           const SizedBox(height: 10),
-          Text(
-            '默认视图',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
+          Text('默认视图', style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
@@ -463,24 +464,21 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
           const SizedBox(height: 4),
           Text(
             '选择生成后首先展示的视图，其余入口按方案排序保留。',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
           ),
           const SizedBox(height: 14),
           Row(
             children: [
-              Text(
-                '图谱正文范围',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
+              Text('图谱正文范围', style: Theme.of(context).textTheme.labelLarge),
               if (_sections != null) ...[
                 const SizedBox(width: 8),
                 Text(
                   '已选 $_selectedLeafCount / $_leafCount 节',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
               ],
             ],
@@ -489,9 +487,9 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
           Text(
             '已自动过滤前言/目录/附录等辅文；以下章节参与生成，'
             '取消勾选可排除（如 序言/导读/出版说明）。',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
           ),
           const SizedBox(height: 6),
           if (_sectionsFailed)
@@ -499,15 +497,12 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
               children: [
                 Text(
                   '章节列表加载失败',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.error,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.error),
                 ),
                 const SizedBox(width: 8),
-                TextButton(
-                  onPressed: _loadSections,
-                  child: const Text('重试'),
-                ),
+                TextButton(onPressed: _loadSections, child: const Text('重试')),
               ],
             )
           else if (_sections == null)
@@ -527,12 +522,10 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
             )
           else
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 260),
+              constraints: const BoxConstraints(maxHeight: 320),
               child: ListView(
                 shrinkWrap: true,
-                children: [
-                  for (final node in _tree) _buildChooserNode(node),
-                ],
+                children: [for (final node in _tree) _buildChooserNode(node)],
               ),
             ),
         ],
