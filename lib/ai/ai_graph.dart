@@ -549,6 +549,7 @@ class AiBookGraph {
     this.generationSeconds,
     this.model = '',
     this.includesUnread = false,
+    this.sectionScheme = 'toc',
     this.coveredSections = const [],
     this.sectionTitles = const {},
     this.excludedGraphSections = const [],
@@ -569,6 +570,14 @@ class AiBookGraph {
 
   /// True when the graph was generated over the whole book (allowUnread on).
   final bool includesUnread;
+
+  /// Body-splitting scheme the covered/excluded indices refer to: 'toc'
+  /// (whole-book range, one logical section per TOC unit) or 'spine'
+  /// (per-work range, one logical section per heading inside each spine
+  /// document). Incremental runs only trust [coveredSections] /
+  /// [excludedGraphSections] when the scheme matches the current range — a
+  /// mismatch forces a full re-extraction instead of silently skipping pieces.
+  final String sectionScheme;
 
   /// 1-based sections already extracted; drives incremental runs.
   final List<int> coveredSections;
@@ -600,6 +609,7 @@ class AiBookGraph {
     int? generationSeconds,
     String? model,
     bool? includesUnread,
+    String? sectionScheme,
     List<int>? coveredSections,
     Map<int, String>? sectionTitles,
     List<int>? excludedGraphSections,
@@ -614,6 +624,7 @@ class AiBookGraph {
       generationSeconds: generationSeconds ?? this.generationSeconds,
       model: model ?? this.model,
       includesUnread: includesUnread ?? this.includesUnread,
+      sectionScheme: sectionScheme ?? this.sectionScheme,
       coveredSections: coveredSections ?? this.coveredSections,
       sectionTitles: sectionTitles ?? this.sectionTitles,
       excludedGraphSections:
@@ -634,6 +645,7 @@ class AiBookGraph {
     if (generationSeconds != null) 'generationSeconds': generationSeconds,
     'model': model,
     'includesUnread': includesUnread,
+    'sectionScheme': sectionScheme,
     'coveredSections': coveredSections,
     'excludedGraphSections': excludedGraphSections,
     'mergeLog': mergeLog,
@@ -685,6 +697,7 @@ class AiBookGraph {
       generationSeconds: json['generationSeconds'] as int?,
       model: json['model'] as String? ?? '',
       includesUnread: json['includesUnread'] as bool? ?? false,
+      sectionScheme: json['sectionScheme'] as String? ?? 'toc',
       coveredSections: rawCovered is List
           ? rawCovered.whereType<int>().toList(growable: false)
           : const [],

@@ -325,6 +325,8 @@ class BookReaderController extends ChangeNotifier {
   int _cachedBookPlainTextBudget = 0;
   String? _cachedGraphPlainText;
   int _cachedGraphPlainTextBudget = 0;
+  String? _cachedGraphSpineText;
+  int _cachedGraphSpineTextBudget = 0;
   void Function(String query)? _runSearch;
   VoidCallback? _clearSearch;
   Future<String?> Function()? _ttsHere;
@@ -705,6 +707,8 @@ class BookReaderController extends ChangeNotifier {
     _cachedBookPlainTextBudget = 0;
     _cachedGraphPlainText = null;
     _cachedGraphPlainTextBudget = 0;
+    _cachedGraphSpineText = null;
+    _cachedGraphSpineTextBudget = 0;
   }
 
   /// Load or create the chat session for this book (isolated by contentHash).
@@ -1446,7 +1450,10 @@ class BookReaderController extends ChangeNotifier {
   Future<void> loadGraphActualSectionCounts() async {
     if (_graphActualSectionCounts != null) return;
     try {
-      final body = await _loadBookGraphPlainTextCached(
+      // Per-work counts follow the per-work generation range: spine mode
+      // (piece granularity), no spine dedupe — the picker count then equals
+      // the chooser items and the progress total for that work.
+      final body = await _loadBookGraphSpineTextCached(
         AiBookGraphService.maxBookBodyChars,
       );
       var sections = AiChatBookCorpus.parseSections(body);
@@ -1469,10 +1476,8 @@ class BookReaderController extends ChangeNotifier {
       final works = graphWorkCandidates ?? const [];
       final counts = <String, int>{};
       for (final work in works) {
-        final seenSpines = <int>{};
         var count = 0;
         for (final section in sections) {
-          if (!seenSpines.add(section.originSectionIndex)) continue;
           if (!work.contains(section.sourceSectionIndex ?? section.index)) {
             continue;
           }
@@ -1626,6 +1631,7 @@ class BookReaderController extends ChangeNotifier {
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
         sections: sections,
+        sectionScheme: work == null ? 'toc' : 'spine',
         includesUnread: allowUnread,
         readThroughSection: allowUnread ? null : sectionIndex + 1,
         existing: existing,
@@ -1676,9 +1682,13 @@ class BookReaderController extends ChangeNotifier {
   Future<List<AiBookSectionSlice>> _graphSectionsForWork(
     AiGraphWorkCandidate? work,
   ) async {
-    final body = await _loadBookGraphPlainTextCached(
-      AiBookGraphService.maxBookBodyChars,
-    );
+    final body = work == null
+        ? await _loadBookGraphPlainTextCached(
+            AiBookGraphService.maxBookBodyChars,
+          )
+        : await _loadBookGraphSpineTextCached(
+            AiBookGraphService.maxBookBodyChars,
+          );
     final sections = AiChatBookCorpus.parseSections(body);
     if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
     final titled = [
@@ -1687,7 +1697,9 @@ class BookReaderController extends ChangeNotifier {
           index: section.index,
           label: section.label.trim().isNotEmpty
               ? section.label.trim()
-              : _titleForOutlineSection(section.index),
+              : (work == null
+                  ? _titleForOutlineSection(section.index)
+                  : '§${section.index}'),
           text: section.text,
           sourceSectionIndex: section.sourceSectionIndex,
           isNavigationUnit: section.isNavigationUnit,
@@ -1707,9 +1719,13 @@ class BookReaderController extends ChangeNotifier {
     if (scoped.isEmpty) {
       throw AiProviderException('所选著作没有可用于生成图谱的正文');
     }
-    // One spine section can yield several logical sections (a document is
-    // split on headings); dedupe so the progress count and the picker's
-    // spine-based section count agree, and each spine is extracted once.
+    // Whole-book (TOC mode): one spine section can yield several logical
+    // sections inside a merged unit — dedupe so the progress count and the
+    // picker's count agree, and each spine is extracted once. Per-work
+    // (spine mode) keeps every logical piece: a heading split inside one
+    // spine document is exactly the piece granularity the user wants to
+    // choose (狂人日记/孔乙己/药 are separate pieces of the same spine file).
+    if (work != null) return scoped;
     final seenSpines = <int>{};
     final deduped = <AiBookSectionSlice>[
       for (final section in scoped)
@@ -1878,6 +1894,31 @@ class BookReaderController extends ChangeNotifier {
       return loaded;
     }
     return ((await _getChapterText?.call()) ?? '').trim();
+  }
+
+  /// Graph corpus loader for **per-work** range: **spine mode** (`toc:false`,
+  /// one logical section per heading inside each spine document). A collection
+  /// work (e.g. 鲁迅小说精品) then offers its internal pieces (狂人日记/孔乙己/药…)
+  /// in the pre-generation chooser instead of the single merged unit, and
+  /// evidence quotes resolve to the exact piece. The whole-book range keeps
+  /// [TOC 模式](_loadBookGraphPlainTextCached) (作品级) — the two caches are
+  /// independent and the graph packages they feed are stored per range.
+  Future<String> _loadBookGraphSpineTextCached(int maxChars) async {
+    final budget = maxChars.clamp(2000, 1500000);
+    final cached = _cachedGraphSpineText;
+    if (cached != null &&
+        cached.isNotEmpty &&
+        _cachedGraphSpineTextBudget >= budget) {
+      return cached.length > budget ? cached.substring(0, budget) : cached;
+    }
+    final loaded =
+        ((await _getBookPlainText?.call(budget, toc: false)) ?? '').trim();
+    if (loaded.isNotEmpty) {
+      _cachedGraphSpineText = loaded;
+      _cachedGraphSpineTextBudget = budget;
+      return loaded;
+    }
+    return _loadBookGraphPlainTextCached(maxChars);
   }
 
   Future<String> _loadBookPlainTextCached(int maxChars) async {

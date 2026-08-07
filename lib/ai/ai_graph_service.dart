@@ -228,6 +228,11 @@ class AiBookGraphService {
     required bool includesUnread,
     int? readThroughSection,
     AiBookGraph? existing,
+    /// 'toc' (whole-book, one unit per TOC entry) or 'spine' (per-work,
+    /// one logical section per heading). Covered/excluded indices are only
+    /// trusted when the scheme matches — a mismatch forces a full
+    /// re-extraction (the piece indices live in different spaces).
+    String sectionScheme = 'toc',
     /// User-confirmed display plan from the pre-generation dialog. When
     /// null the pipeline auto-runs step 0 (or reuses [existing]'s plan).
     AiNarrationPlan? plannedNarration,
@@ -257,6 +262,7 @@ class AiBookGraphService {
     }
 
     final working = <AiBookSectionSlice>[];
+    final schemeMatches = existing?.sectionScheme == sectionScheme;
     for (final s in usable) {
       final origin = s.originSectionIndex;
       if (!includesUnread &&
@@ -264,7 +270,17 @@ class AiBookGraphService {
           origin > readThroughSection) {
         continue;
       }
-      if (existing?.coveredSections.contains(origin) ?? false) continue;
+      // Per-work (spine) coverage keys are the logical-section index; whole-
+      // book (toc) coverage keys are the spine index. Only skip when the
+      // existing graph used the same scheme — otherwise every piece is
+      // re-extracted (indices of a different scheme are meaningless here).
+      if (schemeMatches &&
+          (existing?.coveredSections.contains(
+                sectionScheme == 'spine' ? s.index : origin,
+              ) ??
+              false)) {
+        continue;
+      }
       working.add(s);
     }
 
@@ -375,7 +391,10 @@ class AiBookGraphService {
               priorAliases: priorAliases,
             );
           }
-          if (!covered.contains(origin)) covered.add(origin);
+          if (!covered
+              .contains(sectionScheme == 'spine' ? section.index : origin)) {
+            covered.add(sectionScheme == 'spine' ? section.index : origin);
+          }
           covered.sort();
           onProgress?.call(
             AiGraphProgress(
@@ -413,6 +432,7 @@ class AiBookGraphService {
           existing,
           contentHash: existing?.contentHash ?? '',
           includesUnread: includesUnread,
+          sectionScheme: sectionScheme,
           covered: covered,
           entities: entities,
           relations: relations,
@@ -429,6 +449,7 @@ class AiBookGraphService {
           existing,
           contentHash: existing?.contentHash ?? '',
           includesUnread: includesUnread,
+          sectionScheme: sectionScheme,
           covered: covered,
           entities: entities,
           relations: relations,
@@ -500,6 +521,7 @@ class AiBookGraphService {
       generationSeconds: sw.elapsed.inSeconds,
       model: _settings().resolvedModel,
       includesUnread: includesUnread,
+      sectionScheme: sectionScheme,
       coveredSections: covered,
       sectionTitles: {
         for (final section in sections)
@@ -516,6 +538,7 @@ class AiBookGraphService {
     AiBookGraph? existing, {
     required String contentHash,
     required bool includesUnread,
+    required String sectionScheme,
     required List<int> covered,
     required List<AiGraphEntity> entities,
     required List<AiGraphRelation> relations,
@@ -534,6 +557,7 @@ class AiBookGraphService {
       generationSeconds: generationSeconds,
       model: _settings().resolvedModel,
       includesUnread: includesUnread,
+      sectionScheme: sectionScheme,
       coveredSections: covered,
       sectionTitles: existing?.sectionTitles ?? const {},
       entities: entities,
