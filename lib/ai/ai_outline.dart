@@ -6,6 +6,11 @@ import 'ai_models.dart';
 import 'ai_provider.dart';
 import 'ai_settings.dart';
 
+/// Outline calls carry long prompts (whole TOC units of a collection book
+/// inside a summarize batch) and emit sizeable JSON; the provider default
+/// (45s) is a chat-friendly budget and times out on long collection books.
+const Duration _outlineCallTimeout = Duration(seconds: 120);
+
 /// How a node's reading range was determined. The model never creates this.
 enum AiOutlineNodeSource {
   toc,
@@ -534,6 +539,7 @@ class AiBookOutlineService {
         ],
         maxTokens: 1800,
         temperature: 0.15,
+        timeout: _outlineCallTimeout,
       ),
       cancelToken: cancelToken,
     );
@@ -702,6 +708,7 @@ class AiBookOutlineService {
         ],
         maxTokens: 5000,
         temperature: 0.1,
+        timeout: _outlineCallTimeout,
       ),
       cancelToken: cancelToken,
     );
@@ -925,6 +932,7 @@ class AiBookOutlineService {
         ],
         maxTokens: 1800,
         temperature: 0.2,
+        timeout: _outlineCallTimeout,
       ),
       cancelToken: cancelToken,
     );
@@ -969,6 +977,7 @@ class AiBookOutlineService {
         ],
         maxTokens: 900,
         temperature: 0.2,
+        timeout: _outlineCallTimeout,
       ),
       cancelToken: cancelToken,
     );
