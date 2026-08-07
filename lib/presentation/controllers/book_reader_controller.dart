@@ -1285,6 +1285,15 @@ class BookReaderController extends ChangeNotifier {
   bool hasWorkGraph(AiGraphWorkCandidate work) =>
       _workGraphs.containsKey(workKeyFor(work));
 
+  /// Whether [work]'s saved graph already carries a display plan — a fresh
+  /// per-work generation must not reuse the whole-book plan's existence.
+  bool workGraphHasNarration(AiGraphWorkCandidate work) =>
+      _workGraphs[workKeyFor(work)]?.narration != null;
+
+  /// Saved graph of [work], or null when not generated yet.
+  AiBookGraph? workGraphFor(AiGraphWorkCandidate work) =>
+      _workGraphs[workKeyFor(work)];
+
   /// Opens the graph view of [work] even while it is generating (the picker
   /// lets you jump back into the in-flight generation to watch/stop it).
   void enterGraphWork(AiGraphWorkCandidate work) {
@@ -1301,6 +1310,7 @@ class BookReaderController extends ChangeNotifier {
     if (graph == null) return;
     _bookGraph = graph;
     _activeGraphWork = work;
+    _wholeBookGraphView = false;
     if (!_disposed) notifyListeners();
   }
 
@@ -1782,10 +1792,12 @@ class BookReaderController extends ChangeNotifier {
     }
     if (workKey == null) {
       _bookGraph = null;
+      _wholeBookGraphView = false;
     } else {
       _workGraphs.remove(workKey);
       _bookGraph = null;
       _activeGraphWork = null;
+      _wholeBookGraphView = false;
     }
     _bookGraphError = null;
     if (!_disposed) notifyListeners();

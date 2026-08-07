@@ -1448,7 +1448,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 ],
                 const SizedBox(height: 16),
                 FilledButton.icon(
-                  onPressed: () => unawaited(_generateGraph()),
+                  onPressed: () => unawaited(_generateGraph(
+                        // Retry the range being retried: after a cancelled /
+                        // failed generation the active work is still set, and
+                        // the dialog must open scoped to it (not the whole
+                        // collection).
+                        work: _c.activeGraphWork,
+                      )),
                   icon: const Icon(KaijuanIcons.collections, size: 18),
                   label: const Text('生成图谱'),
                 ),
@@ -1570,7 +1576,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               tooltip: '重新生成图谱',
               onPressed: generating
                   ? null
-                  : () => unawaited(_generateGraph(force: true)),
+                  : () => unawaited(_generateGraph(
+                        force: true,
+                        // Regenerate the range being viewed: the detail
+                        // header is shared by whole-book and per-work graphs,
+                        // and a per-work regeneration must reopen the dialog
+                        // scoped to that work (not the whole collection).
+                        work: _c.activeGraphWork,
+                      )),
               icon: const Icon(KaijuanIcons.refresh, size: 20),
             ),
             PopupMenuButton<_OutlineAction>(
@@ -2220,8 +2233,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
     // Step-0 display plan, confirmed before extraction: a fresh generation
     // (no narration yet) and every regeneration get the confirm dialog;
-    // incremental runs keep their existing plan untouched.
-    final hasPlan = _c.bookGraph?.narration != null;
+    // incremental runs keep their existing plan untouched. Judged against
+    // the TARGET work's graph — the picker page shows the whole-book legacy
+    // graph, whose plan must not suppress a fresh per-work dialog.
+    final hasPlan = work == null
+        ? _c.bookGraph?.narration != null
+        : _c.workGraphHasNarration(work);
     if (force || !hasPlan) {
       final confirmed = await _confirmNarrationPlan(work);
       if (confirmed == null || !mounted) return;
@@ -2258,9 +2275,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       builder: (_) => NarrationPlanDialog(
         controller: _c,
         work: work,
-        // Reopen with the previous manual slice (persisted on the graph).
+        // Reopen with the previous manual slice of the TARGET range (per-work
+        // graphs keep their own exclusions; the picker's whole-book legacy
+        // graph must not leak its exclusions into a fresh per-work dialog).
         initialExcluded:
-            _c.bookGraph?.excludedGraphSections.toSet() ?? const {},
+            (work == null ? _c.bookGraph : _c.workGraphFor(work))
+                    ?.excludedGraphSections.toSet() ??
+                const {},
       ),
     );
   }
