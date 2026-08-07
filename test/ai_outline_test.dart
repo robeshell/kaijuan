@@ -268,84 +268,63 @@ void main() {
     ]);
   });
 
-  test(
-    'generates bounded, reader-derived child outlines without overview',
-    () async {
-      final provider = _OutlineProvider();
-
-      final children = await serviceWith(provider).generateChildren(
-        bookTitle: '合集',
-        parentNodeId: 'top-1',
-        candidates: [
-          for (var index = 1; index <= 5; index++)
-            AiBookOutlineCandidate(
-              label: '第 $index 章',
-              startSectionIndex: index * 10,
-              endSectionIndexExclusive: index * 10 + 1,
-              text: '第 $index 章正文',
-              source: AiOutlineNodeSource.toc,
-            ),
-        ],
-      );
-
-      expect(provider.requests, hasLength(2));
-      expect(children.map((chapter) => chapter.nodeId), [
-        'top-1/1',
-        'top-1/2',
-        'top-1/3',
-        'top-1/4',
-        'top-1/5',
-      ]);
-      expect(children.map((chapter) => chapter.sourceSectionIndex), [
-        10,
-        20,
-        30,
-        40,
-        50,
-      ]);
-    },
-  );
-
-  test(
-    'groups a long child list before requesting per-entry summaries',
-    () async {
-      final provider = _OutlineProvider();
-
-      final children = await serviceWith(provider).generateChildren(
-        bookTitle: '长文集',
-        parentNodeId: 'top-1',
-        candidates: [
-          for (var index = 1; index <= 17; index++)
-            AiBookOutlineCandidate(
-              label: '第 $index 篇',
-              startSectionIndex: index * 10,
-              endSectionIndexExclusive: index * 10 + 1,
-              text: '第 $index 篇正文',
-              source: AiOutlineNodeSource.toc,
-            ),
-        ],
-      );
-
-      expect(provider.requests, hasLength(1));
-      expect(children, hasLength(3));
-      expect(children.map((chapter) => chapter.nodeId), [
-        'top-1/group-1',
-        'top-1/group-2',
-        'top-1/group-3',
-      ]);
-      expect(
-        children.every(
-          (chapter) => chapter.source == AiOutlineNodeSource.semantic,
+  test('generate honors preplanned TOC units and merges summaries into roots',
+      () async {
+    final provider = _OutlineProvider();
+    final outline = await serviceWith(provider).generate(
+      bookTitle: '鲁迅小说精品',
+      sections: [
+        AiBookSectionSlice(
+          index: 1,
+          label: '狂人日记',
+          text: '正文1',
+          sourceSectionIndex: 4,
+          isNavigationUnit: true,
         ),
-        isTrue,
-      );
-      expect(children.map((chapter) => chapter.sourceSectionIndex), [
-        10,
-        90,
-        170,
-      ]);
-    },
-  );
+      ],
+      includesUnread: true,
+      preplannedUnits: [
+        AiBookSectionSlice(
+          index: 1,
+          label: '狂人日记',
+          text: '正文1',
+          sourceSectionIndex: 4,
+          isNavigationUnit: true,
+        ),
+      ],
+      preplannedRoots: [
+        AiBookOutlineChapter(
+          sectionIndex: 1,
+          title: '狂人日记',
+          summary: '',
+          sourceSectionIndex: 4,
+          nodeId: 'toc-4',
+          children: [
+            AiBookOutlineChapter(
+              sectionIndex: 1,
+              title: '之一',
+              summary: '',
+              sourceSectionIndex: 4,
+              nodeId: 'toc-4/1',
+            ),
+          ],
+        ),
+      ],
+    );
+
+    expect(outline.chapters, hasLength(1));
+    expect(outline.chapters.first.title, '狂人日记');
+    expect(outline.chapters.first.summary, isNotEmpty); // AI 摘要回填
+    expect(outline.chapters.first.children, hasLength(1)); // 目录树保留
+    // 目录章节方案：不再调用 AI 结构识别。
+    expect(
+      provider.requests
+          .every((r) => !r.messages.last.content.contains('结构清单：')),
+      isTrue,
+    );
+  });
+
+
 
   test('invalid structure plan falls back without dropping sections', () async {
     final provider = _OutlineProvider(

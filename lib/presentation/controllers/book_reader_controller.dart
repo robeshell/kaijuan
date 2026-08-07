@@ -274,12 +274,6 @@ class BookReaderController extends ChangeNotifier {
   Future<String> Function()? _getChapterText;
   Future<String> Function(int maxChars)? _getReadSoFarText;
   Future<String> Function(int maxChars, {bool toc})? _getBookPlainText;
-  Future<List<AiBookOutlineCandidate>> Function({
-    required int startSectionIndex,
-    required int? endSectionIndexExclusive,
-    required int maxChars,
-  })?
-  _getOutlineChildren;
   Future<({String before, String after})?> Function(int before, int after)?
   _getSelectionContext;
   void Function(Map<String, double>? zone)? _setMenuCursorZone;
@@ -314,10 +308,6 @@ class BookReaderController extends ChangeNotifier {
 
   CancelToken? _bookGraphCancel;
   Future<void>? _bookGraphGeneration;
-  final Map<String, Future<void>> _bookOutlineDetailGenerations = {};
-  final Map<String, CancelToken> _bookOutlineDetailCancels = {};
-  final Map<String, AiOutlineProgress> _bookOutlineDetailProgress = {};
-  final Map<String, String> _bookOutlineDetailErrors = {};
   Future<void> _chatSessionWriteQueue = Future<void>.value();
 
   /// Cached multi-section plain text for book chat (per open).
@@ -626,12 +616,6 @@ class BookReaderController extends ChangeNotifier {
     Future<String> Function()? getChapterText,
     Future<String> Function(int maxChars)? getReadSoFarText,
     Future<String> Function(int maxChars, {bool toc})? getBookPlainText,
-    Future<List<AiBookOutlineCandidate>> Function({
-      required int startSectionIndex,
-      required int? endSectionIndexExclusive,
-      required int maxChars,
-    })?
-    getOutlineChildren,
     Future<({String before, String after})?> Function(int before, int after)?
     getSelectionContext,
   }) {
@@ -645,7 +629,6 @@ class BookReaderController extends ChangeNotifier {
     _getChapterText = getChapterText;
     _getReadSoFarText = getReadSoFarText;
     _getBookPlainText = getBookPlainText;
-    _getOutlineChildren = getOutlineChildren;
     _getSelectionContext = getSelectionContext;
   }
 
@@ -700,7 +683,6 @@ class BookReaderController extends ChangeNotifier {
     _getChapterText = null;
     _getReadSoFarText = null;
     _getBookPlainText = null;
-    _getOutlineChildren = null;
     _setMenuCursorZone = null;
     _setMenuOpen = null;
     _cachedBookPlainText = null;
@@ -903,16 +885,25 @@ class BookReaderController extends ChangeNotifier {
       if (outlineSections.isEmpty) {
         throw AiProviderException('没有可用于生成大纲的正文');
       }
+      // 目录章节方案：优先用本书目录构建大纲树（章节即目录，AI 只补概述/
+      // 摘要）。无目录（tocPlan null）→ 回退 AI 结构分组生成。
+      final tocPlan = _tocOutlineForRange(outlineSections, work);
       AiLog.d(
         'outline usable=${outlineSections.length} '
         'navigation=${outlineSections.where((section) => section.isNavigationUnit).length} '
-        'indexes=${outlineSections.map((section) => section.index).join(',')}',
+        'indexes=${outlineSections.map((section) => section.index).join(',')} '
+        'tocPlan=${tocPlan == null ? 'none' : 'units=${tocPlan.units.length} roots=${tocPlan.roots.length}'}',
       );
       final outline = await service.generate(
         bookTitle: item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
         sections: outlineSections,
         includesUnread: includeUnread,
+        // 目录章节方案：章节树直接来自本书目录（单本=全书目录；合集=当前
+        // 作品的目录，按其 spine 范围过滤——作品的目录项落在自己范围内，
+        // 无需跨文件穿透）。无目录的书回退到 AI 结构分组。
+        preplannedUnits: tocPlan?.units,
+        preplannedRoots: tocPlan?.roots,
         cancelToken: cancel,
         onProgress: (progress) {
           _bookOutlineProgress = progress;
@@ -1085,248 +1076,6 @@ class BookReaderController extends ChangeNotifier {
     });
   }
 
-  bool isGeneratingBookOutlineChildren(AiBookOutlineChapter chapter) =>
-      _bookOutlineDetailGenerations.containsKey(chapter.stableNodeId);
-
-  AiOutlineProgress? bookOutlineChildrenProgress(
-    AiBookOutlineChapter chapter,
-  ) => _bookOutlineDetailProgress[chapter.stableNodeId];
-
-  String? bookOutlineChildrenError(AiBookOutlineChapter chapter) =>
-      _bookOutlineDetailErrors[chapter.stableNodeId];
-
-  bool canGenerateBookOutlineChildren(AiBookOutlineChapter chapter) {
-    final children = chapter.children;
-    if (children != null) return children.isNotEmpty;
-    final outline = _bookOutline;
-    if (outline == null) return false;
-    final range = _outlineRangeFor(chapter, outline.chapters);
-    final end = range.endSectionIndexExclusive;
-    return end == null || end > range.startSectionIndex + 1;
-  }
-
-  /// Generates one reader-derived outline range when the reader explicitly
-  /// requests it. A successful empty result is persisted as a leaf.
-  Future<void> generateBookOutlineChildren(
-    AiBookOutlineChapter chapter, {
-    bool force = false,
-  }) {
-    if (!force && chapter.children != null) return Future<void>.value();
-    final nodeId = chapter.stableNodeId;
-    final active = _bookOutlineDetailGenerations[nodeId];
-    if (active != null) return active;
-    final done = Completer<void>();
-    _bookOutlineDetailGenerations[nodeId] = done.future;
-    unawaited(() async {
-      try {
-        await _generateBookOutlineChildren(chapter);
-        done.complete();
-      } catch (error, stackTrace) {
-        done.completeError(error, stackTrace);
-      }
-    }());
-    unawaited(
-      done.future.whenComplete(() {
-        _bookOutlineDetailGenerations.remove(nodeId);
-        _bookOutlineDetailCancels.remove(nodeId);
-        _bookOutlineDetailProgress.remove(nodeId);
-        if (!_disposed) notifyListeners();
-      }),
-    );
-    return done.future;
-  }
-
-  Future<void> _generateBookOutlineChildren(
-    AiBookOutlineChapter chapter,
-  ) async {
-    final service = _aiOutline;
-    final bridge = _getOutlineChildren;
-    final current = _bookOutline;
-    if (service == null || !canUseAiChat || bridge == null || current == null) {
-      _bookOutlineDetailErrors[chapter.stableNodeId] = '无法读取本书的子级结构';
-      if (!_disposed) notifyListeners();
-      return;
-    }
-    // The chapter belongs to the work whose outline is displayed — cap its
-    // children range at that work's boundary. Without it, the LAST chapter
-    // of a per-work (collection) outline has no next sibling: the range
-    // would run to the book tail and extract the remaining works' chapters
-    // (生成整本的大纲). A plain book has no work → whole-book range stays.
-    final workBoundary = _outlineWorkBoundary();
-    final range = _outlineRangeFor(
-      chapter,
-      current.chapters,
-      workEndSectionExclusive: workBoundary,
-    );
-    final cancel = CancelToken();
-    _bookOutlineDetailCancels[chapter.stableNodeId] = cancel;
-    _bookOutlineDetailErrors.remove(chapter.stableNodeId);
-    if (!_disposed) notifyListeners();
-    try {
-      final candidates = await bridge(
-        startSectionIndex: range.startSectionIndex,
-        endSectionIndexExclusive: range.endSectionIndexExclusive,
-        maxChars: 240000,
-      );
-      cancel.throwIfCancelled();
-      AiLog.d(
-        'outline children parent=${chapter.stableNodeId} '
-        'range=${range.startSectionIndex}-${range.endSectionIndexExclusive ?? 'end'} '
-        'candidates=${candidates.length}',
-      );
-      final children = await service.generateChildren(
-        bookTitle: item.title,
-        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        parentNodeId: chapter.stableNodeId,
-        candidates: candidates,
-        cancelToken: cancel,
-        onProgress: (progress) {
-          _bookOutlineDetailProgress[chapter.stableNodeId] = progress;
-          if (!_disposed) notifyListeners();
-        },
-      );
-      cancel.throwIfCancelled();
-      final outline = _bookOutline;
-      if (outline == null) return;
-      // Capture the work key together with the outline being replaced, just
-      // before the sync update: the saved content and its key always belong
-      // to the same work (a page flip during the AI run must not write the
-      // expansion result under a different work's key).
-      final workKeyAtStart = _bookOutlineWorkKey;
-      final updatedChapters = _replaceOutlineChildren(
-        outline.chapters,
-        chapter.stableNodeId,
-        children,
-      );
-      final attachedCount = _outlineChildrenCount(
-        updatedChapters,
-        chapter.stableNodeId,
-      );
-      if (attachedCount == null) {
-        _bookOutlineDetailErrors[chapter.stableNodeId] = '无法更新下级大纲';
-        AiLog.d(
-          'outline children attach failed parent=${chapter.stableNodeId} '
-          'roots=${outline.chapters.length}',
-        );
-        if (!_disposed) notifyListeners();
-        return;
-      }
-      _bookOutline = outline.copyWith(chapters: updatedChapters);
-      _bookOutlineWorkKey = workKeyAtStart;
-      if (!_disposed) notifyListeners();
-      // The result is ready for the open sheet. Persistence is serialized with
-      // chat writes and must not delay replacing the expanded tree on screen.
-      AiLog.d(
-        'outline children ready parent=${chapter.stableNodeId} '
-        'count=${children.length} attached=$attachedCount',
-      );
-      await _saveBookOutline(_bookOutline!, workKey: workKeyAtStart);
-      AiLog.d('outline children persisted parent=${chapter.stableNodeId}');
-    } on AiProviderException catch (error) {
-      if (!cancel.isCancelled) {
-        _bookOutlineDetailErrors[chapter.stableNodeId] = error.message;
-      }
-      if (!_disposed) notifyListeners();
-    } catch (_) {
-      if (!cancel.isCancelled) {
-        _bookOutlineDetailErrors[chapter.stableNodeId] = '生成子级大纲失败，请稍后重试';
-      }
-      if (!_disposed) notifyListeners();
-    }
-  }
-
-  /// Spine index just past the work whose outline is on screen, or null for
-  /// a plain book (whole-book outline). Resolved from [_bookOutlineWorkKey]
-  /// so a page flip during generation cannot change the boundary mid-run.
-  int? _outlineWorkBoundary() {
-    final key = _bookOutlineWorkKey;
-    if (key == null) return null;
-    for (final work in _works ?? const <AiGraphWorkCandidate>[]) {
-      if (workKeyFor(work) == key) return work.endSectionExclusive;
-    }
-    AiLog.d('outline work boundary: no work for key=$key '
-        'works=${(_works ?? const []).map(workKeyFor).join(',')}');
-    return null;
-  }
-
-  ({int startSectionIndex, int? endSectionIndexExclusive}) _outlineRangeFor(
-    AiBookOutlineChapter target,
-    List<AiBookOutlineChapter> roots, {
-    int? workEndSectionExclusive,
-  }) {
-    ({int startSectionIndex, int? endSectionIndexExclusive})? find(
-      List<AiBookOutlineChapter> siblings,
-    ) {
-      for (var index = 0; index < siblings.length; index++) {
-        final node = siblings[index];
-        if (node.stableNodeId == target.stableNodeId) {
-          final start = node.sourceSectionIndex ?? node.sectionIndex;
-          final nextStart = index + 1 < siblings.length
-              ? siblings[index + 1].sourceSectionIndex ??
-                    siblings[index + 1].sectionIndex
-              : null;
-          final end = node.endSectionIndexExclusive ??
-              nextStart ??
-              workEndSectionExclusive;
-          return (
-            startSectionIndex: start,
-            endSectionIndexExclusive: end != null && end > start ? end : null,
-          );
-        }
-        final children = node.children;
-        if (children != null) {
-          final nested = find(children);
-          if (nested != null) return nested;
-        }
-      }
-      return null;
-    }
-
-    return find(roots) ??
-        (
-          startSectionIndex: target.sourceSectionIndex ?? target.sectionIndex,
-          endSectionIndexExclusive:
-              target.endSectionIndexExclusive ?? workEndSectionExclusive,
-        );
-  }
-
-  List<AiBookOutlineChapter> _replaceOutlineChildren(
-    List<AiBookOutlineChapter> nodes,
-    String parentNodeId,
-    List<AiBookOutlineChapter> children,
-  ) {
-    return [
-      for (final node in nodes)
-        if (node.stableNodeId == parentNodeId)
-          node.copyWith(children: children)
-        else if (node.children != null)
-          node.copyWith(
-            children: _replaceOutlineChildren(
-              node.children!,
-              parentNodeId,
-              children,
-            ),
-          )
-        else
-          node,
-    ];
-  }
-
-  int? _outlineChildrenCount(
-    List<AiBookOutlineChapter> nodes,
-    String targetNodeId,
-  ) {
-    for (final node in nodes) {
-      if (node.stableNodeId == targetNodeId) return node.children?.length;
-      final children = node.children;
-      if (children != null) {
-        final nested = _outlineChildrenCount(children, targetNodeId);
-        if (nested != null) return nested;
-      }
-    }
-    return null;
-  }
-
   Future<void> deleteBookOutline() async {
     if (isGeneratingBookOutline) return;
     await _enqueueChatSessionWrite(() async {
@@ -1359,9 +1108,6 @@ class BookReaderController extends ChangeNotifier {
 
   void cancelBookOutlineGeneration() {
     _bookOutlineCancel?.cancel();
-    for (final cancel in _bookOutlineDetailCancels.values) {
-      cancel.cancel();
-    }
   }
 
   // ------------------------------------------------------------------
@@ -1773,6 +1519,126 @@ class BookReaderController extends ChangeNotifier {
             level: section.level,
           ),
       ];
+
+  /// 目录章节方案：把本书目录（[tocEntries]）转成大纲树——章节即目录项，
+  /// AI 只补概述与摘要。范围：单本（[work] null）= 全书目录；合集 = 当前
+  /// 作品的目录（按其 spine 范围过滤；作品的目录项都落在自己范围内）。
+  /// 返回 null 表示本书没有可用目录（调用方回退 AI 结构分组）。
+  ({List<AiBookSectionSlice> units, List<AiBookOutlineChapter> roots})?
+      _tocOutlineForRange(
+    List<AiBookSectionSlice> sections,
+    AiGraphWorkCandidate? work,
+  ) {
+    if (_tocEntries.isEmpty) return null;
+    final endBound = work?.endSectionExclusive;
+    final entries = <({String title, int spine, int depth})>[];
+    final seenSpines = <int>{};
+    for (final entry in _tocEntries) {
+      final spine = entry.sectionIndex;
+      if (spine == null || spine < 1) continue;
+      // 同一 spine 的重复目录项（如「正文」「全文」指向同一章）只保留首个，
+      // 否则两个 root 区间相同 → 相同 index 的两个 unit → 摘要校验必失败。
+      if (!seenSpines.add(spine)) continue;
+      if (work != null &&
+          (spine < work.startSection ||
+              (endBound != null && spine >= endBound))) {
+        continue;
+      }
+      final title = entry.title.trim();
+      if (title.isEmpty) continue;
+      entries.add((title: title, spine: spine, depth: entry.depth));
+    }
+    if (entries.isEmpty) return null;
+
+    // Rebuild the tree from the flat depth-marked list (TOC order).
+    final minDepth =
+        entries.map((e) => e.depth).reduce((a, b) => a < b ? a : b);
+    final roots = <_TocOutlineNode>[];
+    final stack = <_TocOutlineNode>[];
+    for (final entry in entries) {
+      final node = _TocOutlineNode(
+        title: entry.title,
+        spine: entry.spine,
+        depth: entry.depth - minDepth,
+      );
+      while (stack.isNotEmpty && stack.last.depth >= node.depth) {
+        stack.removeLast();
+      }
+      if (stack.isEmpty) {
+        roots.add(node);
+      } else {
+        stack.last.children.add(node);
+      }
+      stack.add(node);
+    }
+
+    // One unit per root: its body is the range of sections up to the next
+    // root's spine (目录项覆盖自己的 spine 区间). Roots whose spine was
+    // filtered out (封面/目录/版权…) still contribute their range — the
+    // sectionIndex must be the FIRST section index of that range, identical
+    // to the unit's, so the AI summary merges back reliably.
+    final units = <AiBookSectionSlice>[];
+    final effectiveRoots = <(_TocOutlineNode, int)>[];
+    for (var i = 0; i < roots.length; i++) {
+      final root = roots[i];
+      final endSpine = i + 1 < roots.length ? roots[i + 1].spine : null;
+      final matched = sections
+          .where((section) {
+            final src = section.sourceSectionIndex ?? section.index;
+            if (src < root.spine) return false;
+            if (endSpine != null && src >= endSpine) return false;
+            return true;
+          })
+          .toList(growable: false);
+      if (matched.isEmpty) continue; // directory item without body
+      final unitIndex = matched.first.index;
+      units.add(
+        AiBookSectionSlice(
+          index: unitIndex,
+          label: root.title,
+          text: matched.map((section) => section.text).join('\n\n'),
+          sourceSectionIndex: root.spine,
+          isNavigationUnit: true,
+        ),
+      );
+      effectiveRoots.add((root, unitIndex));
+    }
+    if (units.isEmpty) return null;
+    return (
+      units: units,
+      roots: [
+        for (final (root, unitIndex) in effectiveRoots)
+          _tocChapterFromNode(
+            root,
+            sections,
+            unitIndex: unitIndex,
+          ),
+      ],
+    );
+  }
+
+  AiBookOutlineChapter _tocChapterFromNode(
+    _TocOutlineNode node,
+    List<AiBookSectionSlice> sections, {
+    int? unitIndex,
+  }) {
+    final matched = sections
+        .where(
+          (section) => (section.sourceSectionIndex ?? section.index) == node.spine,
+        )
+        .toList(growable: false);
+    return AiBookOutlineChapter(
+      sectionIndex: unitIndex ?? (matched.isEmpty ? node.spine : matched.first.index),
+      title: node.title,
+      summary: '',
+      sourceSectionIndex: node.spine,
+      nodeId: 'toc-${node.spine}',
+      children: [
+        for (final child in node.children)
+          _tocChapterFromNode(child, sections),
+      ],
+    );
+  }
 
   /// Loads + slices the graph corpus for [work] (null = whole book) with the
   /// exact same filtering / spine-dedupe as generation, so re-analysis and
@@ -3728,4 +3594,19 @@ String scopeChatBodyToWork(
     buf.writeln();
   }
   return buf.toString().trim();
+}
+
+/// Directory tree node used by [_tocOutlineForRange]: a flat depth-marked
+/// TOC list is rebuilt into this tree, then rendered as outline chapters.
+class _TocOutlineNode {
+  _TocOutlineNode({
+    required this.title,
+    required this.spine,
+    required this.depth,
+  });
+
+  final String title;
+  final int spine;
+  final int depth;
+  final List<_TocOutlineNode> children = [];
 }

@@ -283,10 +283,6 @@ class AiBookOutlineService {
   static const _maxBatchChars = 15000;
   static const _maxBatchUnits = 4;
   static const _maxDirectNavigationUnits = 24;
-  static const _maxDirectChildUnits = 12;
-  static const _maxChildGroupUnits = 8;
-  static const _maxChildGroupManifestChars = 18000;
-  static const _maxChildGroupSampleChars = 220;
   static const _maxOverviewChars = 36000;
 
   Future<AiBookOutline> generate({
@@ -294,6 +290,12 @@ class AiBookOutlineService {
     String? bookAuthor,
     required List<AiBookSectionSlice> sections,
     required bool includesUnread,
+    /// Pre-arranged top-level units taken from the book's TOC tree: skips
+    /// the AI structure pass (the reader's own directory is authoritative).
+    /// [preplannedRoots] carries the TOC tree; AI summaries/overview are
+    /// merged back into it so nested directory items keep their titles.
+    List<AiBookSectionSlice>? preplannedUnits,
+    List<AiBookOutlineChapter>? preplannedRoots,
     CancelToken? cancelToken,
     void Function(AiOutlineProgress progress)? onProgress,
   }) async {
@@ -310,13 +312,14 @@ class AiBookOutlineService {
         label: '正在识别全书结构',
       ),
     );
-    final units = await planStructure(
-      provider: provider,
-      bookTitle: bookTitle,
-      bookAuthor: bookAuthor,
-      sections: sections,
-      cancelToken: cancelToken,
-    );
+    final units = preplannedUnits ??
+        await planStructure(
+          provider: provider,
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          sections: sections,
+          cancelToken: cancelToken,
+        );
     cancelToken?.throwIfCancelled();
     final batches = _batches(units);
     final chapters = <AiBookOutlineChapter>[];
@@ -370,6 +373,26 @@ class AiBookOutlineService {
     }
     if (chapters.isEmpty) throw AiProviderException('未能生成可用大纲');
 
+    // Merge the AI summaries into the TOC tree (if one was given): the
+    // directory structure is authoritative, AI only enriches it.
+    final byChapterIndex = {
+      for (final chapter in chapters) chapter.sectionIndex: chapter,
+    };
+    final finalChapters = preplannedRoots == null
+        ? chapters
+        : [
+            for (final root in preplannedRoots)
+              (() {
+                final enriched = byChapterIndex[root.sectionIndex];
+                if (enriched == null) return root;
+                return root.copyWith(
+                  title: enriched.title,
+                  summary: enriched.summary,
+                  keyPoints: enriched.keyPoints,
+                );
+              }()),
+          ];
+
     cancelToken?.throwIfCancelled();
     onProgress?.call(
       AiOutlineProgress(
@@ -393,265 +416,13 @@ class AiBookOutlineService {
       includesUnread: includesUnread,
       overview: overview.overview,
       themes: overview.themes,
-      chapters: chapters,
+      chapters: finalChapters,
     );
   }
 
-  /// Summarizes reader-derived child ranges for one already generated node.
-  /// The caller owns range discovery and persistence so a collapsed branch
-  /// never creates network work.
-  Future<List<AiBookOutlineChapter>> generateChildren({
-    required String bookTitle,
-    String? bookAuthor,
-    required String parentNodeId,
-    required List<AiBookOutlineCandidate> candidates,
-    CancelToken? cancelToken,
-    void Function(AiOutlineProgress progress)? onProgress,
-  }) async {
-    if (!_isAvailable()) throw AiProviderException('AI 未启用或未配置');
-    final provider = _openProvider();
-    if (provider == null) throw AiProviderException('AI 未启用或未配置');
-    final usable = candidates
-        .where(
-          (candidate) =>
-              candidate.label.trim().isNotEmpty &&
-              candidate.text.trim().isNotEmpty,
-        )
-        .toList(growable: false);
-    if (usable.isEmpty) return const [];
 
-    // A work with dozens of TOC entries should not turn one expand action into
-    // dozens of serial full-summary calls. First make a bounded intermediate
-    // layer, then summarize the smaller branch when the reader expands it.
-    if (usable.length > _maxDirectChildUnits) {
-      final grouped = await _planChildGroups(
-        provider: provider,
-        bookTitle: bookTitle,
-        bookAuthor: bookAuthor,
-        parentNodeId: parentNodeId,
-        candidates: usable,
-        cancelToken: cancelToken,
-      );
-      if (grouped != null) return grouped;
-      AiLog.d(
-        'outline children grouping invalid; falling back to ${usable.length} direct units',
-      );
-    }
 
-    final sections = [
-      for (var i = 0; i < usable.length; i++)
-        AiBookSectionSlice(
-          index: i + 1,
-          label: usable[i].label,
-          text: usable[i].text,
-          sourceSectionIndex: usable[i].startSectionIndex,
-        ),
-    ];
-    final batches = _batches(sections);
-    final output = <AiBookOutlineChapter>[];
-    for (var batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      cancelToken?.throwIfCancelled();
-      final batch = batches[batchIndex];
-      onProgress?.call(
-        AiOutlineProgress(
-          completed: output.length,
-          total: sections.length,
-          label: '正在分析「${usable[batch.first.index - 1].label}」',
-        ),
-      );
-      final summarized = await _summarizeBatch(
-        provider: provider,
-        bookTitle: bookTitle,
-        bookAuthor: bookAuthor,
-        batch: batch,
-        cancelToken: cancelToken,
-      );
-      final byIndex = {
-        for (final chapter in summarized) chapter.sectionIndex: chapter,
-      };
-      if (byIndex.length != batch.length ||
-          batch.any((section) => !byIndex.containsKey(section.index))) {
-        throw AiProviderException('子级大纲不完整，请重试');
-      }
-      for (final section in batch) {
-        final candidate = usable[section.index - 1];
-        final chapter = byIndex[section.index]!;
-        output.add(
-          AiBookOutlineChapter(
-            sectionIndex: section.index,
-            title: chapter.title,
-            summary: chapter.summary,
-            keyPoints: chapter.keyPoints,
-            sourceSectionIndex: candidate.startSectionIndex,
-            endSectionIndexExclusive: candidate.endSectionIndexExclusive,
-            source: candidate.source,
-            nodeId: '$parentNodeId/${section.index}',
-          ),
-        );
-      }
-      onProgress?.call(
-        AiOutlineProgress(
-          completed: output.length,
-          total: sections.length,
-          label: '已分析 ${output.length}/${sections.length} 节',
-        ),
-      );
-    }
-    return output;
-  }
 
-  /// Builds one visible intermediate layer for a long flat child list. The
-  /// model may name and summarize groups, but every jump range comes from the
-  /// supplied consecutive candidate indexes.
-  Future<List<AiBookOutlineChapter>?> _planChildGroups({
-    required AiProvider provider,
-    required String bookTitle,
-    required String? bookAuthor,
-    required String parentNodeId,
-    required List<AiBookOutlineCandidate> candidates,
-    CancelToken? cancelToken,
-  }) async {
-    final manifest = _childGroupManifest(candidates);
-    final minGroups = (candidates.length / _maxChildGroupUnits).ceil();
-    final result = await completeWithRetry(
-      provider,
-      AiCompletionRequest(
-        messages: [
-          const AiMessage(
-            role: AiMessageRole.system,
-            content:
-                '你是电子书目录编辑。把连续的原书目录项整理成一层便于下钻的阅读大纲。'
-                '只能合并相邻的 sectionIndex；不能遗漏、重复、重排或创造输入中不存在的跳转边界。'
-                '每组最多 8 个 sectionIndex，必须至少形成足以覆盖全部输入的合理分组。'
-                '每组用 70 至 140 字说明这组内容，并给出至多 3 个要点。'
-                '只返回 JSON 对象，不要 Markdown 或解释：'
-                '{"groups":[{"title":"分组标题","sectionIndexes":[1,2],"summary":"摘要","keyPoints":["要点"]}]}。',
-          ),
-          AiMessage(
-            role: AiMessageRole.user,
-            content:
-                '书名：$bookTitle'
-                '${bookAuthor == null || bookAuthor.trim().isEmpty ? '' : '\n作者：${bookAuthor.trim()}'}'
-                '\n\n共有 ${candidates.length} 个连续目录项，至少分为 $minGroups 组。'
-                '\n子级分组清单：\n$manifest',
-          ),
-        ],
-        maxTokens: 1800,
-        temperature: 0.15,
-        timeout: _outlineCallTimeout,
-      ),
-      cancelToken: cancelToken,
-    );
-    final groups = _parseChildGroupPlan(result.text, candidates.length);
-    if (groups == null) return null;
-
-    final output = <AiBookOutlineChapter>[];
-    for (var groupIndex = 0; groupIndex < groups.length; groupIndex++) {
-      final group = groups[groupIndex];
-      final firstIndex = group.sectionIndexes.first;
-      final lastIndex = group.sectionIndexes.last;
-      final first = candidates[firstIndex - 1];
-      final last = candidates[lastIndex - 1];
-      final next = lastIndex < candidates.length ? candidates[lastIndex] : null;
-      output.add(
-        AiBookOutlineChapter(
-          sectionIndex: firstIndex,
-          title: group.title,
-          summary: group.summary,
-          keyPoints: group.keyPoints,
-          sourceSectionIndex: first.startSectionIndex,
-          endSectionIndexExclusive:
-              last.endSectionIndexExclusive ?? next?.startSectionIndex,
-          source: AiOutlineNodeSource.semantic,
-          nodeId: '$parentNodeId/group-${groupIndex + 1}',
-        ),
-      );
-    }
-    AiLog.d(
-      'outline children grouped parent=$parentNodeId '
-      'candidates=${candidates.length} groups=${output.length}',
-    );
-    return output;
-  }
-
-  String _childGroupManifest(List<AiBookOutlineCandidate> candidates) {
-    final headers = [
-      for (var i = 0; i < candidates.length; i++)
-        '[§${i + 1} ${_clip(candidates[i].label.trim(), _maxStructureLabelChars)}]',
-    ];
-    final headerChars = headers.fold<int>(
-      0,
-      (sum, value) => sum + value.length + 1,
-    );
-    final sampleBudget = (_maxChildGroupManifestChars - headerChars)
-        .clamp(0, _maxChildGroupSampleChars * candidates.length)
-        .toInt();
-    final perCandidate = candidates.isEmpty
-        ? 0
-        : (sampleBudget ~/ candidates.length)
-              .clamp(0, _maxChildGroupSampleChars)
-              .toInt();
-    final out = StringBuffer();
-    for (var i = 0; i < candidates.length; i++) {
-      final candidate = candidates[i];
-      out.writeln(headers[i]);
-      if (perCandidate > 0) {
-        out.writeln(_clip(candidate.text.trim(), perCandidate));
-      }
-    }
-    return out.toString().trim();
-  }
-
-  List<_OutlineChildGroup>? _parseChildGroupPlan(String text, int count) {
-    final raw = _decodeJsonObject(text);
-    final groupsRaw = raw?['groups'];
-    if (groupsRaw is! List || groupsRaw.isEmpty) return null;
-    final expected = {for (var i = 1; i <= count; i++) i};
-    final seen = <int>{};
-    final groups = <_OutlineChildGroup>[];
-    for (final row in groupsRaw) {
-      if (row is! Map) return null;
-      final title = row['title'];
-      final summary = row['summary'];
-      final indexes = row['sectionIndexes'];
-      if (title is! String ||
-          title.trim().isEmpty ||
-          summary is! String ||
-          summary.trim().isEmpty ||
-          indexes is! List ||
-          indexes.isEmpty ||
-          indexes.length > _maxChildGroupUnits) {
-        return null;
-      }
-      final parsedIndexes = <int>[];
-      for (final index in indexes) {
-        if (index is! int || !expected.contains(index) || !seen.add(index)) {
-          return null;
-        }
-        parsedIndexes.add(index);
-      }
-      for (var i = 1; i < parsedIndexes.length; i++) {
-        if (parsedIndexes[i] != parsedIndexes[i - 1] + 1) return null;
-      }
-      groups.add(
-        _OutlineChildGroup(
-          title: title.trim(),
-          summary: summary.trim(),
-          keyPoints: row['keyPoints'] is List
-              ? (row['keyPoints'] as List)
-                    .whereType<String>()
-                    .map((value) => value.trim())
-                    .where((value) => value.isNotEmpty)
-                    .take(3)
-                    .toList(growable: false)
-              : const [],
-          sectionIndexes: parsedIndexes,
-        ),
-      );
-    }
-    if (seen.length != expected.length) return null;
-    return groups;
-  }
 
   /// Lets the model identify works and volumes before summaries are requested.
   /// A malformed plan must never make body sections disappear, so it falls
@@ -1064,19 +835,5 @@ class _OutlineStructureGroup {
   });
 
   final String title;
-  final List<int> sectionIndexes;
-}
-
-class _OutlineChildGroup {
-  const _OutlineChildGroup({
-    required this.title,
-    required this.summary,
-    required this.keyPoints,
-    required this.sectionIndexes,
-  });
-
-  final String title;
-  final String summary;
-  final List<String> keyPoints;
   final List<int> sectionIndexes;
 }

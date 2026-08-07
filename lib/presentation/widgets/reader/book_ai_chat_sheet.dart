@@ -11,7 +11,6 @@ import 'package:thinking_orbs/thinking_orbs.dart';
 import '../../../ai/ai_chat.dart';
 import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_family_tree.dart';
-import '../../../ai/ai_log.dart';
 import '../../../ai/ai_models.dart';
 import '../../../ai/ai_outline.dart';
 import '../../../ai/ai_provider.dart';
@@ -1080,11 +1079,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final expanded = _expandedOutlineSections.contains(nodeId);
     final detailsExpanded = _expandedOutlineDetails.contains(nodeId);
     final children = chapter.children;
-    final loadingChildren = _c.isGeneratingBookOutlineChildren(chapter);
-    final childProgress = _c.bookOutlineChildrenProgress(chapter);
-    final childError = _c.bookOutlineChildrenError(chapter);
-    final canGenerateChildren =
-        _c.canGenerateBookOutlineChildren(chapter) || childError != null;
     final indent = 8.0 + depth * 18.0;
     return Column(
       children: [
@@ -1148,10 +1142,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               context,
               chapter,
               detailsExpanded: detailsExpanded,
-              loadingChildren: loadingChildren,
-              childProgress: childProgress,
-              childError: childError,
-              canGenerateChildren: canGenerateChildren,
               hasChildren: children?.isNotEmpty ?? false,
             ),
           ),
@@ -1173,10 +1163,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     BuildContext context,
     AiBookOutlineChapter chapter, {
     required bool detailsExpanded,
-    required bool loadingChildren,
-    required AiOutlineProgress? childProgress,
-    required String? childError,
-    required bool canGenerateChildren,
     required bool hasChildren,
   }) {
     final showAllPoints = detailsExpanded || chapter.keyPoints.length <= 2;
@@ -1187,26 +1173,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (loadingChildren)
-            Row(
-              children: [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: _thinkingOrb(context),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    childProgress?.label ?? '正在生成下级大纲…',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                ),
-              ],
-            ),
           Text(
             chapter.summary,
             maxLines: detailsExpanded ? null : 5,
@@ -1266,18 +1232,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ],
           Row(
             children: [
-              if (!loadingChildren && canGenerateChildren && !hasChildren)
-                TextButton.icon(
-                  onPressed: () => unawaited(
-                    _generateOutlineChildren(chapter, force: false),
-                  ),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                  ),
-                  icon: const Icon(KaijuanIcons.aiChat, size: 17),
-                  label: const Text('生成下级大纲'),
-                ),
               const Spacer(),
               if (canExpandDetails)
                 IconButton(
@@ -1289,14 +1243,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     size: 18,
                   ),
                 ),
-              if (!loadingChildren && hasChildren)
-                IconButton(
-                  tooltip: '重新生成下级大纲',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () =>
-                      unawaited(_generateOutlineChildren(chapter, force: true)),
-                  icon: const Icon(KaijuanIcons.refresh, size: 18),
-                ),
               IconButton(
                 tooltip: '前往原文',
                 visualDensity: VisualDensity.compact,
@@ -1305,20 +1251,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             ],
           ),
-          if (childError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                childError,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  height: 1.4,
-                  color: Theme.of(context).colorScheme.error,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -1352,55 +1284,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     Navigator.of(context).maybePop();
   }
 
-  Future<void> _generateOutlineChildren(
-    AiBookOutlineChapter chapter, {
-    required bool force,
-  }) async {
-    await _c.generateBookOutlineChildren(chapter, force: force);
-    if (!mounted) return;
-    // Keep the just-generated branch visible even if a parent rebuild raced
-    // with the final controller notification.
-    final childCount = _outlineChildrenCount(
-      _c.bookOutline?.chapters ?? const [],
-      chapter.stableNodeId,
-    );
-    AiLog.d(
-      'outline sheet children parent=${chapter.stableNodeId} '
-      'visible=$childCount',
-    );
-    setState(() => _expandedOutlineSections.add(chapter.stableNodeId));
-    if (childCount != null) {
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted) return;
-      final target = _outlineChildrenKeys[chapter.stableNodeId]?.currentContext;
-      if (target != null && target.mounted) {
-        await Scrollable.ensureVisible(
-          target,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOut,
-          alignment: 0.16,
-        );
-      }
-    }
-  }
-
   GlobalKey _outlineChildrenKey(String nodeId) =>
       _outlineChildrenKeys.putIfAbsent(nodeId, GlobalKey.new);
-
-  int? _outlineChildrenCount(
-    List<AiBookOutlineChapter> nodes,
-    String targetNodeId,
-  ) {
-    for (final node in nodes) {
-      if (node.stableNodeId == targetNodeId) return node.children?.length;
-      final children = node.children;
-      if (children != null) {
-        final nested = _outlineChildrenCount(children, targetNodeId);
-        if (nested != null) return nested;
-      }
-    }
-    return null;
-  }
 
   bool get _allowUnread =>
       _c.aiSettingsController?.settings.allowUnreadContext ?? false;

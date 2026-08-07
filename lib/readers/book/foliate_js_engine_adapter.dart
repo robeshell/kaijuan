@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../ai/ai_outline.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../presentation/controllers/book_reader_controller.dart';
 import 'book_rendition_session.dart';
@@ -169,7 +168,6 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       getChapterText: _getChapterText,
       getReadSoFarText: _getReadSoFarText,
       getBookPlainText: _getBookPlainText,
-      getOutlineChildren: _getOutlineChildren,
       getSelectionContext: _getSelectionContext,
     );
     readerController.attachSearchBridge(
@@ -393,73 +391,6 @@ try {
     } catch (e) {
       debugPrint('[FoliateJs] getBookPlainText error: $e');
       return '';
-    }
-  }
-
-  Future<List<AiBookOutlineCandidate>> _getOutlineChildren({
-    required int startSectionIndex,
-    required int? endSectionIndexExclusive,
-    required int maxChars,
-  }) async {
-    if (!_webReady) return const [];
-    final controller = _webController;
-    final lease = _webLease;
-    final session = _session;
-    if (controller == null || lease == null || session == null ||
-        !session.isCurrent(lease)) {
-      return const [];
-    }
-    final start = startSectionIndex.clamp(1, 1500000);
-    final end = endSectionIndexExclusive == null
-        ? 'null'
-        : endSectionIndexExclusive.clamp(start + 1, 1500001).toString();
-    final budget = maxChars.clamp(12000, 300000);
-    try {
-      final result = await controller.callAsyncJavaScript(
-        functionBody: '''
-try {
-  return await window.getOutlineChildren({
-    startSectionIndex: $start,
-    endSectionIndexExclusive: $end,
-    maxChars: $budget,
-  });
-} catch (e) {
-  console.error('[Kaika] getOutlineChildren failed', e);
-  return [];
-}
-''',
-      );
-      final raw = result?.value;
-      if (raw is! List) return const [];
-      final output = <AiBookOutlineCandidate>[];
-      for (final value in raw) {
-        if (value is! Map) continue;
-        final label = value['label'];
-        final text = value['text'];
-        final startIndex = value['startSectionIndex'];
-        final endIndex = value['endSectionIndexExclusive'];
-        if (label is! String || text is! String || startIndex is! num ||
-            label.trim().isEmpty || text.trim().isEmpty || startIndex < 1) {
-          continue;
-        }
-        final start = startIndex.toInt();
-        final end = endIndex is num ? endIndex.toInt() : null;
-        output.add(
-          AiBookOutlineCandidate(
-            label: label.trim(),
-            text: text.trim(),
-            startSectionIndex: start,
-            endSectionIndexExclusive: end != null && end > start
-                ? end
-                : null,
-            source: AiOutlineNodeSource.fromWireName(value['source']),
-          ),
-        );
-      }
-      return output;
-    } catch (error) {
-      debugPrint('[FoliateJs] getOutlineChildren error: $error');
-      return const [];
     }
   }
 
