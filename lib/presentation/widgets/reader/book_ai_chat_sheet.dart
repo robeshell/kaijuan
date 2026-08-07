@@ -1381,6 +1381,36 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
     }
     if (graph == null) {
+      // Collection detection is async (outline → work candidates). Until the
+      // works are known, there is no valid range to generate — show a
+      // loading state instead of the actionable empty-state button, or a
+      // tap would start a whole-book dialog against a half-loaded book.
+      final outlinePending = _c.bookOutline == null;
+      if (works == null && (_graphWorksLoading || outlinePending)) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '正在识别著作范围…',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
       return Center(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
