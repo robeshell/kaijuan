@@ -144,6 +144,65 @@ class _BookAiGraphFamilyTreeViewState
     ];
     if (roots.isEmpty) return const SizedBox.shrink();
 
+    // 旁挂：a consort root (恭妃王氏) parks as the partner's first child
+    // instead of a distant top-level root — her maternal link to the child
+    // then spans one sibling step instead of crossing the whole canvas.
+    // Only forward spouse entries attach (kin ≠ '配偶'; the reverse side is
+    // always plain 配偶); a marriage-only spouse (王皇后) has no tree seat
+    // and is untouched. The spouse entry's forward kin is the 婚配 kin —
+    // empty-kin 婚配 edges (kin='配偶' both ways) are left alone.
+    final parkedNames = <String>{};
+    {
+      final all = <_LayoutNode>[];
+      void walk(_LayoutNode n) {
+        all.add(n);
+        for (final c in n.children) {
+          walk(c);
+        }
+      }
+
+      for (final r in roots) {
+        walk(r);
+      }
+      for (final r in [...roots]) {
+        _LayoutNode? anchor;
+        for (final n in all) {
+          if (n.spouses.any((s) => s.name == r.name && s.kin != '配偶') &&
+              !parkedNames.contains(n.name)) {
+            anchor = n;
+            break;
+          }
+        }
+        if (anchor == null || identical(anchor, r)) continue;
+        if (parkedNames.contains(r.name)) continue;
+        roots.remove(r);
+        final parked = _LayoutNode(
+          name: r.name,
+          depth: anchor.depth + 1,
+          complex: r.complex,
+          kin: r.kin,
+          spouses: r.spouses,
+          spouseAnchor: true,
+        )..children.addAll(r.children);
+        // Shift the carried subtree so depths stay consistent after the move.
+        void shiftDepth(_LayoutNode n, int delta) {
+          for (final c in n.children) {
+            c.depth += delta;
+            shiftDepth(c, delta);
+          }
+        }
+
+        shiftDepth(parked, anchor.depth + 1);
+        parkedNames.add(r.name);
+        anchor.children.insert(0, parked);
+        // Re-walk for the next candidate (the anchor set may have grown).
+        all.clear();
+        for (final r2 in roots) {
+          walk(r2);
+        }
+      }
+    }
+
     var leafCount = 0;
     void countLeaves(_LayoutNode node) {
       if (node.children.isEmpty) {
@@ -217,6 +276,12 @@ class _BookAiGraphFamilyTreeViewState
           node.x += offsetX;
           nodes.add(node);
           for (final child in node.children) {
+            if (child.spouseAnchor) {
+              // 婚配 doesn't draw a parent edge (the spouse row + the
+              // maternal link already show the relationship).
+              collect(child);
+              continue;
+            }
             edges.add(_LayoutEdge(
               parentCenterX: node.x,
               parentBottomY:
@@ -245,18 +310,34 @@ class _BookAiGraphFamilyTreeViewState
           final source = nodeByName[extra.source];
           final target = nodeByName[extra.target];
           if (source == null || target == null) continue;
-          extraEdges.add(_LayoutEdge(
-            parentCenterX: source.x,
-            parentBottomY:
-                source.depth * widget.levelHeight +
-                BookAiGraphFamilyTreeView.nodeHeight +
-                (source.spouses.isNotEmpty
-                    ? BookAiGraphFamilyTreeView._spouseRowHeight
-                    : 0),
-            childCenterX: target.x,
-            childTopY: target.depth * widget.levelHeight,
-            label: extra.kin,
-          ));
+          final bottomY =
+              source.depth * widget.levelHeight +
+              BookAiGraphFamilyTreeView.nodeHeight +
+              (source.spouses.isNotEmpty
+                  ? BookAiGraphFamilyTreeView._spouseRowHeight
+                  : 0);
+          if (source.depth == target.depth) {
+            // Same layer (the parked consort next to her child): a short
+            // horizontal dashed link between the two cards instead of a
+            // long fold spanning the canvas.
+            final left = math.min(source.x, target.x);
+            final right = math.max(source.x, target.x);
+            extraEdges.add(_LayoutEdge(
+              parentCenterX: left + BookAiGraphFamilyTreeView.nodeWidth / 2,
+              parentBottomY: bottomY,
+              childCenterX: right - BookAiGraphFamilyTreeView.nodeWidth / 2,
+              childTopY: bottomY,
+              label: extra.kin,
+            ));
+          } else {
+            extraEdges.add(_LayoutEdge(
+              parentCenterX: source.x,
+              parentBottomY: bottomY,
+              childCenterX: target.x,
+              childTopY: target.depth * widget.levelHeight,
+              label: extra.kin,
+            ));
+          }
         }
 
         if (!_fitted) {
@@ -455,10 +536,11 @@ class _LayoutNode {
     required this.complex,
     this.kin = '',
     this.spouses = const [],
+    this.spouseAnchor = false,
   });
 
   final String name;
-  final int depth;
+  int depth;
   final bool complex;
 
   /// Kinship label of the edge to its parent (父子/夫妻…), empty for roots.
@@ -466,6 +548,10 @@ class _LayoutNode {
 
   /// 旁挂配偶 (婚配 edges), shown as a small row on the card.
   final List<AiFamilySpouse> spouses;
+
+  /// The node is a consort parked right below her partner (万历 → 恭妃王氏)
+  /// so her maternal link stays short; no parent edge is drawn for it.
+  final bool spouseAnchor;
   double x = 0;
   final List<_LayoutNode> children = [];
 }

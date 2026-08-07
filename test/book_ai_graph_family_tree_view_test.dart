@@ -97,6 +97,63 @@ void main() {
     expect(find.text('父子'), findsOneWidget);
   });
 
+  testWidgets('consort parks under partner; maternal link stays short',
+      (tester) async {
+    final tree = buildFamilyTree(
+      entities: [
+        person('万历皇帝', 1),
+        person('恭妃王氏', 1),
+        person('朱常洛', 2),
+      ],
+      relations: [
+        kin('万历皇帝', '朱常洛'),
+        AiGraphRelation(
+          source: '万历皇帝',
+          target: '恭妃王氏',
+          type: '婚配',
+          kin: '妃嫔',
+          description: '',
+          evidence: [
+            AiGraphEvidence(sectionIndex: 1, quote: '册封'),
+          ],
+          weight: 1,
+        ),
+        AiGraphRelation(
+          source: '恭妃王氏',
+          target: '朱常洛',
+          type: '亲属',
+          kin: '母子',
+          description: '',
+          evidence: [
+            AiGraphEvidence(sectionIndex: 2, quote: '所生'),
+          ],
+          weight: 1,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BookAiGraphFamilyTreeView(
+            tree: tree,
+            onVertexTap: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 恭妃 is parked next to 万历 (spouse row) and still present as a card.
+    expect(find.text('恭妃王氏'), findsOneWidget);
+    expect(find.text('妃嫔：恭妃王氏'), findsOneWidget);
+    // The maternal link label renders (same-layer horizontal dashed edge).
+    expect(find.text('母子'), findsOneWidget);
+    // No parent edge is drawn for the marriage (no 婚配/妃嫔 edge label).
+    expect(find.text('父子'), findsOneWidget); // 万历→朱常洛 spine stays.
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('node tap fires the callback', (tester) async {
     final tree = buildFamilyTree(
       entities: [
