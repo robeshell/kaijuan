@@ -2829,7 +2829,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       compact ? 8 : 12,
                     ),
                     children: [
-                      if (_c.graphWorkCandidates != null)
+                      if (_c.hasCollectionWorks)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: Row(

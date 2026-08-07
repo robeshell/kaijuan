@@ -1297,7 +1297,10 @@ class BookReaderController extends ChangeNotifier {
   /// behavior: graph/dialog/outline anchor to the work under the reading
   /// position instead of the whole collection.
   AiGraphWorkCandidate? get currentReadingWork {
-    final works = graphWorkCandidates;
+    // Works may come from the outline OR from the one-shot structural
+    // recognition (no outline yet) — the graph picker and the chat scope
+    // must agree with the list the user actually sees.
+    final works = graphWorkCandidates ?? _resolvedGraphWorks;
     if (works == null) return null;
     final spine = _sectionIndex + 1; // reader is 0-based
     for (final work in works) {
@@ -1315,6 +1318,17 @@ class BookReaderController extends ChangeNotifier {
     _chatScopeWholeBook = value;
     notifyListeners();
   }
+
+  /// Last structural-recognition result (no-outline collections), cached so
+  /// [currentReadingWork] and other sync getters see the same works the
+  /// graph picker lists.
+  List<AiGraphWorkCandidate>? _resolvedGraphWorks;
+
+  /// Whether this book is a collection (works known from the outline or from
+  /// the one-shot structural recognition) — gates the collection-only UI
+  /// (graph picker, chat scope switch) without waiting for the outline.
+  bool get hasCollectionWorks =>
+      (graphWorkCandidates ?? _resolvedGraphWorks)?.isNotEmpty ?? false;
 
   /// True when a graph was already generated for [work] of this collection.
   bool hasWorkGraph(AiGraphWorkCandidate work) =>
@@ -1581,7 +1595,10 @@ class BookReaderController extends ChangeNotifier {
         for (final unit in units)
           (unit.sourceSectionIndex, unit.label, null, ''),
       ];
-      return _worksFromRows(rows);
+      final resolved = _worksFromRows(rows);
+      _resolvedGraphWorks = resolved;
+      if (!_disposed) notifyListeners();
+      return resolved;
     } catch (_) {
       return null;
     }
