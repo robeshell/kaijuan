@@ -892,8 +892,16 @@ class BookReaderController extends ChangeNotifier {
           if (!_disposed) notifyListeners();
         },
       );
-      _bookOutline = outline;
-      _bookOutlineWorkKey = startWorkKey;
+      // 数据始终存到 startWorkKey；UI 只在用户仍停留在原作品时才回拨——
+      // 生成期间翻页后，保留当前作品的大纲（loadBookOutline 已加载），
+      // 避免标题/内容错位。
+      final currentKey = currentReadingWork == null
+          ? null
+          : workKeyFor(currentReadingWork!);
+      if (startWorkKey == currentKey) {
+        _bookOutline = outline;
+        _bookOutlineWorkKey = startWorkKey;
+      }
       _bookOutlineProgress = null;
       await _saveBookOutline(outline, workKey: startWorkKey);
       if (!_disposed) notifyListeners();
