@@ -2696,55 +2696,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       compact ? 8 : 12,
                     ),
                     children: [
-                      if (_c.hasCollectionWorks)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(
-                            children: [
-                              Text(
-                                '对话范围',
-                                style: TextStyle(
-                                  fontSize: context.appCaptionSize,
-                                  color: context.appSecondaryText,
-                                ),
-                              ),
-                              const Spacer(),
-                              SegmentedButton<bool>(
-                                segments: const [
-                                  ButtonSegment(
-                                    value: false,
-                                    label: Text('当前作品'),
-                                  ),
-                                  ButtonSegment(
-                                    value: true,
-                                    label: Text('全书'),
-                                  ),
-                                ],
-                                selected: {_c.chatScopeWholeBook},
-                                onSelectionChanged: (selection) => setState(
-                                  () => _c.chatScopeWholeBook =
-                                      selection.first,
-                                ),
-                                showSelectedIcon: false,
-                                style: ButtonStyle(
-                                  visualDensity: VisualDensity.compact,
-                                  textStyle: WidgetStatePropertyAll(
-                                    TextStyle(
-                                      fontSize: context.appCaptionSize,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  padding: const WidgetStatePropertyAll(
-                                    EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 2,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       Semantics(
                         container: true,
                         liveRegion: true,
