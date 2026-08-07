@@ -1314,14 +1314,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   /// View entry order: the plan's `viewOrder` when present (unknown views
   /// like family_tree are skipped until the tree lands), then the base
-  /// order for anything not mentioned — entries are never hidden.
+  /// order for anything not mentioned. Essays (散文) never get a family
+  /// tree entry — no lineage structure exists there — matching the plan
+  /// filtering; other books keep every view reachable.
   List<_GraphViewMode> _orderedGraphViewModes(AiNarrationPlan? plan) {
-    const base = [
+    final essayHigh = (plan?.feature('essay') ?? 0) >= 0.5;
+    final base = [
       _GraphViewMode.persons,
       _GraphViewMode.locations,
       _GraphViewMode.events,
       _GraphViewMode.graph,
-      _GraphViewMode.familyTree,
+      if (!essayHigh) _GraphViewMode.familyTree,
     ];
     if (plan == null) {
       return [
