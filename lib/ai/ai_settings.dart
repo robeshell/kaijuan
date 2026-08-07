@@ -17,6 +17,8 @@ class AiGraphRuleWords {
     this.citationQuoteTemplates = defaultCitationQuoteTemplates,
     this.relationTypes = defaultRelationTypes,
     this.relationTypeAliases = defaultRelationTypeAliases,
+    this.personTitleSuffixes = defaultPersonTitleSuffixes,
+    this.genericPersonTerms = defaultGenericPersonTerms,
   });
 
   /// Front/back-matter unit words matched as a PREFIX of a section label
@@ -39,6 +41,16 @@ class AiGraphRuleWords {
   /// Raw (usually English NER) relation tags → Chinese vocabulary, one entry
   /// per line as `english=中文` in the settings UI.
   final Map<String, String> relationTypeAliases;
+
+  /// Person-title suffixes marking the same individual's honorific /
+  /// posthumous variants (皇后升格太后、皇帝/帝号简称) — the 0.7 stem rule
+  /// (慈圣太后↔慈圣皇太后) matches on these.
+  final List<String> personTitleSuffixes;
+
+  /// Generic honorific / contextual kinship terms that must never absorb a
+  /// named person via the substring rule (皇帝/太后/哥哥/先生…). Configurable
+  /// so book-specific 称谓 systems can be tuned without touching the pipeline.
+  final List<String> genericPersonTerms;
 
   static const defaultAppendixUnits = <String>[
     '附录',
@@ -214,12 +226,42 @@ class AiGraphRuleWords {
     'worked_together': '共事', 'collaborator': '共事',
   };
 
+  /// Person-title suffixes for the 0.7 stem rule (慈圣太后↔慈圣皇太后).
+  static const defaultPersonTitleSuffixes = <String>[
+    '皇太后',
+    '太后',
+    '皇帝',
+    '皇后',
+  ];
+
+  /// Generic honorific / contextual kinship terms excluded from substring
+  /// merges (皇帝/太后/哥哥/先生… — roles, not names).
+  static const defaultGenericPersonTerms = <String>[
+    // 身份/爵位
+    '皇帝', '皇上', '陛下', '万岁', '太后', '皇后', '贵妃', '娘娘',
+    '殿下', '王爷', '亲王', '大人', '将军', '尚书', '侍郎', '都督',
+    '公主', '太子', '皇子', '世子', '圣母', '先帝', '朕',
+    // 亲属称谓（上下文相关，跨章指人不同）
+    '哥哥', '弟弟', '姐姐', '妹妹', '兄长', '贤弟', '母亲', '父亲',
+    '娘亲', '爹爹', '爷爷', '奶奶', '祖父', '祖母', '外公', '外婆',
+    '叔叔', '婶婶', '舅舅', '舅母', '姑姑', '姑母', '伯父', '伯母',
+    '叔父', '叔母', '侄儿', '侄子', '侄女', '外甥', '外甥女', '孙子',
+    '孙女', '儿子', '女儿', '兄弟', '姐妹',
+    // 身份/称谓
+    '师父', '师傅', '师尊', '弟子', '徒弟', '徒儿', '道友', '道兄',
+    '那怪', '妖怪', '妇人', '老汉', '老翁', '老妪', '书生', '和尚',
+    '道士', '先生', '小姐', '公子', '夫人', '姑娘', '娘子', '官人',
+    '郎君', '大姐', '大婶', '大妈', '堂兄', '堂弟', '表兄', '表弟',
+  ];
+
   AiGraphRuleWords copyWith({
     List<String>? appendixUnits,
     List<String>? metadataUnits,
     List<String>? citationQuoteTemplates,
     List<String>? relationTypes,
     Map<String, String>? relationTypeAliases,
+    List<String>? personTitleSuffixes,
+    List<String>? genericPersonTerms,
   }) {
     return AiGraphRuleWords(
       appendixUnits: appendixUnits ?? this.appendixUnits,
@@ -229,6 +271,9 @@ class AiGraphRuleWords {
       relationTypes: relationTypes ?? this.relationTypes,
       relationTypeAliases:
           relationTypeAliases ?? this.relationTypeAliases,
+      personTitleSuffixes:
+          personTitleSuffixes ?? this.personTitleSuffixes,
+      genericPersonTerms: genericPersonTerms ?? this.genericPersonTerms,
     );
   }
 
@@ -238,6 +283,8 @@ class AiGraphRuleWords {
     'citationQuoteTemplates': citationQuoteTemplates,
     'relationTypes': relationTypes,
     'relationTypeAliases': relationTypeAliases,
+    'personTitleSuffixes': personTitleSuffixes,
+    'genericPersonTerms': genericPersonTerms,
   };
 
   static AiGraphRuleWords fromJson(Object? json) {
@@ -265,6 +312,12 @@ class AiGraphRuleWords {
                   ),
                 )
               : defaults.relationTypeAliases,
+      personTitleSuffixes:
+          (map['personTitleSuffixes'] as List?)?.cast<String>() ??
+          defaults.personTitleSuffixes,
+      genericPersonTerms:
+          (map['genericPersonTerms'] as List?)?.cast<String>() ??
+          defaults.genericPersonTerms,
     );
   }
 }

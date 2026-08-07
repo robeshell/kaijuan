@@ -1003,7 +1003,7 @@ class AiBookGraphService {
         : [
             if (narration.feature('organization') >= 0.5)
               '本书以组织/势力/家族博弈为主：实体类型额外允许 organization'
-              '（家族、组织、势力、派系，如「史塔克家族」），'
+              '（家族、组织、势力、派系，如「河东柳氏」「青云门」），'
               '并多抽隶属关系（隶属/效力/追随）；',
             if (narration.feature('geography') >= 0.5)
               '地理叙事显著：location 实体仅限地理地点（城市/国家/区域/'
@@ -1036,11 +1036,10 @@ class AiBookGraphService {
             '与 importance（1-3 整数，3=重大情节）；'
             'scope 判定：绝大多数实体都应是 setting——本书正文中出现的'
             '任何角色、地点、事件、讨论对象（包括作者亲历、叙述的主题）；'
-            '本书叙述/讨论的主角人物即使已故、或本身是历史人物，仍是 setting'
-            '（如张居正之于《万历十五年》）；'
+            '本书叙述/讨论的主角人物即使已故、或本身是历史人物，仍是 setting；'
             'reference 仅限明显的外部引用：举例、论证时引用的书外人名，'
             '典型句式「据X」「按X」「如X所言」「正如X所说」「X曾说」「X写道」'
-            '（如散文中引用的罗素、苏东坡）。'
+            '（如议论文字中引用的书外学者）。'
             '标错 reference 会让该实体从图谱主视图中隐藏，'
             '所以只对真正的引用标 reference；'
             '$narrationBlock'
@@ -1373,47 +1372,14 @@ class AiBookGraphService {
     return null;
   }
 
-  /// Person title suffixes that mark the same individual's honorific /
-  /// posthumous variants (皇后升格太后、皇帝/帝号简称).
-  static const List<String> _personTitleSuffixes = [
-    '皇太后',
-    '太后',
-    '皇帝',
-    '皇后',
-  ];
-
   /// Name-structure similarity score (ER attribute similarity, Fellegi–Sunter
   /// style): 1.0 exact, 0.7 same person-title stem (慈圣太后↔慈圣皇太后),
   /// 0.5 substring (万历 ⊂ 万历皇帝). null when unrelated. Deliberately not
   /// edit-distance based — 王皇后 vs 王皇太后 is distance 1 but only the
   /// title-suffix rule (which handles the real 皇后→太后升格) applies.
-  /// Generic honorific terms that must never absorb a named person via the
-  /// substring rule: 皇帝 ⊂ 万历皇帝 would fold the emperor's entity into a
-  /// generic mention (and the canonical name disappears from the tree). The
-  /// stem rule (慈圣太后↔慈圣皇太后) still handles real title upgrades.
-  /// Contextual kinship/address terms (哥哥/母亲/道友/那怪/先生…) are in
-  /// the same class — they refer to different people chapter by chapter, so
-  /// using them as a merge key would create false bridges (AI-Reader-V2's
-  /// dangerous-alias table idea).
-  static const _genericPersonTerms = {
-    // 身份/爵位
-    '皇帝', '皇上', '陛下', '万岁', '太后', '皇后', '贵妃', '娘娘',
-    '殿下', '王爷', '亲王', '大人', '将军', '尚书', '侍郎', '都督',
-    '公主', '太子', '皇子', '世子', '圣母', '先帝', '朕',
-    // 亲属称谓（上下文相关，跨章指人不同）
-    '哥哥', '弟弟', '姐姐', '妹妹', '兄长', '贤弟', '母亲', '父亲',
-    '娘亲', '爹爹', '爷爷', '奶奶', '祖父', '祖母', '外公', '外婆',
-    '叔叔', '婶婶', '舅舅', '舅母', '姑姑', '姑母', '伯父', '伯母',
-    '叔父', '叔母', '侄儿', '侄子', '侄女', '外甥', '外甥女', '孙子',
-    '孙女', '儿子', '女儿', '兄弟', '姐妹',
-    // 身份/称谓
-    '师父', '师傅', '师尊', '弟子', '徒弟', '徒儿', '道友', '道兄',
-    '那怪', '妖怪', '妇人', '老汉', '老翁', '老妪', '书生', '和尚',
-    '道士', '先生', '小姐', '公子', '夫人', '姑娘', '娘子', '官人',
-    '郎君', '大姐', '大婶', '大妈', '堂兄', '堂弟', '表兄', '表弟',
-  };
-
-  static double? _nameSimilarityScore(String a, String b) {
+  /// Honorific/kinship terms excluded from substring merges come from the
+  /// configurable [AiGraphRuleWords.genericPersonTerms] (roles, not names).
+  double? _nameSimilarityScore(String a, String b) {
     if (a == b) return 1.0;
     if (a.length < 2 || b.length < 2) return null;
     final (short, long) = a.length <= b.length ? (a, b) : (b, a);
@@ -1424,8 +1390,9 @@ class AiBookGraphService {
     // short side is a real part of the name (short*2 >= long: 万历⊂万历皇帝
     // passes, but 北京 ⊂ 北京理工大学 does not — the short 2-char word is a
     // common token, not the person's name).
+    final genericTerms = _settings().graphRuleWords.genericPersonTerms;
     if ((long.startsWith(short) || long.endsWith(short)) &&
-        !_genericPersonTerms.contains(short) &&
+        !genericTerms.contains(short) &&
         short.length * 2 >= long.length) {
       return 0.5;
     }
@@ -1548,7 +1515,7 @@ class AiBookGraphService {
   /// Name-structure-only resolution for relation endpoints (the endpoint has
   /// no separate chunk-relation evidence — exact hits dominate; a ≥0.5
   /// structural match normalizes new variants like 万历皇帝→万历).
-  static String? _resolveEndpointName(
+  String? _resolveEndpointName(
     Map<AiGraphEntityType, Map<String, String>> canonical,
     AiGraphEntityType type,
     String name,
@@ -1562,8 +1529,8 @@ class AiBookGraphService {
     return null;
   }
 
-  static String? _titleStem(String name) {
-    for (final suffix in _personTitleSuffixes) {
+  String? _titleStem(String name) {
+    for (final suffix in _settings().graphRuleWords.personTitleSuffixes) {
       if (name.endsWith(suffix) && name.length > suffix.length) {
         return name.substring(0, name.length - suffix.length);
       }

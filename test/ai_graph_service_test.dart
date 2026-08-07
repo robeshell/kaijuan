@@ -964,6 +964,46 @@ void main() {
       expect(second.coveredSections, containsAll([1, 2, 4]));
     });
 
+    test('configured generic terms drive the merge (config library, not code)',
+        () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"刘爷爷","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"刘爷爷"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"老爷子","type":"person","aliases":[],
+              "description":"尊称。",
+              "evidence":[{"section":2,"quote":"老爷子"}],
+              "scope":"setting"}],"relations":[]}
+          ''',
+        },
+      );
+      // 老爷子 is a book-specific 称谓: configured via AiGraphRuleWords —
+      // the pipeline itself has no hardcoded book vocabulary.
+      final service = AiBookGraphService(
+        isAvailable: () => true,
+        openProvider: () => provider,
+        settings: () => const AiSettings(
+          model: 'graph-test',
+          graphRuleWords: AiGraphRuleWords(genericPersonTerms: ['老爷子']),
+        ),
+      );
+
+      final graph = await service.generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '一', '刘爷爷。'), slice(2, '二', '老爷子。')],
+        includesUnread: true,
+      );
+
+      // 老爷子 ⊂ 刘爷爷 is a suffix hit, but the configured term excludes it
+      // from merging — book vocabulary lives in settings, not in the pipeline.
+      expect(graph.entities.map((e) => e.name).toSet(),
+          {'刘爷爷', '老爷子'});
+    });
+
     test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
         () async {
       final provider = _GraphProvider(
