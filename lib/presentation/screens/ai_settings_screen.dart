@@ -47,6 +47,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   late final TextEditingController _citationTemplates;
   late final TextEditingController _relationTypes;
   late final TextEditingController _relationAliases;
+  late final TextEditingController _titleSuffixes;
+  late final TextEditingController _genericTerms;
+  late final TextEditingController _bookPriors;
   bool _obscureKey = true;
   bool _obscureSearchKey = true;
   bool _seeded = false;
@@ -74,6 +77,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     _citationTemplates = TextEditingController();
     _relationTypes = TextEditingController();
     _relationAliases = TextEditingController();
+    _titleSuffixes = TextEditingController();
+    _genericTerms = TextEditingController();
+    _bookPriors = TextEditingController();
     // Rebuild only this State when text changes — never push keystrokes into
     // ChangeNotifier (that rebuilds the form mid-paste on macOS).
     _apiKey.addListener(_onDraftChanged);
@@ -139,8 +145,44 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         .entries
         .map((e) => '${e.key}=${e.value}')
         .join('\n');
+    _titleSuffixes.text = settings
+        .graphRuleWords
+        .personTitleSuffixes
+        .join('\n');
+    _genericTerms.text = settings.graphRuleWords.genericPersonTerms.join('\n');
+    _bookPriors.text = settings
+        .graphRuleWords
+        .bookNamePriors
+        .entries
+        .expand((entry) => [
+              for (final alias in entry.value.entries)
+                '${entry.key}::${alias.key}=${alias.value}',
+            ])
+        .join('\n');
     _seeded = true;
     setState(() {});
+  }
+
+  /// Parses `书名::别名=规范名` lines into the book priors map; malformed
+  /// lines are skipped.
+  static Map<String, Map<String, String>> _parseBookPriors(String text) {
+    final priors = <String, Map<String, String>>{};
+    for (final line in text.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      final sep = trimmed.indexOf('::');
+      if (sep <= 0) continue;
+      final book = trimmed.substring(0, sep).trim();
+      final eq = trimmed.indexOf('=', sep);
+      if (eq <= sep + 2 || eq == trimmed.length - 1) continue;
+      priors
+          .putIfAbsent(book, () => {})
+          .putIfAbsent(
+            trimmed.substring(sep + 2, eq).trim(),
+            () => trimmed.substring(eq + 1).trim(),
+          );
+    }
+    return priors;
   }
 
   Future<void> _flushDraft({bool notifyController = true}) async {
@@ -155,6 +197,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
           citationQuoteTemplates: _parseWords(_citationTemplates.text),
           relationTypes: _parseWords(_relationTypes.text),
           relationTypeAliases: _parseAliases(_relationAliases.text),
+          personTitleSuffixes: _parseWords(_titleSuffixes.text),
+          genericPersonTerms: _parseWords(_genericTerms.text),
+          bookNamePriors: _parseBookPriors(_bookPriors.text),
         ),
       );
       await controller.setSearchApiKey(_searchApiKey.text, notify: true);
@@ -195,6 +240,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
           citationQuoteTemplates: _parseWords(_citationTemplates.text),
           relationTypes: _parseWords(_relationTypes.text),
           relationTypeAliases: _parseAliases(_relationAliases.text),
+          personTitleSuffixes: _parseWords(_titleSuffixes.text),
+          genericPersonTerms: _parseWords(_genericTerms.text),
+          bookNamePriors: _parseBookPriors(_bookPriors.text),
         ),
       ),
     );
@@ -988,6 +1036,49 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                             .defaultRelationTypeAliases
                             .entries
                             .map((e) => '${e.key}=${e.value}')
+                            .join('\n');
+                      }),
+                    ),
+                    const SizedBox(height: 20),
+                    _GraphRuleWordsField(
+                      label: '称谓后缀',
+                      helper: '每行一个，同一人称号的后缀变体，如 皇太后、皇帝',
+                      controller: _titleSuffixes,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _titleSuffixes.text = AiGraphRuleWords
+                            .defaultPersonTitleSuffixes
+                            .join('\n');
+                      }),
+                    ),
+                    const SizedBox(height: 20),
+                    _GraphRuleWordsField(
+                      label: '泛称拦截词',
+                      helper: '每行一个；这些称呼（皇帝、哥哥、先生…）不会与具体'
+                          '人名合并，防止张冠李戴',
+                      controller: _genericTerms,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _genericTerms.text = AiGraphRuleWords
+                            .defaultGenericPersonTerms
+                            .join('\n');
+                      }),
+                    ),
+                    const SizedBox(height: 20),
+                    _GraphRuleWordsField(
+                      label: '书名别名先验',
+                      helper: '每行 书名::别名=规范名，如 西游记::行者=孙悟空；'
+                          '该书生成图谱时别名直接归并为规范名',
+                      controller: _bookPriors,
+                      enabled: !controller.isBusy,
+                      onReset: () => setState(() {
+                        _bookPriors.text = AiGraphRuleWords
+                            .defaultBookNamePriors
+                            .entries
+                            .expand((entry) => [
+                                  for (final alias in entry.value.entries)
+                                    '${entry.key}::${alias.key}=${alias.value}',
+                                ])
                             .join('\n');
                       }),
                     ),

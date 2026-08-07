@@ -277,7 +277,21 @@ class AiSettingsController extends ChangeNotifier {
         sameList(a.metadataUnits, b.metadataUnits) &&
         sameList(a.citationQuoteTemplates, b.citationQuoteTemplates) &&
         sameList(a.relationTypes, b.relationTypes) &&
-        _sameMap(a.relationTypeAliases, b.relationTypeAliases);
+        _sameMap(a.relationTypeAliases, b.relationTypeAliases) &&
+        sameList(a.personTitleSuffixes, b.personTitleSuffixes) &&
+        sameList(a.genericPersonTerms, b.genericPersonTerms) &&
+        _samePriors(a.bookNamePriors, b.bookNamePriors);
+  }
+
+  static bool _samePriors(
+    Map<String, Map<String, String>> a,
+    Map<String, Map<String, String>> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (!_sameMap(entry.value, b[entry.key] ?? const {})) return false;
+    }
+    return true;
   }
 
   static bool _sameMap(Map<String, String> a, Map<String, String> b) {
