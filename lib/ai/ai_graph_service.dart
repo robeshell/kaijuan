@@ -1010,9 +1010,6 @@ class AiBookGraphService {
               '自然地貌/街道/建筑场所），船只、机构、组织、公司等不算 location；'
               'location 的 description 应包含方位与地点间的相对关系'
               '（如「位于城北，紧邻港口」）；',
-            if (narration.feature('essay') >= 0.5)
-              '本书为散文/随笔/议论集：scope 判定从严，单章举例引述的'
-              '人物一律 reference，只有全书反复出现的讨论对象可标 setting；',
           ].join();
     final entityTypes = (narration?.feature('organization') ?? 0) >= 0.5
         ? 'person|location|event|organization'

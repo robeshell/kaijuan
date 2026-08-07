@@ -131,10 +131,10 @@ scope 硬规则（引用句式降级）、evidence 锚定（quote→原文 span�
 - **已配置化**：泛称拦截词表（genericPersonTerms，80+ 词）与称谓后缀表
   （personTitleSuffixes）从 `static const` 挪进 `AiGraphRuleWords`
   （AI 设置页可改，含 toJson/fromJson 持久化，旧配置缺字段回退默认值）
-- **保留（方案特征驱动，非硬编码）**：`essay ≥0.5 → scope 从严` 是展示方案
-  （narration）特征反哺的一部分——每本书由模型自判特征，不是代码里写死
-  「某类书」；散文集误伤历史（《沉默的大多数》回滚）后此分支是经过验证的
-  折中，如需移除由用户拍板
+- **已删除（essay 抽取特调）**：`essay ≥0.5 → scope 从严` prompt 分支——
+  散文/议论集没有人物关系/家族树可挖掘，不该为它打抽取补丁；「不同书生成
+  不同板块」由**展示方案驱动**承担（essay 特征让模型自判 defaultView/viewOrder，
+  散文集自然不导向 persons/family_tree，无类型硬编码）
 - **测试基准**：`ai_graph_synthetic_book_test.dart` 全虚构；部分旧单测沿用
   万历十五年人名（慈圣/万历）仅为触发场景，不影响运行时行为
 
