@@ -1155,6 +1155,10 @@ class BookReaderController extends ChangeNotifier {
       cancel.throwIfCancelled();
       final outline = _bookOutline;
       if (outline == null) return;
+      // Same 读哪本跟哪本 guard as full generation: capture the work key at
+      // expansion start — the user may flip pages while the AI runs, and the
+      // result must be stored under the key it was expanded from.
+      final workKeyAtStart = _bookOutlineWorkKey;
       final updatedChapters = _replaceOutlineChildren(
         outline.chapters,
         chapter.stableNodeId,
@@ -1181,7 +1185,7 @@ class BookReaderController extends ChangeNotifier {
         'outline children ready parent=${chapter.stableNodeId} '
         'count=${children.length} attached=$attachedCount',
       );
-      await _saveBookOutline(_bookOutline!, workKey: _bookOutlineWorkKey);
+      await _saveBookOutline(_bookOutline!, workKey: workKeyAtStart);
       AiLog.d('outline children persisted parent=${chapter.stableNodeId}');
     } on AiProviderException catch (error) {
       if (!cancel.isCancelled) {
