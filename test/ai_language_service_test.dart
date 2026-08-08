@@ -432,7 +432,16 @@ void main() {
     expect(find.textContaining('十三代皇帝'), findsOneWidget);
     // Markdown asterisks should not remain visible as raw **.
     expect(find.textContaining('**'), findsNothing);
-    expect(find.text('•'), findsNWidgets(2));
+    // List items render as dot bullets (Container), one per item.
+    expect(
+      find.byWidgetPredicate(
+        (w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration! as BoxDecoration).shape == BoxShape.circle,
+      ),
+      findsNWidgets(2),
+    );
   });
 }
 

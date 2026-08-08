@@ -31,8 +31,8 @@ class AiResultBody extends StatelessWidget {
           if (i > 0)
             SizedBox(
               height: blocks[i].isHeading
-                  ? (compact ? 10 : 14)
-                  : (blocks[i].isListItem ? 6 : (compact ? 8 : 10)),
+                  ? (compact ? 12 : 16)
+                  : (blocks[i].isListItem ? 7 : (compact ? 10 : 12)),
             ),
           _blockWidget(context, blocks[i]),
         ],
@@ -43,14 +43,14 @@ class AiResultBody extends StatelessWidget {
   Widget _blockWidget(BuildContext context, _Block block) {
     final baseStyle = TextStyle(
       fontSize: compact ? context.appBodySecondarySize : context.appBodySize,
-      height: compact ? 1.5 : 1.55,
+      height: compact ? 1.55 : 1.6,
       color: context.appPrimaryText,
       fontWeight: FontWeight.w400,
     );
     final headingStyle = baseStyle.copyWith(
       fontSize: context.appCaptionSize,
       fontWeight: FontWeight.w700,
-      letterSpacing: 0.2,
+      letterSpacing: 0.4,
       color: context.appSecondaryText,
       height: 1.35,
     );
@@ -68,12 +68,13 @@ class AiResultBody extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(top: 2, right: 8),
-            child: Text(
-              '•',
-              style: baseStyle.copyWith(
-                fontWeight: FontWeight.w600,
-                height: 1.45,
+            padding: const EdgeInsets.only(top: 8, right: 10, left: 2),
+            child: Container(
+              width: 4,
+              height: 4,
+              decoration: BoxDecoration(
+                color: context.appSecondaryText,
+                shape: BoxShape.circle,
               ),
             ),
           ),
