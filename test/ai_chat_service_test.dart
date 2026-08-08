@@ -337,9 +337,10 @@ void main() {
   });
 
   group('AiChatService.streamReply (tool status)', () {
-    test('fires status while tools run, prose answer streams', () async {
+    test('fires status while tools run, then prose streams', () async {
       final statuses = <String?>[];
       final provider = _ToolTurnProvider();
+      final host = _FakeHost();
       final service = AiChatService(
         isAvailable: () => true,
         openProvider: () => provider,
@@ -351,23 +352,26 @@ void main() {
         history: const [],
         context: const AiChatContextBundle(chapterText: '正文。'),
         bookTitle: '万历十五年',
-        tools: _FakeHost(),
+        tools: host,
         onToolStatus: (s) => statuses.add(s),
       )) {
         reply.write(chunk);
       }
       expect(statuses, contains('正在检索「张居正」…'));
       expect(statuses.last, isNull);
-      // Prose is re-sent through provider.stream, NOT yielded from the probe.
-      expect(provider.streamCalled, isTrue);
+      expect(host.calls, contains('search_book'));
+      // Fence turn and prose turn both stream; no non-streaming probe ran.
+      expect(provider.streamCalls, 2);
+      expect(provider.completeCalls, 0);
       expect(reply.toString(), contains('张居正是明朝名臣'));
+      expect(reply.toString(), isNot(contains('kaijuan_tools')));
     });
 
     test('no status when tools disabled', () async {
       final statuses = <String?>[];
       final service = AiChatService(
         isAvailable: () => true,
-        openProvider: () => _ToolTurnProvider(),
+        openProvider: () => _ProseProvider(),
         settings: () => const AiSettings(),
       );
       await for (final _ in service.streamReply(
@@ -381,8 +385,8 @@ void main() {
     });
   });
 
-  group('AiChatService.streamReply (prose streams)', () {
-    test('prose answer in the first probe still streams', () async {
+  group('AiChatService.streamReply (prose answers)', () {
+    test('prose answer streams live from the first turn', () async {
       final provider = _ProseProvider();
       final service = AiChatService(
         isAvailable: () => true,
@@ -399,10 +403,10 @@ void main() {
       )) {
         reply.write(chunk);
       }
-      // The probe saw prose, so the answer MUST come from provider.stream.
-      expect(provider.streamCalled, isTrue);
+      // One streaming call produces the answer — no probe, no re-ask.
+      expect(provider.streamCalls, 1);
+      expect(provider.completeCalls, 0);
       expect(reply.toString(), contains('本章主线'));
-      // Probe prose was discarded — only the streamed text is delivered.
       expect(reply.toString(), isNot(contains('probe-only')));
     });
   });
@@ -564,27 +568,20 @@ class _SuggestionProvider implements AiProvider {
   }
 }
 
-/// Provider that first requests `search_book`, then intends prose. The prose
-/// answer is delivered via `stream` (the probe's prose is discarded).
+/// Provider whose first streamed turn emits a `search_book` fence in small
+/// chunks (exercising the prefix buffer), and whose second turn streams the
+/// prose answer. Counters prove no non-streaming probe call runs.
 class _ToolTurnProvider implements AiProvider {
-  int _completeCalls = 0;
-  bool streamCalled = false;
+  int streamCalls = 0;
+  int completeCalls = 0;
 
   @override
   Future<AiCompletionResult> complete(
     AiCompletionRequest request, {
     CancelToken? cancelToken,
   }) async {
-    _completeCalls++;
-    if (_completeCalls == 1) {
-      return const AiCompletionResult(
-        text:
-            '```kaijuan_tools\n'
-            '[{"name":"search_book","query":"张居正"}]\n'
-            '```',
-      );
-    }
-    return const AiCompletionResult(text: '根据书内检索，张居正是明朝名臣。');
+    completeCalls++;
+    return const AiCompletionResult(text: 'unexpected complete()');
   }
 
   @override
@@ -592,8 +589,18 @@ class _ToolTurnProvider implements AiProvider {
     AiCompletionRequest request, {
     CancelToken? cancelToken,
   }) async* {
-    streamCalled = true;
-    yield const AiStreamChunk(text: '根据书内检索，张居正是明朝名臣。');
+    streamCalls++;
+    if (streamCalls == 1) {
+      yield const AiStreamChunk(text: '```kai');
+      yield const AiStreamChunk(
+        text: 'juan_tools\n[{"name":"search_book","query":"张居正"}]\n',
+      );
+      yield const AiStreamChunk(text: '```');
+      yield const AiStreamChunk(text: '', isFinal: true);
+      return;
+    }
+    yield const AiStreamChunk(text: '根据书内检索，');
+    yield const AiStreamChunk(text: '张居正是明朝名臣。');
     yield const AiStreamChunk(text: '', isFinal: true);
   }
 
@@ -709,14 +716,18 @@ class _AlwaysNetworkFailProvider implements AiProvider {
   }
 }
 
-/// Provider whose probe always returns prose (model intends to answer directly).
-class _ProseProvider implements AiProvider {  bool streamCalled = false;
+/// Provider whose streamed turn always answers in prose. `complete` is
+/// tracked to prove the answer never goes through a non-streaming probe.
+class _ProseProvider implements AiProvider {
+  int streamCalls = 0;
+  int completeCalls = 0;
 
   @override
   Future<AiCompletionResult> complete(
     AiCompletionRequest request, {
     CancelToken? cancelToken,
   }) async {
+    completeCalls++;
     return const AiCompletionResult(text: 'probe-only 这一章讲主线。');
   }
 
@@ -725,8 +736,9 @@ class _ProseProvider implements AiProvider {  bool streamCalled = false;
     AiCompletionRequest request, {
     CancelToken? cancelToken,
   }) async* {
-    streamCalled = true;
-    yield const AiStreamChunk(text: '本章主线是…');
+    streamCalls++;
+    yield const AiStreamChunk(text: '本章主线');
+    yield const AiStreamChunk(text: '是…');
     yield const AiStreamChunk(text: '', isFinal: true);
   }
 

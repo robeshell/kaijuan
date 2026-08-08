@@ -44,10 +44,10 @@ class AiChatService {
 
   static const maxToolRounds = 4;
 
-  /// Cheap probe budget just to see whether the model wants tools or prose.
-  /// Large enough for a tool-call fence, small enough that discarding a prose
-  /// answer here (we re-stream it) costs little.
-  static const toolIntentProbeMaxTokens = 300;
+  /// Per-turn streaming budget. Large enough for a complete prose answer
+  /// (a no-tools turn streams straight to the user) and for tool-call fences;
+  /// a fence stops its stream early once the closing fence arrives.
+  static const toolIntentProbeMaxTokens = 2000;
   static const maxSuggestedQuestionAnswerChars = 6000;
 
   bool get isAvailable => isAvailableFn();
@@ -189,35 +189,84 @@ class AiChatService {
       enableTools: tools != null,
     );
 
-    // Tool rounds only detect intent with a cheap probe; the FINAL answer
-    // always streams below. A probe that returns prose is discarded and
-    // re-streamed — otherwise the non-streaming probe would become the answer
-    // and `provider.stream` would effectively never run (all stream:false).
+    // Tool turns stream the model's own turn: buffer only the opening tokens
+    // until they can be told apart — a ```kaijuan_tools fence stays hidden and
+    // runs its tools; anything else is prose and flows to the user live. The
+    // model is never asked to answer twice (the old probe-then-restream design
+    // made the second ask return empty or malformed/JSON content).
+    const fenceHead = '```kaijuan_tools';
     if (tools != null) {
       for (var round = 0; round < maxToolRounds; round++) {
         cancelToken?.throwIfCancelled();
         AiLog.d('chat tool round=${round + 1}/$maxToolRounds');
-        var text = (await completeWithRetry(
-          provider,
+
+        final rawBuf = StringBuffer();
+        final proseBuf = StringBuffer();
+        var decided = false;
+        var isToolTurn = false;
+        var fenceComplete = false;
+        await for (final chunk in provider.stream(
           AiCompletionRequest(
             messages: working,
             maxTokens: toolIntentProbeMaxTokens,
             temperature: 0.2,
           ),
           cancelToken: cancelToken,
-        )).text.trim();
-        if (text.isEmpty) {
+        )) {
+          if (chunk.text.isNotEmpty) {
+            rawBuf.write(chunk.text);
+            final raw = rawBuf.toString();
+            if (!decided) {
+              // Undecided while the opening is still a prefix of the fence
+              // head ('', '`', '```ka' …); prose that starts with backticks
+              // (```dart …) diverges at the 4th char and flushes live.
+              final lower = raw.trimLeft().toLowerCase();
+              if (lower.isNotEmpty && !fenceHead.startsWith(lower)) {
+                decided = true;
+                isToolTurn = lower.startsWith(fenceHead);
+              }
+            }
+            if (decided && !isToolTurn) {
+              final cleaned = AiChatTools.stripToolProtocol(raw);
+              if (cleaned.length > proseBuf.length) {
+                proseBuf
+                  ..clear()
+                  ..write(cleaned);
+                yield proseBuf.toString();
+              }
+            } else if (decided &&
+                isToolTurn &&
+                AiChatTools.parseCalls(raw).isNotEmpty) {
+              fenceComplete = true; // closing fence + valid JSON arrived
+            }
+          }
+          if (chunk.isFinal || fenceComplete) break;
+        }
+
+        final rawText = rawBuf.toString().trim();
+        if (!decided) {
+          // Stream ended in the prefix stage: empty (fall through to the
+          // final-stream fallback) or a dangling partial fence (re-probe).
+          if (rawText.isEmpty) break;
+          isToolTurn = AiChatTools.looksLikeToolTurn(rawText);
+          if (!isToolTurn) {
+            onToolStatus?.call(null);
+            final cleaned = AiChatTools.stripToolProtocol(rawText).trim();
+            if (cleaned.isNotEmpty) yield cleaned;
+            return;
+          }
+        } else if (!isToolTurn) {
+          // Prose streamed live above — done, unless it came out empty.
+          onToolStatus?.call(null);
+          if (proseBuf.toString().trim().isNotEmpty) return;
           break;
         }
 
-        var calls = AiChatTools.parseCalls(text);
-        if (!AiChatTools.looksLikeToolTurn(text)) {
-          // Prose intent — drop the probe, stream the real answer below.
-          break;
-        }
-        // Fence present but JSON truncated by the cheap probe → re-probe fully.
+        var fenceText = rawText;
+        var calls = AiChatTools.parseCalls(fenceText);
+        // Fence truncated/malformed → one non-streaming re-probe, as before.
         if (calls.isEmpty) {
-          text = (await completeWithRetry(
+          fenceText = (await completeWithRetry(
             provider,
             AiCompletionRequest(
               messages: working,
@@ -226,8 +275,8 @@ class AiChatService {
             ),
             cancelToken: cancelToken,
           )).text.trim();
-          calls = AiChatTools.parseCalls(text);
-          if (calls.isEmpty || !AiChatTools.looksLikeToolTurn(text)) {
+          calls = AiChatTools.parseCalls(fenceText);
+          if (calls.isEmpty || !AiChatTools.looksLikeToolTurn(fenceText)) {
             break;
           }
         }
@@ -238,7 +287,9 @@ class AiChatService {
         working.add(
           AiMessage(
             role: AiMessageRole.assistant,
-            content: text.length > 2000 ? '${text.substring(0, 2000)}…' : text,
+            content: fenceText.length > 2000
+                ? '${fenceText.substring(0, 2000)}…'
+                : fenceText,
           ),
         );
         working.add(
