@@ -279,13 +279,30 @@ class AiBookOutlineService {
         ? _maxPackedBodyChars
         : (raw > _maxBodyChars ? raw : _maxBodyChars);
     // perSection cap = _maxPackedBodyChars (not 6000): a few-section book
-    // (3 部 trilogy) with a large budget must let each section take its full
-    // equal share, or the lengthBudget is wasted -- 3 × 6000 = 18k sent of a
-    // 50k budget. The total is still bounded by [budget] + the final
-    // substring truncation, so this only lifts the per-section ceiling.
-    final perSection = (budget ~/ nonEmpty.length).clamp(600, _maxPackedBodyChars);
+    // (3-part trilogy) with a large budget must let each section take its
+    // full equal share, or the lengthBudget is wasted.
+    //
+    // Stride sampling: when sections don't all fit in the budget at minimum
+    // perSection (134+ sections), sample every Nth section so the model
+    // sees the whole book's arc -- first, middle, last -- instead of just
+    // the opening chapters. Always includes the first and last section.
+    final perSectionMin = 600;
+    final maxSections = budget ~/ perSectionMin;
+    final List<int> indices;
+    if (nonEmpty.length <= maxSections) {
+      indices = [for (var i = 0; i < nonEmpty.length; i++) i];
+    } else {
+      final stride = (nonEmpty.length / maxSections).ceil();
+      indices = [for (var i = 0; i < nonEmpty.length; i += stride) i];
+      if (indices.last != nonEmpty.length - 1) {
+        indices.add(nonEmpty.length - 1);
+      }
+    }
+    final perSection =
+        (budget ~/ indices.length).clamp(perSectionMin, _maxPackedBodyChars);
     final buf = StringBuffer();
-    for (final section in nonEmpty) {
+    for (final i in indices) {
+      final section = nonEmpty[i];
       final text = section.text.trim();
       final label = section.label.trim();
       if (buf.isNotEmpty) buf.write('\n\n');
