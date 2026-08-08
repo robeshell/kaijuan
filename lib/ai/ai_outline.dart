@@ -175,10 +175,15 @@ class AiBookOutlineService {
     final body = _packBody(sections);
     if (body.isEmpty) throw AiProviderException('没有可用于生成大纲的正文');
 
-    // 单元目标跟结构规模走：单元数 ≈ 目录单元数，短篇 5、长篇多卷放大到 30。
-    // 多部长篇（明朝 15 部 / 三体三部曲）固定 5-15 会漏整部，按目录单元数
-    // 给足——每一部/卷至少能占一个单元。
-    final unitGoal = sections.length.clamp(5, 30);
+    // 单元目标跟内容规模走，不只看目录条目数：多部长篇目录粗（一部一个
+    // TOC 条目），sections.length 只有 3-4，但总字数几十万--按字数补足，
+    // 否则 unitGoal 被压到最低 5，反而比固定 10 更少。
+    final totalChars = sections.fold<int>(
+      0, (sum, s) => sum + s.text.length,
+    );
+    final byLength = totalChars ~/ 15000;
+    final unitGoal = (byLength > sections.length ? byLength : sections.length)
+        .clamp(5, 30);
 
     final result = await completeWithRetry(
       provider,
@@ -194,7 +199,7 @@ class AiBookOutlineService {
                 '{"overview":"一段话综述全书的整体脉络（200-300字，讲清主旨、推进方式、核心张力）",'
                 '"units":[{"title":"单元名（2-12字，体现这一块的议题或内容）",'
                 '"blurb":"一段话说清这块讲了什么、在全书里的作用（80-150字）"}]}。'
-                'units 数量约 $unitGoal 个（5-$unitGoal 之间），按书中出现顺序排列，'
+                'units 数量约 $unitGoal 个，按书中出现顺序排列，'
                 '覆盖全书从头到尾，不能只覆盖开头。'
                 '如果这本书分若干部/卷（如"第壹部""三体II"），按部组织单元——'
                 '每一部至少一个单元，单元名带上所属部/卷（如"第壹部·洪武建国"）；'
@@ -253,15 +258,20 @@ class AiBookOutlineService {
         if (s.text.trim().isNotEmpty) s,
     ];
     if (nonEmpty.isEmpty) return '';
-    // Multi-unit books get a larger total budget so every unit keeps a real
-    // sample (a 15-部 novel would otherwise starve later units to ~1 page).
-    // Use min/max instead of clamp: when the unit budget (1500 × n) exceeds
-    // the cap (80000) — 54+ non-empty sections — `clamp` would throw
-    // ArgumentError (lowerLimit > upperLimit) and kill generation.
+    // Budget scales with content: multi-unit books get more per unit, and
+    // long books with few coarse sections (one TOC entry per volume) get a
+    // length-based floor so the model has enough material for the scaled-up
+    // unit count. Use min/max instead of clamp to avoid ArgumentError when
+    // the unit budget exceeds the cap (54+ non-empty sections).
     final unitBudget = _minUnitSampleChars * nonEmpty.length;
-    final budget = unitBudget > _maxPackedBodyChars
+    final totalChars = nonEmpty.fold<int>(
+      0, (sum, s) => sum + s.text.length,
+    );
+    final lengthBudget = totalChars ~/ 6;
+    final raw = unitBudget > lengthBudget ? unitBudget : lengthBudget;
+    final budget = raw > _maxPackedBodyChars
         ? _maxPackedBodyChars
-        : (unitBudget > _maxBodyChars ? unitBudget : _maxBodyChars);
+        : (raw > _maxBodyChars ? raw : _maxBodyChars);
     final perSection = (budget ~/ nonEmpty.length).clamp(600, 6000);
     final buf = StringBuffer();
     for (final section in nonEmpty) {
