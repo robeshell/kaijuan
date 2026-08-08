@@ -222,7 +222,7 @@ class AiBookOutlineService {
           ),
         ],
         maxTokens: (2000 + unitGoal * 150).clamp(4000, 8000),
-        temperature: 0.3,
+        temperature: 0.1,
         timeout: _outlineCallTimeout,
       ),
       cancelToken: cancelToken,
@@ -331,7 +331,7 @@ class AiBookOutlineService {
               .replaceFirst(RegExp(r'\s*```$'), '')
         : text;
     // Tolerate prose around the JSON ("好的，以下是大纲：{...} 希望对你有帮助")
-    // — models at temperature 0.3 sometimes wrap the answer. Extract the first
+    // - models sometimes wrap the answer in prose. Extract the first
     // '{' to the last '}' before decoding; a bare fence-strip + whole-text
     // decode hard-fails on any preamble and costs the user a full retry.
     final start = fenced.indexOf('{');
