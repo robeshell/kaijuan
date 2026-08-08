@@ -175,15 +175,9 @@ void main() {
           outline: AiBookOutline(
             createdAt: DateTime.utc(2026, 8, 3, 12),
             model: 'backup-test',
-            includesUnread: true,
-            overview: '远端大纲概览。',
-            themes: const ['主题'],
-            chapters: const [
-              AiBookOutlineChapter(
-                sectionIndex: 1,
-                title: '第一节',
-                summary: '远端章节摘要。',
-              ),
+            overview: '远端大纲。',
+            units: const [
+              AiOutlineUnit(title: '主题', blurb: '远端主题说明。'),
             ],
           ),
         ).toJson(),
@@ -362,8 +356,8 @@ void main() {
           as Map<String, dynamic>,
     );
     expect(restoredChat.messages, hasLength(2));
-    expect(restoredChat.outline?.overview, '远端大纲概览。');
-    expect(restoredChat.outline?.chapters.single.title, '第一节');
+    expect(restoredChat.outline?.overview, '远端大纲。');
+    expect(restoredChat.outline?.units.single.title, '主题');
 
     final restoredGraph = AiBookGraph.fromJson(
       jsonDecode(

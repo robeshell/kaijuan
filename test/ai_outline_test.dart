@@ -14,89 +14,32 @@ void main() {
     );
   }
 
-  test('outline JSON round-trip preserves cache metadata', () {
+  test('outline JSON round-trip preserves tagline and themes', () {
     final source = AiBookOutline(
       createdAt: DateTime.utc(2026, 8, 5, 12),
       model: 'outline-test',
-      includesUnread: true,
-      overview: '全书围绕一次迁都与归京展开。',
-      themes: const ['权力', '抉择'],
-      chapters: const [
-        AiBookOutlineChapter(
-          sectionIndex: 7,
-          title: '开端',
-          summary: '事件发生后，主角被迫离开南京。',
-          keyPoints: ['爆炸', '出逃'],
-          sourceSectionIndex: 1,
-        ),
+      overview: '一部关于沉默与话语的杂文集。',
+      units: const [
+        AiOutlineUnit(title: '沉默的辩证法', blurb: '沉默作为文化选择。'),
+        AiOutlineUnit(title: '知识分子的处境', blurb: '插队与思想灌输。'),
       ],
     );
 
     final restored = AiBookOutline.fromJson(source.toJson());
 
     expect(restored, isNotNull);
-    expect(restored!.includesUnread, isTrue);
-    expect(restored.model, 'outline-test');
-    expect(restored.chapters.single.keyPoints, ['爆炸', '出逃']);
-    expect(restored.chapters.single.sourceSectionIndex, 1);
-  });
-
-  test('outline JSON preserves unloaded and loaded child branches', () {
-    final source = AiBookOutline(
-      createdAt: DateTime.utc(2026, 8, 5, 12),
-      model: 'outline-test',
-      includesUnread: true,
-      overview: '全书概览。',
-      chapters: const [
-        AiBookOutlineChapter(
-          sectionIndex: 1,
-          title: '第一部',
-          summary: '第一部摘要。',
-          sourceSectionIndex: 2,
-          endSectionIndexExclusive: 10,
-          nodeId: 'top-1',
-          children: [
-            AiBookOutlineChapter(
-              sectionIndex: 1,
-              title: '第一章',
-              summary: '第一章摘要。',
-              sourceSectionIndex: 2,
-              source: AiOutlineNodeSource.heading,
-              nodeId: 'top-1/1',
-              children: [],
-            ),
-          ],
-        ),
-        AiBookOutlineChapter(
-          sectionIndex: 2,
-          title: '第二部',
-          summary: '第二部摘要。',
-          nodeId: 'top-2',
-        ),
-      ],
-    );
-
-    final restored = AiBookOutline.fromJson(source.toJson());
-
-    expect(restored, isNotNull);
-    expect(restored!.chapters[0].endSectionIndexExclusive, 10);
-    expect(
-      restored.chapters[0].children!.single.source,
-      AiOutlineNodeSource.heading,
-    );
-    expect(restored.chapters[0].children!.single.children, isEmpty);
-    expect(restored.chapters[1].children, isNull);
+    expect(restored!.overview, '一部关于沉默与话语的杂文集。');
+    expect(restored.units, hasLength(2));
+    expect(restored.units.first.title, '沉默的辩证法');
+    expect(restored.units.first.blurb, '沉默作为文化选择。');
   });
 
   test('outline cache ignores a result from an older generator version', () {
     final source = AiBookOutline(
       createdAt: DateTime.utc(2026, 8, 5, 12),
       model: 'outline-test',
-      includesUnread: true,
       overview: '旧大纲。',
-      chapters: const [
-        AiBookOutlineChapter(sectionIndex: 1, title: '旧章节', summary: '旧摘要。'),
-      ],
+      units: const [AiOutlineUnit(title: '旧', blurb: '旧主题。')],
     );
     final oldJson = {
       ...source.toJson(),
@@ -106,273 +49,95 @@ void main() {
     expect(AiBookOutline.fromJson(oldJson), isNull);
   });
 
-  test(
-    'generates every section in bounded batches and reports progress',
-    () async {
-      final provider = _OutlineProvider();
-      final progress = <AiOutlineProgress>[];
-      final sections = [
-        for (var index = 1; index <= 5; index++)
-          AiBookSectionSlice(
-            index: index,
-            label: '第 $index 节',
-            text: '正文$index ' * 1100,
-          ),
-      ];
+  test('generate makes one provider call and parses themes', () async {
+    final provider = _OutlineProvider();
+    final progress = <AiOutlineProgress>[];
+    final sections = [
+      for (var index = 1; index <= 5; index++)
+        AiBookSectionSlice(
+          index: index,
+          label: '第 $index 节',
+          text: '正文$index ' * 1100,
+        ),
+    ];
 
-      final outline = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: sections,
-        includesUnread: false,
-        onProgress: progress.add,
-      );
+    final outline = await serviceWith(provider).generate(
+      bookTitle: '测试书',
+      sections: sections,
+      onProgress: progress.add,
+    );
 
-      expect(provider.requests, hasLength(4));
-      expect(outline.model, 'outline-test');
-      expect(outline.includesUnread, isFalse);
-      expect(outline.chapters.map((chapter) => chapter.sectionIndex), [
-        1,
-        2,
-        3,
-        4,
-        5,
-      ]);
-      expect(progress.last.finalizing, isTrue);
-      expect(progress.last.label, '正在整理全书脉络');
-    },
-  );
+    expect(provider.requests, hasLength(1));
+    expect(outline.model, 'outline-test');
+    expect(outline.overview, isNotEmpty);
+    expect(outline.units, isNotEmpty);
+    expect(progress.last.finalizing, isTrue);
+  });
 
-  test('rejects a batch that omits one provided section', () async {
-    final provider = _OutlineProvider(omitLastSection: true);
+  test('generate throws on invalid provider output', () async {
+    final provider = _OutlineProvider(invalidOutput: true);
 
     await expectLater(
       serviceWith(provider).generate(
         bookTitle: '测试书',
         sections: const [
           AiBookSectionSlice(index: 1, label: '一', text: '正文一'),
-          AiBookSectionSlice(index: 2, label: '二', text: '正文二'),
         ],
-        includesUnread: true,
       ),
       throwsA(
         isA<AiProviderException>().having(
           (error) => error.message,
           'message',
-          '章节大纲不完整，请重试',
+          '大纲提炼失败，请重试',
         ),
       ),
     );
   });
 
-  test('limits a summary batch to four short sections', () async {
+  test('generate throws when no usable body', () async {
     final provider = _OutlineProvider();
 
-    final outline = await serviceWith(provider).generate(
-      bookTitle: '短章合集',
-      includesUnread: true,
-      sections: [
-        for (var index = 1; index <= 9; index++)
-          AiBookSectionSlice(index: index, label: '第 $index 节', text: '短正文'),
-      ],
-    );
-
-    // Structure plan + 3 bounded summary batches + final overview.
-    expect(provider.requests, hasLength(5));
-    expect(outline.chapters, hasLength(9));
-  });
-
-  test('uses model structure groups as outline units', () async {
-    final provider = _OutlineProvider(
-      structurePlan:
-          '{"groups":['
-          '{"title":"第一部","sectionIndexes":[1,2]},'
-          '{"title":"第二部","sectionIndexes":[3,4,5]}'
-          '],"ignoredSectionIndexes":[]}',
-    );
-
-    final outline = await serviceWith(provider).generate(
-      bookTitle: '合集',
-      sections: const [
-        AiBookSectionSlice(index: 1, label: '甲之一', text: '第一部开端'),
-        AiBookSectionSlice(index: 2, label: '甲之二', text: '第一部发展'),
-        AiBookSectionSlice(index: 3, label: '乙之一', text: '第二部开端'),
-        AiBookSectionSlice(index: 4, label: '乙之二', text: '第二部发展'),
-        AiBookSectionSlice(index: 5, label: '乙之三', text: '第二部结尾'),
-      ],
-      includesUnread: true,
-    );
-
-    expect(outline.chapters.map((chapter) => chapter.sectionIndex), [1, 3]);
-    expect(outline.chapters.map((chapter) => chapter.title), ['第一部', '第二部']);
-    expect(provider.requests.first.messages.last.content, contains('结构清单：'));
-  });
-
-  test(
-    'summarizes a small set of navigation units without a structure plan',
-    () async {
-      final provider = _OutlineProvider();
-
-      final outline = await serviceWith(provider).generate(
-        bookTitle: '合集',
-        includesUnread: true,
+    await expectLater(
+      serviceWith(provider).generate(
+        bookTitle: '测试书',
         sections: const [
-          AiBookSectionSlice(
-            index: 1,
-            label: '第一部',
-            text: '第一部正文',
-            isNavigationUnit: true,
-          ),
-          AiBookSectionSlice(
-            index: 2,
-            label: '第二部',
-            text: '第二部正文',
-            isNavigationUnit: true,
-          ),
+          AiBookSectionSlice(index: 1, label: '目录', text: '   '),
         ],
-      );
-
-      expect(outline.chapters.map((chapter) => chapter.sectionIndex), [1, 2]);
-      expect(provider.requests, hasLength(2));
-      expect(
-        provider.requests.any(
-          (request) => request.messages.last.content.contains('结构清单：'),
+      ),
+      throwsA(
+        isA<AiProviderException>().having(
+          (error) => error.message,
+          'message',
+          '没有可用于生成大纲的正文',
         ),
-        isFalse,
-      );
-    },
-  );
-
-  test('keeps original spine locations for logically split units', () async {
-    final outline = await serviceWith(_OutlineProvider()).generate(
-      bookTitle: '合集',
-      sections: const [
-        AiBookSectionSlice(
-          index: 1,
-          sourceSectionIndex: 1,
-          label: '第一部',
-          text: '第一部正文',
-        ),
-        AiBookSectionSlice(
-          index: 2,
-          sourceSectionIndex: 1,
-          label: '第二部',
-          text: '第二部正文',
-        ),
-      ],
-      includesUnread: true,
+      ),
     );
-
-    expect(outline.chapters.map((chapter) => chapter.sourceSectionIndex), [
-      1,
-      1,
-    ]);
+    expect(provider.requests, isEmpty);
   });
 
-  test('generate honors preplanned TOC units and merges summaries into roots',
-      () async {
+  test('generate honors cancellation before the call', () async {
     final provider = _OutlineProvider();
-    final outline = await serviceWith(provider).generate(
-      bookTitle: '鲁迅小说精品',
-      sections: [
-        AiBookSectionSlice(
-          index: 1,
-          label: '狂人日记',
-          text: '正文1',
-          sourceSectionIndex: 4,
-          isNavigationUnit: true,
-        ),
-      ],
-      includesUnread: true,
-      preplannedUnits: [
-        AiBookSectionSlice(
-          index: 1,
-          label: '狂人日记',
-          text: '正文1',
-          sourceSectionIndex: 4,
-          isNavigationUnit: true,
-        ),
-      ],
-      preplannedRoots: [
-        AiBookOutlineChapter(
-          sectionIndex: 1,
-          title: '狂人日记',
-          summary: '',
-          sourceSectionIndex: 4,
-          nodeId: 'toc-4',
-          children: [
-            AiBookOutlineChapter(
-              sectionIndex: 1,
-              title: '之一',
-              summary: '',
-              sourceSectionIndex: 4,
-              nodeId: 'toc-4/1',
-            ),
-          ],
-        ),
-      ],
-    );
+    final cancel = CancelToken()..cancel();
 
-    expect(outline.chapters, hasLength(1));
-    expect(outline.chapters.first.title, '狂人日记');
-    expect(outline.chapters.first.summary, isNotEmpty); // AI 摘要回填
-    expect(outline.chapters.first.children, hasLength(1)); // 目录树保留
-    // 目录章节方案：不再调用 AI 结构识别。
-    expect(
-      provider.requests
-          .every((r) => !r.messages.last.content.contains('结构清单：')),
-      isTrue,
+    await expectLater(
+      serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: const [
+          AiBookSectionSlice(index: 1, label: '一', text: '正文一'),
+        ],
+        cancelToken: cancel,
+      ),
+      throwsA(isA<AiProviderException>()),
     );
+    expect(provider.requests, isEmpty);
   });
 
-
-
-  test('invalid structure plan falls back without dropping sections', () async {
-    final provider = _OutlineProvider(
-      structurePlan:
-          '{"groups":[{"title":"错误分组","sectionIndexes":[1]}],'
-          '"ignoredSectionIndexes":[2,3]}',
-    );
-
-    final outline = await serviceWith(provider).generate(
-      bookTitle: '测试书',
-      sections: const [
-        AiBookSectionSlice(index: 1, label: '一', text: '正文一'),
-        AiBookSectionSlice(index: 2, label: '二', text: '正文二'),
-        AiBookSectionSlice(index: 3, label: '三', text: '正文三'),
-      ],
-      includesUnread: false,
-    );
-
-    expect(outline.chapters.map((chapter) => chapter.sectionIndex), [1, 2, 3]);
-  });
-
-  test(
-    'does not call the provider after cancellation before structure planning',
-    () async {
-      final provider = _OutlineProvider();
-      final cancel = CancelToken()..cancel();
-
-      await expectLater(
-        serviceWith(provider).generate(
-          bookTitle: '测试书',
-          sections: const [
-            AiBookSectionSlice(index: 1, label: '一', text: '正文一'),
-          ],
-          includesUnread: false,
-          cancelToken: cancel,
-        ),
-        throwsA(isA<AiProviderException>()),
-      );
-      expect(provider.requests, isEmpty);
-    },
-  );
 }
 
 class _OutlineProvider implements AiProvider {
-  _OutlineProvider({this.omitLastSection = false, this.structurePlan});
+  _OutlineProvider({this.invalidOutput = false});
 
-  final bool omitLastSection;
-  final String? structurePlan;
+  final bool invalidOutput;
   final List<AiCompletionRequest> requests = [];
 
   @override
@@ -381,52 +146,17 @@ class _OutlineProvider implements AiProvider {
     CancelToken? cancelToken,
   }) async {
     requests.add(request);
-    final prompt = request.messages.last.content;
-    if (prompt.contains('结构清单：')) {
-      if (structurePlan != null) {
-        return AiCompletionResult(text: structurePlan!);
-      }
-      final rows = RegExp(r'\[§(\d+) ')
-          .allMatches(prompt)
-          .map((match) {
-            final index = match.group(1)!;
-            return '{"title":"第$index 节","sectionIndexes":[$index]}';
-          })
-          .join(',');
-      return AiCompletionResult(
-        text: '{"groups":[$rows],"ignoredSectionIndexes":[]}',
-      );
+    if (invalidOutput) {
+      return const AiCompletionResult(text: 'not json');
     }
-    if (prompt.contains('子级分组清单：')) {
-      final indexes = RegExp(
-        r'\[§(\d+) ',
-      ).allMatches(prompt).map((match) => int.parse(match.group(1)!)).toList();
-      final rows = <String>[];
-      for (var start = 0; start < indexes.length; start += 8) {
-        final group = indexes.skip(start).take(8).toList();
-        rows.add(
-          '{"title":"第${group.first}至${group.last}篇",'
-          '"sectionIndexes":[${group.join(',')}],'
-          '"summary":"这一组收录相邻篇章的核心内容。",'
-          '"keyPoints":["篇章脉络"]}',
-        );
-      }
-      return AiCompletionResult(text: '{"groups":[${rows.join(',')}]}');
-    }
-    if (prompt.contains('章节摘要：')) {
-      return const AiCompletionResult(
-        text: '{"overview":"全书由多段危机串联而成。","themes":["选择"]}',
-      );
-    }
-    final matches = RegExp(r'\[§(\d+) ([^\]]+)\]').allMatches(prompt).toList();
-    final rows = matches
-        .take(omitLastSection ? matches.length - 1 : matches.length)
-        .map(
-          (match) =>
-              '{"sectionIndex":${match.group(1)},"title":"${match.group(2)}","summary":"本节的关键事件和转折。","keyPoints":["要点"]}',
-        )
-        .join(',');
-    return AiCompletionResult(text: '[$rows]');
+    return const AiCompletionResult(
+      text:
+          '{"overview":"一本关于测试的书。",'
+          '"units":['
+          '{"title":"单元一","blurb":"单元一的一段话说明。"},'
+          '{"title":"单元二","blurb":"单元二的一段话说明。"}'
+          ']}',
+    );
   }
 
   @override

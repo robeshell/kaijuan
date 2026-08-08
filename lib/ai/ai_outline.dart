@@ -6,197 +6,72 @@ import 'ai_models.dart';
 import 'ai_provider.dart';
 import 'ai_settings.dart';
 
-/// Outline calls carry long prompts (whole TOC units of a collection book
-/// inside a summarize batch) and emit sizeable JSON; the provider default
-/// (45s) is a chat-friendly budget and times out on long collection books.
+/// Outline calls carry long prompts (whole-book bodies) and emit sizeable
+/// JSON; the provider default (45s) is a chat-friendly budget and times out
+/// on long collection books.
 const Duration _outlineCallTimeout = Duration(seconds: 120);
 
-/// How a node's reading range was determined. The model never creates this.
-enum AiOutlineNodeSource {
-  toc,
-  heading,
-  semantic;
-
-  String get wireName => name;
-
-  static AiOutlineNodeSource fromWireName(Object? value) => switch (value) {
-    'heading' => AiOutlineNodeSource.heading,
-    'semantic' => AiOutlineNodeSource.semantic,
-    _ => AiOutlineNodeSource.toc,
-  };
-}
-
-/// A bounded, reader-derived range that may become a child outline node.
-class AiBookOutlineCandidate {
-  const AiBookOutlineCandidate({
-    required this.label,
-    required this.startSectionIndex,
-    required this.text,
-    required this.source,
-    this.endSectionIndexExclusive,
-  });
-
-  final String label;
-  final int startSectionIndex;
-  final int? endSectionIndexExclusive;
-  final String text;
-  final AiOutlineNodeSource source;
-}
-
-/// One generated section in a book-scoped AI outline.
-class AiBookOutlineChapter {
-  const AiBookOutlineChapter({
-    required this.sectionIndex,
+/// One structural unit in the book's outline: a section of the book the AI
+/// identified as a coherent block (an essay in a collection, a part in a
+/// novel, a topic cluster in nonfiction).
+class AiOutlineUnit {
+  const AiOutlineUnit({
     required this.title,
-    required this.summary,
-    this.keyPoints = const [],
-    this.sourceSectionIndex,
-    this.nodeId = '',
-    this.endSectionIndexExclusive,
-    this.source = AiOutlineNodeSource.toc,
-    this.children,
+    required this.blurb,
   });
 
-  final int sectionIndex;
   final String title;
-  final String summary;
-  final List<String> keyPoints;
+  final String blurb;
 
-  /// 1-based original EPUB spine section; differs for logical split units.
-  final int? sourceSectionIndex;
+  Map<String, Object?> toJson() => {'title': title, 'blurb': blurb};
 
-  /// Stable path within the cached outline tree.
-  final String nodeId;
-
-  /// Exclusive 1-based spine endpoint when the reader can determine one.
-  final int? endSectionIndexExclusive;
-
-  final AiOutlineNodeSource source;
-
-  /// `null` means not loaded; an empty list means there are no child nodes.
-  final List<AiBookOutlineChapter>? children;
-
-  String get stableNodeId => nodeId.isEmpty ? 'node-$sectionIndex' : nodeId;
-
-  AiBookOutlineChapter copyWith({
-    String? title,
-    String? summary,
-    List<String>? keyPoints,
-    List<AiBookOutlineChapter>? children,
-  }) => AiBookOutlineChapter(
-    sectionIndex: sectionIndex,
-    title: title ?? this.title,
-    summary: summary ?? this.summary,
-    keyPoints: keyPoints ?? this.keyPoints,
-    sourceSectionIndex: sourceSectionIndex,
-    nodeId: nodeId,
-    endSectionIndexExclusive: endSectionIndexExclusive,
-    source: source,
-    children: children ?? this.children,
-  );
-
-  Map<String, Object?> toJson() => {
-    'sectionIndex': sectionIndex,
-    'title': title,
-    'summary': summary,
-    if (keyPoints.isNotEmpty) 'keyPoints': keyPoints,
-    if (sourceSectionIndex != null && sourceSectionIndex != sectionIndex)
-      'sourceSectionIndex': sourceSectionIndex,
-    if (nodeId.isNotEmpty) 'nodeId': nodeId,
-    if (endSectionIndexExclusive != null)
-      'endSectionIndexExclusive': endSectionIndexExclusive,
-    if (source != AiOutlineNodeSource.toc) 'source': source.wireName,
-    if (children != null)
-      'children': [for (final child in children!) child.toJson()],
-  };
-
-  static AiBookOutlineChapter? fromJson(Object? raw) {
+  static AiOutlineUnit? fromJson(Object? raw) {
     if (raw is! Map) return null;
-    final sectionIndex = raw['sectionIndex'];
     final title = raw['title'];
-    final summary = raw['summary'];
-    if (sectionIndex is! int ||
-        sectionIndex < 1 ||
-        title is! String ||
-        title.trim().isEmpty ||
-        summary is! String ||
-        summary.trim().isEmpty) {
-      return null;
-    }
-    final points = raw['keyPoints'];
-    final sourceSectionIndex = raw['sourceSectionIndex'];
-    final endSectionIndexExclusive = raw['endSectionIndexExclusive'];
-    final childrenRaw = raw['children'];
-    List<AiBookOutlineChapter>? children;
-    if (childrenRaw is List) {
-      children = [
-        for (final value in childrenRaw) ?AiBookOutlineChapter.fromJson(value),
-      ];
-    }
-    return AiBookOutlineChapter(
-      sectionIndex: sectionIndex,
-      title: title.trim(),
-      summary: summary.trim(),
-      keyPoints: points is List
-          ? points
-                .whereType<String>()
-                .map((value) => value.trim())
-                .where((value) => value.isNotEmpty)
-                .take(4)
-                .toList(growable: false)
-          : <String>[],
-      sourceSectionIndex: sourceSectionIndex is int && sourceSectionIndex >= 1
-          ? sourceSectionIndex
-          : null,
-      nodeId: raw['nodeId'] is String ? (raw['nodeId'] as String).trim() : '',
-      endSectionIndexExclusive:
-          endSectionIndexExclusive is int && endSectionIndexExclusive >= 2
-          ? endSectionIndexExclusive
-          : null,
-      source: AiOutlineNodeSource.fromWireName(raw['source']),
-      children: children,
-    );
+    final blurb = raw['blurb'];
+    if (title is! String || title.trim().isEmpty) return null;
+    if (blurb is! String || blurb.trim().isEmpty) return null;
+    return AiOutlineUnit(title: title.trim(), blurb: blurb.trim());
   }
 }
 
-/// Cached outline for one exact book file ([contentHash]).
+/// Structural outline for one exact book file ([contentHash]): a paragraph
+/// overview + a list of units in reading order. Chapter-level navigation is
+/// the reader's own TOC, not this.
+///
+/// ## 版本规则
+///
+/// [currentVersion] 单调递增，永不复用。[fromJson] 只接受严格等于
+/// currentVersion 的 JSON——其他版本返回 null，调用方重新生成。大纲
+/// 内容便宜可再生（一次 LLM 调用），不为老版本写迁移。
+///
+/// 何时该 bump version：仅当 schema 发生**破坏性变更**（删字段、改字段
+/// 含义、改嵌套结构）。新增可选字段、改字段名（提供别名解析）不应 bump。
 class AiBookOutline {
   const AiBookOutline({
     required this.createdAt,
     required this.model,
-    required this.includesUnread,
     required this.overview,
-    required this.chapters,
-    this.themes = const [],
+    required this.units,
   });
 
-  static const currentVersion = 12;
+  static const currentVersion = 14;
 
   final DateTime createdAt;
   final String model;
-  final bool includesUnread;
-  final String overview;
-  final List<String> themes;
-  final List<AiBookOutlineChapter> chapters;
 
-  AiBookOutline copyWith({List<AiBookOutlineChapter>? chapters}) =>
-      AiBookOutline(
-        createdAt: createdAt,
-        model: model,
-        includesUnread: includesUnread,
-        overview: overview,
-        themes: themes,
-        chapters: chapters ?? this.chapters,
-      );
+  /// One paragraph (200-300 chars) describing the book's overall arc.
+  final String overview;
+
+  /// 5-15 structural units in reading order.
+  final List<AiOutlineUnit> units;
 
   Map<String, Object?> toJson() => {
     'version': currentVersion,
     'createdAt': createdAt.toUtc().toIso8601String(),
     'model': model,
-    'includesUnread': includesUnread,
     'overview': overview,
-    if (themes.isNotEmpty) 'themes': themes,
-    'chapters': [for (final chapter in chapters) chapter.toJson()],
+    'units': [for (final unit in units) unit.toJson()],
   };
 
   static AiBookOutline? fromJson(Object? raw) {
@@ -205,34 +80,23 @@ class AiBookOutline {
     final createdAt = DateTime.tryParse('${raw['createdAt'] ?? ''}');
     final model = raw['model'];
     final overview = raw['overview'];
-    final chapters = raw['chapters'];
+    final unitsRaw = raw['units'];
     if (createdAt == null ||
         model is! String ||
         overview is! String ||
-        chapters is! List) {
+        overview.trim().isEmpty ||
+        unitsRaw is! List) {
       return null;
     }
-    final parsed = <AiBookOutlineChapter>[];
-    for (final row in chapters) {
-      final chapter = AiBookOutlineChapter.fromJson(row);
-      if (chapter != null) parsed.add(chapter);
-    }
-    if (parsed.isEmpty) return null;
-    final themes = raw['themes'];
+    final units = [
+      for (final row in unitsRaw) ?AiOutlineUnit.fromJson(row),
+    ];
+    if (units.isEmpty) return null;
     return AiBookOutline(
       createdAt: createdAt,
       model: model,
-      includesUnread: raw['includesUnread'] as bool? ?? false,
       overview: overview.trim(),
-      themes: themes is List
-          ? themes
-                .whereType<String>()
-                .map((value) => value.trim())
-                .where((value) => value.isNotEmpty)
-                .take(6)
-                .toList(growable: false)
-          : const [],
-      chapters: parsed,
+      units: units,
     );
   }
 }
@@ -252,8 +116,8 @@ class AiOutlineProgress {
   final bool finalizing;
 }
 
-/// Produces a deterministic, per-section outline without sending an entire
-/// long book in one request. The caller owns persistence and cancellation.
+/// One-shot structural outline over the whole (or current-work) body. The
+/// caller owns persistence and cancellation.
 class AiBookOutlineService {
   factory AiBookOutlineService({
     required bool Function() isAvailable,
@@ -275,27 +139,26 @@ class AiBookOutlineService {
   final AiProvider? Function() _openProvider;
   final AiSettings Function() _settings;
 
-  static const _maxSectionSampleChars = 3600;
+  static const _maxBodyChars = 24000;
   static const maxBookBodyChars = 1500000;
-  static const _maxStructurePlanChars = 36000;
-  static const _maxStructureLabelChars = 120;
-  static const _maxStructureSampleChars = 320;
-  static const _maxBatchChars = 15000;
-  static const _maxBatchUnits = 4;
-  static const _maxDirectNavigationUnits = 24;
-  static const _maxOverviewChars = 36000;
+
+  /// Per-unit sampling floor: a multi-unit book (multi-volume novel like
+  /// 《明朝那些事儿》 with one unit per 部) must still give each unit a real
+  /// head+tail sample, or later volumes vanish from the prompt. Long books
+  /// therefore get a larger total budget than the 24k default.
+  static const _minUnitSampleChars = 1500;
+  static const _maxPackedBodyChars = 80000;
 
   Future<AiBookOutline> generate({
     required String bookTitle,
     String? bookAuthor,
+
+    /// When set, [bookTitle] is one work inside the collection
+    /// [collectionTitle] — the overview must describe this work alone, not
+    /// the whole set. Keeps a collection's per-work outline from drifting
+    /// into a set-level summary (the LLM otherwise anchors on the set name).
+    String? collectionTitle,
     required List<AiBookSectionSlice> sections,
-    required bool includesUnread,
-    /// Pre-arranged top-level units taken from the book's TOC tree: skips
-    /// the AI structure pass (the reader's own directory is authoritative).
-    /// [preplannedRoots] carries the TOC tree; AI summaries/overview are
-    /// merged back into it so nested directory items keep their titles.
-    List<AiBookSectionSlice>? preplannedUnits,
-    List<AiBookOutlineChapter>? preplannedRoots,
     CancelToken? cancelToken,
     void Function(AiOutlineProgress progress)? onProgress,
   }) async {
@@ -304,536 +167,163 @@ class AiBookOutlineService {
     if (provider == null) throw AiProviderException('AI 未启用或未配置');
     if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
 
-    cancelToken?.throwIfCancelled();
     onProgress?.call(
-      AiOutlineProgress(
-        completed: 0,
-        total: sections.length,
-        label: '正在识别全书结构',
-      ),
+      const AiOutlineProgress(completed: 0, total: 1, label: '正在提炼大纲'),
     );
-    final units = preplannedUnits ??
-        await planStructure(
-          provider: provider,
-          bookTitle: bookTitle,
-          bookAuthor: bookAuthor,
-          sections: sections,
-          cancelToken: cancelToken,
-        );
     cancelToken?.throwIfCancelled();
-    final batches = _batches(units);
-    final chapters = <AiBookOutlineChapter>[];
-    for (var batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      cancelToken?.throwIfCancelled();
-      final batch = batches[batchIndex];
-      final completed = chapters.length;
-      final first = batch.first;
-      onProgress?.call(
-        AiOutlineProgress(
-          completed: completed,
-          total: units.length,
-          label: '正在分析第 ${first.index} 节',
-        ),
-      );
-      final generated = await _summarizeBatch(
-        provider: provider,
-        bookTitle: bookTitle,
-        bookAuthor: bookAuthor,
-        batch: batch,
-        cancelToken: cancelToken,
-      );
-      cancelToken?.throwIfCancelled();
-      final byIndex = {
-        for (final chapter in generated) chapter.sectionIndex: chapter,
-      };
-      if (byIndex.length != batch.length ||
-          batch.any((section) => !byIndex.containsKey(section.index))) {
-        throw AiProviderException('章节大纲不完整，请重试');
-      }
-      for (final section in batch) {
-        final generatedChapter = byIndex[section.index]!;
-        chapters.add(
-          AiBookOutlineChapter(
-            sectionIndex: generatedChapter.sectionIndex,
-            title: generatedChapter.title,
-            summary: generatedChapter.summary,
-            keyPoints: generatedChapter.keyPoints,
-            sourceSectionIndex: section.sourceSectionIndex,
-            nodeId: 'top-${section.index}',
+
+    final body = _packBody(sections);
+    if (body.isEmpty) throw AiProviderException('没有可用于生成大纲的正文');
+
+    // 单元目标跟结构规模走：单元数 ≈ 目录单元数，短篇 5、长篇多卷放大到 30。
+    // 多部长篇（明朝 15 部 / 三体三部曲）固定 5-15 会漏整部，按目录单元数
+    // 给足——每一部/卷至少能占一个单元。
+    final unitGoal = sections.length.clamp(5, 30);
+
+    final result = await completeWithRetry(
+      provider,
+      AiCompletionRequest(
+        messages: [
+          AiMessage(
+            role: AiMessageRole.system,
+            content:
+                '你是图书编辑。读完整本书（或一部作品）后，产出它的结构大纲——'
+                '这本书按什么顺序、分哪几块推进。'
+                '不要按章节罗列，不要逐篇摘要；要回答的是"这本书是怎么组织的"。'
+                '只返回 JSON 对象，不要 Markdown 或解释：'
+                '{"overview":"一段话综述全书的整体脉络（200-300字，讲清主旨、推进方式、核心张力）",'
+                '"units":[{"title":"单元名（2-12字，体现这一块的议题或内容）",'
+                '"blurb":"一段话说清这块讲了什么、在全书里的作用（80-150字）"}]}。'
+                'units 数量约 $unitGoal 个（5-$unitGoal 之间），按书中出现顺序排列，'
+                '覆盖全书从头到尾，不能只覆盖开头。'
+                '如果这本书分若干部/卷（如"第壹部""三体II"），按部组织单元——'
+                '每一部至少一个单元，单元名带上所属部/卷（如"第壹部·洪武建国"）；'
+                '部名识别不出时按内容板块划分即可。'
+                '只根据给出的正文归纳，不要编造书里没讲的内容。',
           ),
-        );
-      }
-      onProgress?.call(
-        AiOutlineProgress(
-          completed: chapters.length,
-          total: units.length,
-          label: '已分析 ${chapters.length}/${units.length} 节',
-        ),
-      );
+          AiMessage(
+            role: AiMessageRole.user,
+            content:
+                '书名：$bookTitle'
+                '${collectionTitle == null || collectionTitle.trim().isEmpty ? '' : '\n所属合集：${collectionTitle.trim()}（只针对《$bookTitle》这一部作品写大纲，不要综述整个合集）'}'
+                '${bookAuthor == null || bookAuthor.trim().isEmpty ? '' : '\n作者：${bookAuthor.trim()}'}'
+                '\n\n正文：\n$body',
+          ),
+        ],
+        maxTokens: (2000 + unitGoal * 150).clamp(4000, 8000),
+        temperature: 0.3,
+        timeout: _outlineCallTimeout,
+      ),
+      cancelToken: cancelToken,
+    );
+
+    final parsed = _parseOutline(result.text);
+    if (parsed == null) {
+      AiLog.d('outline parse failed: ${result.text}');
+      throw AiProviderException('大纲提炼失败，请重试');
     }
-    if (chapters.isEmpty) throw AiProviderException('未能生成可用大纲');
 
-    // Merge the AI summaries into the TOC tree (if one was given): the
-    // directory structure is authoritative, AI only enriches it.
-    final byChapterIndex = {
-      for (final chapter in chapters) chapter.sectionIndex: chapter,
-    };
-    final finalChapters = preplannedRoots == null
-        ? chapters
-        : [
-            for (final root in preplannedRoots)
-              (() {
-                final enriched = byChapterIndex[root.sectionIndex];
-                if (enriched == null) return root;
-                return root.copyWith(
-                  title: enriched.title,
-                  summary: enriched.summary,
-                  keyPoints: enriched.keyPoints,
-                );
-              }()),
-          ];
-
-    cancelToken?.throwIfCancelled();
     onProgress?.call(
-      AiOutlineProgress(
-        completed: chapters.length,
-        total: units.length,
-        label: '正在整理全书脉络',
+      const AiOutlineProgress(
+        completed: 1,
+        total: 1,
+        label: '完成',
         finalizing: true,
       ),
     );
-    final overview = await _buildOverview(
-      provider: provider,
-      bookTitle: bookTitle,
-      bookAuthor: bookAuthor,
-      chapters: chapters,
-      cancelToken: cancelToken,
-    );
-    cancelToken?.throwIfCancelled();
     return AiBookOutline(
       createdAt: DateTime.now(),
       model: _settings().resolvedModel,
-      includesUnread: includesUnread,
-      overview: overview.overview,
-      themes: overview.themes,
-      chapters: finalChapters,
+      overview: parsed.overview,
+      units: parsed.units,
     );
   }
 
-
-
-
-
-  /// Lets the model identify works and volumes before summaries are requested.
-  /// A malformed plan must never make body sections disappear, so it falls
-  /// back to a one-section-per-unit plan.
-  /// One-shot structural recognition: groups contiguous spine sections into
-  /// logical units (a chapter, a volume, or a whole work inside a collection).
-  /// Public so graph generation can detect collections before an outline
-  /// exists (docs/specs/ai-graph.md §合集选书).
-  Future<List<AiBookSectionSlice>> planStructure({
-    AiProvider? provider,
-    required String bookTitle,
-    required String? bookAuthor,
-    required List<AiBookSectionSlice> sections,
-    CancelToken? cancelToken,
-  }) async {
-    final resolvedProvider = provider ?? _openProvider();
-    if (resolvedProvider == null) {
-      throw AiProviderException('AI 未启用或未配置');
-    }
-    final manifest = _structureManifest(sections);
-    if (sections.length <= _maxDirectNavigationUnits &&
-        sections.every((section) => section.isNavigationUnit)) {
-      AiLog.d('outline structure skipped: ${sections.length} navigation units');
-      return sections;
-    }
-    AiLog.d(
-      'outline structure input=${sections.length} '
-      'indexes=${sections.map((section) => section.index).join(',')}',
-    );
-    final result = await completeWithRetry(
-      resolvedProvider,
-      AiCompletionRequest(
-        messages: [
-          const AiMessage(
-            role: AiMessageRole.system,
-            content:
-                '你是电子书结构编辑。先识别一本书的叙事或论述单元。'
-                '普通书通常一节一个单元；合集、文集、分卷作品应把属于同一部作品或一卷的连续节合并。'
-                '只能根据给出的节标题和短样本判断，不能编造标题或内容。'
-                '只有确实属于目录、版权、扉页、出版信息等非正文元数据的节才能忽略；不确定时必须放进一个 group。'
-                '每个输入 sectionIndex 必须恰好出现一次：要么在一个 group 的 sectionIndexes 中，要么在 ignoredSectionIndexes 中。'
-                '不得遗漏、重复或使用未提供的 sectionIndex。'
-                '只返回 JSON 对象，不要 Markdown 或解释：'
-                '{"groups":[{"title":"单元标题","sectionIndexes":[1,2]}],"ignoredSectionIndexes":[3]}。',
-          ),
-          AiMessage(
-            role: AiMessageRole.user,
-            content:
-                '书名：$bookTitle'
-                '${bookAuthor == null || bookAuthor.trim().isEmpty ? '' : '\n作者：${bookAuthor.trim()}'}'
-                '\n\n结构清单：\n$manifest',
-          ),
-        ],
-        maxTokens: 5000,
-        temperature: 0.1,
-        timeout: _outlineCallTimeout,
-      ),
-      cancelToken: cancelToken,
-    );
-    final plan = _parseStructurePlan(result.text, sections);
-    if (plan == null) {
-      AiLog.d(
-        'outline structure invalid; falling back to ${sections.length} units',
-      );
-      return sections;
-    }
-    final byIndex = {for (final section in sections) section.index: section};
-    final units = <AiBookSectionSlice>[];
-    for (final group in plan.groups) {
-      final members = [
-        for (final index in group.sectionIndexes) byIndex[index]!,
-      ]..sort((a, b) => a.index.compareTo(b.index));
-      units.add(
-        AiBookSectionSlice(
-          index: members.first.index,
-          label: group.title,
-          text: _groupSample(members),
-          sourceSectionIndex: members.first.originSectionIndex,
-        ),
-      );
-    }
-    units.sort((a, b) => a.index.compareTo(b.index));
-    AiLog.d(
-      'outline structure groups=${units.length} '
-      'indexes=${units.map((unit) => unit.index).join(',')}',
-    );
-    return units.isEmpty ? sections : units;
-  }
-
-  String _structureManifest(List<AiBookSectionSlice> sections) {
-    final headers = <String>[
-      for (final section in sections)
-        '[§${section.index} ${_clip(section.label.trim(), _maxStructureLabelChars)}]',
+  /// Sample every section (head + tail) so the model sees the WHOLE book's
+  /// arc, not just the opening — a naive "concatenate then cut" feeds a
+  /// 300k-char novel's first ~8% and the overview describes only the
+  /// beginning. Section labels are kept so the model can anchor units to
+  /// chapter/volume titles. Total budget scales with section count (floor
+  /// [_minUnitSampleChars] per unit, capped at [_maxPackedBodyChars]) so a
+  /// multi-volume book still samples every 部; per-section budget shrinks as
+  /// section count grows within that budget.
+  String _packBody(List<AiBookSectionSlice> sections) {
+    final nonEmpty = [
+      for (final s in sections)
+        if (s.text.trim().isNotEmpty) s,
     ];
-    final headerChars = headers.fold<int>(
-      0,
-      (sum, value) => sum + value.length + 1,
-    );
-    final sampleBudget = (_maxStructurePlanChars - headerChars)
-        .clamp(0, _maxStructureSampleChars * sections.length)
+    if (nonEmpty.isEmpty) return '';
+    // Multi-unit books get a larger total budget so every unit keeps a real
+    // sample (a 15-部 novel would otherwise starve later units to ~1 page).
+    final budget = (_maxBodyChars)
+        .clamp(
+          _minUnitSampleChars * nonEmpty.length,
+          _maxPackedBodyChars,
+        )
         .toInt();
-    final perSection = sections.isEmpty
-        ? 0
-        : (sampleBudget ~/ sections.length)
-              .clamp(0, _maxStructureSampleChars)
-              .toInt();
-    final out = StringBuffer();
-    for (var i = 0; i < sections.length; i++) {
-      out.writeln(headers[i]);
-      if (perSection > 0) {
-        out.writeln(_clip(sections[i].text.trim(), perSection));
+    final perSection = (budget ~/ nonEmpty.length).clamp(600, 6000);
+    final buf = StringBuffer();
+    for (final section in nonEmpty) {
+      final text = section.text.trim();
+      final label = section.label.trim();
+      if (buf.isNotEmpty) buf.write('\n\n');
+      if (label.isNotEmpty) buf.write('【$label】\n');
+      if (text.length <= perSection) {
+        buf.write(text);
+      } else {
+        // Head + tail: the opening sets up the unit, the close resolves it.
+        final head = perSection * 2 ~/ 3;
+        final tail = perSection - head;
+        buf.write(text.substring(0, head));
+        buf.write('\n…（中略）…\n');
+        buf.write(text.substring(text.length - tail));
       }
+      if (buf.length >= budget) break;
     }
-    return out.toString().trim();
+    final body = buf.toString();
+    return body.length <= budget ? body : body.substring(0, budget);
   }
 
-  _OutlineStructurePlan? _parseStructurePlan(
-    String text,
-    List<AiBookSectionSlice> sections,
-  ) {
-    final raw = _decodeJsonObject(text);
-    final groupsRaw = raw?['groups'];
-    final ignoredRaw = raw?['ignoredSectionIndexes'];
-    if (groupsRaw is! List || ignoredRaw is! List) return null;
-
-    final expected = {for (final section in sections) section.index};
-    final byIndex = {for (final section in sections) section.index: section};
-    final seen = <int>{};
-    final groups = <_OutlineStructureGroup>[];
-    for (final row in groupsRaw) {
-      if (row is! Map) return null;
+  ({String overview, List<AiOutlineUnit> units})? _parseOutline(String raw) {
+    final text = raw.trim();
+    final fenced = text.startsWith('```')
+        ? text
+              .replaceFirst(RegExp(r'^```(?:json)?\s*'), '')
+              .replaceFirst(RegExp(r'\s*```$'), '')
+        : text;
+    // Tolerate prose around the JSON ("好的，以下是大纲：{...} 希望对你有帮助")
+    // — models at temperature 0.3 sometimes wrap the answer. Extract the first
+    // '{' to the last '}' before decoding; a bare fence-strip + whole-text
+    // decode hard-fails on any preamble and costs the user a full retry.
+    final start = fenced.indexOf('{');
+    final end = fenced.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    final candidate = fenced.substring(start, end + 1);
+    Object? decoded;
+    try {
+      decoded = jsonDecode(candidate);
+    } catch (_) {
+      return null;
+    }
+    if (decoded is! Map) return null;
+    final overview = decoded['overview'];
+    final unitsRaw = decoded['units'];
+    if (overview is! String || overview.trim().isEmpty) return null;
+    if (unitsRaw is! List) return null;
+    final units = <AiOutlineUnit>[];
+    for (final row in unitsRaw) {
+      if (row is! Map) continue;
       final title = row['title'];
-      final indexes = row['sectionIndexes'];
-      if (title is! String || title.trim().isEmpty || indexes is! List) {
-        return null;
-      }
-      final parsedIndexes = <int>[];
-      for (final index in indexes) {
-        if (index is! int || !expected.contains(index) || !seen.add(index)) {
-          return null;
+      final blurb = row['blurb'];
+      if (title is String && blurb is String) {
+        final t = title.trim();
+        final b = blurb.trim();
+        if (t.isNotEmpty && b.isNotEmpty) {
+          units.add(AiOutlineUnit(title: t, blurb: b));
         }
-        parsedIndexes.add(index);
-      }
-      if (parsedIndexes.isEmpty) return null;
-      groups.add(
-        _OutlineStructureGroup(
-          title: title.trim(),
-          sectionIndexes: parsedIndexes,
-        ),
-      );
-    }
-    for (final index in ignoredRaw) {
-      if (index is! int ||
-          !expected.contains(index) ||
-          !seen.add(index) ||
-          !_isUnambiguousMetadataSection(byIndex[index]!)) {
-        return null;
       }
     }
-    if (groups.isEmpty || seen.length != expected.length) return null;
-    return _OutlineStructurePlan(groups: groups);
+    if (units.isEmpty) return null;
+    return (overview: overview.trim(), units: units);
   }
-
-  bool _isUnambiguousMetadataSection(AiBookSectionSlice section) {
-    final title = section.label.trim().replaceAll(RegExp(r'\s+'), '');
-    if (RegExp(
-      r'^(目录|总目录|全书目录|章节目录|目次|版权(?:信息)?|出版(?:信息|说明)?|图书在版编目|封面|封底|扉页|书名页)$',
-    ).hasMatch(title)) {
-      return true;
-    }
-    final text = section.text.trim();
-    if (text.isEmpty) return true;
-    final prefix = text.length > 640 ? text.substring(0, 640) : text;
-    final compact = prefix.replaceAll(RegExp(r'\s+'), '');
-    if (RegExp(r'^(目录|目次)(?:[：:]|$)').hasMatch(compact)) return true;
-    final hasCopyrightSignal = RegExp(
-      r'ISBN|图书在版编目|版权所有|版权归属|版权信息',
-    ).hasMatch(prefix);
-    return hasCopyrightSignal && RegExp(r'出版|出版社|版权|编目').hasMatch(prefix);
-  }
-
-  List<List<AiBookSectionSlice>> _batches(List<AiBookSectionSlice> sections) {
-    final output = <List<AiBookSectionSlice>>[];
-    var current = <AiBookSectionSlice>[];
-    var used = 0;
-    for (final section in sections) {
-      final sample = _sample(section);
-      final length = sample.text.length + sample.label.length + 32;
-      if (current.isNotEmpty &&
-          (used + length > _maxBatchChars ||
-              current.length >= _maxBatchUnits)) {
-        output.add(current);
-        current = <AiBookSectionSlice>[];
-        used = 0;
-      }
-      current.add(sample);
-      used += length;
-    }
-    if (current.isNotEmpty) output.add(current);
-    return output;
-  }
-
-  AiBookSectionSlice _sample(AiBookSectionSlice section) {
-    final text = section.text.trim();
-    if (text.length <= _maxSectionSampleChars) return section;
-    final head = (_maxSectionSampleChars * 0.72).round();
-    final tail = _maxSectionSampleChars - head;
-    return AiBookSectionSlice(
-      index: section.index,
-      label: section.label,
-      text:
-          '${text.substring(0, head)}\n…\n${text.substring(text.length - tail)}',
-      sourceSectionIndex: section.sourceSectionIndex,
-    );
-  }
-
-  String _groupSample(List<AiBookSectionSlice> members) {
-    if (members.length == 1) return _sample(members.single).text;
-    const maxBodyChars = 3000;
-    final perMember = (maxBodyChars ~/ members.length).clamp(80, 600).toInt();
-    final out = StringBuffer();
-    for (final member in members) {
-      final label = member.label.trim();
-      if (label.isNotEmpty) out.writeln('【$label】');
-      out.writeln(_clip(member.text.trim(), perMember));
-    }
-    return out.toString().trim();
-  }
-
-  String _clip(String text, int maxChars) {
-    if (text.length <= maxChars) return text;
-    final head = (maxChars * 0.72).round();
-    final tail = maxChars - head;
-    return '${text.substring(0, head)}\n…\n${text.substring(text.length - tail)}';
-  }
-
-  Future<List<AiBookOutlineChapter>> _summarizeBatch({
-    required AiProvider provider,
-    required String bookTitle,
-    required String? bookAuthor,
-    required List<AiBookSectionSlice> batch,
-    CancelToken? cancelToken,
-  }) async {
-    AiLog.d(
-      'outline summarize indexes=${batch.map((section) => section.index).join(',')}',
-    );
-    final body = StringBuffer();
-    for (final section in batch) {
-      body
-        ..writeln('[§${section.index} ${section.label}]')
-        ..writeln(section.text.trim())
-        ..writeln();
-    }
-    final result = await completeWithRetry(
-      provider,
-      AiCompletionRequest(
-        messages: [
-          const AiMessage(
-            role: AiMessageRole.system,
-            content:
-                '你是阅读助手，负责把书籍章节整理成可靠的大纲。'
-                '只依据提供的正文，不补写不存在的情节。'
-                '输入单元可能是一章，也可能是合集中的一部作品或一卷；'
-                '标题必须反映该单元，不要把目录、版权等元数据说成正文。'
-                '只返回 JSON 数组，不要 Markdown 或解释。'
-                '数组中每个对象必须是 '
-                '{"sectionIndex":数字,"title":"单元标题","summary":"100至220字摘要","keyPoints":["要点"]}。'
-                '必须为每个提供的 § 返回一个对象，sectionIndex 不得改写。',
-          ),
-          AiMessage(
-            role: AiMessageRole.user,
-            content:
-                '书名：$bookTitle'
-                '${bookAuthor == null || bookAuthor.trim().isEmpty ? '' : '\n作者：${bookAuthor.trim()}'}'
-                '\n\n以下是需要归纳的章节：\n$body',
-          ),
-        ],
-        maxTokens: 1800,
-        temperature: 0.2,
-        timeout: _outlineCallTimeout,
-      ),
-      cancelToken: cancelToken,
-    );
-    final parsed = _parseChapterArray(result.text);
-    if (parsed.isEmpty) throw AiProviderException('大纲格式无效，请重试');
-    return parsed;
-  }
-
-  Future<({String overview, List<String> themes})> _buildOverview({
-    required AiProvider provider,
-    required String bookTitle,
-    required String? bookAuthor,
-    required List<AiBookOutlineChapter> chapters,
-    CancelToken? cancelToken,
-  }) async {
-    final summaries = StringBuffer();
-    for (final chapter in chapters) {
-      summaries.writeln(
-        '§${chapter.sectionIndex} ${chapter.title}：${chapter.summary}',
-      );
-      if (summaries.length >= _maxOverviewChars) break;
-    }
-    final result = await completeWithRetry(
-      provider,
-      AiCompletionRequest(
-        messages: [
-          const AiMessage(
-            role: AiMessageRole.system,
-            content:
-                '你是阅读助手。根据章节摘要总结全书，不补写书中没有的内容。'
-                '若书是合集，先说明由哪些作品、分卷或主题构成，再概括它们的关联。'
-                '只返回 JSON 对象：'
-                '{"overview":"120至220字的全书脉络","themes":["主题"]}。',
-          ),
-          AiMessage(
-            role: AiMessageRole.user,
-            content:
-                '书名：$bookTitle'
-                '${bookAuthor == null || bookAuthor.trim().isEmpty ? '' : '\n作者：${bookAuthor.trim()}'}'
-                '\n\n章节摘要：\n$summaries',
-          ),
-        ],
-        maxTokens: 900,
-        temperature: 0.2,
-        timeout: _outlineCallTimeout,
-      ),
-      cancelToken: cancelToken,
-    );
-    final raw = _decodeJsonObject(result.text);
-    final overview = raw?['overview'];
-    final themes = raw?['themes'];
-    if (overview is! String || overview.trim().isEmpty) {
-      throw AiProviderException('全书概览格式无效，请重试');
-    }
-    return (
-      overview: overview.trim(),
-      themes: themes is List
-          ? themes
-                .whereType<String>()
-                .map((value) => value.trim())
-                .where((value) => value.isNotEmpty)
-                .take(6)
-                .toList(growable: false)
-          : <String>[],
-    );
-  }
-
-  static List<AiBookOutlineChapter> _parseChapterArray(String text) {
-    final raw = _decodeJsonArray(text);
-    if (raw == null) return const [];
-    final seen = <int>{};
-    final output = <AiBookOutlineChapter>[];
-    for (final value in raw) {
-      final chapter = AiBookOutlineChapter.fromJson(value);
-      if (chapter != null && seen.add(chapter.sectionIndex)) {
-        output.add(chapter);
-      }
-    }
-    return output;
-  }
-
-  static List<Object?>? _decodeJsonArray(String text) {
-    final candidate = _jsonCandidate(text, '[', ']');
-    if (candidate == null) return null;
-    try {
-      final value = jsonDecode(candidate);
-      return value is List ? List<Object?>.from(value) : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Map<String, dynamic>? _decodeJsonObject(String text) {
-    final candidate = _jsonCandidate(text, '{', '}');
-    if (candidate == null) return null;
-    try {
-      final value = jsonDecode(candidate);
-      return value is Map ? Map<String, dynamic>.from(value) : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static String? _jsonCandidate(String text, String open, String close) {
-    var value = text.trim();
-    if (value.startsWith('```')) {
-      value = value.replaceFirst(
-        RegExp(r'^```(?:json)?\s*', caseSensitive: false),
-        '',
-      );
-      value = value.replaceFirst(RegExp(r'\s*```\s*$'), '');
-    }
-    final start = value.indexOf(open);
-    final end = value.lastIndexOf(close);
-    if (start < 0 || end < start) return null;
-    return value.substring(start, end + 1);
-  }
-}
-
-class _OutlineStructurePlan {
-  const _OutlineStructurePlan({required this.groups});
-
-  final List<_OutlineStructureGroup> groups;
-}
-
-class _OutlineStructureGroup {
-  const _OutlineStructureGroup({
-    required this.title,
-    required this.sectionIndexes,
-  });
-
-  final String title;
-  final List<int> sectionIndexes;
 }
