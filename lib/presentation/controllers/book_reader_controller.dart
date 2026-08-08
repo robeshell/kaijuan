@@ -1407,13 +1407,14 @@ class BookReaderController extends ChangeNotifier {
       final spine = s.originSectionIndex;
       charCount[spine] = (charCount[spine] ?? 0) + s.text.trim().length;
     }
-    // 相对 + 绝对双阈值：正文 spine 字符数 ≥ 最大正文 spine 的 3%（短篇
-    // 诗/文合集每篇一两千字不被绝对阈值误杀），且 >2000（目录/版权页
-    // 等元数据页远小于正文页，绝对兜底排掉）。
+    // 相对 + 绝对双阈值（OR）：字符数 >2000 即保留（绝对达标——短篇散文
+    // 一两千字正文不被排除）；相对阈值只兜底元数据页——正文页相对最长
+    // 作品过小（<3%）视为目录/版权页。参差合集（主长篇+短篇）里短篇靠
+    // 绝对阈值保住，不因 max 被长篇拉大而误杀。
     final maxChars = charCount.values.fold<int>(0, (a, b) => a > b ? a : b);
     for (final spine in charCount.keys.toList()..sort()) {
       final chars = charCount[spine] ?? 0;
-      if (chars < 2000 || chars * 100 < maxChars * 3) continue;
+      if (chars < 2000 && chars * 100 < maxChars * 3) continue;
       contentSpines.add(spine);
     }
 
