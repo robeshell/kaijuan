@@ -63,7 +63,7 @@ class AiBookOutline {
   /// One paragraph (200-300 chars) describing the book's overall arc.
   final String overview;
 
-  /// 5-15 structural units in reading order.
+  /// 5-30 structural units in reading order.
   final List<AiOutlineUnit> units;
 
   Map<String, Object?> toJson() => {
@@ -255,12 +255,13 @@ class AiBookOutlineService {
     if (nonEmpty.isEmpty) return '';
     // Multi-unit books get a larger total budget so every unit keeps a real
     // sample (a 15-部 novel would otherwise starve later units to ~1 page).
-    final budget = (_maxBodyChars)
-        .clamp(
-          _minUnitSampleChars * nonEmpty.length,
-          _maxPackedBodyChars,
-        )
-        .toInt();
+    // Use min/max instead of clamp: when the unit budget (1500 × n) exceeds
+    // the cap (80000) — 54+ non-empty sections — `clamp` would throw
+    // ArgumentError (lowerLimit > upperLimit) and kill generation.
+    final unitBudget = _minUnitSampleChars * nonEmpty.length;
+    final budget = unitBudget > _maxPackedBodyChars
+        ? _maxPackedBodyChars
+        : (unitBudget > _maxBodyChars ? unitBudget : _maxBodyChars);
     final perSection = (budget ~/ nonEmpty.length).clamp(600, 6000);
     final buf = StringBuffer();
     for (final section in nonEmpty) {

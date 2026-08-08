@@ -115,6 +115,27 @@ void main() {
     expect(provider.requests, isEmpty);
   });
 
+  test('generate survives 54+ sections (pack budget must not clamp-crash)',
+      () async {
+    final provider = _OutlineProvider();
+    final outline = await serviceWith(provider).generate(
+      bookTitle: '大部头',
+      sections: [
+        for (var i = 1; i <= 60; i++)
+          AiBookSectionSlice(
+            index: i,
+            label: '第 $i 章',
+            text: '第 $i 章正文',
+            sourceSectionIndex: i,
+            isNavigationUnit: true,
+          ),
+      ],
+    );
+    // 1500×60 = 90000 > 80000 cap：旧 clamp 在这里抛 ArgumentError。
+    expect(outline.units, isNotEmpty);
+    expect(provider.requests, hasLength(1));
+  });
+
   test('generate honors cancellation before the call', () async {
     final provider = _OutlineProvider();
     final cancel = CancelToken()..cancel();
