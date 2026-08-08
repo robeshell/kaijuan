@@ -489,13 +489,7 @@ void main() {
         endSectionExclusive: 8,
       );
 
-      // Whole-book scope passes through untouched.
-      expect(
-        scopeChatBodyToWork(body, work, wholeBook: true),
-        body,
-      );
-
-      final scoped = scopeChatBodyToWork(body, work, wholeBook: false);
+      final scoped = scopeChatBodyToWork(body, work);
       final sections = AiChatRetrieve.splitSections(scoped);
       expect(sections.map((s) => s.label), ['狂人日记', '孔乙己']);
       expect(sections.map((s) => s.index), [2, 3]);
@@ -503,7 +497,7 @@ void main() {
 
       // A null work (plain book) is untouched too.
       expect(
-        scopeChatBodyToWork(body, null, wholeBook: false),
+        scopeChatBodyToWork(body, null),
         body,
       );
     });

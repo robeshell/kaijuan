@@ -311,8 +311,6 @@ class BookReaderController extends ChangeNotifier {
   Future<void> _chatSessionWriteQueue = Future<void>.value();
 
   /// Cached multi-section plain text for book chat (per open).
-  String? _cachedBookPlainText;
-  int _cachedBookPlainTextBudget = 0;
   String? _cachedGraphPlainText;
   int _cachedGraphPlainTextBudget = 0;
   String? _cachedGraphSpineText;
@@ -685,8 +683,6 @@ class BookReaderController extends ChangeNotifier {
     _getBookPlainText = null;
     _setMenuCursorZone = null;
     _setMenuOpen = null;
-    _cachedBookPlainText = null;
-    _cachedBookPlainTextBudget = 0;
     _cachedGraphPlainText = null;
     _cachedGraphPlainTextBudget = 0;
     _cachedGraphSpineText = null;
@@ -880,7 +876,7 @@ class BookReaderController extends ChangeNotifier {
             .where((s) => s.text.trim().isNotEmpty)
             .toList(growable: false);
       } else {
-        final body = await _loadBookPlainTextCached(
+        final body = await _loadBookGraphPlainTextCached(
           AiBookOutlineService.maxBookBodyChars,
         );
         sections = AiChatRetrieve.splitSections(body);
@@ -1227,12 +1223,6 @@ class BookReaderController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// Back to the collection picker (work view → list).
-  void closeWorkGraph() {
-    _activeGraphWork = null;
-    _bookGraph = null;
-    if (!_disposed) notifyListeners();
-  }
   AiGraphProgress? get bookGraphProgress => _bookGraphProgress;
   String? get bookGraphError => _bookGraphError;
   bool get isGeneratingBookGraph => _bookGraphGeneration != null;
@@ -1801,8 +1791,8 @@ class BookReaderController extends ChangeNotifier {
   /// Graph-pipeline corpus: one piece per spine section (toc:false), cached
   /// separately from the outline/chat piece-level cache. Evidence quotes then
   /// resolve to the exact section instead of a multi-section work's start.
-  /// Graph corpus loader: **TOC mode** (`toc: true`). The user picked
-  /// "按目录读": sections are the book's own table-of-contents units, so the
+  /// Shared TOC-mode corpus loader (outline single-book, graph whole-book,
+  /// chat tools). **TOC mode** (`toc: true`): sections are the book's own table-of-contents units, so the
   /// pre-generation chooser shows readable titles (出版说明/中文版序言/第一
   /// 章…) instead of file paths, and manual exclusion becomes trustworthy.
   /// Evidence jumps land on the unit's starting spine (chapter-level), which
@@ -1849,27 +1839,6 @@ class BookReaderController extends ChangeNotifier {
       return loaded;
     }
     return _loadBookGraphPlainTextCached(maxChars);
-  }
-
-  Future<String> _loadBookPlainTextCached(int maxChars) async {
-    // Corpus-level budget: must cover the whole book so search / sample see
-    // later chapters (books are commonly 300–700k chars). Per-prompt truncation
-    // happens later in AiChatRetrieve / tool packers.
-    final budget = maxChars.clamp(2000, 1500000);
-    final cached = _cachedBookPlainText;
-    if (cached != null &&
-        cached.isNotEmpty &&
-        _cachedBookPlainTextBudget >= budget) {
-      return cached.length > budget ? cached.substring(0, budget) : cached;
-    }
-    final loaded = ((await _getBookPlainText?.call(budget)) ?? '').trim();
-    if (loaded.isNotEmpty) {
-      _cachedBookPlainText = loaded;
-      _cachedBookPlainTextBudget = budget;
-      return loaded;
-    }
-    // Fallback: current chapter only if spine extract failed.
-    return ((await _getChapterText?.call()) ?? '').trim();
   }
 
   /// Loads the chat tool corpus: **TOC mode** (`toc: true`). Collections in
@@ -3437,16 +3406,12 @@ class _BookChatToolHost implements AiChatToolHost {
 
   final BookReaderController _c;
 
-  /// Restricts [body] to the work under the reading position unless the user
-  /// switched chat scope to the whole book. Plain books (no works) pass
-  /// through unchanged. The re-assembled text keeps the original logical
+  /// Restricts [body] to the work under the reading position. Plain books
+  /// (no works) pass through unchanged. The re-assembled text keeps the original logical
   /// indices so toolGetChapter/sectionText still address the same slices.
   String _scopedBody(String body) => scopeChatBodyToWork(
         body,
         _c.currentReadingWork,
-        // Collection decision: always the current work, never the whole
-        // book — the switch UI was removed.
-        wholeBook: false,
       );
 
   @override
@@ -3556,7 +3521,7 @@ class _BookChatToolHost implements AiChatToolHost {
 }
 
 /// Restricts a getBookPlainText body to [work]'s unit (「读到哪本跟哪本」
-/// chat scope). `wholeBook` or a null work passes the body through unchanged.
+/// chat scope). A null work passes the body through unchanged.
 ///
 /// The chat corpus is TOC-mode: one slice per work, with the work's own
 /// navigation marker (`[§@spine~ 作品名]`) as its label. We cut on the slice
@@ -3567,10 +3532,9 @@ class _BookChatToolHost implements AiChatToolHost {
 @visibleForTesting
 String scopeChatBodyToWork(
   String body,
-  AiGraphWorkCandidate? work, {
-  required bool wholeBook,
-}) {
-  if (wholeBook || work == null) return body;
+  AiGraphWorkCandidate? work,
+) {
+  if (work == null) return body;
   final sections = AiChatRetrieve.splitSections(body);
   final wanted = work.title.trim();
   var kept = sections.where((s) => s.label.trim() == wanted).toList();
