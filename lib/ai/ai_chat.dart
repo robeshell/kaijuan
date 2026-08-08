@@ -89,6 +89,7 @@ class AiChatContextBundle {
     this.selectionText = '',
     this.bookBody = '',
     this.tocOutline = const [],
+    this.scopeLabel,
   });
 
   /// Where the reader is now (for "这一章" questions).
@@ -105,6 +106,11 @@ class AiChatContextBundle {
 
   /// Section titles only (cheap). Full list also available via get_toc tool.
   final List<String> tocOutline;
+
+  /// When set (collections / volume-split books), chat is scoped to this one
+  /// work inside the book — the model must answer for this work alone, not
+  /// the whole set. TOC and tool bodies are already trimmed to its range.
+  final String? scopeLabel;
 }
 
 /// One-tap prompts shown at contextual points in the book chat.
@@ -234,10 +240,16 @@ class AiChatSession {
     this.messages = const [],
     this.outline,
     this.workOutlines = const {},
+    this.workMessages = const {},
   });
 
   final String contentHash;
   final String itemId;
+
+  /// Whole-book chat messages (plain books). Collections keep per-work
+  /// messages in [workMessages] instead — same 读哪本跟哪本 model as
+  /// [workOutlines]: each work's conversation is isolated so its history
+  /// never leaks another work's characters/plot into the LLM context.
   final List<AiChatMessage> messages;
 
   /// Whole-book outline (plain books; collections keep per-work outlines in
@@ -249,12 +261,22 @@ class AiChatSession {
   /// loads its own outline; the tab follows the reading position.
   final Map<String, AiBookOutline> workOutlines;
 
+  /// Per-work chat messages of a collection, keyed by work key. See
+  /// [messages] for why collections don't share one list.
+  final Map<String, List<AiChatMessage>> workMessages;
+
+  /// Messages for [workKey]: the per-work list for collections, the shared
+  /// whole-book list when [workKey] is null (plain books).
+  List<AiChatMessage> messagesFor(String? workKey) =>
+      workKey == null ? messages : (workMessages[workKey] ?? const []);
+
   AiChatSession copyWith({
     String? contentHash,
     String? itemId,
     List<AiChatMessage>? messages,
     AiBookOutline? outline,
     Map<String, AiBookOutline>? workOutlines,
+    Map<String, List<AiChatMessage>>? workMessages,
     bool clearOutline = false,
     String? clearWorkOutlineKey,
   }) {
@@ -269,7 +291,15 @@ class AiChatSession {
                 if (entry.key != clearWorkOutlineKey) entry.key: entry.value,
             }
           : (workOutlines ?? this.workOutlines),
+      workMessages: workMessages ?? this.workMessages,
     );
+  }
+
+  /// Returns a copy with [messages] stored under [workKey] (collections), or
+  /// as the whole-book list when [workKey] is null.
+  AiChatSession withMessagesFor(String? workKey, List<AiChatMessage> msgs) {
+    if (workKey == null) return copyWith(messages: msgs);
+    return copyWith(workMessages: {...workMessages, workKey: msgs});
   }
 
   Map<String, Object?> toJson() => {
@@ -280,6 +310,11 @@ class AiChatSession {
     if (workOutlines.isNotEmpty)
       'workOutlines': workOutlines.map(
         (key, value) => MapEntry(key, value.toJson()),
+      ),
+    if (workMessages.isNotEmpty)
+      'workMessages': workMessages.map(
+        (key, value) =>
+            MapEntry(key, value.map((m) => m.toJson()).toList(growable: false)),
       ),
   };
 
@@ -307,12 +342,26 @@ class AiChatSession {
         }
       }
     }
+    final rawWorkMessages = json['workMessages'];
+    final workMessages = <String, List<AiChatMessage>>{};
+    if (rawWorkMessages is Map) {
+      for (final entry in rawWorkMessages.entries) {
+        if (entry.value is List) {
+          workMessages[entry.key] = [
+            for (final row in entry.value as List)
+              if (row is Map)
+                AiChatMessage.fromJson(Map<String, dynamic>.from(row)),
+          ];
+        }
+      }
+    }
     return AiChatSession(
       contentHash: json['contentHash'] as String? ?? '',
       itemId: json['itemId'] as String? ?? '',
       messages: messages,
       outline: AiBookOutline.fromJson(json['outline']),
       workOutlines: workOutlines,
+      workMessages: workMessages,
     );
   }
 }

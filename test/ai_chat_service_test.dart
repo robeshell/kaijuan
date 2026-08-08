@@ -432,10 +432,9 @@ void main() {
         outline: AiBookOutline(
           createdAt: DateTime.utc(2026, 8, 5),
           model: 'm',
-          includesUnread: false,
           overview: '概览',
-          chapters: const [
-            AiBookOutlineChapter(sectionIndex: 1, title: '第一节', summary: '摘要'),
+          units: const [
+            AiOutlineUnit(title: '主题', blurb: '一句话说明。'),
           ],
         ),
       );
@@ -445,21 +444,16 @@ void main() {
       );
 
       expect(restored.outline?.overview, '概览');
-      expect(restored.outline?.chapters.single.sectionIndex, 1);
+      expect(restored.outline?.units.single.title, '主题');
     });
 
     test('session JSON round-trips per-work outlines and key clearing', () {
       AiBookOutline makeOutline(String title) => AiBookOutline(
             createdAt: DateTime.utc(2026, 8, 5),
             model: 'm',
-            includesUnread: false,
             overview: title,
-            chapters: const [
-              AiBookOutlineChapter(
-                sectionIndex: 1,
-                title: '第一章',
-                summary: '摘要',
-              ),
+            units: const [
+              AiOutlineUnit(title: '主题', blurb: '说明'),
             ],
           );
 
@@ -485,6 +479,47 @@ void main() {
       final cleared = restored.copyWith(clearWorkOutlineKey: 's4');
       expect(cleared.workOutlines.keys, ['s8']);
       expect(cleared.outline, isNull);
+    });
+
+    test('session JSON round-trips per-work chat messages', () {
+      AiChatMessage msg(String role, String content) => AiChatMessage(
+            role: role == 'user' ? AiMessageRole.user : AiMessageRole.assistant,
+            content: content,
+            createdAt: DateTime.utc(2026, 8, 8),
+          );
+
+      final session = AiChatSession(
+        contentHash: 'h1',
+        itemId: 'a',
+        workMessages: {
+          's4': [msg('user', '鲁迅这本讲什么'), msg('assistant', '鲁迅回答')],
+          's197': [msg('user', '红拂夜奔的王二')],
+        },
+      );
+
+      final restored = AiChatSession.fromJson(
+        Map<String, dynamic>.from(session.toJson()),
+      );
+      expect(restored.messagesFor('s4'), hasLength(2));
+      expect(restored.messagesFor('s4').first.content, '鲁迅这本讲什么');
+      expect(restored.messagesFor('s197'), hasLength(1));
+      expect(restored.messagesFor('s8'), isEmpty); // 未生成的作品为空
+      expect(restored.messagesFor(null), isEmpty); // 单本列表独立
+
+      // withMessagesFor 写到对应 work，不影响其他 work。
+      final updated = restored.withMessagesFor(
+        's197',
+        [msg('user', '新问题'), msg('assistant', '新回答')],
+      );
+      expect(updated.messagesFor('s197'), hasLength(2));
+      expect(updated.messagesFor('s4'), hasLength(2));
+
+      // Legacy data without the field stays empty, not null.
+      final legacy = AiChatSession.fromJson(
+        Map<String, dynamic>.from(session.toJson())..remove('workMessages'),
+      );
+      expect(legacy.workMessages, isEmpty);
+      expect(legacy.messagesFor('s4'), isEmpty);
     });
 
     test('session JSON preserves answer-specific questions', () {
