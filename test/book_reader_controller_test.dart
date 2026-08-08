@@ -128,14 +128,9 @@ void main() {
     final outline = AiBookOutline(
       createdAt: DateTime.utc(2026, 1, 1),
       model: 'test',
-      includesUnread: false,
       overview: '概述',
-      chapters: [
-        AiBookOutlineChapter(
-          title: '狂人日记',
-          summary: '摘要',
-          sectionIndex: 1,
-        ),
+      units: const [
+        AiOutlineUnit(title: '主题', blurb: '一句话说明。'),
       ],
     );
     final fresh = AiChatSession(
@@ -169,20 +164,14 @@ void main() {
     final v1 = AiBookOutline(
       createdAt: DateTime.utc(2026, 1, 1),
       model: 'test',
-      includesUnread: false,
       overview: '旧版',
-      chapters: [
-        AiBookOutlineChapter(title: '狂人日记', summary: '摘要', sectionIndex: 1),
-      ],
+      units: const [AiOutlineUnit(title: '旧', blurb: '旧主题。')],
     );
     final v2 = AiBookOutline(
       createdAt: DateTime.utc(2026, 1, 2),
       model: 'test',
-      includesUnread: false,
       overview: '新版',
-      chapters: [
-        AiBookOutlineChapter(title: '孔乙己', summary: '摘要', sectionIndex: 1),
-      ],
+      units: const [AiOutlineUnit(title: '新', blurb: '新主题。')],
     );
     // Disk already holds V2 (fresh generation); the sheet snapshot is stale
     // V1 plus a new chat message — saving it must keep V2.

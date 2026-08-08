@@ -12,7 +12,6 @@ import '../../../ai/ai_chat.dart';
 import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_family_tree.dart';
 import '../../../ai/ai_models.dart';
-import '../../../ai/ai_outline.dart';
 import '../../../ai/ai_provider.dart';
 import '../../../ai/ai_search.dart';
 import '../../../brand/brand_config.dart';
@@ -114,10 +113,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   _BookAiWorkspaceTab _activeTab = _BookAiWorkspaceTab.chat;
 
   AiChatSession _session = const AiChatSession(contentHash: '', itemId: '');
-  final _expandedOutlineSections = <String>{};
-  final _expandedOutlineDetails = <String>{};
-  final _outlineChildrenKeys = <String, GlobalKey>{};
-  bool _outlineOverviewExpanded = false;
   _GraphViewMode _graphViewMode = _GraphViewMode.persons;
 
   /// Plan whose default view has been applied; applying again is skipped so
@@ -173,12 +168,28 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   StreamSubscription<String>? _sub;
   String _streaming = '';
 
+  /// Work key of the in-flight turn, captured at send time so a mid-stream
+  /// page flip doesn't reroute a stop/partial commit into the new work.
+  String? _activeTurnWorkKey;
+
   BookReaderController get _c => widget.controller;
 
   /// Keep the in-memory + stored session bounded: every write re-serializes
   /// the whole JSON, so an unbounded list would grow each write (O(n²)) and
   /// the ai_chat/ file without limit. 100 messages ≈ 50 turns is generous.
   static const int _maxStoredMessages = 100;
+
+  /// Current collection work's key (null for plain books / no work under the
+  /// reading position). Collections isolate chat per work — same 读哪本跟哪本
+  /// model as outlines/graphs.
+  String? get _chatWorkKey {
+    final work = _c.currentReadingWork;
+    return work == null ? null : BookReaderController.workKeyFor(work);
+  }
+
+  /// Messages of the current conversation: per-work for collections, the
+  /// shared whole-book list for plain books.
+  List<AiChatMessage> get _messages => _session.messagesFor(_chatWorkKey);
 
   bool get _ready => _c.canUseAiChat;
 
@@ -259,50 +270,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       unawaited(_ensureGraphWorks());
     } else if (_activeTab == _BookAiWorkspaceTab.outline) {
       // 「读到哪本跟哪本」: landing on the outline tab loads the current
-      // work's outline (per-work storage) and expands its chain.
+      // work's outline. Works were resolved in _bootstrap, so this is a
+      // cache read, not an async resolve.
       unawaited(_c.loadBookOutline());
-      _revealOutlineForReadingWork();
     }
-  }
-
-  /// Expands the outline nodes leading to the work the reader is currently
-  /// inside (match by the work's start spine). No-op for plain books or when
-  /// the outline is not loaded yet; scrolling to the row is skipped — the
-  /// expanded chain makes the anchor visible without fighting the scroll
-  /// controller.
-  void _revealOutlineForReadingWork() {
-    final work = _c.currentReadingWork;
-    if (work == null) return;
-    final outline = _c.bookOutline;
-    if (outline == null) return;
-    final chain = <AiBookOutlineChapter>[];
-    final ancestors = <AiBookOutlineChapter>[];
-    void walk(AiBookOutlineChapter node) {
-      if (chain.isNotEmpty) return;
-      if (node.sectionIndex == work.startSection ||
-          node.sourceSectionIndex == work.startSection) {
-        chain.add(node);
-        return;
-      }
-      for (final child in node.children ?? const <AiBookOutlineChapter>[]) {
-        if (chain.isNotEmpty) return;
-        ancestors.add(node);
-        walk(child);
-        if (chain.isNotEmpty) return;
-        ancestors.removeLast();
-      }
-    }
-
-    for (final root in outline.chapters) {
-      walk(root);
-      if (chain.isNotEmpty) break;
-    }
-    if (chain.isEmpty) return;
-    for (final ancestor in ancestors) {
-      _expandedOutlineSections.add(ancestor.stableNodeId);
-    }
-    _expandedOutlineSections.add(chain.first.stableNodeId);
-    setState(() {});
   }
 
   void _onReaderControllerChanged() {
@@ -325,8 +296,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // unchanged — loadBookOutline diffs on the work key).
     if (_activeTab == _BookAiWorkspaceTab.graph && _c.hasCollectionWorks) {
       _followReadingWorkForGraph();
-    } else if (_activeTab == _BookAiWorkspaceTab.outline &&
-        _c.hasCollectionWorks) {
+    } else if (_activeTab == _BookAiWorkspaceTab.outline) {
+      // Works resolved in _bootstrap; follow the reading work. No-op for
+      // plain books — loadBookOutline uses the whole-book outline.
       unawaited(_c.loadBookOutline());
     }
     setState(() {});
@@ -335,9 +307,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<void> _bootstrap() async {
     try {
       final session = await _c.loadChatSession();
-      // The outline shares the same session JSON; avoid decoding it twice
-      // while the side sheet is animating in.
-      await _c.loadBookOutline(session: session);
+      // Resolve the work structure ONCE at panel open (collection or not —
+      // plain books resolve to null with no side effect). Doing it here means
+      // the outline/graph tabs and every 翻页 follow read a ready cache
+      // instead of each kicking off their own async resolve and flickering.
+      await _c.resolveGraphWorkCandidates();
+      if (!mounted) return;
+      // 单本此刻即可预载（workKey 恒 null，与位置无关）；合集的大纲交给
+      // _onReaderControllerChanged——启动时阅读位置尚未恢复，这里 load 会把
+      // 大纲定位到第一个作品。works 已解析就绪后，那次 load 是缓存命中，
+      // 不会再闪烁。
+      if (!_c.hasCollectionWorks) {
+        await _c.loadBookOutline(session: session);
+      }
       await _c.loadBookGraph();
       if (!mounted) return;
       setState(() {
@@ -345,7 +327,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _loadingSession = false;
       });
       // Open on the latest turn (history starts at top of the list).
-      if (session.messages.isNotEmpty) {
+      if (_messages.isNotEmpty) {
         _scrollToEnd(animated: false);
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -377,12 +359,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   /// Append [message], keeping only the newest [_maxStoredMessages] so both the
   /// in-memory list and the JSON file stay bounded.
-  AiChatSession _withMessage(AiChatMessage message) {
-    final messages = <AiChatMessage>[..._session.messages, message];
+  ///
+  /// [workKey] is the key captured when the turn STARTED (may be null for a
+  /// whole-book turn). It is used verbatim — never re-read [_chatWorkKey]
+  /// here, or a mid-stream page flip would reroute this message into the new
+  /// work's list and split the Q&A across two scopes.
+  AiChatSession _withMessage(AiChatMessage message, {String? workKey}) {
+    final key = workKey;
+    final messages = <AiChatMessage>[..._session.messagesFor(key), message];
     final kept = messages.length > _maxStoredMessages
         ? messages.sublist(messages.length - _maxStoredMessages)
         : messages;
-    return _session.copyWith(messages: kept);
+    return _session.withMessagesFor(key, kept);
   }
 
   Future<void> _onWebSearchChanged(bool value) async {
@@ -426,6 +414,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
     if (!mounted) return;
 
+    // Capture the work key ONCE for the whole turn: the user may flip to
+    // another work while the answer streams, and both the user message and
+    // the assistant reply must land in the work the question was asked in —
+    // never re-read _chatWorkKey at commit time.
+    final turnWorkKey = _chatWorkKey;
+    _activeTurnWorkKey = turnWorkKey;
+
     // Clear a composer send as soon as the request is committed. Preset and
     // retry actions leave any separately typed draft untouched.
     if (preset == null && _input.text.trim() == text) {
@@ -440,9 +435,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       createdAt: DateTime.now(),
       webHitCount: wantWeb ? 0 : null,
     );
-    final historyBefore = List<AiChatMessage>.from(_session.messages);
+    final historyBefore = List<AiChatMessage>.from(_messages);
     if (retrying && historyBefore.isNotEmpty) {
-      final msgs = List<AiChatMessage>.from(_session.messages);
+      final msgs = List<AiChatMessage>.from(_messages);
       if (msgs.isNotEmpty && msgs.last.role == AiMessageRole.assistant) {
         msgs.removeLast();
       }
@@ -454,14 +449,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       historyBefore
         ..clear()
         ..addAll(msgs);
-      if (msgs.length != _session.messages.length) {
-        setState(() => _session = _session.copyWith(messages: msgs));
+      if (msgs.length != _messages.length) {
+        setState(
+          () => _session = _session.withMessagesFor(turnWorkKey, msgs),
+        );
       }
     }
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _cancel = CancelToken();
     setState(() {
-      _session = _withMessage(userMsg);
+      _session = _withMessage(userMsg, workKey: turnWorkKey);
       _sending = true;
       _generatingFollowUp = false;
       _searchingWeb = wantWeb;
@@ -509,10 +506,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _searchingWeb = false;
         _lastWebHitCount = hitCount;
         // Refresh last user bubble with real hit count.
-        final msgs = List<AiChatMessage>.from(_session.messages);
+        final msgs = List<AiChatMessage>.from(_session.messagesFor(turnWorkKey));
         if (msgs.isNotEmpty && msgs.last.role == AiMessageRole.user) {
           msgs[msgs.length - 1] = userMsg;
-          _session = _session.copyWith(messages: msgs);
+          _session = _session.withMessagesFor(turnWorkKey, msgs);
         }
       });
       unawaited(_persist());
@@ -558,9 +555,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           _error = error is AiProviderException ? error.message : '生成失败，请稍后重试';
           _retryText = text;
           if (_streaming.trim().isNotEmpty) {
-            _commitAssistant(_streaming);
+            _commitAssistant(_streaming, workKey: turnWorkKey);
           }
           _streaming = '';
+          _activeTurnWorkKey = null;
         });
         _restorePendingDraft();
       },
@@ -573,11 +571,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           _searchingWeb = false;
           _toolStatus = null;
           if (body.isNotEmpty) {
-            _commitAssistant(body);
-            assistantIndex = _session.messages.length - 1;
+            _commitAssistant(body, workKey: turnWorkKey);
+            assistantIndex = _session.messagesFor(turnWorkKey).length - 1;
           }
           _retryText = null;
           _streaming = '';
+          _activeTurnWorkKey = null;
         });
         _pendingDraft = null;
         unawaited(_persist());
@@ -589,6 +588,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               userText: text,
               answer: body,
               context: chatContext,
+              workKey: turnWorkKey,
             ),
           );
         }
@@ -615,13 +615,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return KeyEventResult.handled;
   }
 
-  void _commitAssistant(String body) {
+  void _commitAssistant(String body, {String? workKey}) {
     _session = _withMessage(
       AiChatMessage(
         role: AiMessageRole.assistant,
         content: body,
         createdAt: DateTime.now(),
       ),
+      workKey: workKey,
     );
   }
 
@@ -630,6 +631,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required String userText,
     required String answer,
     required AiChatContextBundle context,
+    String? workKey,
   }) async {
     final token = CancelToken();
     _suggestionCancel = token;
@@ -646,18 +648,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           !identical(_suggestionCancel, token)) {
         return;
       }
+      final msgs = _session.messagesFor(workKey);
       if (suggestions.isEmpty ||
-          messageIndex >= _session.messages.length ||
-          _session.messages[messageIndex].role != AiMessageRole.assistant ||
-          _session.messages[messageIndex].content != answer) {
+          messageIndex >= msgs.length ||
+          msgs[messageIndex].role != AiMessageRole.assistant ||
+          msgs[messageIndex].content != answer) {
         return;
       }
-      final messages = List<AiChatMessage>.from(_session.messages);
+      final messages = List<AiChatMessage>.from(msgs);
       messages[messageIndex] = messages[messageIndex].copyWith(
         suggestedQuestions: suggestions,
       );
       setState(() {
-        _session = _session.copyWith(messages: messages);
+        _session = _session.withMessagesFor(workKey, messages);
         _generatingFollowUp = false;
       });
       published = true;
@@ -697,10 +700,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _searchingWeb = false;
       _toolStatus = null;
       if (commitPartial && body.isNotEmpty) {
-        _commitAssistant(body);
+        _commitAssistant(body, workKey: _activeTurnWorkKey);
       }
       _streaming = '';
       _cancel = CancelToken();
+      _activeTurnWorkKey = null;
     });
     _restorePendingDraft();
     if (persist) unawaited(_persist());
@@ -722,13 +726,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _suggestionCancel = null;
       // Cancel first without committing an in-flight partial answer.
       await _stop(commitPartial: false, persist: false);
-      await _c.clearChatSession();
+      final workKey = _chatWorkKey;
+      await _c.clearChatSession(workKey: workKey);
       if (!mounted) return;
       setState(() {
-        _session = AiChatSession(
-          contentHash: _c.item.contentHash,
-          itemId: _c.item.id,
-        );
+        // 合集：只清当前作品的消息，保留其他作品的对话/大纲；单本整体会话清空。
+        _session = workKey == null
+            ? AiChatSession(
+                contentHash: _c.item.contentHash,
+                itemId: _c.item.id,
+              )
+            : _session.withMessagesFor(workKey, const []);
         _error = null;
         _retryText = null;
         _streaming = '';
@@ -833,7 +841,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final progress = _c.bookOutlineProgress;
     final generating = _c.isGeneratingBookOutline;
     final error = _c.bookOutlineError;
-    final canExpandOverview = outline != null && outline.overview.length > 180;
     if (!_ready) {
       return _AiUnavailable(
         message: '添加 API Key 后，就可以生成本书大纲。',
@@ -857,7 +864,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  '翻到某部作品后，这里显示它的知识图谱大纲',
+                  '翻到某部作品后，这里显示它的大纲',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: context.appCaptionSize,
@@ -877,24 +884,23 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             children: [
               Icon(KaijuanIcons.toc, size: 34, color: context.appSecondaryText),
               const SizedBox(height: 14),
-              Text(
-                generating
-                    ? '正在生成大纲'
-                    : (_c.currentReadingWork != null
-                        ? '《${_c.currentReadingWork!.title}》大纲'
-                        : '本书大纲'),
-                style: TextStyle(
-                  fontSize: _panelTitleSize(context),
-                  fontWeight: FontWeight.w600,
-                  color: context.appPrimaryText,
-                ),
-              ),
-              const SizedBox(height: 6),
-              // While generating, the live progress label lives next to the
-              // thinking orb below; showing it here too duplicates the text.
+              // While generating, the title is redundant next to the live
+              // progress label below; keep it only for the idle state.
               if (!generating)
                 Text(
-                  progress?.label ?? '生成一次后会保存在这本书中。',
+                  _c.currentReadingWork != null
+                      ? '《${_c.currentReadingWork!.title}》大纲'
+                      : '本书大纲',
+                  style: TextStyle(
+                    fontSize: _panelTitleSize(context),
+                    fontWeight: FontWeight.w600,
+                    color: context.appPrimaryText,
+                  ),
+                ),
+              if (!generating) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '生成一次后会保存在这本书中。',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: _panelBodySize(context),
@@ -902,8 +908,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     color: context.appSecondaryText,
                   ),
                 ),
+              ],
               if (generating) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 4),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -959,7 +966,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           children: [
             Expanded(
               child: Text(
-                '全书概览',
+                _c.currentReadingWork != null
+                    ? '《${_c.currentReadingWork!.title}》'
+                    : '本书',
                 style: TextStyle(
                   fontSize: _panelTitleSize(context),
                   fontWeight: FontWeight.w600,
@@ -990,49 +999,37 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
           ],
         ),
-        RichText(
-          maxLines: _outlineOverviewExpanded ? null : 3,
-          overflow: _outlineOverviewExpanded
-              ? TextOverflow.visible
-              : TextOverflow.ellipsis,
-          text: TextSpan(
-            style: TextStyle(
-              fontSize: _panelDetailSize(context),
-              height: 1.55,
-              color: context.appSecondaryText,
-            ),
-            children: [
-              TextSpan(text: outline.overview),
-              if (canExpandOverview)
-                WidgetSpan(
-                  alignment: PlaceholderAlignment.middle,
-                  child: _InlineOutlineOverviewToggle(
-                    expanded: _outlineOverviewExpanded,
-                    onPressed: () => setState(
-                      () =>
-                          _outlineOverviewExpanded = !_outlineOverviewExpanded,
-                    ),
-                  ),
-                ),
-            ],
+        const SizedBox(height: 8),
+        // 综述（一段话讲清全书脉络）
+        Text(
+          outline.overview,
+          style: TextStyle(
+            fontSize: _panelBodySize(context),
+            height: 1.6,
+            color: context.appPrimaryText,
           ),
         ),
         if (generating) ...[
           const SizedBox(height: 18),
-          Text(
-            progress?.label ?? '正在生成…',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: _c.cancelBookOutlineGeneration,
-              icon: const Icon(KaijuanIcons.stop, size: 18),
-              label: const Text('停止'),
-            ),
+          Row(
+            children: [
+              _thinkingOrb(context),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  progress?.label ?? '正在生成…',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _c.cancelBookOutlineGeneration,
+                icon: const Icon(KaijuanIcons.stop, size: 18),
+                label: const Text('停止'),
+              ),
+            ],
           ),
         ],
         if (error != null) ...[
@@ -1046,246 +1043,71 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ),
         ],
         SizedBox(height: context.appIsCompact ? 20 : 28),
-        if (_c.currentReadingWork case final reading?) ...[
-          Text(
-            '《${reading.title}》',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
-            ),
-          ),
-          const SizedBox(height: 4),
-        ],
+        // 大纲（结构单元，按书中顺序）
         Text(
-          '章节大纲',
+          '大纲',
           style: TextStyle(
             fontSize: _panelTitleSize(context),
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 10),
-        for (final chapter in outline.chapters)
-          _buildOutlineChapterTile(context, chapter),
-      ],
-    );
-  }
-
-  Widget _buildOutlineChapterTile(
-    BuildContext context,
-    AiBookOutlineChapter chapter, {
-    int depth = 0,
-  }) {
-    final nodeId = chapter.stableNodeId;
-    final expanded = _expandedOutlineSections.contains(nodeId);
-    final detailsExpanded = _expandedOutlineDetails.contains(nodeId);
-    final children = chapter.children;
-    final indent = 8.0 + depth * 18.0;
-    return Column(
-      children: [
-        Padding(
-          padding: EdgeInsetsDirectional.only(start: depth * 18.0),
-          child: ListTile(
-            contentPadding: EdgeInsetsDirectional.fromSTEB(
-              8,
-              context.appIsCompact ? 6 : 10,
-              2,
-              context.appIsCompact ? 6 : 10,
-            ),
-            minVerticalPadding: 0,
-            title: Text(
-              chapter.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: _panelBodySize(context),
-                fontWeight: FontWeight.w600,
-                height: 1.35,
-                color: context.appPrimaryText,
-              ),
-            ),
-            subtitle: expanded
-                ? null
-                : Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(
-                      chapter.summary,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: context.appCaptionSize,
-                        height: 1.4,
-                        color: context.appSecondaryText,
-                      ),
+        const SizedBox(height: 12),
+        for (var i = 0; i < outline.units.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 序号
+                Container(
+                  width: 24,
+                  height: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '${i + 1}',
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      fontWeight: FontWeight.w600,
+                      color: context.appSecondaryText,
                     ),
                   ),
-            trailing: IconButton(
-              tooltip: expanded ? '收起' : '展开',
-              onPressed: () => _toggleOutlineNode(chapter),
-              icon: Icon(
-                expanded ? KaijuanIcons.chevronDown : KaijuanIcons.chevronRight,
-                size: 18,
-                color: context.appSecondaryText,
-              ),
-            ),
-            onTap: () => _toggleOutlineNode(chapter),
-          ),
-        ),
-        if (expanded)
-          Padding(
-            padding: EdgeInsetsDirectional.fromSTEB(
-              indent,
-              4,
-              8,
-              context.appIsCompact ? 12 : 16,
-            ),
-            child: _buildOutlineChapterDetails(
-              context,
-              chapter,
-              detailsExpanded: detailsExpanded,
-              hasChildren: children?.isNotEmpty ?? false,
-            ),
-          ),
-        if (expanded && children != null)
-          KeyedSubtree(
-            key: _outlineChildrenKey(nodeId),
-            child: Column(
-              children: [
-                for (final child in children)
-                  _buildOutlineChapterTile(context, child, depth: depth + 1),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        outline.units[i].title,
+                        style: TextStyle(
+                          fontSize: _panelBodySize(context),
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                          color: context.appPrimaryText,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        outline.units[i].blurb,
+                        style: TextStyle(
+                          fontSize: _panelDetailSize(context),
+                          height: 1.55,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
       ],
     );
   }
-
-  Widget _buildOutlineChapterDetails(
-    BuildContext context,
-    AiBookOutlineChapter chapter, {
-    required bool detailsExpanded,
-    required bool hasChildren,
-  }) {
-    final showAllPoints = detailsExpanded || chapter.keyPoints.length <= 2;
-    final canExpandDetails =
-        chapter.summary.length > 260 || chapter.keyPoints.length > 2;
-    return Padding(
-      padding: const EdgeInsets.only(left: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            chapter.summary,
-            maxLines: detailsExpanded ? null : 5,
-            overflow: detailsExpanded
-                ? TextOverflow.visible
-                : TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: _panelDetailSize(context),
-              height: 1.5,
-              color: context.appSecondaryText,
-            ),
-          ),
-          if (chapter.keyPoints.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Text(
-              '要点',
-              style: TextStyle(
-                fontSize: context.appCaptionSize,
-                fontWeight: FontWeight.w600,
-                color: context.appPrimaryText,
-              ),
-            ),
-            const SizedBox(height: 5),
-            for (final point
-                in showAllPoints
-                    ? chapter.keyPoints
-                    : chapter.keyPoints.take(2))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 7, right: 7),
-                      child: Container(
-                        width: 4,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: context.appSecondaryText,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        point,
-                        style: TextStyle(
-                          fontSize: _panelDetailSize(context),
-                          height: 1.45,
-                          color: context.appSecondaryText,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-          Row(
-            children: [
-              const Spacer(),
-              if (canExpandDetails)
-                IconButton(
-                  tooltip: detailsExpanded ? '收起完整内容' : '展开完整内容',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => _toggleOutlineDetails(chapter),
-                  icon: Icon(
-                    detailsExpanded ? KaijuanIcons.minimize : KaijuanIcons.more,
-                    size: 18,
-                  ),
-                ),
-              IconButton(
-                tooltip: '前往原文',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _goToOutlineChapter(context, chapter),
-                icon: const Icon(KaijuanIcons.open, size: 18),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _toggleOutlineNode(AiBookOutlineChapter chapter) {
-    final nodeId = chapter.stableNodeId;
-    final expanding = !_expandedOutlineSections.contains(nodeId);
-    setState(() {
-      if (expanding) {
-        _expandedOutlineSections.add(nodeId);
-      } else {
-        _expandedOutlineSections.remove(nodeId);
-      }
-    });
-  }
-
-  void _toggleOutlineDetails(AiBookOutlineChapter chapter) {
-    final nodeId = chapter.stableNodeId;
-    setState(() {
-      if (_expandedOutlineDetails.contains(nodeId)) {
-        _expandedOutlineDetails.remove(nodeId);
-      } else {
-        _expandedOutlineDetails.add(nodeId);
-      }
-    });
-  }
-
-  void _goToOutlineChapter(BuildContext context, AiBookOutlineChapter chapter) {
-    _c.goToSection((chapter.sourceSectionIndex ?? chapter.sectionIndex) - 1);
-    Navigator.of(context).maybePop();
-  }
-
-  GlobalKey _outlineChildrenKey(String nodeId) =>
-      _outlineChildrenKeys.putIfAbsent(nodeId, GlobalKey.new);
 
   bool get _allowUnread =>
       _c.aiSettingsController?.settings.allowUnreadContext ?? false;
@@ -1505,7 +1327,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       // fails (or this is a plain book that will never have works), fall
       // through to the actionable empty state — otherwise the tab would be
       // stuck on「正在识别著作范围…」forever.
-      final works = _c.resolvedGraphWorks ?? _c.graphWorkCandidates;
+      final works = _c.resolvedGraphWorks;
       if (works == null && _graphWorksLoading) {
         return Center(
           child: Padding(
@@ -2339,20 +2161,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _ensureGraphWorks() async {
-    // Already resolved (outline path, or the outline generation ran the
-    // recognition first): follow the reading work now — the entry card's
+    // Already resolved: follow the reading work now — the entry card's
     // "正在打开" spinner is only dismissed by _followReadingWorkForGraph.
     if (_c.resolvedGraphWorks != null) {
       _followReadingWorkForGraph();
       return;
     }
     if (_graphWorksLoading || !mounted) return;
-    final sync = _c.graphWorkCandidates;
-    if (sync != null) {
-      _followReadingWorkForGraph();
-      return;
-    }
-    if (_c.bookOutline != null) return; // has outline, not a collection
     _graphWorksLoading = true;
     final resolved = await _c.resolveGraphWorkCandidates();
     if (!mounted) return;
@@ -2518,12 +2333,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         !_searchingWeb &&
         _streaming.isEmpty &&
         _error == null &&
-        _session.messages.isNotEmpty &&
-        _session.messages.last.role == AiMessageRole.assistant;
+        _messages.isNotEmpty &&
+        _messages.last.role == AiMessageRole.assistant;
     final followUpShortcuts = aiChatFollowUpShortcuts(
       hasSelection: hasSelection,
       generatedQuestions: showFollowUpShortcuts
-          ? _session.messages.last.suggestedQuestions
+          ? _messages.last.suggestedQuestions
           : const [],
     );
 
@@ -2549,8 +2364,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 ),
               ),
               const Spacer(),
-              if (_activeTab == _BookAiWorkspaceTab.chat &&
-                  _session.messages.isNotEmpty)
+              if (_activeTab == _BookAiWorkspaceTab.chat && _messages.isNotEmpty)
                 IconButton(
                   tooltip: '清空对话',
                   onPressed: _sending || _clearingHistory
@@ -2684,7 +2498,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                         label: _liveStatus,
                         child: const SizedBox.shrink(),
                       ),
-                      if (_session.messages.isEmpty &&
+                      if (_messages.isEmpty &&
                           _streaming.isEmpty &&
                           !_searchingWeb)
                         Padding(
@@ -2701,7 +2515,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                                 '围绕这本书聊聊：总结、人物，或你想到的问题。',
                                 style: TextStyle(
                                   fontSize: _panelBodySize(context),
-                                  height: 1.5,
+                                  height: 1.6,
                                   color: context.appSecondaryText,
                                 ),
                               ),
@@ -2716,7 +2530,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                             ],
                           ),
                         ),
-                      for (final msg in _session.messages)
+                      for (final msg in _messages)
                         _Bubble(
                           message: msg,
                           onCopy: () => unawaited(_copy(msg.content)),
@@ -2802,6 +2616,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                               fontSize: _panelDetailSize(context),
                             ),
                           ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
                           onDeleted: _sending
                               ? null
                               : () => setState(() => _selection = null),
@@ -2812,65 +2629,75 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ],
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  // Center send/stop against the multiline field (not bottom-stuck).
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      // Keep IME candidate confirmation ahead of desktop
-                      // shortcuts; see [_handleComposerKey].
-                      child: Focus(
-                        onKeyEvent: _handleComposerKey,
-                        child: withDesktopTextEditingShortcuts(
-                          controller: _input,
-                          TextField(
+                Container(
+                  padding: const EdgeInsets.only(left: 14, right: 6),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withValues(
+                      alpha: 0.42,
+                    ),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    // Center send/stop against the multiline field (not bottom-stuck).
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        // Keep IME candidate confirmation ahead of desktop
+                        // shortcuts; see [_handleComposerKey].
+                        child: Focus(
+                          onKeyEvent: _handleComposerKey,
+                          child: withDesktopTextEditingShortcuts(
                             controller: _input,
-                            focusNode: _focus,
-                            autofocus: true,
-                            minLines: 1,
-                            maxLines: 6,
-                            keyboardType: TextInputType.multiline,
-                            textInputAction: TextInputAction.send,
-                            textCapitalization: TextCapitalization.sentences,
-                            enableInteractiveSelection: true,
-                            onTap: () => unawaited(_focusComposer()),
-                            onSubmitted: (_) {
-                              if (!_sending) unawaited(_send());
-                            },
-                            style: context.appInputTextStyle.copyWith(
-                              color: context.appPrimaryText,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: '问这本书…',
-                              hintStyle: context.appInputTextStyle.copyWith(
-                                color: context.appSecondaryText,
+                            TextField(
+                              controller: _input,
+                              focusNode: _focus,
+                              autofocus: true,
+                              minLines: 1,
+                              maxLines: 6,
+                              keyboardType: TextInputType.multiline,
+                              textInputAction: TextInputAction.send,
+                              textCapitalization: TextCapitalization.sentences,
+                              enableInteractiveSelection: true,
+                              onTap: () => unawaited(_focusComposer()),
+                              onSubmitted: (_) {
+                                if (!_sending) unawaited(_send());
+                              },
+                              style: context.appInputTextStyle.copyWith(
+                                color: context.appPrimaryText,
                               ),
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
+                              decoration: InputDecoration(
+                                hintText: '问这本书…',
+                                hintStyle: context.appInputTextStyle.copyWith(
+                                  color: context.appSecondaryText,
+                                ),
+                                isDense: true,
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (_sending)
-                      IconButton.filledTonal(
-                        tooltip: '停止',
-                        onPressed: _stop,
-                        icon: Icon(
-                          KaijuanIcons.stopFilled,
-                          color: colors.error,
+                      const SizedBox(width: 6),
+                      if (_sending)
+                        IconButton.filledTonal(
+                          tooltip: '停止',
+                          onPressed: _stop,
+                          icon: Icon(
+                            KaijuanIcons.stopFilled,
+                            color: colors.error,
+                          ),
+                        )
+                      else
+                        IconButton.filled(
+                          tooltip: '发送',
+                          onPressed: () => unawaited(_send()),
+                          icon: const Icon(KaijuanIcons.sendFilled, size: 20),
                         ),
-                      )
-                    else
-                      IconButton.filled(
-                        tooltip: '发送',
-                        onPressed: () => unawaited(_send()),
-                        icon: const Icon(KaijuanIcons.sendFilled, size: 20),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -2926,42 +2753,6 @@ class _AiUnavailable extends StatelessWidget {
           const SizedBox(height: 12),
           FilledButton(onPressed: onOpenSettings, child: const Text('去设置')),
         ],
-      ),
-    );
-  }
-}
-
-class _InlineOutlineOverviewToggle extends StatelessWidget {
-  const _InlineOutlineOverviewToggle({
-    required this.expanded,
-    required this.onPressed,
-  });
-
-  final bool expanded;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = expanded ? '收起完整概览' : '展开完整概览';
-    return Semantics(
-      button: true,
-      label: label,
-      child: ExcludeSemantics(
-        child: Tooltip(
-          message: label,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onPressed,
-            child: Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(6, 4, 2, 4),
-              child: Icon(
-                expanded ? KaijuanIcons.chevronUp : KaijuanIcons.chevronDown,
-                size: 16,
-                color: context.appSecondaryText,
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -3077,10 +2868,10 @@ class _SuggestedQuestionList extends StatelessWidget {
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxWidth),
               child: Material(
-                color: colors.surfaceContainerHighest.withValues(alpha: 0.56),
-                borderRadius: BorderRadius.circular(16),
+                color: colors.surfaceContainerHighest.withValues(alpha: 0.42),
+                borderRadius: BorderRadius.circular(18),
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(18),
                   onTap: () => onSelected(shortcuts[index]),
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(
@@ -3101,6 +2892,7 @@ class _SuggestedQuestionList extends StatelessWidget {
                               fontSize: compact
                                   ? 14
                                   : context.appBodySecondarySize,
+                              height: 1.4,
                               color: context.appPrimaryText,
                             ),
                           ),
@@ -3108,7 +2900,7 @@ class _SuggestedQuestionList extends StatelessWidget {
                         const SizedBox(width: 6),
                         Icon(
                           KaijuanIcons.chevronRight,
-                          size: compact ? 16 : 18,
+                          size: compact ? 15 : 17,
                           color: context.appSecondaryText,
                         ),
                       ],
@@ -3136,7 +2928,7 @@ class _Bubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = message.role == AiMessageRole.user;
     final bg = isUser
-        ? context.appColors.primary.withValues(alpha: 0.14)
+        ? context.appColors.primary.withValues(alpha: 0.12)
         : Colors.transparent;
     final webHits = message.webHitCount;
     final compact = context.appIsCompact;
@@ -3144,15 +2936,15 @@ class _Bubble extends StatelessWidget {
 
     final bubble = Container(
       margin: EdgeInsets.only(bottom: compact ? 10 : 14),
-      padding: EdgeInsets.fromLTRB(
-        isUser ? (compact ? 12 : 14) : 4,
-        isUser ? (compact ? 8 : 10) : 4,
-        isUser ? (compact ? 12 : 14) : 4,
-        isUser ? (compact ? 8 : 10) : 4,
-      ),
+      padding: isUser
+          ? EdgeInsets.symmetric(
+              horizontal: compact ? 13 : 15,
+              vertical: compact ? 9 : 10,
+            )
+          : const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(isUser ? 16 : 10),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3172,16 +2964,16 @@ class _Bubble extends StatelessWidget {
           if (!isUser && !streaming && onCopy != null) ...[
             const SizedBox(height: 2),
             Align(
-              alignment: Alignment.centerRight,
+              alignment: Alignment.centerLeft,
               child: IconButton(
                 tooltip: '复制本条回答',
                 onPressed: onCopy,
-                icon: const Icon(KaijuanIcons.copy, size: 16),
+                icon: const Icon(KaijuanIcons.copy, size: 15),
                 style: IconButton.styleFrom(
                   foregroundColor: context.appSecondaryText,
                   visualDensity: VisualDensity.compact,
                   padding: const EdgeInsets.all(8),
-                  minimumSize: Size.square(compact ? 32 : 36),
+                  minimumSize: Size.square(compact ? 30 : 32),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),

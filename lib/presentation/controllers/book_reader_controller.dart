@@ -714,22 +714,26 @@ class BookReaderController extends ChangeNotifier {
         contentHash: item.contentHash,
         itemId: item.id,
       );
-      await store.write(
-        current?.outline != null && session.outline == null
-            ? session.copyWith(outline: current!.outline)
-            : (current != null && current.workOutlines.isNotEmpty
-                // Disk holds the latest per-work outlines (generation writes
-                // there); the sheet snapshot predates them. Disk wins, so a
-                // freshly generated outline is never rolled back by an older
-                // snapshot — same direction as the outline branch above.
-                ? session.copyWith(
-                    workOutlines: {
-                      ...session.workOutlines,
-                      ...current.workOutlines,
-                    },
-                  )
-                : session),
+      // Disk wins for per-work data the sheet snapshot predates: outlines
+      // (generation writes there) and workMessages (other works' chats the
+      // in-memory session may not carry, e.g. after a whole-book clear reset
+      // the snapshot). Merge both so a later _persist never wipes disk.
+      final merged = session.copyWith(
+        outline: current?.outline != null && session.outline == null
+            ? current!.outline
+            : session.outline,
+        workOutlines: {
+          ...session.workOutlines,
+          if (current != null) ...current.workOutlines,
+        },
+        workMessages: {
+          if (current != null) ...current.workMessages,
+          // The sheet is the live writer for the works it knows about — its
+          // entries win over disk for those keys; disk keeps the rest.
+          ...session.workMessages,
+        },
       );
+      await store.write(merged);
     });
   }
 
@@ -744,7 +748,11 @@ class BookReaderController extends ChangeNotifier {
 
   /// User-initiated only. Do **not** call from library delete — same contentHash
   /// re-import must restore this session (PRODUCT / ai.md §7.3).
-  Future<void> clearChatSession() async {
+  ///
+  /// [workKey]: clear only that collection work's messages, leaving the rest
+  /// of the session (other works' chats, outlines) intact. Null clears the
+  /// whole-book message list (plain books).
+  Future<void> clearChatSession({String? workKey}) async {
     await _enqueueChatSessionWrite(() async {
       final store = _chatHistoryStore;
       if (store == null) return;
@@ -752,8 +760,16 @@ class BookReaderController extends ChangeNotifier {
         contentHash: item.contentHash,
         itemId: item.id,
       );
-      if (current != null &&
-          (current.outline != null || current.workOutlines.isNotEmpty)) {
+      if (current == null) return;
+      if (workKey != null) {
+        // Collection: drop this work's chat; keep everything else.
+        final remaining = {...current.workMessages}..remove(workKey);
+        await store.write(current.copyWith(workMessages: remaining));
+        return;
+      }
+      if (current.outline != null ||
+          current.workOutlines.isNotEmpty ||
+          current.workMessages.isNotEmpty) {
         await store.write(current.copyWith(messages: const []));
       } else {
         await store.delete(item.contentHash);
@@ -776,6 +792,13 @@ class BookReaderController extends ChangeNotifier {
     // the disk snapshot which may be stale and would wipe the result.
     if (_bookOutlineWorkKey == workKey && _bookOutline != null) {
       return _bookOutline;
+    }
+    // 翻到另一部作品（workKey 变了）就立刻丢掉旧大纲——否则 await session
+    // 期间 UI 仍显示上一部作品的内容，标题已是新作品、正文还是旧的。
+    if (_bookOutlineWorkKey != workKey) {
+      _bookOutline = null;
+      _bookOutlineWorkKey = workKey;
+      if (!_disposed) notifyListeners();
     }
     final resolvedSession = session ?? await loadChatSession();
     final outline = workKey == null
@@ -831,31 +854,26 @@ class BookReaderController extends ChangeNotifier {
       // may flip pages — the content must be stored under the key it was
       // generated from, never re-read at save time.
       var work = currentReadingWork;
-      // First generation of a collection: no outline and no graph yet, so
-      // both work sources are empty and currentReadingWork is null — without
-      // this we would silently generate a whole-book (30 works) outline that
-      // no collection surface can display. Resolve the structure once, then
-      // locate the work under the reading position. A single-group book is
-      // not a collection — keep the whole-book path (its groups already came
-      // back from the same structural call).
+      // 单本书首次生成：currentReadingWork 为 null。做一次结构识别——
+      // 如果它把当前阅读位置定位进某个卷/作品（合集、上下卷），就按该
+      // 范围生成；定位不到（普通单本书被 LLM 拆出前言/附录等多个 group）
+      // 就退回整本大纲，绝不能因此拒绝生成。
       if (work == null) {
         final resolved = await resolveGraphWorkCandidates(
           cancel: cancel,
         );
-        // >=2 groups is a real reading-range split — either a collection's
-        // works or a volume-split single book (上卷/下卷). Both mean "follow
-        // the range under the reading position": generating the current
-        // volume's outline is the same behavior as the current work's.
         if (resolved != null && resolved.length > 1) {
           work = currentReadingWork;
         }
       }
-      // A collection has no whole-book outline surface — refusing generation
-      // outside any work beats producing an outline nothing can display.
+      // 真合集且不在任何作品内（封面/目录/前言页）：合集没有整本大纲的
+      // 展示位，引导用户翻到某部作品再生成。普通单本书 work 为 null 时
+      // hasCollectionWorks 为 false，不会走到这里。
       if (hasCollectionWorks && work == null) {
         throw AiProviderException('翻到某部作品后，再生成它的知识图谱大纲');
       }
       final startWorkKey = work == null ? null : workKeyFor(work);
+
       final List<AiBookSectionSlice> sections;
       if (work != null) {
         sections = (await _graphSectionsForWork(work))
@@ -868,15 +886,6 @@ class BookReaderController extends ChangeNotifier {
         sections = AiChatRetrieve.splitSections(body);
       }
       if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
-      AiLog.d(
-        'outline extracted=${sections.length} '
-        'navigation=${sections.where((section) => section.isNavigationUnit).length} '
-        'labels=${sections.take(24).map((section) => section.label).join(' | ')}',
-      );
-      // A book outline is explicitly whole-book work. Restricting it to the
-      // current spine position turns a collection opened at its front matter
-      // into a one-item "outline".
-      const includeUnread = true;
       final titled = _withTitles(
         sections,
         fallback: _titleForOutlineSection,
@@ -885,25 +894,15 @@ class BookReaderController extends ChangeNotifier {
       if (outlineSections.isEmpty) {
         throw AiProviderException('没有可用于生成大纲的正文');
       }
-      // 目录章节方案：优先用本书目录构建大纲树（章节即目录，AI 只补概述/
-      // 摘要）。无目录（tocPlan null）→ 回退 AI 结构分组生成。
-      final tocPlan = _tocOutlineForRange(outlineSections, work);
       AiLog.d(
-        'outline usable=${outlineSections.length} '
-        'navigation=${outlineSections.where((section) => section.isNavigationUnit).length} '
-        'indexes=${outlineSections.map((section) => section.index).join(',')} '
-        'tocPlan=${tocPlan == null ? 'none' : 'units=${tocPlan.units.length} roots=${tocPlan.roots.length}'}',
+        'outline sections=${outlineSections.length} '
+        'range=${work == null ? 'whole-book' : '${work.startSection}..${work.endSectionExclusive}'}',
       );
       final outline = await service.generate(
-        bookTitle: item.title,
+        bookTitle: work?.title ?? item.title,
         bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        collectionTitle: work == null ? null : item.title,
         sections: outlineSections,
-        includesUnread: includeUnread,
-        // 目录章节方案：章节树直接来自本书目录（单本=全书目录；合集=当前
-        // 作品的目录，按其 spine 范围过滤——作品的目录项落在自己范围内，
-        // 无需跨文件穿透）。无目录的书回退到 AI 结构分组。
-        preplannedUnits: tocPlan?.units,
-        preplannedRoots: tocPlan?.roots,
         cancelToken: cancel,
         onProgress: (progress) {
           _bookOutlineProgress = progress;
@@ -921,12 +920,14 @@ class BookReaderController extends ChangeNotifier {
       if (!_disposed) notifyListeners();
     } on AiProviderException catch (error) {
       _bookOutlineProgress = null;
+      AiLog.d('outline failed: ${error.message}');
       if (!cancel.isCancelled) {
         _bookOutlineError = error.message;
       }
       if (!_disposed) notifyListeners();
-    } catch (_) {
+    } catch (error, stack) {
       _bookOutlineProgress = null;
+      AiLog.d('outline failed: $error\n$stack');
       if (!cancel.isCancelled) {
         _bookOutlineError = '生成大纲失败，请稍后重试';
       }
@@ -1023,6 +1024,37 @@ class BookReaderController extends ChangeNotifier {
     return _appendixWordsRegExp!.hasMatch(label);
   }
 
+  /// A TOC top-level title that names a chapter/section of a single work
+  /// (第一章 / 序章 / 第3回 / Chapter 1 ...) — reading-order divisions, not
+  /// independent works. Volumes (第一部/卷一) are matched separately by
+  /// [_volumeTitlePattern]: a volume-split book IS multi-work.
+  static final RegExp _chapterTitlePattern = RegExp(
+    r'^('
+    r'第[0-9零一二三四五六七八九十百千两]+[章节回篇集讲则]'
+    r'|[章节回篇集讲][0-9零一二三四五六七八九十百千两]+'
+    r'|(序章|楔子|引子|尾声|终章|番外|前言|序言|自序|序|跋|后记|引论|导论|绪论)'
+    r'|(chapter|section|prologue|epilogue|introduction)\s*[0-9ivxlcdm]*'
+    r')',
+    caseSensitive: false,
+  );
+
+  /// A volume/part container (第一部 / 卷二 / Part III / Book 2). A book
+  /// split into volumes behaves like a collection — each volume gets its own
+  /// outline/graph — so these are NOT chapter-modeled single-work markers.
+  static final RegExp _volumeTitlePattern = RegExp(
+    r'^('
+    r'第[0-9零一二三四五六七八九十百千两]+[部卷]'
+    r'|[部卷][0-9零一二三四五六七八九十百千两]+'
+    r'|(part|book|volume|vol\.?)\s*[0-9ivxlcdm]+'
+    r')',
+    caseSensitive: false,
+  );
+
+  bool _isChapterTocTitle(String raw) =>
+      _chapterTitlePattern.hasMatch(raw.trim());
+
+  bool _isVolumeTocTitle(String raw) => _volumeTitlePattern.hasMatch(raw.trim());
+
   bool _isOutlineMetadataTitle(String value) {
     final title = value.trim().replaceAll(RegExp(r'\s+'), '');
     final words = _graphRuleWords.metadataUnits;
@@ -1086,16 +1118,22 @@ class BookReaderController extends ChangeNotifier {
           itemId: item.id,
         );
         if (current != null) {
-          if (current.messages.isEmpty) {
+          final work = currentReadingWork;
+          final workKey = work == null ? null : workKeyFor(work);
+          // 只清当前作用域的大纲；删整个文件仅在所有内容都空时——否则会把
+          // 其他作品的大纲和聊天记录一起抹掉（合集整本 messages 恒为空，
+          // 不能只凭 messages.isEmpty 判断）。
+          final cleared = workKey == null
+              ? current.copyWith(clearOutline: true)
+              : current.copyWith(clearWorkOutlineKey: workKey);
+          final empty = cleared.messages.isEmpty &&
+              cleared.outline == null &&
+              cleared.workOutlines.isEmpty &&
+              cleared.workMessages.isEmpty;
+          if (empty) {
             await store.delete(item.contentHash);
           } else {
-            final work = currentReadingWork;
-            final workKey = work == null ? null : workKeyFor(work);
-            await store.write(
-              workKey == null
-                  ? current.copyWith(clearOutline: true)
-                  : current.copyWith(clearWorkOutlineKey: workKey),
-            );
+            await store.write(cleared);
           }
         }
       }
@@ -1127,8 +1165,7 @@ class BookReaderController extends ChangeNotifier {
   /// Single source for the collection's works: the one-shot structural
   /// recognition (work-granular, stable keys) wins; outline-derived
   /// candidates are the fallback. All collection getters must read this.
-  List<AiGraphWorkCandidate>? get _works =>
-      _resolvedGraphWorks ?? graphWorkCandidates;
+  List<AiGraphWorkCandidate>? get _works => _resolvedGraphWorks;
 
   /// The collection work the reader is currently inside (current spine →
   /// work range), or null when the current section belongs to no work (plain
@@ -1227,7 +1264,7 @@ class BookReaderController extends ChangeNotifier {
     final store = _aiGraphStore;
     if (store == null) return;
     try {
-      final works = graphWorkCandidates;
+      final works = _resolvedGraphWorks;
       if (works == null || works.length < 2) return;
       final target = _matchingWorkForGraph(works, graph);
       if (target == null) return;
@@ -1299,109 +1336,151 @@ class BookReaderController extends ChangeNotifier {
     return done.future;
   }
 
-  /// Non-null when the outline reveals a collection / multi-volume book:
-  /// at least two outline units each spanning multiple spine sections
-  /// (a plain book's chapters are one-section units). Each candidate is one
-  /// work the user can generate the graph for; the sheet shows a picker.
-  ///
-  /// The outline does not persist `endSectionIndexExclusive` for every unit
-  /// (see real collection caches), so a work's end is derived from the next
-  /// unit's start; the last work is open-ended (spans to the book's tail).
-
-
-  List<AiGraphWorkCandidate>? get graphWorkCandidates {
-    final outline = _bookOutline;
-    if (outline == null) return null;
-    final rows = <(int?, String, int?, String)>[
-      for (final chapter in outline.chapters)
-        // Volume-opening TOC nodes (e.g. a collection's first work) can have
-        // a null sourceSectionIndex; keep them — they resolve to spine 1.
-        (chapter.sourceSectionIndex, chapter.title,
-            chapter.endSectionIndexExclusive, chapter.summary.trim()),
-    ];
-    return _worksFromRows(rows);
-  }
-
-  /// Same as [graphWorkCandidates], but when no outline exists yet it runs a
-  /// one-shot structural recognition (a single short call vs. the dozens of
-  /// extraction calls a generation makes) to detect collections. Returns null
-  /// on recognition failure → caller falls back to full-book generation.
+  /// Detect collections / multi-volume books from the TOC, not from LLM
+  /// structural recognition: a collection titles its top-level TOC entries
+  /// after the contained works, while a single book titles them by reading
+  /// order (第X章/节/回 ...). LLM grouping proved unreliable for this (it
+  /// silently dropped chapters and mislabeled a single book's front/back
+  /// matter as works). Returns null for a single book (or no usable TOC) →
+  /// the caller generates a whole-book outline/graph.
   Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates({
     CancelToken? cancel,
   }) async {
-    final fromOutline = graphWorkCandidates;
     if (_resolvedGraphWorks != null) return _resolvedGraphWorks;
-    final service = _aiOutline;
-    if (service == null || !canUseAiChat) return fromOutline;
+    cancel?.throwIfCancelled();
     try {
-      final body = await _loadBookGraphPlainTextCached(
-        AiBookOutlineService.maxBookBodyChars,
-      );
-      cancel?.throwIfCancelled();
-      var sections = AiChatRetrieve.splitSections(body);
-      if (sections.isEmpty) return fromOutline;
-      final titled = _withTitles(
-        sections,
-        fallback: _titleForOutlineSection,
-      );
-      final eligible =
-          _graphEligibleSections(_filterOutlineSections(titled));
-      if (eligible.isEmpty) return fromOutline;
-      final units = await service.planStructure(
-        bookTitle: item.title,
-        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        sections: eligible,
-        cancelToken: cancel,
-      );
-      final rows = <(int?, String, int?, String)>[
-        for (final unit in units)
-          (unit.sourceSectionIndex, unit.label, null, ''),
-      ];
-      final resolved = _worksFromRows(rows);
-      _resolvedGraphWorks = resolved;
-      if (!_disposed) notifyListeners();
-      return resolved;
-    } catch (_) {
-      // Recognition failed — fall back to outline-derived candidates so a
-      // collection still works (its keys may be piece-level; the user can
-      // regenerate).
-      return fromOutline;
+      return _resolvedGraphWorks = await _resolveWorks(cancel);
+    } catch (error) {
+      // A corpus-extraction failure (WebView reload mid-read, JS callback
+      // error) must not wedge the caller: the graph tab's「识别中」spinner
+      // keys off _graphWorksLoading and would otherwise spin forever.
+      AiLog.d('resolveGraphWorkCandidates failed: $error');
+      return null;
     }
   }
 
-  /// [rows] are (startSection, title, optional persisted end). A missing end
-  /// is derived from the next row's start; the last row stays open-ended.
-  List<AiGraphWorkCandidate>? _worksFromRows(
-    List<(int?, String, int?, String)> rows,
-  ) {
-    // Volume-opening nodes with a null start come first (spine 1); the rest
-    // follow by start.
-    final ordered = [...rows]..sort((a, b) {
-      final sa = a.$1 ?? 1;
-      final sb = b.$1 ?? 1;
-      return sa.compareTo(sb);
-    });
+  Future<List<AiGraphWorkCandidate>?> _resolveWorks(CancelToken? cancel) async {
+    // Derive works from the book's own body labels, not the reader TOC: the
+    // `[§logical@spine label]` markers in the plain-text corpus are produced
+    // by the same JS that already resolves every format's TOC→spine mapping
+    // (epub NCX, mobi/azw3 flat nav, txt single spine). The Dart-side
+    // `_tocEntries` href→spine match is unreliable for azw3 (every entry
+    // came back sectionIndex=null), so reading the corpus labels is the one
+    // cross-format source that always carries a resolved spine.
+    final body = await _loadBookGraphPlainTextCached(
+      AiBookOutlineService.maxBookBodyChars,
+    );
+    cancel?.throwIfCancelled();
+    if (body.isEmpty) {
+      AiLog.d('resolveGraphWorkCandidates(toc): null (empty corpus)');
+      return null;
+    }
+
+    // ── 目录标题（仅用于命名，不用于边界）────────────────────────────
+    final sections = AiChatRetrieve.splitSections(body);
+    final labeled = <(int, String)>[
+      for (final s in sections)
+        if (s.sourceSectionIndex != null && s.label.trim().isNotEmpty)
+          (s.sourceSectionIndex!, s.label.trim()),
+    ];
+    final bySpine = <int, String>{};
+    for (final (spine, label) in labeled) {
+      bySpine.putIfAbsent(spine, () => label);
+    }
+    final tocTitles = bySpine.entries
+        .map((e) => e.value)
+        .where((t) => !_isOutlineMetadataTitle(t) && !_isGraphAppendixLabel(t))
+        .toList(growable: false);
+
+    // ── 边界从正文 spine 结构推，不信目录→正文映射 ────────────────────
+    // 合集制作参差不齐：萧红/石评梅共享同一份正文，目录 href→spine 对不齐。
+    // 但正文 spine 自己的结构是可靠的——每个作品的正文载体是一个有实质内容
+    // 的 spine（前言+各篇），其前一个 spine 常是「目录页」（列出该作品篇目）。
+    // spine 模式（toc:false）把每个正文 spine 拆成篇目级 slice，@spine 相同。
+    final spineBody = await _loadBookGraphSpineTextCached(
+      AiBookOutlineService.maxBookBodyChars,
+    );
+    final spineSections = AiChatRetrieve.splitSections(spineBody);
+    final contentSpines = <int>[]; // 有实质正文的作品载体 spine
+    final charCount = <int, int>{};
+    for (final s in spineSections) {
+      final spine = s.originSectionIndex;
+      charCount[spine] = (charCount[spine] ?? 0) + s.text.trim().length;
+    }
+    for (final spine in charCount.keys.toList()..sort()) {
+      // 实质正文：非目录页（内容远少于正文页，且以「目录」起手）。
+      if ((charCount[spine] ?? 0) < 2000) continue;
+      contentSpines.add(spine);
+    }
+
+    // 单本：只有一个正文 spine，或目录标题明显是章节模式（多数决）。
+    final chapterCount =
+        tocTitles.where(_isChapterTocTitle).length;
+    final chapterMajority = chapterCount * 2 > tocTitles.length;
+    final volumeCount = tocTitles.where(_isVolumeTocTitle).length;
+    final volumeMajority = volumeCount * 2 > tocTitles.length;
+    // 结构性信号（不依赖章名模式）：单本一章一文件，每个正文 spine 内部
+    // 只拆出 ~1 个篇目标题；合集一作品一文件，每个正文 spine 内部拆出多
+    // 篇（前言+第一辑+各篇）。篇目密度 ≫1 → 合集，≈1 → 单本。
+    final pieceCount = spineSections
+        .where((s) => s.label.trim().isNotEmpty && s.text.trim().isNotEmpty)
+        .length;
+    final piecesPerSpine = contentSpines.isEmpty
+        ? 0.0
+        : pieceCount / contentSpines.length;
+    // 合集：目录多条 + （分卷模式 或 非章节多数）+ 每个作品含多篇目。
+    // 章名不规则的单本（章名是意象词）多数决会漏，但篇目密度≈1 兜住；
+    // 各作品自身分章的合集章名多数是"第X章"，多数决会误判单本，但篇目
+    // 密度≫1 救回。两个方向的边界都由结构信号兜底，不只靠目录命名。
+    final namedCollection =
+        tocTitles.length >= 2 && (volumeMajority || !chapterMajority);
+    final structuralCollection = contentSpines.length >= 2 &&
+        contentSpines.length <= 60 &&
+        piecesPerSpine >= 3;
+    final looksCollection = namedCollection && structuralCollection;
+    AiLog.d(
+      'resolveGraphWorkCandidates(gate): named=$namedCollection '
+      'structural=$structuralCollection contentSpines=${contentSpines.length} '
+      'pieces=$pieceCount density=${piecesPerSpine.toStringAsFixed(1)} '
+      'chapterMaj=$chapterMajority volumeMaj=$volumeMajority '
+      '→ ${looksCollection ? 'COLLECTION' : 'SINGLE'}',
+    );
+    if (!looksCollection) {
+      _resolvedGraphWorks = null;
+      AiLog.d(
+        'resolveGraphWorkCandidates(spine): null '
+        '(contentSpines=${contentSpines.length} tocTitles=${tocTitles.length} '
+        'piecesPerSpine=${piecesPerSpine.toStringAsFixed(1)})',
+      );
+      if (!_disposed) notifyListeners();
+      return null;
+    }
+
+    // 标题按目录顺序对齐到各正文 spine（目录本身对，错的是映射）。标题数与
+    // 正文 spine 数不一致时（如共享正文导致多/少），取较少者按顺序对齐。
+    final titles = tocTitles;
+    final count = contentSpines.length < titles.length
+        ? contentSpines.length
+        : titles.length;
     final works = <AiGraphWorkCandidate>[];
-    for (var i = 0; i < ordered.length; i++) {
-      final (rawStart, rawTitle, persistedEnd, sample) = ordered[i];
-      final start = rawStart ?? 1;
-      final end =
-          persistedEnd ?? (i + 1 < ordered.length ? (ordered[i + 1].$1 ?? 1) : null);
-      if (end != null && end - start < 2) continue;
-      final title = rawTitle.trim();
-      if (title.isEmpty || _isGraphAppendixLabel(title)) continue;
-      if (_isOutlineMetadataTitle(title)) continue;
+    for (var i = 0; i < count; i++) {
+      final start = contentSpines[i];
+      final end = i + 1 < count ? contentSpines[i + 1] : null;
       works.add(
         AiGraphWorkCandidate(
-          title: title,
+          title: titles[i],
           startSection: start,
           endSectionExclusive: end,
-          sample: sample,
         ),
       );
     }
-    if (works.length < 2) return null;
-    return works;
+    final resolved = works.length >= 2 ? works : null;
+    _resolvedGraphWorks = resolved;
+    AiLog.d(
+      'resolveGraphWorkCandidates(spine): ${resolved == null ? 'null' : resolved.map((w) => '${w.title}[${w.startSection}-${w.endSectionExclusive ?? '∞'}]').join(', ')}',
+    );
+    if (!_disposed) notifyListeners();
+    return resolved;
   }
 
   Future<void> _generateBookGraph({
@@ -1520,137 +1599,6 @@ class BookReaderController extends ChangeNotifier {
           ),
       ];
 
-  /// 目录章节方案：把本书目录（[tocEntries]）转成大纲树——章节即目录项，
-  /// AI 只补概述与摘要。范围：单本（[work] null）= 全书目录；合集 = 当前
-  /// 作品的目录（按其 spine 范围过滤；作品的目录项都落在自己范围内）。
-  /// 返回 null 表示本书没有可用目录（调用方回退 AI 结构分组）。
-  ({List<AiBookSectionSlice> units, List<AiBookOutlineChapter> roots})?
-      _tocOutlineForRange(
-    List<AiBookSectionSlice> sections,
-    AiGraphWorkCandidate? work,
-  ) {
-    if (_tocEntries.isEmpty) return null;
-    final endBound = work?.endSectionExclusive;
-    // 收集全部目录项（不按作品范围过滤——子项可能挂在范围外的 spine
-    // 上，即「穿透到下一集读取目录」：先建全书树，再只按范围过滤顶层
-    // root，root 的整棵子树原样保留）。
-    final entries = <({String title, int spine, int depth})>[];
-    final seenSpines = <int>{};
-    for (final entry in _tocEntries) {
-      final spine = entry.sectionIndex;
-      if (spine == null || spine < 1) continue;
-      // 同一 spine 的重复目录项（如「正文」「全文」指向同一章）只保留首个，
-      // 否则两个 root 区间相同 → 相同 index 的两个 unit → 摘要校验必失败。
-      if (!seenSpines.add(spine)) continue;
-      final title = entry.title.trim();
-      if (title.isEmpty) continue;
-      entries.add((title: title, spine: spine, depth: entry.depth));
-    }
-    if (entries.isEmpty) return null;
-
-    // Rebuild the tree from the flat depth-marked list (TOC order).
-    final minDepth =
-        entries.map((e) => e.depth).reduce((a, b) => a < b ? a : b);
-    final roots = <_TocOutlineNode>[];
-    final stack = <_TocOutlineNode>[];
-    for (final entry in entries) {
-      final node = _TocOutlineNode(
-        title: entry.title,
-        spine: entry.spine,
-        depth: entry.depth - minDepth,
-      );
-      while (stack.isNotEmpty && stack.last.depth >= node.depth) {
-        stack.removeLast();
-      }
-      if (stack.isEmpty) {
-        roots.add(node);
-      } else {
-        stack.last.children.add(node);
-      }
-      stack.add(node);
-    }
-
-    // 范围过滤只作用于顶层 root：合集当前作品 = 其 spine 区间内的 root
-    // （含整棵子树）；单本（work null）= 全部。
-    final scopedRoots = work == null
-        ? roots
-        : [
-            for (final root in roots)
-              if (root.spine >= work.startSection &&
-                  (endBound == null || root.spine < endBound))
-                root,
-          ];
-    if (scopedRoots.isEmpty) return null;
-
-    // One unit per root: its body is the range of sections up to the next
-    // root's spine (目录项覆盖自己的 spine 区间). Roots whose spine was
-    // filtered out (封面/目录/版权…) still contribute their range — the
-    // sectionIndex must be the FIRST section index of that range, identical
-    // to the unit's, so the AI summary merges back reliably.
-    final units = <AiBookSectionSlice>[];
-    final effectiveRoots = <(_TocOutlineNode, int)>[];
-    for (var i = 0; i < scopedRoots.length; i++) {
-      final root = scopedRoots[i];
-      final endSpine = i + 1 < scopedRoots.length
-          ? scopedRoots[i + 1].spine
-          : null;
-      final matched = sections
-          .where((section) {
-            final src = section.sourceSectionIndex ?? section.index;
-            if (src < root.spine) return false;
-            if (endSpine != null && src >= endSpine) return false;
-            return true;
-          })
-          .toList(growable: false);
-      if (matched.isEmpty) continue; // directory item without body
-      final unitIndex = matched.first.index;
-      units.add(
-        AiBookSectionSlice(
-          index: unitIndex,
-          label: root.title,
-          text: matched.map((section) => section.text).join('\n\n'),
-          sourceSectionIndex: root.spine,
-          isNavigationUnit: true,
-        ),
-      );
-      effectiveRoots.add((root, unitIndex));
-    }
-    if (units.isEmpty) return null;
-    return (
-      units: units,
-      roots: [
-        for (final (root, unitIndex) in effectiveRoots)
-          _tocChapterFromNode(
-            root,
-            sections,
-            unitIndex: unitIndex,
-          ),
-      ],
-    );
-  }
-
-  AiBookOutlineChapter _tocChapterFromNode(
-    _TocOutlineNode node,
-    List<AiBookSectionSlice> sections, {
-    int? unitIndex,
-  }) {
-    final matched = sections
-        .where(
-          (section) => (section.sourceSectionIndex ?? section.index) == node.spine,
-        )
-        .toList(growable: false);
-    return AiBookOutlineChapter(
-      sectionIndex: unitIndex ?? (matched.isEmpty ? node.spine : matched.first.index),
-      title: node.title,
-      summary: '',
-      sourceSectionIndex: node.spine,
-      nodeId: 'toc-${node.spine}',
-      children: [
-        for (final child in node.children)
-          _tocChapterFromNode(child, sections),
-      ],
-    );
-  }
 
   /// Loads + slices the graph corpus for [work] (null = whole book) with the
   /// exact same filtering / spine-dedupe as generation, so re-analysis and
@@ -1819,15 +1767,26 @@ class BookReaderController extends ChangeNotifier {
         selection = ((await _getSelectedText?.call()) ?? '').trim();
       }
       final chapter = ((await _getChapterText?.call()) ?? '').trim();
-      final outline = _tocTitles
+      final work = currentReadingWork;
+      // 合集读哪本跟哪本：目录也裁到当前作品范围，否则全书 TOC 会让模型
+      // 综述整个合集。下标保持全书 1-based，与 get_toc 工具口径一致。
+      var outline = _tocTitles
           .map((t) => t.trim())
           .where((t) => t.isNotEmpty)
           .toList(growable: false);
+      if (work != null) {
+        outline = [
+          for (var i = 0; i < _tocTitles.length; i++)
+            if (work.contains(i + 1) && _tocTitles[i].trim().isNotEmpty)
+              _tocTitles[i].trim(),
+        ];
+      }
       return AiChatContextBundle(
         chapterTitle: currentChapterTitle,
         chapterText: chapter,
         selectionText: selection,
         tocOutline: outline,
+        scopeLabel: work?.title.trim().isNotEmpty == true ? work!.title : null,
       );
     } catch (_) {
       return AiChatContextBundle(chapterTitle: currentChapterTitle);
@@ -1907,6 +1866,16 @@ class BookReaderController extends ChangeNotifier {
     // Fallback: current chapter only if spine extract failed.
     return ((await _getChapterText?.call()) ?? '').trim();
   }
+
+  /// Loads the chat tool corpus: **TOC mode** (`toc: true`). Collections in
+  /// this app commonly pack one work per spine section (萧红散文精品 = one
+  /// spine), so the spine-mode corpus can't address a work by `contains`
+  /// (span = 1) — the scope filter misses and chat bled the whole book into
+  /// the prompt. TOC mode emits a navigation marker per work (`[§@spine~
+  /// 作品名]`), which is the unit chat scope cuts on; the per-piece sampling
+  /// inside one work isn't needed for retrieval.
+  Future<String> _loadChatCorpus(int maxChars) =>
+      _loadBookGraphPlainTextCached(maxChars);
 
   /// Tool host for on-demand body (toc / chapter / search / sample).
   AiChatToolHost get chatToolHost => _BookChatToolHost(this);
@@ -3480,7 +3449,7 @@ class _BookChatToolHost implements AiChatToolHost {
     final titles = _c.tocTitles;
     if (titles.isEmpty) {
       final body = _scopedBody(
-        await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
+        await _c._loadChatCorpus(AiChatService.maxBookBodyChars),
       );
       final sections = AiChatRetrieve.splitSections(body);
       if (sections.isNotEmpty) {
@@ -3522,7 +3491,7 @@ class _BookChatToolHost implements AiChatToolHost {
     int maxChars = 10000,
   }) async {
     final body = _scopedBody(
-      await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
+      await _c._loadChatCorpus(AiChatService.maxBookBodyChars),
     );
     final sections = AiChatRetrieve.splitSections(body);
     if (sections.isEmpty) {
@@ -3542,7 +3511,7 @@ class _BookChatToolHost implements AiChatToolHost {
   @override
   Future<String> toolSearchBook(String query, {int maxChars = 12000}) async {
     final body = _scopedBody(
-      await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
+      await _c._loadChatCorpus(AiChatService.maxBookBodyChars),
     );
     if (body.isEmpty) return '(书中无正文可检索)';
     final packed = AiChatRetrieve.pack(
@@ -3562,7 +3531,7 @@ class _BookChatToolHost implements AiChatToolHost {
   @override
   Future<String> toolSampleBook({int maxChars = 36000}) async {
     final body = _scopedBody(
-      await _c._loadBookPlainTextCached(AiChatService.maxBookBodyChars),
+      await _c._loadChatCorpus(AiChatService.maxBookBodyChars),
     );
     if (body.isEmpty) return '(书中无正文可取样)';
     final packed = AiChatRetrieve.pack(
@@ -3581,11 +3550,15 @@ class _BookChatToolHost implements AiChatToolHost {
   }
 }
 
-/// Restricts a getBookPlainText body to [work]'s spine range (「读到哪本跟
-/// 哪本」chat scope). `wholeBook` or a null work passes the body through
-/// unchanged. The re-assembled text keeps the original logical indices and
-/// navigation markers so downstream parseSections / pack / sectionText keep
-/// addressing the same slices.
+/// Restricts a getBookPlainText body to [work]'s unit (「读到哪本跟哪本」
+/// chat scope). `wholeBook` or a null work passes the body through unchanged.
+///
+/// The chat corpus is TOC-mode: one slice per work, with the work's own
+/// navigation marker (`[§@spine~ 作品名]`) as its label. We cut on the slice
+/// whose label matches [work].title — NOT on `work.contains(spine)`, because
+/// collections in this app commonly pack one work per spine section, making
+/// the spine span 1 and `contains` unreliable. Falls back to spine-contains
+/// for spine-mode bodies (tests / non-collection).
 @visibleForTesting
 String scopeChatBodyToWork(
   String body,
@@ -3594,9 +3567,20 @@ String scopeChatBodyToWork(
 }) {
   if (wholeBook || work == null) return body;
   final sections = AiChatRetrieve.splitSections(body);
-  final kept = sections
-      .where((s) => work.contains(s.originSectionIndex))
-      .toList(growable: false);
+  final wanted = work.title.trim();
+  var kept = sections.where((s) => s.label.trim() == wanted).toList();
+  var byLabel = true;
+  if (kept.isEmpty) {
+    byLabel = false;
+    kept = sections
+        .where((s) => work.contains(s.originSectionIndex))
+        .toList(growable: false);
+  }
+  AiLog.d(
+    'scopeChatBodyToWork: work=${work.title} by=${
+      byLabel ? 'label' : 'spine'
+    } sections=${sections.length} kept=${kept.length}',
+  );
   if (kept.isEmpty || kept.length == sections.length) return body;
   final buf = StringBuffer();
   for (final s in kept) {
@@ -3606,19 +3590,4 @@ String scopeChatBodyToWork(
     buf.writeln();
   }
   return buf.toString().trim();
-}
-
-/// Directory tree node used by [_tocOutlineForRange]: a flat depth-marked
-/// TOC list is rebuilt into this tree, then rendered as outline chapters.
-class _TocOutlineNode {
-  _TocOutlineNode({
-    required this.title,
-    required this.spine,
-    required this.depth,
-  });
-
-  final String title;
-  final int spine;
-  final int depth;
-  final List<_TocOutlineNode> children = [];
 }
