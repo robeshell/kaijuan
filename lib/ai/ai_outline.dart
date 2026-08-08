@@ -176,14 +176,20 @@ class AiBookOutlineService {
     if (body.isEmpty) throw AiProviderException('没有可用于生成大纲的正文');
 
     // 单元目标跟内容规模走，不只看目录条目数：多部长篇目录粗（一部一个
-    // TOC 条目），sections.length 只有 3-4，但总字数几十万--按字数补足，
-    // 否则 unitGoal 被压到最低 5，反而比固定 10 更少。
-    final totalChars = sections.fold<int>(
+    // TOC 条目），nonEmpty.length 只有 3-4，但总字数几十万--按字数补足，
+    // 否则 unitGoal 被压到最低 5，反而比固定 10 更少。用 nonEmpty 与
+    // _packBody 口径一致，避免空文本容器节点撑高 sections.length。
+    final nonEmptySections = [
+      for (final s in sections)
+      if (s.text.trim().isNotEmpty) s,
+    ];
+    final totalChars = nonEmptySections.fold<int>(
       0, (sum, s) => sum + s.text.length,
     );
     final byLength = totalChars ~/ 15000;
-    final unitGoal = (byLength > sections.length ? byLength : sections.length)
-        .clamp(5, 30);
+    final unitGoal =
+        (byLength > nonEmptySections.length ? byLength : nonEmptySections.length)
+            .clamp(5, 30);
 
     final result = await completeWithRetry(
       provider,
@@ -272,7 +278,12 @@ class AiBookOutlineService {
     final budget = raw > _maxPackedBodyChars
         ? _maxPackedBodyChars
         : (raw > _maxBodyChars ? raw : _maxBodyChars);
-    final perSection = (budget ~/ nonEmpty.length).clamp(600, 6000);
+    // perSection cap = _maxPackedBodyChars (not 6000): a few-section book
+    // (3 部 trilogy) with a large budget must let each section take its full
+    // equal share, or the lengthBudget is wasted -- 3 × 6000 = 18k sent of a
+    // 50k budget. The total is still bounded by [budget] + the final
+    // substring truncation, so this only lifts the per-section ceiling.
+    final perSection = (budget ~/ nonEmpty.length).clamp(600, _maxPackedBodyChars);
     final buf = StringBuffer();
     for (final section in nonEmpty) {
       final text = section.text.trim();
