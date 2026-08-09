@@ -112,5 +112,6 @@ abstract final class KaijuanIcons {
   static const IconData alignJustify =
       FluentIcons.text_align_justify_24_regular;
   static const IconData maximize = FluentIcons.maximize_24_regular;
+  static const IconData graph = FluentIcons.data_scatter_24_regular;
   static const IconData dismissCircle = FluentIcons.dismiss_circle_24_regular;
 }

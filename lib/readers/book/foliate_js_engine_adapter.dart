@@ -59,6 +59,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   double? _lastBrightness;
   bool? _lastChromeVisible;
   Timer? _prefsApplyTimer;
+
   /// Desktop PlatformView (WKWebView / WebView2) often keeps a stale surface
   /// until the next input; flip a sub-pixel translate to force a composite.
   bool _desktopPaintNudge = false;
@@ -166,7 +167,6 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       setMenuCursorZone: _setMenuCursorZone,
       setMenuOpen: _setMenuOpen,
       getChapterText: _getChapterText,
-      getReadSoFarText: _getReadSoFarText,
       getBookPlainText: _getBookPlainText,
       getSelectionContext: _getSelectionContext,
     );
@@ -225,7 +225,8 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
     if (session == null || !session.isCurrent(lease)) return null;
     try {
       final result = await controller.callAsyncJavaScript(
-        functionBody: '''
+        functionBody:
+            '''
 try {
   $functionBody;
 } catch (e) {
@@ -243,9 +244,7 @@ try {
 
   void _runSearch(String query) {
     if (!_webReady) return;
-    unawaited(
-      _evaluate('window.search(${jsonEncode(query)})'),
-    );
+    unawaited(_evaluate('window.search(${jsonEncode(query)})'));
   }
 
   void _clearEngineSearch() {
@@ -358,14 +357,12 @@ try {
     return raw?.toString() ?? '';
   }
 
-  Future<String> _getReadSoFarText(int maxChars) async {
-    final n = maxChars.clamp(200, 20000);
-    final raw = await _evaluate('window.previousContent($n)');
-    if (raw is String) return raw;
-    return raw?.toString() ?? '';
-  }
-
-  Future<String> _getBookPlainText(int maxChars, {bool toc = true}) async {
+  Future<String> _getBookPlainText(
+    int maxChars, {
+    bool toc = true,
+    int? startSection,
+    int? endSectionExclusive,
+  }) async {
     // Corpus-level cap (whole book), not per-prompt: see AiChatService.
     final n = maxChars.clamp(2000, 1500000);
     if (!_webReady) return '';
@@ -375,10 +372,18 @@ try {
     final session = _session;
     if (session == null || !session.isCurrent(lease)) return '';
     try {
+      final start = startSection == null ? 'null' : '$startSection';
+      final end = endSectionExclusive == null ? 'null' : '$endSectionExclusive';
       final result = await controller.callAsyncJavaScript(
-        functionBody: '''
+        functionBody:
+            '''
 try {
-  return await window.getBookPlainText({maxChars: $n, toc: $toc});
+  return await window.getBookPlainText({
+    maxChars: $n,
+    toc: $toc,
+    startSection: $start,
+    endSectionExclusive: $end,
+  });
 } catch (e) {
   console.error('[Kaika] getBookPlainText failed', e);
   return '';
@@ -532,9 +537,7 @@ try {
     final brightness = readerController.brightness;
     if (brightness == _lastBrightness) return;
     _lastBrightness = brightness;
-    await _evaluate(
-      'window.setReaderBrightness(${jsonEncode(brightness)})',
-    );
+    await _evaluate('window.setReaderBrightness(${jsonEncode(brightness)})');
   }
 
   Future<void> _onLoadEnd(BookRenditionWebLease lease) async {
@@ -643,6 +646,7 @@ try {
   void _onRelocated(FoliateRelocation relocation) {
     if (_sectionHrefs.isEmpty || !_webReady || _relocationSuspended) return;
     final sectionIndex =
+        relocation.sectionIndex ??
         BookLocator.sectionIndexFromCfi(relocation.cfi) ??
         _sectionIndexFromHref(relocation.chapterHref) ??
         0;
@@ -829,7 +833,8 @@ try {
         : readerController.pageTurnEffect.resolved == BookPageTurnEffect.none
         ? 'noAnimation'
         : 'slide';
-    final mobile = !kIsWeb &&
+    final mobile =
+        !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.iOS ||
             defaultTargetPlatform == TargetPlatform.android);
     // Foliate `gap` is the TOTAL gutter; each side gets gap/2 in padding.

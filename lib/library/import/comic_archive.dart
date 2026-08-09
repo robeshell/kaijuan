@@ -6,10 +6,7 @@ import 'package:path/path.dart' as p;
 
 /// Result of listing pages in a comic archive (CBZ/ZIP/EPUB-as-images).
 class ComicPageListing {
-  const ComicPageListing({
-    required this.pageNames,
-    this.title,
-  });
+  const ComicPageListing({required this.pageNames, this.title});
 
   /// Entry paths inside the zip, in reading order.
   final List<String> pageNames;
@@ -109,8 +106,8 @@ abstract final class ComicArchive {
     }
 
     final opfDir = p.posix.dirname(opfPath);
-    final title = _firstXmlText(opfXml, 'dc:title') ??
-        _firstXmlText(opfXml, 'title');
+    final title =
+        _firstXmlText(opfXml, 'dc:title') ?? _firstXmlText(opfXml, 'title');
 
     final manifest = <String, _ManifestItem>{};
     for (final m in RegExp(
@@ -169,7 +166,8 @@ abstract final class ComicArchive {
     }
 
     if (pages.isEmpty) {
-      final fallback = names.where(_isImageEntry).toList()..sort(naturalCompare);
+      final fallback = names.where(_isImageEntry).toList()
+        ..sort(naturalCompare);
       return ComicPageListing(pageNames: fallback, title: title);
     }
     return ComicPageListing(pageNames: pages, title: title);
@@ -180,8 +178,10 @@ abstract final class ComicArchive {
     final patterns = [
       RegExp(r'''src\s*=\s*["']([^"']+)["']''', caseSensitive: false),
       RegExp(r'''xlink:href\s*=\s*["']([^"']+)["']''', caseSensitive: false),
-      RegExp(r'''href\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|gif|webp|bmp|svg))["']''',
-          caseSensitive: false),
+      RegExp(
+        r'''href\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|gif|webp|bmp|svg))["']''',
+        caseSensitive: false,
+      ),
     ];
     for (final re in patterns) {
       for (final m in re.allMatches(html)) {
@@ -241,10 +241,10 @@ abstract final class ComicArchive {
   }
 
   static String? _readText(Archive archive, String entry) {
-    final resolved = _findEntry(
-      {for (final f in archive.files) if (f.isFile) f.name},
-      entry,
-    );
+    final resolved = _findEntry({
+      for (final f in archive.files)
+        if (f.isFile) f.name,
+    }, entry);
     if (resolved == null) return null;
     final file = archive.findFile(resolved);
     final bytes = file?.readBytes();
@@ -257,8 +257,8 @@ abstract final class ComicArchive {
     final input = InputFileStream(path);
     try {
       final archive = ZipDecoder().decodeStream(input);
-      final file = archive.findFile(entry) ??
-          archive.findFile(_normalizeZipPath(entry));
+      final file =
+          archive.findFile(entry) ?? archive.findFile(_normalizeZipPath(entry));
       final bytes = file?.readBytes();
       return bytes == null ? null : Uint8List.fromList(bytes);
     } finally {

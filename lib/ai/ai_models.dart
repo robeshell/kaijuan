@@ -10,10 +10,19 @@ class AiMessage {
 
 /// One streamed text delta from the model.
 class AiStreamChunk {
-  const AiStreamChunk({required this.text, this.isFinal = false});
+  const AiStreamChunk({
+    required this.text,
+    this.isFinal = false,
+    this.truncated = false,
+  }) : assert(!truncated || isFinal);
 
   final String text;
   final bool isFinal;
+
+  /// The provider stopped because the output reached its token limit. A
+  /// truncated terminal chunk is not a successful completion: callers should
+  /// retain any visible partial text but surface a retry/continue state.
+  final bool truncated;
 }
 
 class AiCompletionRequest {
@@ -52,7 +61,9 @@ class AiConnectionTestResult {
     : ok = true,
       message = '连接正常';
 
-  const AiConnectionTestResult.failure(this.message) : ok = false, detail = null;
+  const AiConnectionTestResult.failure(this.message)
+    : ok = false,
+      detail = null;
 
   final bool ok;
   final String message;

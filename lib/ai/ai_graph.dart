@@ -5,50 +5,27 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+
+import 'ai_book_structure.dart';
 import 'ai_log.dart';
 
-/// One selectable work/volume inside a collection when generating a graph.
-///
-/// Derived from the outline: `_planStructure` already merges each work/volume
-/// of a collection into one unit that spans multiple spine sections, so a
-/// candidate = outline chapter with `endSectionIndexExclusive - start > 1`.
-class AiGraphWorkCandidate {
-  const AiGraphWorkCandidate({
-    required this.title,
-    required this.startSection,
-    required this.endSectionExclusive,
-    this.sample = '',
-  });
+/// Compatibility name for graph UI while book structure ownership moves out
+/// of the graph domain. Chat, outline and graph now share [AiBookWork].
+typedef AiGraphWorkCandidate = AiBookWork;
 
-  /// Work/volume title (outline group title).
-  final String title;
-
-  /// Inclusive 1-based spine section where the work starts.
-  final int startSection;
-
-  /// Exclusive 1-based spine endpoint of the work. Null for the last work in
-  /// the outline: its end is the book's tail, only known at generation time.
-  final int? endSectionExclusive;
-
-  /// Outline summary sample, used as the dialog subtitle.
-  final String sample;
-
-  bool get isOpenEnded => endSectionExclusive == null;
-
-  bool contains(int spineSection) =>
-      spineSection >= startSection &&
-      (isOpenEnded || spineSection < endSectionExclusive!);
-}
-
-/// Entity kinds extracted for v1. `organization` is only generated when
-/// the narration plan says the book is organization-driven (§3.3).
+/// Evidence-backed entity kinds extracted from literary and non-fiction text.
+/// Every kind is always legal; the narration plan may tune recall emphasis
+/// but never changes this schema.
 enum AiGraphEntityType {
   person,
   location,
   event,
-  organization;
+  organization,
+  item,
+  concept,
+  creature;
 
   String get wireName => name;
 
@@ -57,6 +34,9 @@ enum AiGraphEntityType {
     'location' => AiGraphEntityType.location,
     'event' => AiGraphEntityType.event,
     'organization' => AiGraphEntityType.organization,
+    'item' => AiGraphEntityType.item,
+    'concept' => AiGraphEntityType.concept,
+    'creature' => AiGraphEntityType.creature,
     _ => AiGraphEntityType.person,
   };
 }
@@ -122,7 +102,8 @@ class AiGraphEvidence {
           : int.tryParse('$rawSection') ?? 0,
       quote: json['quote'] as String? ?? '',
       progressInSection: rawProgress is num ? rawProgress.toDouble() : null,
-      spanResolved: json['spanResolved'] as bool? ?? false,
+      spanResolved:
+          json['spanResolved'] as bool? ?? json['progressInSection'] is num,
     );
   }
 }
@@ -158,25 +139,50 @@ enum AiGraphEventType {
   String get wireName => name;
 }
 
-/// A book entity. Unique key is `name + type`.
+String graphEntityIdFor({
+  required AiGraphEntityType type,
+  required String name,
+  String identityHint = '',
+}) {
+  String normalize(String value) =>
+      value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+  final seed =
+      '${type.wireName}\u0000${normalize(name)}\u0000'
+      '${normalize(identityHint)}';
+  return 'e_${sha1.convert(utf8.encode(seed)).toString().substring(0, 20)}';
+}
+
+/// A book entity. [entityId] is the identity key; [name] is display data.
 class AiGraphEntity {
   const AiGraphEntity({
+    this.entityId = '',
     required this.name,
     required this.type,
+    this.identityHint = '',
     this.scope = AiGraphEntityScope.setting,
     this.aliases = const [],
+    this.aliasSections = const {},
     this.description = '',
+    this.descriptionSection = 0,
     this.evidence = const [],
     this.chapterFreq = const {},
     this.firstSection = 0,
     this.lastSection = 0,
     this.eventType = AiGraphEventType.other,
     this.importance = 0,
+    this.needsReview = false,
   });
+
+  /// Stable, non-display identity. Empty is accepted only for source-level
+  /// compatibility with old const fixtures; [id] always exposes a real value.
+  final String entityId;
 
   /// Canonical name (never renamed on re-extraction).
   final String name;
   final AiGraphEntityType type;
+
+  /// Short role/context used to keep same-name, same-type entities distinct.
+  final String identityHint;
 
   /// Whether this entity is part of the book's own setting or only
   /// referenced by it. Old caches without the field default to [setting]
@@ -186,13 +192,20 @@ class AiGraphEntity {
   /// Alternative names merged into this entity.
   final List<String> aliases;
 
+  /// Alias -> first section that established it. Drives read-safe snapshots.
+  final Map<String, int> aliasSections;
+
   /// Evidence-driven description (3-5 sentences when available).
   final String description;
+
+  /// Latest section used to produce [description]. Zero means legacy/unknown.
+  final int descriptionSection;
 
   /// Quote-backed provenance (appended, never overwritten).
   final List<AiGraphEvidence> evidence;
 
-  /// sectionIndex -> occurrence count in that section.
+  /// sectionIndex -> resolved evidence count in that section. This is not a
+  /// literal source-text mention frequency.
   final Map<int, int> chapterFreq;
 
   /// First / last section this entity appears in (for read-progress gating).
@@ -205,49 +218,69 @@ class AiGraphEntity {
   /// Event importance 0-3 (0 = unmarked, 3 = major plot event).
   final int importance;
 
-  String get id => '$name|${type.wireName}';
+  /// Candidate lacks enough resolved evidence or has unresolved identity.
+  final bool needsReview;
+
+  String get id => entityId.isEmpty
+      ? graphEntityIdFor(type: type, name: name, identityHint: identityHint)
+      : entityId;
 
   AiGraphEntity copyWith({
+    String? entityId,
+    String? name,
+    String? identityHint,
     AiGraphEntityScope? scope,
     List<String>? aliases,
+    Map<String, int>? aliasSections,
     String? description,
+    int? descriptionSection,
     List<AiGraphEvidence>? evidence,
     Map<int, int>? chapterFreq,
     int? firstSection,
     int? lastSection,
     AiGraphEventType? eventType,
     int? importance,
+    bool? needsReview,
   }) {
     return AiGraphEntity(
-      name: name,
+      entityId: entityId ?? id,
+      name: name ?? this.name,
       type: type,
+      identityHint: identityHint ?? this.identityHint,
       scope: scope ?? this.scope,
       aliases: aliases ?? this.aliases,
+      aliasSections: aliasSections ?? this.aliasSections,
       description: description ?? this.description,
+      descriptionSection: descriptionSection ?? this.descriptionSection,
       evidence: evidence ?? this.evidence,
       chapterFreq: chapterFreq ?? this.chapterFreq,
       firstSection: firstSection ?? this.firstSection,
       lastSection: lastSection ?? this.lastSection,
       eventType: eventType ?? this.eventType,
       importance: importance ?? this.importance,
+      needsReview: needsReview ?? this.needsReview,
     );
   }
 
   Map<String, Object?> toJson() => {
+    'entityId': id,
     'name': name,
     'type': type.wireName,
+    if (identityHint.isNotEmpty) 'identityHint': identityHint,
     'scope': scope.wireName,
     'aliases': aliases,
+    'aliasSections': aliasSections,
     'description': description,
+    'descriptionSection': descriptionSection,
     'evidence': [for (final e in evidence) e.toJson()],
     'chapterFreq': {
-      for (final entry in chapterFreq.entries)
-        '${entry.key}': entry.value,
+      for (final entry in chapterFreq.entries) '${entry.key}': entry.value,
     },
     'firstSection': firstSection,
     'lastSection': lastSection,
     'eventType': eventType.wireName,
     'importance': importance,
+    if (needsReview) 'needsReview': true,
   };
 
   static AiGraphEntity? fromJson(Map<String, dynamic> json) {
@@ -264,9 +297,23 @@ class AiGraphEntity {
     }
     final rawEvidence = json['evidence'];
     final rawAliases = json['aliases'];
+    final type = AiGraphEntityType.fromWireName(json['type']);
+    final hint = (json['identityHint'] as String? ?? '').trim();
+    final rawAliasSections = json['aliasSections'];
+    final aliasSections = <String, int>{};
+    if (rawAliasSections is Map) {
+      for (final entry in rawAliasSections.entries) {
+        final section = entry.value;
+        if (section is int && '${entry.key}'.trim().isNotEmpty) {
+          aliasSections['${entry.key}'.trim()] = section;
+        }
+      }
+    }
     return AiGraphEntity(
+      entityId: (json['entityId'] as String? ?? '').trim(),
       name: name.trim(),
-      type: AiGraphEntityType.fromWireName(json['type']),
+      type: type,
+      identityHint: hint,
       scope: AiGraphEntityScope.fromWireName(json['scope']),
       aliases: rawAliases is List
           ? rawAliases
@@ -275,7 +322,9 @@ class AiGraphEntity {
                 .where((value) => value.isNotEmpty)
                 .toList(growable: false)
           : const [],
+      aliasSections: aliasSections,
       description: json['description'] as String? ?? '',
+      descriptionSection: json['descriptionSection'] as int? ?? 0,
       evidence: _evidenceList(rawEvidence),
       chapterFreq: freq,
       firstSection: json['firstSection'] as int? ?? 0,
@@ -284,6 +333,7 @@ class AiGraphEntity {
       importance: json['importance'] is int
           ? (json['importance'] as int).clamp(0, 3)
           : 0,
+      needsReview: json['needsReview'] as bool? ?? false,
     );
   }
 
@@ -307,6 +357,8 @@ class AiGraphEntity {
 /// A typed relation between two entities.
 class AiGraphRelation {
   const AiGraphRelation({
+    this.sourceId = '',
+    this.targetId = '',
     required this.source,
     required this.target,
     required this.type,
@@ -314,8 +366,11 @@ class AiGraphRelation {
     this.kin = '',
     this.evidence = const [],
     this.weight = 1,
+    this.needsReview = false,
   });
 
+  final String sourceId;
+  final String targetId;
   final String source;
   final String target;
 
@@ -331,28 +386,41 @@ class AiGraphRelation {
 
   /// Evidence count after merge (chapter coverage).
   final double weight;
+  final bool needsReview;
 
-  /// Merge key keeps direction: `A father_of B` != `B father_of A`.
-  String get mergeKey => '$source\u0000$target\u0000$type';
+  /// Merge key keeps direction and is stable across display-name changes.
+  String get mergeKey =>
+      '${sourceId.isEmpty ? source : sourceId}\u0000'
+      '${targetId.isEmpty ? target : targetId}\u0000$type';
 
   AiGraphRelation copyWith({
+    String? sourceId,
+    String? targetId,
+    String? source,
+    String? target,
     String? description,
     String? kin,
     List<AiGraphEvidence>? evidence,
     double? weight,
+    bool? needsReview,
   }) {
     return AiGraphRelation(
-      source: source,
-      target: target,
+      sourceId: sourceId ?? this.sourceId,
+      targetId: targetId ?? this.targetId,
+      source: source ?? this.source,
+      target: target ?? this.target,
       type: type,
       description: description ?? this.description,
       kin: kin ?? this.kin,
       evidence: evidence ?? this.evidence,
       weight: weight ?? this.weight,
+      needsReview: needsReview ?? this.needsReview,
     );
   }
 
   Map<String, Object?> toJson() => {
+    if (sourceId.isNotEmpty) 'sourceId': sourceId,
+    if (targetId.isNotEmpty) 'targetId': targetId,
     'source': source,
     'target': target,
     'type': type,
@@ -360,6 +428,7 @@ class AiGraphRelation {
     if (kin.isNotEmpty) 'kin': kin,
     'evidence': [for (final e in evidence) e.toJson()],
     'weight': weight,
+    if (needsReview) 'needsReview': true,
   };
 
   static AiGraphRelation? fromJson(Map<String, dynamic> json) {
@@ -376,6 +445,8 @@ class AiGraphRelation {
     }
     final rawEvidence = json['evidence'];
     return AiGraphRelation(
+      sourceId: (json['sourceId'] as String? ?? '').trim(),
+      targetId: (json['targetId'] as String? ?? '').trim(),
       source: source.trim(),
       target: target.trim(),
       type: type.trim(),
@@ -383,6 +454,7 @@ class AiGraphRelation {
       kin: json['kin'] as String? ?? '',
       evidence: AiGraphEntity._evidenceList(rawEvidence),
       weight: json['weight'] is num ? (json['weight'] as num).toDouble() : 1,
+      needsReview: json['needsReview'] as bool? ?? false,
     );
   }
 }
@@ -407,8 +479,7 @@ class AiNarrationPlan {
   /// Five narration dimensions, each independent 0..1.
   final Map<String, double> features;
 
-  /// Recommended default view. One of [knownViews]; `org_tree` is not
-  /// produced until the organization tree lands.
+  /// Recommended default view. One of [knownViews].
   final String defaultView;
 
   /// Entry order (a permutation of the available views, [defaultView] first).
@@ -430,9 +501,10 @@ class AiNarrationPlan {
     'persons',
     'locations',
     'events',
+    'organizations',
+    'things',
     'graph',
     'family_tree',
-    'org_tree',
   ];
 
   double feature(String key) => features[key] ?? 0;
@@ -478,24 +550,29 @@ class AiNarrationPlan {
       features[key] = (raw is num ? raw.toDouble() : 0.0).clamp(0.0, 1.0);
     }
     // Essays (散文/杂文/评论) carry no lineage or faction structure — a
-    // family tree / org tree entry makes no sense there, even when the model
-    // guessed one (a collection judged as a whole can still score
-    // organization high). Drop both views and fall back to the plain graph.
+    // family-tree entry makes no sense there, even when the model guessed one.
     final essayHigh = (features['essay'] ?? 0.0) >= 0.5;
-    final view = json['defaultView'];
+    String? normalizeView(Object? raw) {
+      if (raw == 'org_tree') return 'organizations';
+      return raw is String ? raw : null;
+    }
+
+    final view = normalizeView(json['defaultView']);
     final derived = _deriveDefaultView(features);
-    var resolvedView =
-        (view is String && knownViews.contains(view)) ? view : derived;
-    if (essayHigh &&
-        (resolvedView == 'family_tree' || resolvedView == 'org_tree')) {
+    var resolvedView = (view is String && knownViews.contains(view))
+        ? view
+        : derived;
+    if (essayHigh && resolvedView == 'family_tree') {
       resolvedView = 'graph';
     }
-    final rawOrder =
-        json['viewOrder'] is List ? json['viewOrder'] as List : const <dynamic>[];
+    final rawOrder = json['viewOrder'] is List
+        ? json['viewOrder'] as List
+        : const <dynamic>[];
     final modelOrder = rawOrder
+        .map(normalizeView)
         .whereType<String>()
         .where(knownViews.contains)
-        .where((v) => !essayHigh || (v != 'family_tree' && v != 'org_tree'))
+        .where((v) => !essayHigh || v != 'family_tree')
         .toList();
     final viewOrder = [
       resolvedView,
@@ -504,7 +581,7 @@ class AiNarrationPlan {
       for (final v in knownViews)
         if (v != resolvedView &&
             !modelOrder.contains(v) &&
-            (!essayHigh || (v != 'family_tree' && v != 'org_tree')))
+            (!essayHigh || v != 'family_tree'))
           v,
     ];
     return AiNarrationPlan(
@@ -519,7 +596,7 @@ class AiNarrationPlan {
   /// essays default to the plain relation graph.
   static String _deriveDefaultView(Map<String, double> features) {
     const mapping = <String, String>{
-      'organization': 'family_tree',
+      'organization': 'organizations',
       'characterEnsemble': 'persons',
       'eventDriven': 'events',
       'geography': 'locations',
@@ -550,12 +627,14 @@ class AiBookGraph {
     this.sectionTitles = const {},
     this.excludedGraphSections = const [],
     this.mergeLog = const [],
+    this.qualityIssues = const [],
+    this.hiddenEntityIds = const [],
     this.entities = const [],
     this.relations = const [],
     this.narration,
   });
 
-  static const int currentVersion = 1;
+  static const int currentVersion = 2;
 
   final String contentHash;
   final DateTime? generatedAt;
@@ -592,6 +671,13 @@ class AiBookGraph {
   /// (Dedupe/Splink convention) so wrong merges are traceable and fixable.
   final List<Map<String, Object?>> mergeLog;
 
+  /// Production quality-gate findings. Empty means the structural gate passed.
+  final List<String> qualityIssues;
+
+  /// User-level suppression overrides. Stable IDs make the choice survive
+  /// incremental extraction and regeneration merges.
+  final List<String> hiddenEntityIds;
+
   final List<AiGraphEntity> entities;
   final List<AiGraphRelation> relations;
 
@@ -610,6 +696,8 @@ class AiBookGraph {
     Map<int, String>? sectionTitles,
     List<int>? excludedGraphSections,
     List<Map<String, Object?>>? mergeLog,
+    List<String>? qualityIssues,
+    List<String>? hiddenEntityIds,
     List<AiGraphEntity>? entities,
     List<AiGraphRelation>? relations,
     AiNarrationPlan? narration,
@@ -626,6 +714,8 @@ class AiBookGraph {
       excludedGraphSections:
           excludedGraphSections ?? this.excludedGraphSections,
       mergeLog: mergeLog ?? this.mergeLog,
+      qualityIssues: qualityIssues ?? this.qualityIssues,
+      hiddenEntityIds: hiddenEntityIds ?? this.hiddenEntityIds,
       entities: entities ?? this.entities,
       relations: relations ?? this.relations,
       narration: narration ?? this.narration,
@@ -635,7 +725,8 @@ class AiBookGraph {
   Map<String, Object?> toJson() => {
     'version': currentVersion,
     'contentHash': contentHash,
-    if (generatedAt != null) 'generatedAt': generatedAt!.toUtc().toIso8601String(),
+    if (generatedAt != null)
+      'generatedAt': generatedAt!.toUtc().toIso8601String(),
     if (generationSeconds != null) 'generationSeconds': generationSeconds,
     'model': model,
     'includesUnread': includesUnread,
@@ -643,6 +734,8 @@ class AiBookGraph {
     'coveredSections': coveredSections,
     'excludedGraphSections': excludedGraphSections,
     'mergeLog': mergeLog,
+    'qualityIssues': qualityIssues,
+    'hiddenEntityIds': hiddenEntityIds,
     'sectionTitles': {
       for (final entry in sectionTitles.entries) '${entry.key}': entry.value,
     },
@@ -651,10 +744,12 @@ class AiBookGraph {
     if (narration != null) 'narration': narration!.toJson(),
   };
 
-  /// Null when the payload is invalid or produced by an older generator.
+  /// Reads v2 and migrates v1 identity-by-name caches to deterministic IDs.
   static AiBookGraph? fromJson(Map<String, dynamic> json) {
     final version = json['version'];
-    if (version is! int || version != currentVersion) return null;
+    if (version is! int || (version != 1 && version != currentVersion)) {
+      return null;
+    }
     final hash = json['contentHash'];
     if (hash is! String || hash.isEmpty) return null;
     final rawEntities = json['entities'];
@@ -666,7 +761,13 @@ class AiBookGraph {
           final entity = AiGraphEntity.fromJson(
             Map<String, dynamic>.from(item),
           );
-          if (entity != null) entities.add(entity);
+          if (entity != null) {
+            entities.add(
+              entity.entityId.isEmpty
+                  ? entity.copyWith(entityId: entity.id)
+                  : entity,
+            );
+          }
         }
       }
     }
@@ -684,7 +785,39 @@ class AiBookGraph {
     final rawCovered = json['coveredSections'];
     final rawExcluded = json['excludedGraphSections'];
     final rawMergeLog = json['mergeLog'];
+    final rawQualityIssues = json['qualityIssues'];
+    final rawHiddenEntityIds = json['hiddenEntityIds'];
     final rawTitles = json['sectionTitles'];
+    final idsByName = <String, List<String>>{};
+    for (final entity in entities) {
+      idsByName.putIfAbsent(entity.name, () => []).add(entity.id);
+      for (final alias in entity.aliases) {
+        idsByName.putIfAbsent(alias, () => []).add(entity.id);
+      }
+    }
+    final migratedRelations = <AiGraphRelation>[];
+    for (final relation in relations) {
+      String uniqueId(String name) {
+        final ids = idsByName[name]?.toSet() ?? const <String>{};
+        return ids.length == 1 ? ids.single : '';
+      }
+
+      migratedRelations.add(
+        relation.copyWith(
+          sourceId: relation.sourceId.isEmpty
+              ? uniqueId(relation.source)
+              : relation.sourceId,
+          targetId: relation.targetId.isEmpty
+              ? uniqueId(relation.target)
+              : relation.targetId,
+          needsReview:
+              relation.needsReview ||
+              (relation.sourceId.isEmpty &&
+                  uniqueId(relation.source).isEmpty) ||
+              (relation.targetId.isEmpty && uniqueId(relation.target).isEmpty),
+        ),
+      );
+    }
     return AiBookGraph(
       contentHash: hash,
       generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? ''),
@@ -701,9 +834,14 @@ class AiBookGraph {
       mergeLog: rawMergeLog is List
           ? [
               for (final entry in rawMergeLog)
-                if (entry is Map)
-                  Map<String, Object?>.from(entry),
+                if (entry is Map) Map<String, Object?>.from(entry),
             ]
+          : const [],
+      qualityIssues: rawQualityIssues is List
+          ? rawQualityIssues.whereType<String>().toList(growable: false)
+          : const [],
+      hiddenEntityIds: rawHiddenEntityIds is List
+          ? rawHiddenEntityIds.whereType<String>().toList(growable: false)
           : const [],
       sectionTitles: rawTitles is Map
           ? {
@@ -713,137 +851,381 @@ class AiBookGraph {
             }
           : const {},
       entities: entities,
-      relations: relations,
+      relations: migratedRelations,
       narration: AiNarrationPlan.fromJson(
         json['narration'] is Map
             ? Map<String, dynamic>.from(json['narration'] as Map)
             : null,
       ),
+    ).repairDuplicateEntityIds().repairEquivalentMentions();
+  }
+
+  /// Repairs graphs produced before the exact-ID merge invariant was
+  /// enforced. Duplicate IDs represent the same logical entity, so their
+  /// evidence and metadata are fused instead of discarding an arbitrary row.
+  /// Relations are collapsed by their stable endpoint/type key as well.
+  AiBookGraph repairDuplicateEntityIds() {
+    final entitiesById = <String, AiGraphEntity>{};
+    var changed = false;
+
+    for (final entity in entities) {
+      final current = entitiesById[entity.id];
+      if (current == null) {
+        entitiesById[entity.id] = entity;
+        continue;
+      }
+      changed = true;
+      entitiesById[entity.id] = _mergeDuplicateEntity(current, entity);
+    }
+
+    final relationsByKey = <String, AiGraphRelation>{};
+    for (final relation in relations) {
+      final current = relationsByKey[relation.mergeKey];
+      if (current == null) {
+        relationsByKey[relation.mergeKey] = relation;
+        continue;
+      }
+      changed = true;
+      relationsByKey[relation.mergeKey] = _mergeDuplicateRelation(
+        current,
+        relation,
+      );
+    }
+
+    if (!changed) return this;
+    AiLog.d(
+      'graph identity repair: entities ${entities.length}→${entitiesById.length}, '
+      'relations ${relations.length}→${relationsByKey.length}',
+    );
+    return copyWith(
+      entities: entitiesById.values.toList(growable: false),
+      relations: relationsByKey.values.toList(growable: false),
+      qualityIssues: qualityIssues
+          .where((issue) => !issue.contains('重复实体 ID'))
+          .toList(growable: false),
     );
   }
-}
 
-/// File-backed graph cache: one JSON file per contentHash under `ai_graph/`.
-class AiGraphStore {
-  AiGraphStore(this._directory);
+  /// Repairs one logical entity that the extractor emitted several times in
+  /// the same text unit with changing life-stage/role hints. Exact display
+  /// name alone is never enough (two 张伟 must survive); a non-name alias
+  /// shared by the rows is required positive identity evidence. Every
+  /// relation endpoint is rewired to the strongest representative ID.
+  AiBookGraph repairEquivalentMentions() {
+    final groups = <String, List<AiGraphEntity>>{};
+    for (final entity in entities) {
+      groups
+          .putIfAbsent('${entity.type.wireName}\u0000${entity.name}', () => [])
+          .add(entity);
+    }
+    final replacements = <String, String>{};
+    final repairedEntities = <AiGraphEntity>[];
 
-  final Directory _directory;
+    Set<String> identityAliases(AiGraphEntity entity) => entity.aliases
+        .map((alias) => alias.trim())
+        .where((alias) => alias.isNotEmpty && alias != entity.name)
+        .toSet();
 
-  /// One file per graph. A collection keeps one graph per work
-  /// (docs/specs/ai-graph.md §合集选书): `$hash.json` for the whole book,
-  /// `$hash.$workKey.json` for a single work inside a collection.
-  static String fileNameFor(String contentHash, {String? workKey}) {
-    final safe = contentHash.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-    if (workKey == null) return '$safe.json';
-    final safeKey = workKey.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-    return '$safe.$safeKey.json';
+    for (final group in groups.values) {
+      if (group.length == 1) {
+        repairedEntities.add(group.single);
+        continue;
+      }
+      final pending = [...group];
+      while (pending.isNotEmpty) {
+        final component = <AiGraphEntity>[pending.removeAt(0)];
+        final aliases = identityAliases(component.single);
+        var expanded = true;
+        while (expanded) {
+          expanded = false;
+          for (var i = pending.length - 1; i >= 0; i--) {
+            final candidateAliases = identityAliases(pending[i]);
+            if (aliases.intersection(candidateAliases).isEmpty) continue;
+            final candidate = pending.removeAt(i);
+            component.add(candidate);
+            aliases.addAll(candidateAliases);
+            expanded = true;
+          }
+        }
+        if (component.length == 1) {
+          repairedEntities.add(component.single);
+          continue;
+        }
+        component.sort((a, b) {
+          final byEvidence = b.evidence.length.compareTo(a.evidence.length);
+          if (byEvidence != 0) return byEvidence;
+          return a.firstSection.compareTo(b.firstSection);
+        });
+        var merged = component.first;
+        for (final duplicate in component.skip(1)) {
+          merged = _mergeDuplicateEntity(merged, duplicate);
+          replacements[duplicate.id] = component.first.id;
+        }
+        replacements[component.first.id] = component.first.id;
+        repairedEntities.add(merged);
+      }
+    }
+
+    if (replacements.isEmpty) return this;
+    final repairedById = {
+      for (final entity in repairedEntities) entity.id: entity,
+    };
+    final repairedRelations = <String, AiGraphRelation>{};
+    for (final relation in relations) {
+      final sourceId = replacements[relation.sourceId] ?? relation.sourceId;
+      final targetId = replacements[relation.targetId] ?? relation.targetId;
+      if (sourceId.isNotEmpty && sourceId == targetId) continue;
+      final rewired = relation.copyWith(
+        sourceId: sourceId,
+        targetId: targetId,
+        source: repairedById[sourceId]?.name ?? relation.source,
+        target: repairedById[targetId]?.name ?? relation.target,
+      );
+      final current = repairedRelations[rewired.mergeKey];
+      repairedRelations[rewired.mergeKey] = current == null
+          ? rewired
+          : _mergeDuplicateRelation(current, rewired);
+    }
+    AiLog.d(
+      'graph mention repair: entities ${entities.length}→${repairedEntities.length}, '
+      'relations ${relations.length}→${repairedRelations.length}',
+    );
+    return copyWith(
+      entities: repairedEntities,
+      relations: repairedRelations.values.toList(growable: false),
+      hiddenEntityIds: hiddenEntityIds
+          .map((id) => replacements[id] ?? id)
+          .toSet()
+          .toList(growable: false),
+    );
   }
 
-  File _fileFor(String contentHash, {String? workKey}) => File(
-    '${_directory.path}${Platform.pathSeparator}'
-    '${fileNameFor(contentHash, workKey: workKey)}',
-  );
-
-  /// The per-work key embedded in a collection file name, or null for a
-  /// whole-book graph. Parses `$hash.$workKey.json`.
-  static String? workKeyOfFile(String fileName, String contentHash) {
-    final safe = contentHash.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-    final stem = fileName.endsWith('.json')
-        ? fileName.substring(0, fileName.length - 5)
-        : fileName;
-    if (stem == safe) return null;
-    if (stem.startsWith('$safe.')) {
-      final key = stem.substring(safe.length + 1);
-      if (key.isNotEmpty) return key;
+  AiGraphEntity? entityById(String id) {
+    for (final entity in entities) {
+      if (entity.id == id) return entity;
     }
     return null;
   }
 
-  Future<AiBookGraph?> read(String contentHash, {String? workKey}) async {
-    try {
-      final file = _fileFor(contentHash, workKey: workKey);
-      if (!await file.exists()) return null;
-      final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map) return null;
-      return AiBookGraph.fromJson(Map<String, dynamic>.from(decoded));
-    } catch (error) {
-      AiLog.d('AiGraphStore read failed: $error');
-      return null;
+  /// Immutable spoiler-safe projection used whenever a full-book graph is
+  /// viewed with unread context disabled.
+  AiBookGraph readSafeThrough(int section) {
+    final visibleEntities = <AiGraphEntity>[];
+    for (final entity in entities) {
+      final evidence = entity.evidence
+          .where((item) => item.sectionIndex <= section)
+          .toList(growable: false);
+      if (evidence.isEmpty) continue;
+      final aliases = entity.aliases
+          .where((alias) {
+            final established = entity.aliasSections[alias];
+            return established == null
+                ? entity.lastSection <= section
+                : established <= section;
+          })
+          .toList(growable: false);
+      final descriptionSafe = entity.descriptionSection > 0
+          ? entity.descriptionSection <= section
+          : entity.lastSection <= section;
+      visibleEntities.add(
+        entity.copyWith(
+          aliases: aliases,
+          aliasSections: {
+            for (final alias in aliases)
+              alias: entity.aliasSections[alias] ?? entity.lastSection,
+          },
+          description: descriptionSafe ? entity.description : '',
+          evidence: evidence,
+          chapterFreq: {
+            for (final entry in entity.chapterFreq.entries)
+              if (entry.key <= section) entry.key: entry.value,
+          },
+          lastSection: evidence
+              .map((item) => item.sectionIndex)
+              .reduce((left, right) => left > right ? left : right),
+        ),
+      );
     }
+    final visibleIds = {for (final entity in visibleEntities) entity.id};
+    final visibleRelations = <AiGraphRelation>[];
+    for (final relation in relations) {
+      if (relation.sourceId.isEmpty || relation.targetId.isEmpty) continue;
+      final evidence = relation.evidence
+          .where((item) => item.sectionIndex <= section)
+          .toList(growable: false);
+      if (evidence.isEmpty) continue;
+      final sourceVisible = visibleIds.contains(relation.sourceId);
+      final targetVisible = visibleIds.contains(relation.targetId);
+      if (!sourceVisible || !targetVisible) continue;
+      visibleRelations.add(
+        relation.copyWith(
+          evidence: evidence,
+          weight: evidence.length.toDouble(),
+        ),
+      );
+    }
+    return copyWith(entities: visibleEntities, relations: visibleRelations);
   }
 
-  /// All per-work graphs for [contentHash] (collection files `$hash.*.json`),
-  /// keyed by workKey. Whole-book files (`$hash.json`) are not included.
-  Future<Map<String, AiBookGraph>> readAllFor(String contentHash) async {
-    try {
-      if (!await _directory.exists()) return {};
-      final safe = contentHash.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-      final result = <String, AiBookGraph>{};
-      await for (final entity in _directory.list(followLinks: false)) {
-        if (entity is! File || !entity.path.endsWith('.json')) continue;
-        final key = workKeyOfFile(entity.uri.pathSegments.last, safe);
-        if (key == null) continue;
-        final decoded = jsonDecode(await entity.readAsString());
-        if (decoded is! Map) continue;
-        final graph = AiBookGraph.fromJson(Map<String, dynamic>.from(decoded));
-        if (graph != null) result[key] = graph;
-      }
-      return result;
-    } catch (error) {
-      AiLog.d('AiGraphStore readAllFor failed: $error');
-      return {};
+  /// Removes claims that cannot be traced back to an exact source span.
+  /// Unresolved candidates remain in the stored graph for a later repair run,
+  /// but are not presented as established facts.
+  AiBookGraph verifiedForDisplay() {
+    final visibleEntities = <AiGraphEntity>[];
+    for (final entity in entities) {
+      if (hiddenEntityIds.contains(entity.id)) continue;
+      final evidence = entity.evidence
+          .where((item) => item.spanResolved)
+          .toList(growable: false);
+      if (evidence.isEmpty) continue;
+      visibleEntities.add(
+        entity.copyWith(
+          evidence: evidence,
+          chapterFreq: {
+            for (final section
+                in evidence.map((item) => item.sectionIndex).toSet())
+              section: evidence
+                  .where((item) => item.sectionIndex == section)
+                  .length,
+          },
+          needsReview: false,
+        ),
+      );
     }
-  }
-
-  Future<void> write(AiBookGraph graph, {String? workKey}) async {
-    await _directory.create(recursive: true);
-    final file = _fileFor(graph.contentHash, workKey: workKey);
-    await file.writeAsString(jsonEncode(graph.toJson()), flush: true);
-  }
-
-  Future<void> delete(String contentHash, {String? workKey}) async {
-    final file = _fileFor(contentHash, workKey: workKey);
-    if (await file.exists()) {
-      await file.delete();
+    final ids = {for (final entity in visibleEntities) entity.id};
+    final visibleRelations = <AiGraphRelation>[];
+    for (final relation in relations) {
+      if (relation.sourceId.isEmpty || relation.targetId.isEmpty) continue;
+      final evidence = relation.evidence
+          .where((item) => item.spanResolved)
+          .toList(growable: false);
+      if (evidence.isEmpty) continue;
+      final sourceVisible = ids.contains(relation.sourceId);
+      final targetVisible = ids.contains(relation.targetId);
+      if (!sourceVisible || !targetVisible) continue;
+      visibleRelations.add(
+        relation.copyWith(
+          evidence: evidence,
+          weight: evidence.length.toDouble(),
+          needsReview: false,
+        ),
+      );
     }
+    return copyWith(entities: visibleEntities, relations: visibleRelations);
   }
 }
 
-/// Objective quality gate for a generated graph (docs/specs/ai-graph-pipeline.md
-/// §5). Computed by AiBookGraphService.assessGraphQuality — every metric is
-/// structure-self-consistency, requiring no human annotation, so ANY book can
-/// be screened automatically after generation.
-class AiGraphQualityReport {
-  const AiGraphQualityReport({
-    required this.reversedKinPairs,
-    required this.kinlessKinEdges,
-    required this.mislabelledReferences,
-    required this.mirrorPairs,
-    required this.isolatedEntityRatio,
-    required this.issues,
-  });
+AiGraphEntity _mergeDuplicateEntity(AiGraphEntity first, AiGraphEntity second) {
+  final evidenceByQuote = <String, AiGraphEvidence>{};
+  for (final evidence in [...first.evidence, ...second.evidence]) {
+    final key = '${evidence.sectionIndex}\u0000${evidence.quote.trim()}';
+    final current = evidenceByQuote[key];
+    if (current == null || (!current.spanResolved && evidence.spanResolved)) {
+      evidenceByQuote[key] = evidence;
+    }
+  }
+  final evidence = evidenceByQuote.values.toList(growable: false)
+    ..sort((a, b) => a.sectionIndex.compareTo(b.sectionIndex));
+  final chapterFreq = <int, int>{};
+  if (evidence.isNotEmpty) {
+    for (final item in evidence) {
+      chapterFreq[item.sectionIndex] =
+          (chapterFreq[item.sectionIndex] ?? 0) + 1;
+    }
+  } else {
+    for (final entry in [
+      ...first.chapterFreq.entries,
+      ...second.chapterFreq.entries,
+    ]) {
+      final current = chapterFreq[entry.key] ?? 0;
+      if (entry.value > current) chapterFreq[entry.key] = entry.value;
+    }
+  }
 
-  /// 亲属 edges where both A→B and B→A exist with the same kin (the flipped
-  /// mirror should have been deduped by _dedupeReverseKinEdges).
-  final int reversedKinPairs;
+  final aliases = <String>{
+    ...first.aliases,
+    ...second.aliases,
+  }.toList(growable: false);
+  final aliasSections = <String, int>{};
+  for (final alias in aliases) {
+    final a = first.aliasSections[alias];
+    final b = second.aliasSections[alias];
+    aliasSections[alias] = switch ((a, b)) {
+      (final int left, final int right) => left < right ? left : right,
+      (final int value, null) || (null, final int value) => value,
+      _ => first.firstSection > 0 ? first.firstSection : second.firstSection,
+    };
+  }
 
-  /// 亲属 edges with an empty kin label (should have been dropped at merge).
-  final int kinlessKinEdges;
+  final preferSecondDescription =
+      second.description.isNotEmpty &&
+      (first.description.isEmpty ||
+          second.descriptionSection > first.descriptionSection ||
+          (second.descriptionSection == first.descriptionSection &&
+              second.description.length > first.description.length));
+  final positiveFirstSections = [
+    first.firstSection,
+    second.firstSection,
+  ].where((value) => value > 0);
+  final firstSection = positiveFirstSections.isEmpty
+      ? 0
+      : positiveFirstSections.reduce((a, b) => a < b ? a : b);
+  final lastSection = first.lastSection > second.lastSection
+      ? first.lastSection
+      : second.lastSection;
 
-  /// reference persons with ≥5 evidence and zero citation-template hits
-  /// (should have been restored to setting by _protectCoreEntities).
-  final int mislabelledReferences;
+  return first.copyWith(
+    identityHint: first.identityHint.isNotEmpty
+        ? first.identityHint
+        : second.identityHint,
+    scope:
+        first.scope == AiGraphEntityScope.setting ||
+            second.scope == AiGraphEntityScope.setting
+        ? AiGraphEntityScope.setting
+        : AiGraphEntityScope.reference,
+    aliases: aliases,
+    aliasSections: aliasSections,
+    description: preferSecondDescription
+        ? second.description
+        : first.description,
+    descriptionSection: preferSecondDescription
+        ? second.descriptionSection
+        : first.descriptionSection,
+    evidence: evidence,
+    chapterFreq: chapterFreq,
+    firstSection: firstSection,
+    lastSection: lastSection,
+    eventType: first.eventType != AiGraphEventType.other
+        ? first.eventType
+        : second.eventType,
+    importance: first.importance > second.importance
+        ? first.importance
+        : second.importance,
+    needsReview: first.needsReview || second.needsReview,
+  );
+}
 
-  /// Unordered pairs with the same type+kin in both directions (婚配 etc.;
-  /// informational — not a hard gate, mirrors outside 亲属 are tolerated).
-  final int mirrorPairs;
-
-  /// Share of setting persons touching no relation at all (informational:
-  /// essay collections are naturally high).
-  final double isolatedEntityRatio;
-
-  /// Human-readable problems; empty when the gate is clean.
-  final List<String> issues;
-
-  bool get hasIssues => issues.isNotEmpty;
+AiGraphRelation _mergeDuplicateRelation(
+  AiGraphRelation first,
+  AiGraphRelation second,
+) {
+  final evidenceByQuote = <String, AiGraphEvidence>{};
+  for (final evidence in [...first.evidence, ...second.evidence]) {
+    final key = '${evidence.sectionIndex}\u0000${evidence.quote.trim()}';
+    final current = evidenceByQuote[key];
+    if (current == null || (!current.spanResolved && evidence.spanResolved)) {
+      evidenceByQuote[key] = evidence;
+    }
+  }
+  final evidence = evidenceByQuote.values.toList(growable: false)
+    ..sort((a, b) => a.sectionIndex.compareTo(b.sectionIndex));
+  return first.copyWith(
+    description: first.description.isNotEmpty
+        ? first.description
+        : second.description,
+    kin: first.kin.isNotEmpty ? first.kin : second.kin,
+    evidence: evidence,
+    weight: evidence.length.toDouble(),
+    needsReview: first.needsReview || second.needsReview,
+  );
 }

@@ -77,6 +77,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - `RemoteSourceController` 负责 WebDAV / OPDS 连接记录、凭据访问、目录状态和远程导入队列；表现层不得直接持有 HTTP 客户端或安全存储。
 - WebDAV / OPDS 适配器只负责协议解析和远程字节流，必须把选中的文件转换为 `ImportCandidate`，再交给 `ImportPipeline`；不得直接写正式文件或数据库。
 - `BackupService` 负责用户自有 WebDAV 的逻辑快照、内容寻址对象和恢复合并；不得复制 SQLite 文件，也不得把备份误当成实时同步。
+- 阅读时长仍是快照数据而非跨设备 CRDT：恢复旧 `dayStats` 时必须先校验日期与非负计数，再按整行选择本地或远端较大的有效累计，禁止分别合并 active/comic/book；单本累计取较大值。若未来需要精确叠加多设备新增时长，必须另立带设备来源的单调计数器或不可变 session 记录，不能继续扩展当前日汇总行。
 - WebDAV 导入与备份共用连接和凭据，但目录选择器分流：导入只把文件送入 `ImportPipeline`，备份只返回相对 WebDAV 根目录的文件夹路径，不进入导入队列。
 - `BackupController` 是设置页唯一入口；备份页面不得直接访问 Drift、`WebDavSession` 或安全凭据。
 - 备份清单使用 `contentHash` 和相对对象路径，不得持久化本机绝对 `filePath`、WebDAV 密码或临时缓存。
@@ -93,11 +94,26 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 
 ### AI 边界（BYOK）
 
+知识图谱 v3：入口与共享的 `AiBookStructureResolver` 保持不变；识别结果之后采用“生成目标 → 内容单元 → 构建任务”三层边界。`AiGraphScopePlanner` 把书内作品与全部可读单元整理为确定性选择计划，只给出正文/辅文的默认勾选建议，不能替用户删除范围；图谱管线只接收用户确认后的正文切片，负责多类型抽取、可选补漏、证据定位、消歧、合并与方向复核，并通过 checkpoint 回调发布不可变快照。实体与关系以稳定 ID 相连，关系图、家族树及实体详情都不得用名称作为身份键；家族树只消费父母/祖辈到子女的代际边，旁系亲属保留在关系图但不进入层级。电子书正文、标题、证据摘录和已知实体表一律作为不可信上下文注入模型。
+
+本书 AI 采用组合边界，新增职责不得继续堆入阅读器 god-controller：
+
+- `BookReaderController` 暂时作为兼容门面暴露 AI 命令，并持有阅读引擎回调；正文抽取缓存由 `AiBookCorpusCache` 独立负责，作品识别及“当前位置属于哪部作品”由 `AiBookStructureSession` 作为对话/大纲/图谱的唯一结构事实源。
+- `AiBookChatToolHost` 只依赖正文缓存、本轮冻结上下文和作品范围，不得依赖表现层 controller；即使阅读引擎忽略范围参数，也必须再次本地收窄，防止相邻作品正文泄漏。
+- `AiChatService` 把供应商的单次输出限制视为传输分段而非回答失败：收到 `length` / `max_tokens` 后以同一冻结上下文自动续写、去重拼接到同一回答，并设置有界保护。流式传输只允许在首个可见文字前重试瞬时故障；首字后失败保留部分正文，不得从头静默重跑。表现层按节流频率保存 pending 回答检查点，终态写入必须排在检查点之后并覆盖它。
+- 对话、图谱与设置的模型和文件存储分别放置；JSON 原子写入、备份恢复与安全凭据不得混入模型类。`AiProvider` 只定义协议，默认工厂单独依赖具体 transport，具体 transport 不反向依赖工厂实现。
+- 下一阶段再把对话发送状态和大纲/图谱任务状态迁入独立 workspace/conversation controller；迁移前先补 Widget 流程测试，不以 `part` 或跨文件私有字段制造形式拆分。
+- 图谱模型、文件存储、抽取、合并消歧、质量门和描述润色是独立职责。管线 orchestrator 只编排这些组件，拆分不得改变提示词、算法阈值、缓存 schema 或 checkpoint 时机。
+
 - 产品范围见 [PRODUCT.md §6](./PRODUCT.md) 与 [specs/ai.md](./specs/ai.md)。
-- `lib/ai/`：`AiProvider`（OpenAI 兼容 / Anthropic Messages）、`AiSettings`（非机密 JSON）、`SecureAiCredentialStore`（模型 Key + 搜索 Key 分槽）、选区语言 `AiLanguageService`、本书对话 `AiChatService`（**轻量 tool 循环**，非 LangChain；`get_toc` / `get_chapter` / `search_book` / `sample_book`）、`AiBookOutlineService`（模型先依据 spine 标题与短样本生成并校验结构计划，再按单元分批结构化大纲与全书汇总）、`AiBookGraphService` + `AiGraphStore`（人物/地点/事件与关系抽取：章级增量、fenced JSON、quote 回填、顺序增量共指消解；`ai_graph/` 按 contentHash 缓存，用户主动快照时可备份，永不备份 Key；规格见 specs/ai-graph.md）、可选联网 `AiWebSearchService`（Tavily / Brave）+ `ai_chat/` 会话文件（按 contentHash；保存对话与大纲，用户主动快照时可备份，永不备份 Key）。
+- `lib/ai/`：`AiProvider`（OpenAI 兼容 / Anthropic Messages）、`AiSettings`（非机密、原子 JSON）、`SecureAiCredentialStore`（模型 Key + 搜索 Key 分槽）、`AiBookStructureResolver`（纯 Dart；把 TOC/spine/heading 事实归一为单本、分段单本、多作品出版物或不确定结构，供对话/大纲/图谱共享）、`AiGraphScopePlanner`（纯 Dart；把识别结果和完整内容单元变成用户可确认的范围计划）、选区语言 `AiLanguageService`、本书对话 `AiChatService`（**轻量 tool 循环**，非 LangChain；`get_toc` / `get_chapter` / `search_book` / `sample_book`）、`AiBookOutlineService`（本地确定正文范围并均匀采样；多个独立批次分别摘要，不累积对话历史；最终依据全部批次摘要生成并校验扁平大纲）、`AiBookGraphService` + `AiGraphStore`（人物、地点、事件、组织、物件、概念、非人角色与关系抽取：章级增量、fenced JSON、quote 回填、顺序增量共指消解；`ai_graph/` 按 contentHash 缓存，用户主动快照时可备份，永不备份 Key；规格见 specs/ai-graph.md）、可选联网 `AiWebSearchService`（Tavily / Brave）+ `ai_chat/` 会话文件（按 contentHash；保存对话与大纲，用户主动快照时可备份，永不备份 Key）。
+- AI 回复的富内容渲染保持在 `presentation/widgets/reader/`：`AiResultBody` 负责 Markdown AST 与扩展块分发，代码、图形、媒体分别由独立 Widget 承担；Mermaid 通过随包原生 headless 引擎离线生成 `resvg-safe` SVG，声明式 chart 先转为受限 Mermaid 语法。Mermaid 的屏幕显示使用禁用 JavaScript、以 CSP 禁止网络且由 Flutter 吸收交互的浏览器级 SVG 表面，以保留 CSS/marker/文字回退；不得给 `loadHTMLString` 注册无条件取消导航的回调。清洗后的 SVG 直接内联，禁止再嵌套为 Apple WebKit 可能空白的 `data:` 图片，也不得用 `flutter_svg` 直接解释 Mermaid 产物。图形主题由 Widget 把当前语义 `ColorScheme` 编译为 Merman options，缓存键必须包含主题，皮肤或强调色变化时重新生成；不得让渲染引擎直接依赖 `BuildContext`，也不得写死默认暖橙。渲染器不得进入 Provider/Service，也不得执行模型提供的 HTML 或脚本；未知语言和解析失败统一降级为可复制源码块。
+- Apple 端暂用 CocoaPods 集成原生插件（`flutter.config.enable-swift-package-manager: false`）：`merman 0.7.0` 的 SwiftPM 二进制目标位于 package 目录外，Flutter 生成插件软链接后 Xcode 无法解析；其 macOS dylib 还携带上游 CI 的绝对 install name，因此 Runner 在 Pods 嵌入完成后通过 `patch_merman_install_names.sh` 把 App、插件 Framework 和 dylib 的引用统一改成 `@rpath/libmerman_ffi.dylib`，并用本次 Xcode 构建身份重新签署被修改的嵌套代码。待上游同时修复二进制布局与 install name 后再移除兼容层并恢复 SwiftPM；不得修改 Pub 缓存或用开发机全局 `flutter config` 掩盖约束。
 - 预设服务商：OpenAI、Anthropic、DeepSeek；另支持「自定义（OpenAI 兼容）」端点。
 - 表现层只经 `AiSettingsController`；Widget **不得**持有 `http.Client`、不得读写安全存储、不得拼装供应商请求体。
+- AI 异常在进入 Widget 前必须经过统一的用户错误映射；供应商原文、HTTP 状态码、JSON/SSE/schema、异常类名与堆栈仅写调试日志。Widget 不得把 `error.toString()` 或未经映射的 `AiProviderException.message` 直接展示。
 - API Key（模型与搜索）**不得**写入 `ai_settings.json`、WebDAV 备份清单或调试导出。
+- 携带 Key 的远程模型端点必须使用 HTTPS；明文 HTTP 只允许无 Key 的 loopback 本地后端。Provider 的流式成功终态必须来自协议完成事件，异常 EOF/空闲超时不得伪装成成功。
 - 总开关关闭时 `openProvider()` 返回 null，业务层不得绕过开关发请求。
 - 本书 AI「联网」默认关；仅开关开且已配搜索 Key 时才调用搜索 API，结果注入 chat system prompt 的补充区。
 
@@ -106,6 +122,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - `AppShell` 持有根级书架 / 书库 / 设置状态，并在内容区提供嵌套 Navigator。书单、合集、导入确认、远程来源与 WebDAV 备份等管理型子页推入内容 Navigator，宽屏侧边栏和窄屏 BottomBar 不随子页消失。
 - 点击根导航目标时先清理内容 Navigator 的子页栈，再切换根页面，避免子页被错误保留到另一 Tab。
 - 漫画与图书阅读器继续使用 root Navigator，以维持沉浸式全屏和独立阅读 chrome。
+- root Navigator 注册共享 `RouteObserver`；阅读时长采集把 route 可见性与正文 ready、App lifecycle、TTS 状态共同作为计时资格，加载/错误页面和被模态 route 覆盖的阅读器不得累计。
 
 ### 折叠屏 / 多窗口布局
 

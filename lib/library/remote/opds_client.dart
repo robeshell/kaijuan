@@ -58,7 +58,7 @@ class OpdsClient {
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.stream.drain<void>();
-        throw RemoteProtocolException('服务器返回 HTTP ${response.statusCode}');
+        throw RemoteProtocolException(_statusMessage(response.statusCode));
       }
       final body = await _readBody(response).timeout(_timeout);
       return _parse(body, Uri.parse(url));
@@ -78,7 +78,7 @@ class OpdsClient {
       final response = await client.send(request).timeout(_timeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.stream.drain<void>();
-        throw RemoteProtocolException('下载失败：HTTP ${response.statusCode}');
+        throw RemoteProtocolException(_statusMessage(response.statusCode));
       }
       yield* response.stream;
     } finally {
@@ -174,6 +174,14 @@ class OpdsClient {
       searchUri: _searchTemplate(document, baseUri),
     );
   }
+
+  static String _statusMessage(int status) => switch (status) {
+    401 || 403 => '认证失败，请检查用户名和密码',
+    404 => '没有找到远程目录，请检查地址',
+    429 => '服务器请求较多，请稍后重试',
+    >= 500 => '远程服务器暂时不可用，请稍后重试',
+    _ => '远程服务器未能完成请求，请稍后重试',
+  };
 
   String? _mimeFor(XmlElement entry) {
     for (final link in _elementsNamed(entry, 'link')) {

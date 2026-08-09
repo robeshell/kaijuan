@@ -241,10 +241,7 @@ class _RemoteEmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-            OutlinedButton(
-              onPressed: onAdd,
-              child: Text('添加$label'),
-            ),
+            OutlinedButton(onPressed: onAdd, child: Text('添加$label')),
           ],
         ),
       ),
@@ -292,15 +289,9 @@ class _RemoteSourceSectionHeader extends StatelessWidget {
           ),
         ),
         if (context.appIsCompact)
-          TextButton(
-            onPressed: onAdd,
-            child: const Text('添加'),
-          )
+          TextButton(onPressed: onAdd, child: const Text('添加'))
         else
-          OutlinedButton(
-            onPressed: onAdd,
-            child: const Text('添加连接'),
-          ),
+          OutlinedButton(onPressed: onAdd, child: const Text('添加连接')),
       ],
     );
   }
@@ -522,9 +513,11 @@ class _RemoteConnectionFormScreenState
         result.isSuccess ? '连接测试成功' : (result.error ?? '连接失败'),
       );
     } catch (error) {
+      debugPrint('[Remote] connection test failed: $error');
       if (!mounted) return;
-      setState(() => _testError = error.toString());
-      showAppSnackBar(context, error.toString());
+      const message = '连接失败，请检查地址、账号和网络';
+      setState(() => _testError = message);
+      showAppSnackBar(context, message);
     } finally {
       if (mounted) setState(() => _testing = false);
     }
@@ -556,7 +549,8 @@ class _RemoteConnectionFormScreenState
         showAppSnackBar(context, result.error ?? '保存前连接测试失败');
       }
     } catch (error) {
-      if (mounted) showAppSnackBar(context, error.toString());
+      debugPrint('[Remote] save connection failed: $error');
+      if (mounted) showAppSnackBar(context, '保存连接失败，请重试');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -764,7 +758,7 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
   String? _nextUrl;
   String? _searchUrl;
   List<RemoteEntry> _entries = const [];
-  Object? _error;
+  String? _error;
   bool _loading = true;
   bool _preparingQueue = false;
 
@@ -787,7 +781,9 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
     try {
       final page = await widget.remote.browsePage(widget.connection, url: url);
       if (!page.isSuccess) {
-        throw StateError(page.error ?? '读取远程目录失败');
+        if (!mounted) return;
+        setState(() => _error = page.error ?? '无法读取远程目录，请重试');
+        return;
       }
       if (!mounted) return;
       setState(() {
@@ -796,8 +792,9 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
         _searchUrl = page.searchUri;
       });
     } catch (error) {
+      debugPrint('[Remote] browse failed: $error');
       if (!mounted) return;
-      setState(() => _error = error);
+      setState(() => _error = '无法读取远程目录，请检查网络后重试');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -933,7 +930,8 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
         ),
       );
     } catch (error) {
-      if (mounted) showAppSnackBar(context, '整理所选文件失败：$error');
+      debugPrint('[Remote] prepare import queue failed: $error');
+      if (mounted) showAppSnackBar(context, '无法整理所选文件，请检查网络后重试');
     } finally {
       if (mounted) setState(() => _preparingQueue = false);
     }
@@ -1040,7 +1038,7 @@ class _RemoteBrowserScreenState extends State<RemoteBrowserScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '$_error',
+                    _error!,
                     style: TextStyle(color: context.settingsSecondary),
                   ),
                   const SizedBox(height: 14),

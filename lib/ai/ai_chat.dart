@@ -1,8 +1,20 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'ai_models.dart';
 import 'ai_outline.dart';
+
+enum AiChatTurnStatus {
+  pending,
+  completed,
+  failed,
+  cancelled;
+
+  static AiChatTurnStatus fromStorage(Object? value) {
+    final name = '$value';
+    return AiChatTurnStatus.values.firstWhere(
+      (status) => status.name == name,
+      orElse: () => AiChatTurnStatus.completed,
+    );
+  }
+}
 
 /// One user or assistant bubble in the book chat.
 class AiChatMessage {
@@ -13,6 +25,8 @@ class AiChatMessage {
     this.createdAt,
     this.webHitCount,
     this.suggestedQuestions = const [],
+    this.turnId,
+    this.status = AiChatTurnStatus.completed,
   });
 
   final AiMessageRole role;
@@ -27,6 +41,14 @@ class AiChatMessage {
   /// One answer-specific follow-up generated after an assistant reply.
   final List<String> suggestedQuestions;
 
+  /// Stable identity shared by the user message and its assistant reply.
+  /// Legacy messages have no id and are treated as completed history.
+  final String? turnId;
+
+  /// Non-completed turns remain visible to the reader but are excluded from
+  /// future model history, so a failed request cannot poison the next prompt.
+  final AiChatTurnStatus status;
+
   AiChatMessage copyWith({
     AiMessageRole? role,
     String? content,
@@ -34,6 +56,8 @@ class AiChatMessage {
     DateTime? createdAt,
     int? webHitCount,
     List<String>? suggestedQuestions,
+    String? turnId,
+    AiChatTurnStatus? status,
     bool clearWebHitCount = false,
   }) {
     return AiChatMessage(
@@ -43,6 +67,8 @@ class AiChatMessage {
       createdAt: createdAt ?? this.createdAt,
       webHitCount: clearWebHitCount ? null : (webHitCount ?? this.webHitCount),
       suggestedQuestions: suggestedQuestions ?? this.suggestedQuestions,
+      turnId: turnId ?? this.turnId,
+      status: status ?? this.status,
     );
   }
 
@@ -53,6 +79,8 @@ class AiChatMessage {
     if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
     if (webHitCount != null) 'webHitCount': webHitCount,
     if (suggestedQuestions.isNotEmpty) 'suggestedQuestions': suggestedQuestions,
+    if (turnId != null) 'turnId': turnId,
+    'status': status.name,
   };
 
   static AiChatMessage fromJson(Map<String, dynamic> json) {
@@ -77,6 +105,8 @@ class AiChatMessage {
                 .where((value) => value.isNotEmpty)
                 .toList(growable: false)
           : const [],
+      turnId: json['turnId'] as String?,
+      status: AiChatTurnStatus.fromStorage(json['status']),
     );
   }
 }
@@ -128,6 +158,13 @@ class AiChatShortcut {
 
 /// Shortcuts for a whole-book companion (not progress-gated).
 const kAiChatShortcuts = <AiChatShortcut>[
+  AiChatShortcut(
+    label: '生成本书大纲',
+    prompt:
+        '请为当前这本书生成一份清晰、完整的大纲。先用一段话概括全书主线与核心主题，'
+        '再按内容推进列出主要结构阶段；每一项包含简短标题和说明，并覆盖全书的重要部分。'
+        '请直接基于书中内容回答。',
+  ),
   AiChatShortcut(label: '总结这一章', prompt: '请总结我正在读的这一章：主线、关键转折，尽量简短。'),
   AiChatShortcut(
     label: '这本书在讲什么',
@@ -363,95 +400,5 @@ class AiChatSession {
       workOutlines: workOutlines,
       workMessages: workMessages,
     );
-  }
-}
-
-/// Local JSON store — one file per [contentHash].
-///
-/// Product: **same file re-import keeps memory**. Library row delete must NOT
-/// call [delete]; only the user "清空对话" action should. Not in WebDAV backup.
-abstract interface class AiChatHistoryStore {
-  Future<AiChatSession?> read({
-    required String contentHash,
-    required String itemId,
-  });
-
-  Future<void> write(AiChatSession session);
-
-  Future<void> delete(String contentHash);
-}
-
-class JsonAiChatHistoryStore implements AiChatHistoryStore {
-  JsonAiChatHistoryStore(this._directory);
-
-  final Directory _directory;
-
-  File _fileFor(String contentHash) {
-    final safe = contentHash.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-    return File('${_directory.path}${Platform.pathSeparator}$safe.json');
-  }
-
-  @override
-  Future<AiChatSession?> read({
-    required String contentHash,
-    required String itemId,
-  }) async {
-    try {
-      final file = _fileFor(contentHash);
-      if (!await file.exists()) {
-        return AiChatSession(contentHash: contentHash, itemId: itemId);
-      }
-      final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map) {
-        return AiChatSession(contentHash: contentHash, itemId: itemId);
-      }
-      final session = AiChatSession.fromJson(
-        Map<String, dynamic>.from(decoded),
-      );
-      if (session.itemId != itemId && itemId.isNotEmpty) {
-        return session.copyWith(itemId: itemId);
-      }
-      return session;
-    } catch (_) {
-      return AiChatSession(contentHash: contentHash, itemId: itemId);
-    }
-  }
-
-  @override
-  Future<void> write(AiChatSession session) async {
-    await _directory.create(recursive: true);
-    final file = _fileFor(session.contentHash);
-    await file.writeAsString(jsonEncode(session.toJson()), flush: true);
-  }
-
-  @override
-  Future<void> delete(String contentHash) async {
-    final file = _fileFor(contentHash);
-    if (await file.exists()) {
-      await file.delete();
-    }
-  }
-}
-
-class MemoryAiChatHistoryStore implements AiChatHistoryStore {
-  final Map<String, AiChatSession> _sessions = {};
-
-  @override
-  Future<AiChatSession?> read({
-    required String contentHash,
-    required String itemId,
-  }) async {
-    return _sessions[contentHash] ??
-        AiChatSession(contentHash: contentHash, itemId: itemId);
-  }
-
-  @override
-  Future<void> write(AiChatSession session) async {
-    _sessions[session.contentHash] = session;
-  }
-
-  @override
-  Future<void> delete(String contentHash) async {
-    _sessions.remove(contentHash);
   }
 }

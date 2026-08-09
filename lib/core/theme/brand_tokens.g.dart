@@ -5,7 +5,8 @@
 import 'package:flutter/material.dart';
 
 const kaiBrandSpecVersion = '0.8.0';
-const kaiBrandTokenDigest = 'b2fd457b866c415b5f723cdd422f16ef8e82d91a42117b5768c67f34caae24de';
+const kaiBrandTokenDigest =
+    'b2fd457b866c415b5f723cdd422f16ef8e82d91a42117b5768c67f34caae24de';
 
 abstract final class KaiBrandBasePalette {
   static const mainBackground = Color(0xFFF7F9FC);

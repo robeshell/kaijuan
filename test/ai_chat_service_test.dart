@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
+import 'package:kaijuan/ai/ai_chat_store.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/ai/ai_chat_service.dart';
 import 'package:kaijuan/ai/ai_chat_tools.dart';
@@ -35,6 +36,10 @@ void main() {
       expect(system, isNot(contains('第一章本地正文')));
       expect(system, contains('get_toc'));
       expect(system, contains('sample_book'));
+      expect(system, contains('```mermaid'));
+      expect(system, contains('Mermaid mindmap syntax'));
+      expect(system, contains('```chart'));
+      expect(system, contains('Never emit raw HTML'));
       expect(prompt, contains('Question:\n这一章讲什么？'));
       expect(prompt, contains('<untrusted_context>'));
       expect(prompt, contains('万历十五年'));
@@ -74,6 +79,42 @@ void main() {
       expect(messages.length, 4);
       expect(messages[1].content, 'q1');
       expect(messages.last.content, contains('Question:\nq2'));
+    });
+
+    test('excludes failed and cancelled turns from model history', () {
+      final messages = AiChatService.buildMessages(
+        userText: '新问题',
+        history: const [
+          AiChatMessage(
+            role: AiMessageRole.user,
+            content: '成功问题',
+            status: AiChatTurnStatus.completed,
+          ),
+          AiChatMessage(
+            role: AiMessageRole.assistant,
+            content: '成功回答',
+            status: AiChatTurnStatus.completed,
+          ),
+          AiChatMessage(
+            role: AiMessageRole.user,
+            content: '失败问题',
+            status: AiChatTurnStatus.failed,
+          ),
+          AiChatMessage(
+            role: AiMessageRole.assistant,
+            content: '截断回答',
+            status: AiChatTurnStatus.cancelled,
+          ),
+        ],
+        context: const AiChatContextBundle(),
+        bookTitle: '书',
+      );
+
+      final joined = messages.map((message) => message.content).join('\n');
+      expect(joined, contains('成功问题'));
+      expect(joined, contains('成功回答'));
+      expect(joined, isNot(contains('失败问题')));
+      expect(joined, isNot(contains('截断回答')));
     });
 
     test('clips history to per-message + aggregate budget', () {
@@ -170,16 +211,18 @@ void main() {
       expect(provider.completeCalls, 1);
     });
 
-    test('retries once on network errors (HandshakeException), then succeeds',
-        () async {
-      final provider = _NetworkFailThenOkProvider();
-      final result = await completeWithRetry(
-        provider,
-        const AiCompletionRequest(messages: []),
-      );
-      expect(result.text, 'ok');
-      expect(provider.completeCalls, 2);
-    });
+    test(
+      'retries once on network errors (HandshakeException), then succeeds',
+      () async {
+        final provider = _NetworkFailThenOkProvider();
+        final result = await completeWithRetry(
+          provider,
+          const AiCompletionRequest(messages: []),
+        );
+        expect(result.text, 'ok');
+        expect(provider.completeCalls, 2);
+      },
+    );
 
     test('rethrows network errors after exhausting attempts', () async {
       final provider = _AlwaysNetworkFailProvider();
@@ -188,6 +231,36 @@ void main() {
         throwsA(isA<IOException>()),
       );
       expect(provider.completeCalls, 2);
+    });
+  });
+
+  group('streamWithRetryBeforeFirstText', () {
+    test('retries a transient failure before visible text', () async {
+      final provider = _StreamRetryThenOkProvider();
+      final chunks = await streamWithRetryBeforeFirstText(
+        provider,
+        const AiCompletionRequest(messages: []),
+      ).toList();
+
+      expect(provider.streamCalls, 2);
+      expect(chunks.map((chunk) => chunk.text).join(), '恢复成功');
+    });
+
+    test('never restarts after visible text', () async {
+      final provider = _StreamFailsAfterTextProvider();
+      final chunks = <AiStreamChunk>[];
+
+      await expectLater(() async {
+        await for (final chunk in streamWithRetryBeforeFirstText(
+          provider,
+          const AiCompletionRequest(messages: []),
+        )) {
+          chunks.add(chunk);
+        }
+      }(), throwsA(isA<AiProviderException>()));
+
+      expect(provider.streamCalls, 1);
+      expect(chunks.single.text, '已经显示');
     });
   });
 
@@ -229,6 +302,20 @@ void main() {
       expect(host.calls, ['get_toc', 'search_book']);
     });
 
+    test('deduplicates calls and clamps model-controlled budgets', () async {
+      final host = _FakeHost();
+      await AiChatTools.runAll(const [
+        AiChatToolCall(
+          name: AiChatToolNames.sampleBook,
+          args: {'maxChars': 999999},
+        ),
+        AiChatToolCall(name: AiChatToolNames.sampleBook, args: {'maxChars': 1}),
+      ], host);
+
+      expect(host.calls.where((call) => call == 'sample_book'), hasLength(1));
+      expect(host.lastMaxChars, 18000);
+    });
+
     test('strips accidental tool fences from final prose', () {
       const text =
           '好的，我先查一下。\n'
@@ -237,9 +324,35 @@ void main() {
           '```';
       expect(AiChatTools.stripToolProtocol(text), '好的，我先查一下。');
     });
+
+    test('hides a dangling tool protocol prefix after prose', () {
+      const text = '好的，我把第 8 章调出来。\n```kaijuan_t';
+
+      expect(AiChatTools.stripToolProtocol(text), '好的，我把第 8 章调出来。');
+      expect(AiChatTools.containsToolProtocolAttempt(text), isTrue);
+      expect(AiChatTools.looksLikeToolTurn(text), isFalse);
+      expect(AiChatTools.looksLikeToolTurn('```kaijuan_t'), isTrue);
+    });
+
+    test('tool catalog forbids guessing an id from a human chapter number', () {
+      final catalog = AiChatTools.catalogForPrompt();
+
+      expect(catalog, contains('Never infer sectionIndex'));
+      expect(catalog, contains('call get_toc first'));
+    });
   });
 
   group('shortcuts', () {
+    test('outline shortcut uses the normal whole-book chat prompt', () {
+      final outline = kAiChatShortcuts.firstWhere(
+        (shortcut) => shortcut.label == '生成本书大纲',
+      );
+
+      expect(outline.prompt, contains('全书'));
+      expect(outline.prompt, contains('主要结构阶段'));
+      expect(outline.needsSelection, isFalse);
+    });
+
     test('overview shortcut demands whole book', () {
       final overview = kAiChatShortcuts.firstWhere((s) => s.label == '这本书在讲什么');
       expect(overview.prompt, contains('整本书'));
@@ -251,6 +364,7 @@ void main() {
       final selected = aiChatOpeningShortcuts(hasSelection: true);
 
       expect(general, hasLength(3));
+      expect(general.first.label, '生成本书大纲');
       expect(general.map((s) => s.label), isNot(contains('解释这段')));
       expect(selected, hasLength(3));
       expect(selected.first.label, '解释这段');
@@ -367,6 +481,81 @@ void main() {
       expect(reply.toString(), isNot(contains('kaijuan_tools')));
     });
 
+    test(
+      'repairs a prefaced truncated tool fence without exposing it',
+      () async {
+        final provider = _PrefacedTruncatedToolProvider();
+        final host = _FakeHost();
+        final service = AiChatService(
+          isAvailable: () => true,
+          openProvider: () => provider,
+          settings: () => const AiSettings(),
+        );
+        final snapshots = <String>[];
+
+        await for (final value in service.streamReply(
+          userText: '调出第 8 章',
+          history: const [],
+          context: const AiChatContextBundle(),
+          bookTitle: '书',
+          tools: host,
+        )) {
+          snapshots.add(value);
+        }
+
+        expect(snapshots, isNot(anyElement(contains('kaijuan_t'))));
+        expect(snapshots.last, '第 8 章内容显示在这里。');
+        expect(host.calls, contains('get_chapter'));
+        expect(provider.streamCalls, 2);
+        expect(provider.completeCalls, 1);
+        expect(
+          provider.repairRequest!.messages.last.content,
+          contains('Retry'),
+        );
+      },
+    );
+
+    test(
+      'fails closed when the tool fence repair is still incomplete',
+      () async {
+        final provider = _PrefacedTruncatedToolProvider(
+          repairText: '```kaijuan_t',
+        );
+        final host = _FakeHost();
+        final service = AiChatService(
+          isAvailable: () => true,
+          openProvider: () => provider,
+          settings: () => const AiSettings(),
+        );
+        final snapshots = <String>[];
+
+        await expectLater(
+          () async {
+            await for (final value in service.streamReply(
+              userText: '调出第 8 章',
+              history: const [],
+              context: const AiChatContextBundle(),
+              bookTitle: '书',
+              tools: host,
+            )) {
+              snapshots.add(value);
+            }
+          }(),
+          throwsA(
+            isA<AiProviderException>().having(
+              (error) => error.message,
+              'message',
+              contains('格式不完整'),
+            ),
+          ),
+        );
+
+        expect(snapshots, isNot(anyElement(contains('kaijuan_t'))));
+        expect(snapshots.last, isEmpty);
+        expect(host.calls, isEmpty);
+      },
+    );
+
     test('no status when tools disabled', () async {
       final statuses = <String?>[];
       final service = AiChatService(
@@ -409,6 +598,127 @@ void main() {
       expect(reply.toString(), contains('本章主线'));
       expect(reply.toString(), isNot(contains('probe-only')));
     });
+
+    test('automatically continues and stitches a truncated answer', () async {
+      final provider = _TruncatedProvider();
+      final service = AiChatService(
+        isAvailable: () => true,
+        openProvider: () => provider,
+        settings: () => const AiSettings(),
+      );
+      final snapshots = <String>[];
+
+      await for (final value in service.streamReply(
+        userText: '详细回答',
+        history: const [],
+        context: const AiChatContextBundle(),
+        bookTitle: '书',
+      )) {
+        snapshots.add(value);
+      }
+
+      expect(provider.streamCalls, 2);
+      expect(snapshots.first, '部分回答');
+      expect(snapshots.last, '部分回答，并完成。');
+    });
+
+    test('continues direct prose from the tool-enabled first turn', () async {
+      final provider = _TruncatedProvider();
+      final statuses = <String?>[];
+      final service = AiChatService(
+        isAvailable: () => true,
+        openProvider: () => provider,
+        settings: () => const AiSettings(),
+      );
+      final snapshots = <String>[];
+
+      await for (final value in service.streamReply(
+        userText: '生成完整大纲',
+        history: const [],
+        context: const AiChatContextBundle(),
+        bookTitle: '书',
+        tools: _FakeHost(),
+        onToolStatus: statuses.add,
+      )) {
+        snapshots.add(value);
+      }
+
+      expect(provider.streamCalls, 2);
+      expect(snapshots.last, '部分回答，并完成。');
+      expect(statuses, contains('正在续写…'));
+      expect(statuses.last, isNull);
+    });
+
+    test(
+      'bounds automatic continuation and preserves partial output',
+      () async {
+        final provider = _AlwaysTruncatedProvider();
+        final service = AiChatService(
+          isAvailable: () => true,
+          openProvider: () => provider,
+          settings: () => const AiSettings(),
+        );
+        final snapshots = <String>[];
+
+        await expectLater(
+          () async {
+            await for (final value in service.streamReply(
+              userText: '无限回答',
+              history: const [],
+              context: const AiChatContextBundle(),
+              bookTitle: '书',
+            )) {
+              snapshots.add(value);
+            }
+          }(),
+          throwsA(
+            isA<AiProviderException>().having(
+              (error) => error.message,
+              'message',
+              contains('自动续写多次'),
+            ),
+          ),
+        );
+
+        expect(
+          provider.streamCalls,
+          AiChatService.maxAnswerContinuationRounds + 1,
+        );
+        expect(snapshots.last, contains('续写8'));
+      },
+    );
+
+    test('rejects a dangling tool marker in the final prose stream', () async {
+      final service = AiChatService(
+        isAvailable: () => true,
+        openProvider: () => _PrefacedTruncatedToolProvider(),
+        settings: () => const AiSettings(),
+      );
+      final snapshots = <String>[];
+
+      await expectLater(
+        () async {
+          await for (final value in service.streamReply(
+            userText: '普通回答',
+            history: const [],
+            context: const AiChatContextBundle(),
+            bookTitle: '书',
+          )) {
+            snapshots.add(value);
+          }
+        }(),
+        throwsA(
+          isA<AiProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('格式不完整'),
+          ),
+        ),
+      );
+
+      expect(snapshots, isNot(anyElement(contains('kaijuan_t'))));
+      expect(snapshots.last, isEmpty);
+    });
   });
 
   group('session store', () {
@@ -437,9 +747,7 @@ void main() {
           createdAt: DateTime.utc(2026, 8, 5),
           model: 'm',
           overview: '概览',
-          units: const [
-            AiOutlineUnit(title: '主题', blurb: '一句话说明。'),
-          ],
+          units: const [AiOutlineUnit(title: '主题', blurb: '一句话说明。')],
         ),
       );
 
@@ -453,13 +761,11 @@ void main() {
 
     test('session JSON round-trips per-work outlines and key clearing', () {
       AiBookOutline makeOutline(String title) => AiBookOutline(
-            createdAt: DateTime.utc(2026, 8, 5),
-            model: 'm',
-            overview: title,
-            units: const [
-              AiOutlineUnit(title: '主题', blurb: '说明'),
-            ],
-          );
+        createdAt: DateTime.utc(2026, 8, 5),
+        model: 'm',
+        overview: title,
+        units: const [AiOutlineUnit(title: '主题', blurb: '说明')],
+      );
 
       final session = AiChatSession(
         contentHash: 'h1',
@@ -487,10 +793,10 @@ void main() {
 
     test('session JSON round-trips per-work chat messages', () {
       AiChatMessage msg(String role, String content) => AiChatMessage(
-            role: role == 'user' ? AiMessageRole.user : AiMessageRole.assistant,
-            content: content,
-            createdAt: DateTime.utc(2026, 8, 8),
-          );
+        role: role == 'user' ? AiMessageRole.user : AiMessageRole.assistant,
+        content: content,
+        createdAt: DateTime.utc(2026, 8, 8),
+      );
 
       final session = AiChatSession(
         contentHash: 'h1',
@@ -511,10 +817,10 @@ void main() {
       expect(restored.messagesFor(null), isEmpty); // 单本列表独立
 
       // withMessagesFor 写到对应 work，不影响其他 work。
-      final updated = restored.withMessagesFor(
-        's197',
-        [msg('user', '新问题'), msg('assistant', '新回答')],
-      );
+      final updated = restored.withMessagesFor('s197', [
+        msg('user', '新问题'),
+        msg('assistant', '新回答'),
+      ]);
       expect(updated.messagesFor('s197'), hasLength(2));
       expect(updated.messagesFor('s4'), hasLength(2));
 
@@ -538,6 +844,63 @@ void main() {
       );
 
       expect(restored.suggestedQuestions, ['接下来人物会如何选择？']);
+    });
+
+    test('session JSON preserves turn identity and status', () {
+      const message = AiChatMessage(
+        role: AiMessageRole.user,
+        content: '问题',
+        turnId: 'turn-1',
+        status: AiChatTurnStatus.failed,
+      );
+      final restored = AiChatMessage.fromJson(
+        Map<String, dynamic>.from(message.toJson()),
+      );
+
+      expect(restored.turnId, 'turn-1');
+      expect(restored.status, AiChatTurnStatus.failed);
+    });
+
+    test('json store recovers the previous generation from backup', () async {
+      final dir = await Directory.systemTemp.createTemp('kaijuan-chat-store-');
+      addTearDown(() => dir.delete(recursive: true));
+      final store = JsonAiChatHistoryStore(dir);
+      await store.write(
+        const AiChatSession(
+          contentHash: 'hash',
+          itemId: 'item',
+          messages: [AiChatMessage(role: AiMessageRole.user, content: 'first')],
+        ),
+      );
+      await store.write(
+        const AiChatSession(
+          contentHash: 'hash',
+          itemId: 'item',
+          messages: [
+            AiChatMessage(role: AiMessageRole.user, content: 'second'),
+          ],
+        ),
+      );
+      await File(
+        '${dir.path}${Platform.pathSeparator}hash.json',
+      ).writeAsString('{broken');
+
+      final restored = await store.read(contentHash: 'hash', itemId: 'item');
+      expect(restored!.messages.single.content, 'first');
+    });
+
+    test('json store reports corruption when no valid backup exists', () async {
+      final dir = await Directory.systemTemp.createTemp('kaijuan-chat-store-');
+      addTearDown(() => dir.delete(recursive: true));
+      await File(
+        '${dir.path}${Platform.pathSeparator}hash.json',
+      ).writeAsString('{broken');
+      final store = JsonAiChatHistoryStore(dir);
+
+      expect(
+        store.read(contentHash: 'hash', itemId: 'item'),
+        throwsA(isA<FormatException>()),
+      );
     });
   });
 }
@@ -608,6 +971,53 @@ class _ToolTurnProvider implements AiProvider {
   Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async {
     return const [];
   }
+}
+
+/// Models sometimes preface a tool call, then stop while spelling the fence.
+/// The service must hide that fragment, repair it once, and only execute the
+/// repaired standalone call.
+class _PrefacedTruncatedToolProvider implements AiProvider {
+  _PrefacedTruncatedToolProvider({
+    this.repairText =
+        '```kaijuan_tools\n'
+        '[{"name":"get_chapter","sectionIndex":8}]\n'
+        '```',
+  });
+
+  final String repairText;
+  int streamCalls = 0;
+  int completeCalls = 0;
+  AiCompletionRequest? repairRequest;
+
+  @override
+  Future<AiCompletionResult> complete(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async {
+    completeCalls++;
+    repairRequest = request;
+    return AiCompletionResult(text: repairText);
+  }
+
+  @override
+  Stream<AiStreamChunk> stream(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async* {
+    streamCalls++;
+    if (streamCalls == 1) {
+      yield const AiStreamChunk(text: '好的，我把第 8 章调出来。\n');
+      yield const AiStreamChunk(text: '```kaijuan_t');
+      yield const AiStreamChunk(text: '', isFinal: true);
+      return;
+    }
+    yield const AiStreamChunk(text: '第 8 章内容显示在这里。');
+    yield const AiStreamChunk(text: '', isFinal: true);
+  }
+
+  @override
+  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
+      const [];
 }
 
 /// Fails once with 429, then succeeds — for completeWithRetry.
@@ -748,8 +1158,114 @@ class _ProseProvider implements AiProvider {
   }
 }
 
+class _TruncatedProvider implements AiProvider {
+  int streamCalls = 0;
+
+  @override
+  Future<AiCompletionResult> complete(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async => const AiCompletionResult(text: 'unused');
+
+  @override
+  Stream<AiStreamChunk> stream(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async* {
+    streamCalls++;
+    if (streamCalls == 1) {
+      yield const AiStreamChunk(text: '部分回答');
+      yield const AiStreamChunk(text: '', isFinal: true, truncated: true);
+      return;
+    }
+    // Deliberately repeats the suffix so the stitcher must remove overlap.
+    yield const AiStreamChunk(text: '回答，并完成。');
+    yield const AiStreamChunk(text: '', isFinal: true);
+  }
+
+  @override
+  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
+      const [];
+}
+
+class _AlwaysTruncatedProvider implements AiProvider {
+  int streamCalls = 0;
+
+  @override
+  Future<AiCompletionResult> complete(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async => const AiCompletionResult(text: 'unused');
+
+  @override
+  Stream<AiStreamChunk> stream(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async* {
+    streamCalls++;
+    yield AiStreamChunk(text: streamCalls == 1 ? '开头' : '续写$streamCalls');
+    yield const AiStreamChunk(text: '', isFinal: true, truncated: true);
+  }
+
+  @override
+  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
+      const [];
+}
+
+class _StreamRetryThenOkProvider implements AiProvider {
+  int streamCalls = 0;
+
+  @override
+  Future<AiCompletionResult> complete(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async => const AiCompletionResult(text: 'unused');
+
+  @override
+  Stream<AiStreamChunk> stream(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async* {
+    streamCalls++;
+    if (streamCalls == 1) {
+      throw AiProviderException('temporary', statusCode: 503);
+    }
+    yield const AiStreamChunk(text: '恢复成功');
+    yield const AiStreamChunk(text: '', isFinal: true);
+  }
+
+  @override
+  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
+      const [];
+}
+
+class _StreamFailsAfterTextProvider implements AiProvider {
+  int streamCalls = 0;
+
+  @override
+  Future<AiCompletionResult> complete(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async => const AiCompletionResult(text: 'unused');
+
+  @override
+  Stream<AiStreamChunk> stream(
+    AiCompletionRequest request, {
+    CancelToken? cancelToken,
+  }) async* {
+    streamCalls++;
+    yield const AiStreamChunk(text: '已经显示');
+    throw AiProviderException('temporary', statusCode: 503);
+  }
+
+  @override
+  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
+      const [];
+}
+
 class _FakeHost implements AiChatToolHost {
   final calls = <String>[];
+  int? lastMaxChars;
 
   @override
   Future<String> toolGetToc() async {
@@ -760,6 +1276,7 @@ class _FakeHost implements AiChatToolHost {
   @override
   Future<String> toolGetCurrentChapter({int maxChars = 10000}) async {
     calls.add('get_current_chapter');
+    lastMaxChars = maxChars;
     return 'current';
   }
 
@@ -769,18 +1286,21 @@ class _FakeHost implements AiChatToolHost {
     int maxChars = 10000,
   }) async {
     calls.add('get_chapter');
+    lastMaxChars = maxChars;
     return 'sec $sectionIndex1Based';
   }
 
   @override
   Future<String> toolSearchBook(String query, {int maxChars = 12000}) async {
     calls.add('search_book');
+    lastMaxChars = maxChars;
     return 'hit:$query';
   }
 
   @override
   Future<String> toolSampleBook({int maxChars = 36000}) async {
     calls.add('sample_book');
+    lastMaxChars = maxChars;
     return 'samples';
   }
 }

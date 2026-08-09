@@ -45,6 +45,17 @@ void main() {
     expect(section.label, '第一部');
   });
 
+  test('splitSections preserves navigation child count', () {
+    const logicalBook = '[§12@4~+17 魔法石]\n正文';
+
+    final section = AiChatRetrieve.splitSections(logicalBook).single;
+
+    expect(section.isNavigationUnit, isTrue);
+    expect(section.navigationChildCount, 17);
+    expect(section.sourceSectionIndex, 4);
+    expect(section.label, '魔法石');
+  });
+
   test('splitSections parses heading level and keeps empty containers', () {
     // Book-level container (level 1, empty body) + piece (level 2): the
     // chooser rebuilds the work → book → piece tree from this.
@@ -85,6 +96,26 @@ void main() {
     final indexes = packed.relatedSections.map((s) => s.index).toSet();
     expect(indexes, containsAll([1, 2, 3, 4, 5]));
     expect(packed.sectionOutline.length, 5);
+  });
+
+  test('long whole-book sampling spans the first and last sections', () {
+    final body = StringBuffer();
+    for (var i = 1; i <= 120; i++) {
+      body.writeln('[§$i 第$i章]\n${'正文$i。' * 200}');
+    }
+    final packed = AiChatRetrieve.pack(
+      userText: '概括整本书的主线与主题',
+      selection: '',
+      bookBody: body.toString(),
+      maxSections: 16,
+      maxRelatedChars: 18000,
+    );
+
+    final indexes = packed.relatedSections.map((s) => s.index).toList();
+    expect(indexes, hasLength(16));
+    expect(indexes.first, 1);
+    expect(indexes.last, 120);
+    expect(indexes.where((index) => index > 60), isNotEmpty);
   });
 
   test('focused pack boosts selection section', () {

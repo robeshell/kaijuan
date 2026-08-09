@@ -65,26 +65,40 @@ class BackupController extends ChangeNotifier {
   }
 
   Future<void> setConnection(String? id) async {
+    final normalizedId = id == null || id.isEmpty ? null : id;
+    final targetChanged = settings.connectionId != normalizedId;
     await service.updateSettings(
       settings.copyWith(
-        connectionId: id,
-        clearConnectionId: id == null || id.isEmpty,
+        connectionId: normalizedId,
+        clearConnectionId: normalizedId == null,
         clearLastError: true,
+        clearLastSnapshotId: targetChanged,
+        clearLastSuccessfulAt: targetChanged,
       ),
     );
+    if (targetChanged) _resetTargetState();
     notifyListeners();
   }
 
   Future<void> setRemotePath(String path) async {
+    final targetChanged = settings.remotePath != path.trim();
     await service.updateSettings(
-      settings.copyWith(remotePath: path, clearLastError: true),
+      settings.copyWith(
+        remotePath: path,
+        clearLastError: true,
+        clearLastSnapshotId: targetChanged,
+        clearLastSuccessfulAt: targetChanged,
+      ),
     );
+    if (targetChanged) _resetTargetState();
     notifyListeners();
   }
 
   Future<void> setDeviceName(String name) async {
     await service.updateSettings(
-      settings.copyWith(deviceName: name.trim().isEmpty ? '我的设备' : name.trim()),
+      settings.copyWith(
+        deviceName: KaijuanBackupFormat.truncateDeviceName(name),
+      ),
     );
     notifyListeners();
   }
@@ -116,8 +130,9 @@ class BackupController extends ChangeNotifier {
       _status = BackupUiStatus.success;
       _message = '备份完成';
     } catch (error) {
+      debugPrint('[Backup] backup failed: $error');
       _status = BackupUiStatus.error;
-      _message = error.toString();
+      _message = service.settings.lastError ?? '备份未完成，请检查网络和备份设置后重试';
     }
     notifyListeners();
   }
@@ -128,8 +143,10 @@ class BackupController extends ChangeNotifier {
       _message = null;
       notifyListeners();
     } catch (error) {
+      debugPrint('[Backup] list snapshots failed: $error');
+      _snapshots = const [];
       _status = BackupUiStatus.error;
-      _message = error.toString();
+      _message = service.userMessageFor(error, fallback: '无法获取备份记录。请检查网络后重试');
       notifyListeners();
     }
   }
@@ -138,8 +155,9 @@ class BackupController extends ChangeNotifier {
     try {
       return await service.preview(manifest);
     } catch (error) {
+      debugPrint('[Backup] preview failed: $error');
       _status = BackupUiStatus.error;
-      _message = error.toString();
+      _message = service.userMessageFor(error, fallback: '无法读取备份信息。请重试');
       notifyListeners();
       return null;
     }
@@ -165,8 +183,10 @@ class BackupController extends ChangeNotifier {
       await refreshSnapshots();
       return result;
     } catch (error) {
+      debugPrint('[Backup] restore failed: $error');
       _status = BackupUiStatus.error;
-      _message = error.toString();
+      final reason = service.userMessageFor(error, fallback: '请检查网络后重试');
+      _message = '恢复未完成。已恢复的内容会保留；$reason';
       notifyListeners();
       return null;
     }
@@ -177,6 +197,14 @@ class BackupController extends ChangeNotifier {
     _message = null;
     _status = BackupUiStatus.idle;
     notifyListeners();
+  }
+
+  void _resetTargetState() {
+    _snapshots = const [];
+    _lastRun = null;
+    _autoAttempted = false;
+    _status = BackupUiStatus.idle;
+    _message = null;
   }
 
   @override

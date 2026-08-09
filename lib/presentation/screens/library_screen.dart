@@ -31,11 +31,7 @@ enum _LibraryLayout { grid, list }
 
 enum _LibraryMoreAction { toggleLayout, sort, lists, collections }
 
-enum _LibraryFilterAction {
-  all,
-  kind,
-  read,
-}
+enum _LibraryFilterAction { all, kind, read }
 
 enum _LibraryImportAction { autoScan, localFile, cloud, wifi, onlineLibrary }
 
@@ -718,8 +714,9 @@ class _LibraryScreenState extends State<LibraryScreen>
                 Builder(
                   builder: (context) {
                     final option = _importMenuOptions[index];
-                    final reduceMotion =
-                        MediaQuery.disableAnimationsOf(context);
+                    final reduceMotion = MediaQuery.disableAnimationsOf(
+                      context,
+                    );
                     final start = index * 0.1;
                     final end = 0.62 + index * 0.075;
                     final itemProgress = reduceMotion
@@ -1005,10 +1002,7 @@ class _LibraryScreenState extends State<LibraryScreen>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                _libraryFilterLabel(controller),
-                style: pageTitleStyle(),
-              ),
+              Text(_libraryFilterLabel(controller), style: pageTitleStyle()),
               const SizedBox(width: 5),
               Icon(
                 KaijuanIcons.caretDown,
@@ -1027,12 +1021,7 @@ class _LibraryScreenState extends State<LibraryScreen>
         ? AppSpacing.x6
         : AppSettingsMetrics.pageTop(context);
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        hPad,
-        topPad,
-        hPad,
-        0,
-      ),
+      padding: EdgeInsets.fromLTRB(hPad, topPad, hPad, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1052,10 +1041,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                   ),
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  '已选 ${_selected.length}',
-                  style: pageTitleStyle(),
-                ),
+                Text('已选 ${_selected.length}', style: pageTitleStyle()),
               ] else ...[
                 if (showBrowseTools)
                   filterTitle()
@@ -1299,8 +1285,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                                   BoxShadow(
                                     color: context.appGlass.shadow,
                                     blurRadius:
-                                        14 *
-                                        context.appSkinEffects.shadowScale,
+                                        14 * context.appSkinEffects.shadowScale,
                                     offset: const Offset(0, 4),
                                   ),
                                 ],

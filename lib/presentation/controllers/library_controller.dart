@@ -13,6 +13,7 @@ import '../../library/import/import_models.dart';
 import '../../library/import/import_pipeline.dart';
 import '../../library/import/import_sources.dart';
 import '../../library/persistence/app_database.dart';
+import 'reading_stats_controller.dart';
 
 /// How the library grid orders items (client-side after stream).
 enum LibrarySort { addedDesc, titleAsc, lastOpenedDesc }
@@ -88,6 +89,12 @@ class LibraryController extends ChangeNotifier {
 
   /// File picker extensions (no dots), from [BrandConfig].
   final List<String> importExtensions;
+
+  ReadingStatsController createReadingStatsController() =>
+      ReadingStatsController(database: database);
+
+  Future<int> itemReadingSeconds(String itemId) =>
+      database.itemReadingSeconds(itemId);
 
   bool _importing = false;
   bool get isImporting => _importing;

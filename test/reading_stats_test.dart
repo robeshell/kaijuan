@@ -8,6 +8,7 @@ import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/backup/backup_format.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
 import 'package:kaijuan/library/stats/reading_stats.dart';
+import 'package:kaijuan/library/stats/reading_day_counters.dart';
 import 'package:kaijuan/library/stats/reading_time_tracker.dart';
 import 'package:kaijuan/presentation/controllers/reading_stats_controller.dart';
 import 'package:kaijuan/readers/comic/comic_models.dart';
@@ -261,10 +262,7 @@ void main() {
           sessionsCount: 1,
         ),
       };
-      expect(
-        buildCurrentStreakDays(byDay: byDay, now: nowLocal),
-        2,
-      );
+      expect(buildCurrentStreakDays(byDay: byDay, now: nowLocal), 2);
 
       // Today empty → streak continues from yesterday.
       byDay.remove('2026-08-04');
@@ -298,11 +296,11 @@ void main() {
       final nowLocal = DateTime(2026, 8, 4, 12);
       final cells = buildHeatmapCells(byDay: const {}, now: nowLocal);
       expect(cells, hasLength(53 * 7));
-      expect(contributionLevel(0, 100), 0);
-      expect(contributionLevel(10, 100), 1);
-      expect(contributionLevel(30, 100), 2);
-      expect(contributionLevel(60, 100), 3);
-      expect(contributionLevel(100, 100), 4);
+      expect(contributionLevel(0), 0);
+      expect(contributionLevel(10 * 60), 1);
+      expect(contributionLevel(20 * 60), 2);
+      expect(contributionLevel(45 * 60), 3);
+      expect(contributionLevel(60 * 60), 4);
     });
 
     test('finished threshold matches library (≥ 0.98)', () {
@@ -329,6 +327,71 @@ void main() {
       expect(snap.readingCount, 1);
       expect(snap.finishedCount, 1);
       expect(snap.finished.single.item.id, 'done');
+    });
+
+    test('finished progress wins when legacy lastOpenedAt is missing', () {
+      final snap = buildReadingStats(
+        entries: [entry(id: 'restored', kind: ReaderKind.book, progress: 1)],
+        bookmarkCount: 0,
+        annotationCount: 0,
+        period: StatsPeriod.all,
+        now: now,
+      );
+      expect(snap.finishedCount, 1);
+      expect(snap.unreadCount, 0);
+      expect(snap.finished.single.item.id, 'restored');
+    });
+
+    test('recent reading excludes finished and future-opened items', () {
+      final snap = buildReadingStats(
+        entries: [
+          entry(
+            id: 'reading',
+            kind: ReaderKind.book,
+            lastOpenedAt: now,
+            progress: 0.5,
+          ),
+          entry(
+            id: 'finished',
+            kind: ReaderKind.book,
+            lastOpenedAt: now,
+            progress: 1,
+          ),
+          entry(
+            id: 'future',
+            kind: ReaderKind.book,
+            lastOpenedAt: DateTime(2026, 8, 5),
+            progress: 0.2,
+          ),
+        ],
+        bookmarkCount: 0,
+        annotationCount: 0,
+        period: StatsPeriod.week,
+        now: now,
+      );
+      expect(snap.openedInPeriod, 2);
+      expect(snap.recent.map((row) => row.item.id), ['reading']);
+    });
+
+    test('period duration excludes future rows', () {
+      final snap = buildReadingStats(
+        entries: const [],
+        bookmarkCount: 0,
+        annotationCount: 0,
+        period: StatsPeriod.all,
+        now: now,
+        dayStats: const [
+          ReadingDayStat(
+            day: '2026-08-05',
+            activeSeconds: 600,
+            comicSeconds: 0,
+            bookSeconds: 600,
+            sessionsCount: 1,
+          ),
+        ],
+      );
+      expect(snap.periodActiveSeconds, 0);
+      expect(snap.hasStoredDuration, isTrue);
     });
 
     test('empty library snapshot', () {
@@ -460,6 +523,7 @@ void main() {
       // Instead unit-test midnight split through public DB API + tracker
       // setCountingEnabled with attach under testWidgets.
       tracker.attach();
+      tracker.setContentReady(true);
       now = DateTime(2026, 8, 4, 10, 5, 0); // +5 min
       await tracker.detach();
 
@@ -481,6 +545,7 @@ void main() {
         clock: () => now,
       );
       tracker.attach();
+      tracker.setContentReady(true);
       now = DateTime(2026, 8, 4, 12, 2, 0); // +2 min counted
       tracker.setCountingEnabled(false); // TTS on — flush 2 min, stop
       now = DateTime(2026, 8, 4, 12, 20, 0); // +18 min ignored
@@ -530,6 +595,7 @@ void main() {
         clock: () => now,
       );
       tracker.attach();
+      tracker.setContentReady(true);
       now = DateTime(2026, 8, 5, 0, 10, 0);
       await tracker.detach();
 
@@ -553,6 +619,7 @@ void main() {
         clock: () => now,
       );
       tracker.attach();
+      tracker.setContentReady(true);
       now = DateTime(2026, 8, 4, 9, 3, 0); // +3 min foreground
       tracker.didChangeAppLifecycleState(AppLifecycleState.paused);
       now = DateTime(2026, 8, 4, 9, 30, 0); // +27 min background ignored
@@ -562,6 +629,34 @@ void main() {
 
       expect(await database.itemReadingSeconds('bg'), 5 * 60);
     });
+
+    test(
+      'ReadingTimeTracker waits for content and pauses behind a route',
+      () async {
+        await insertItem('visible', kind: ReaderKind.book);
+        var now = DateTime(2026, 8, 4, 9);
+        final tracker = ReadingTimeTracker(
+          database: database,
+          itemId: 'visible',
+          kind: ReaderKind.book,
+          flushInterval: const Duration(hours: 1),
+          clock: () => now,
+        );
+        tracker.attach();
+        now = DateTime(2026, 8, 4, 9, 5); // loading: ignored
+        tracker.setContentReady(true);
+        now = DateTime(2026, 8, 4, 9, 8); // visible: +3m
+        tracker.setRouteVisible(false);
+        now = DateTime(2026, 8, 4, 9, 20); // covered: ignored
+        tracker.setRouteVisible(true);
+        now = DateTime(2026, 8, 4, 9, 22); // visible: +2m
+        await tracker.detach();
+
+        expect(await database.itemReadingSeconds('visible'), 5 * 60);
+        final days = await database.watchAllDayStats().first;
+        expect(days.single.sessionsCount, 1);
+      },
+    );
   });
 
   group('ReadingStatsController', () {
@@ -605,7 +700,10 @@ void main() {
         seconds: 180,
       );
 
-      final controller = ReadingStatsController(database: database);
+      final controller = ReadingStatsController(
+        database: database,
+        clock: () => DateTime(2026, 8, 4, 15),
+      );
       addTearDown(controller.dispose);
 
       // Wait for first library + day stream emissions.
@@ -648,13 +746,16 @@ void main() {
       expect(destinationsBlock, isNot(contains('统计')));
       expect(destinationsBlock, isNot(contains('stats')));
 
-      final settings =
-          File('lib/presentation/screens/settings_screen.dart').readAsStringSync();
+      final settings = File(
+        'lib/presentation/screens/settings_screen.dart',
+      ).readAsStringSync();
       expect(settings, contains("label: '阅读统计'"));
       expect(settings, contains('ReadingStatsScreen.open'));
       expect(settings, contains('comicReadingPreferences'));
       expect(settings, contains('bookReadingPreferences'));
-      final shellOpen = File('lib/presentation/app_shell.dart').readAsStringSync();
+      final shellOpen = File(
+        'lib/presentation/app_shell.dart',
+      ).readAsStringSync();
       expect(
         shellOpen,
         contains('comicReadingPreferences: widget.readingPreferences'),
@@ -664,34 +765,36 @@ void main() {
         contains('bookReadingPreferences: widget.bookReadingPreferences'),
       );
 
-      final comic =
-          File('lib/presentation/screens/comic_reader_screen.dart')
-              .readAsStringSync();
+      final comic = File(
+        'lib/presentation/screens/comic_reader_screen.dart',
+      ).readAsStringSync();
       expect(comic, contains('ReadingTimeTracker'));
       expect(comic, contains('ReaderKind.comic'));
 
-      final book =
-          File('lib/presentation/screens/book_reader_screen.dart')
-              .readAsStringSync();
+      final book = File(
+        'lib/presentation/screens/book_reader_screen.dart',
+      ).readAsStringSync();
       expect(book, contains('ReadingTimeTracker'));
       expect(book, contains('setCountingEnabled'));
       expect(book, contains('ttsPlaying'));
 
-      final db =
-          File('lib/library/persistence/app_database.dart').readAsStringSync();
+      final db = File(
+        'lib/library/persistence/app_database.dart',
+      ).readAsStringSync();
       expect(db, contains('class ReadingDayStats'));
       expect(db, contains('class ReadingItemTime'));
       expect(db, contains('schemaVersion => 6'));
       expect(db, contains('from < 6'));
 
-      final detail =
-          File('lib/presentation/screens/item_detail_sheet.dart')
-              .readAsStringSync();
+      final detail = File(
+        'lib/presentation/screens/item_detail_sheet.dart',
+      ).readAsStringSync();
       expect(detail, contains('itemReadingSeconds'));
       expect(detail, contains('累计阅读'));
 
-      final exporter =
-          File('lib/library/backup/backup_exporter.dart').readAsStringSync();
+      final exporter = File(
+        'lib/library/backup/backup_exporter.dart',
+      ).readAsStringSync();
       expect(exporter, contains('dayStats'));
       expect(exporter, contains('itemTime'));
       expect(exporter, contains('readingDayStats'));
@@ -728,9 +831,7 @@ void main() {
       );
       final decoded = BackupRecords.fromJson(
         // ignore: inference_failure_on_collection_literal
-        {
-          ...full.toJson(),
-        },
+        {...full.toJson()},
       );
       expect(decoded, isNotNull);
       expect(decoded!.dayStats, hasLength(1));
@@ -753,6 +854,50 @@ void main() {
       expect(legacy, isNotNull);
       expect(legacy!.dayStats, isEmpty);
       expect(legacy.itemTime, isEmpty);
+    });
+  });
+
+  group('ReadingDayCounters', () {
+    test('normalizes invalid breakdown and chooses one coherent row', () {
+      final local = ReadingDayCounters.normalized(
+        activeSeconds: 100,
+        comicSeconds: 100,
+        bookSeconds: 0,
+        sessionsCount: 1,
+      );
+      final remote = ReadingDayCounters.normalized(
+        activeSeconds: 120,
+        comicSeconds: 0,
+        bookSeconds: 120,
+        sessionsCount: 2,
+      );
+      final chosen = ReadingDayCounters.chooseLarger(local, remote);
+      expect(chosen.activeSeconds, 120);
+      expect(chosen.comicSeconds, 0);
+      expect(chosen.bookSeconds, 120);
+      expect(chosen.activeSeconds, chosen.comicSeconds + chosen.bookSeconds);
+
+      final corrupt = ReadingDayCounters.normalized(
+        activeSeconds: 20,
+        comicSeconds: 30,
+        bookSeconds: 40,
+        sessionsCount: -1,
+      );
+      expect(corrupt.activeSeconds, 70);
+      expect(corrupt.sessionsCount, 0);
+
+      final bounded = ReadingDayCounters.normalized(
+        activeSeconds: 0x7FFFFFFFFFFFFFFF,
+        comicSeconds: 0x7FFFFFFFFFFFFFFF,
+        bookSeconds: 0x7FFFFFFFFFFFFFFF,
+        sessionsCount: 0x7FFFFFFFFFFFFFFF,
+      );
+      expect(bounded.activeSeconds, 0x3FFFFFFFFFFFFFFF);
+      expect(bounded.comicSeconds, 0x3FFFFFFFFFFFFFFF);
+      expect(bounded.bookSeconds, 0);
+      expect(bounded.comicSeconds + bounded.bookSeconds, bounded.activeSeconds);
+      expect(isValidReadingDayKey('2026-02-29'), isFalse);
+      expect(isValidReadingDayKey('2028-02-29'), isTrue);
     });
   });
 }

@@ -8,7 +8,9 @@ import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 
 import '../../ai/ai_chat.dart';
+import '../../ai/ai_chat_store.dart';
 import '../../ai/ai_graph.dart';
+import '../../ai/ai_graph_store.dart';
 import '../../domain/reader_models.dart';
 import '../import/import_pipeline.dart';
 import '../import/import_sources.dart';
@@ -17,6 +19,7 @@ import '../remote/remote_models.dart';
 import '../remote/remote_store.dart';
 import '../remote/webdav_client.dart';
 import '../storage/library_paths.dart';
+import '../stats/reading_day_counters.dart';
 import 'backup_exporter.dart';
 import 'backup_format.dart';
 import 'backup_store.dart';
@@ -147,9 +150,17 @@ class BackupService {
         deviceName: _defaultDeviceName(),
       );
       changed = true;
-    } else if (_settings.deviceName.trim().isEmpty) {
-      _settings = _settings.copyWith(deviceName: _defaultDeviceName());
-      changed = true;
+    } else {
+      final deviceName = KaijuanBackupFormat.truncateDeviceName(
+        _settings.deviceName,
+      );
+      final normalizedName = deviceName.isEmpty
+          ? _defaultDeviceName()
+          : deviceName;
+      if (normalizedName != _settings.deviceName) {
+        _settings = _settings.copyWith(deviceName: normalizedName);
+        changed = true;
+      }
     }
     if (changed) await settingsStore.write(_settings);
     _loaded = true;
@@ -160,7 +171,13 @@ class BackupService {
     final normalizedPath = WebDavBackupStore.sanitizeRelativePath(
       settings.remotePath,
     );
-    _settings = settings.copyWith(remotePath: normalizedPath);
+    final deviceName = KaijuanBackupFormat.truncateDeviceName(
+      settings.deviceName,
+    );
+    _settings = settings.copyWith(
+      remotePath: normalizedPath,
+      deviceName: deviceName.isEmpty ? _defaultDeviceName() : deviceName,
+    );
     await settingsStore.write(_settings);
   }
 
@@ -169,11 +186,12 @@ class BackupService {
   }) async {
     await load();
     if (_running) throw const BackupServiceException('备份正在进行');
-    final connection = await _webDavConnection();
-    final credentials =
-        await credentialStore.read(connection.id) ?? const RemoteCredentials();
     _running = true;
     try {
+      final connection = await _webDavConnection();
+      final credentials =
+          await credentialStore.read(connection.id) ??
+          const RemoteCredentials();
       onProgress?.call(
         const BackupProgress(
           phase: BackupPhase.preparing,
@@ -187,7 +205,15 @@ class BackupService {
         supportDirectory: supportDirectory,
       ).export();
       final snapshotId = _newId('snapshot');
-      final compressed = gzip.encode(utf8.encode(exported.records.encode()));
+      final encodedRecords = utf8.encode(exported.records.encode());
+      if (encodedRecords.length >
+          KaijuanBackupFormat.maxUncompressedRecordsBytes) {
+        throw const BackupServiceException('备份数据过大，暂时无法创建快照');
+      }
+      final compressed = gzip.encode(encodedRecords);
+      if (compressed.length > KaijuanBackupFormat.maxCompressedRecordsBytes) {
+        throw const BackupServiceException('备份记录压缩后超过大小限制');
+      }
       final manifest = BackupSnapshotManifest(
         snapshotId: snapshotId,
         deviceId: _settings.deviceId,
@@ -298,16 +324,21 @@ class BackupService {
     final (store, _, _) = await _storeParts();
     return store.withSession(_settings.remotePath, (session, root) async {
       final records = await store.readRecords(session, root, manifest);
-      final localItems = await database.select(database.readingItems).get();
-      final hashes = {for (final item in localItems) item.contentHash};
+      var newBooks = 0;
+      var existingBooks = 0;
+      for (final object in manifest.objects) {
+        final local = await database.readingItemByHash(object.hash);
+        final localFile = local == null ? null : await _existingItemFile(local);
+        if (localFile != null && await _fileMatchesObject(localFile, object)) {
+          existingBooks++;
+        } else {
+          newBooks++;
+        }
+      }
       return BackupRestorePreview(
         manifest: manifest,
-        newBooks: manifest.objects
-            .where((object) => !hashes.contains(object.hash))
-            .length,
-        existingBooks: manifest.objects
-            .where((object) => hashes.contains(object.hash))
-            .length,
+        newBooks: newBooks,
+        existingBooks: existingBooks,
         progressRows: records.progress.length,
         bookmarkRows: records.bookmarks.length,
         annotationRows: records.annotations.length,
@@ -327,11 +358,11 @@ class BackupService {
     final staging = Directory(
       p.join(supportDirectory.path, '.backup-staging', manifest.snapshotId),
     );
-    final localHashesBeforeRestore = {
-      for (final item in await database.select(database.readingItems).get())
-        item.contentHash,
-    };
     try {
+      final localHashesBeforeRestore = {
+        for (final item in await database.select(database.readingItems).get())
+          item.contentHash,
+      };
       final (store, _, _) = await _storeParts();
       await staging.create(recursive: true);
       return await store.withSession(_settings.remotePath, (
@@ -340,46 +371,73 @@ class BackupService {
       ) async {
         final records = await store.readRecords(session, root, manifest);
         final objectsToRestore = <BackupObjectDescriptor>[];
+        final corruptLocalFiles = <String, File>{};
+        final downloadedFiles = <String, File>{};
         final newlyImportedHashes = <String>{};
         for (final object in manifest.objects) {
           final local = await database.readingItemByHash(object.hash);
           final localFile = local == null
               ? null
               : await _existingItemFile(local);
-          if (local == null || localFile == null) objectsToRestore.add(object);
+          if (localFile != null &&
+              await _fileMatchesObject(localFile, object)) {
+            continue;
+          }
+          if (localFile != null) corruptLocalFiles[object.hash] = localFile;
+          objectsToRestore.add(object);
         }
         onProgress?.call(
           BackupProgress(
             phase: BackupPhase.downloading,
             completed: 0,
             total: objectsToRestore.length,
-            message: '正在下载缺失书籍…',
+            message: '正在下载并校验待恢复书籍…',
           ),
         );
+        // Finish every network transfer and integrity check before mutating
+        // the library. A failed download therefore leaves local data intact.
         for (var i = 0; i < objectsToRestore.length; i++) {
           final object = objectsToRestore[i];
           final destination = File(
             p.join(staging.path, '${object.hash}${object.extension}'),
           );
           await store.downloadObject(session, root, object, destination);
-          final candidate = ImportCandidate(
-            source: LocalFileImportSource(
-              destination,
-              method: ImportMethod.localFile,
-              displayName: '${object.hash}${object.extension}',
-            ),
-            declaredFormat: ReaderFormat.fromExtension(object.extension),
-          );
-          final result = await importPipeline.importCandidates([candidate]);
-          if (result.hasFailures || result.added + result.updated == 0) {
-            throw BackupServiceException(
-              '恢复书籍失败：${result.failures.firstOrNull?.reason ?? object.hash}',
-            );
-          }
-          newlyImportedHashes.add(object.hash);
+          downloadedFiles[object.hash] = destination;
           onProgress?.call(
             BackupProgress(
               phase: BackupPhase.downloading,
+              completed: i + 1,
+              total: objectsToRestore.length,
+              message: '已校验 ${i + 1}/${objectsToRestore.length} 本书',
+            ),
+          );
+        }
+        for (var i = 0; i < objectsToRestore.length; i++) {
+          final object = objectsToRestore[i];
+          final destination = downloadedFiles[object.hash]!;
+          final corruptLocal = corruptLocalFiles[object.hash];
+          if (corruptLocal != null) {
+            await _replaceCorruptFile(corruptLocal, destination, object);
+          } else {
+            final candidate = ImportCandidate(
+              source: LocalFileImportSource(
+                destination,
+                method: ImportMethod.localFile,
+                displayName: '${object.hash}${object.extension}',
+              ),
+              declaredFormat: ReaderFormat.fromExtension(object.extension),
+            );
+            final result = await importPipeline.importCandidates([candidate]);
+            if (result.hasFailures || result.added + result.updated == 0) {
+              throw BackupServiceException(
+                '恢复书籍失败：${result.failures.firstOrNull?.reason ?? object.hash}',
+              );
+            }
+            newlyImportedHashes.add(object.hash);
+          }
+          onProgress?.call(
+            BackupProgress(
+              phase: BackupPhase.restoring,
               completed: i + 1,
               total: objectsToRestore.length,
               message: '已恢复 ${i + 1}/${objectsToRestore.length} 本书',
@@ -635,15 +693,17 @@ class BackupService {
             );
       }
 
-      // Duration tables: merge by taking the larger cumulative seconds so
-      // neither device loses "more reading time" on restore.
+      // Duration tables are snapshot counters, not additive sync. Pick one
+      // coherent normalized day row so active == comic + book stays true.
       for (final raw in records.dayStats) {
         final day = _string(raw['day']);
-        if (day == null || day.isEmpty) continue;
-        final remoteActive = _int(raw['activeSeconds']) ?? 0;
-        final remoteComic = _int(raw['comicSeconds']) ?? 0;
-        final remoteBook = _int(raw['bookSeconds']) ?? 0;
-        final remoteSessions = _int(raw['sessionsCount']) ?? 0;
+        if (day == null || !isValidReadingDayKey(day)) continue;
+        final remote = ReadingDayCounters.normalized(
+          activeSeconds: _int(raw['activeSeconds']) ?? 0,
+          comicSeconds: _int(raw['comicSeconds']) ?? 0,
+          bookSeconds: _int(raw['bookSeconds']) ?? 0,
+          sessionsCount: _int(raw['sessionsCount']) ?? 0,
+        );
         final local = await (database.select(
           database.readingDayStats,
         )..where((t) => t.day.equals(day))).getSingleOrNull();
@@ -653,35 +713,30 @@ class BackupService {
               .insert(
                 ReadingDayStatsCompanion.insert(
                   day: day,
-                  activeSeconds: Value(remoteActive),
-                  comicSeconds: Value(remoteComic),
-                  bookSeconds: Value(remoteBook),
-                  sessionsCount: Value(remoteSessions),
+                  activeSeconds: Value(remote.activeSeconds),
+                  comicSeconds: Value(remote.comicSeconds),
+                  bookSeconds: Value(remote.bookSeconds),
+                  sessionsCount: Value(remote.sessionsCount),
                 ),
               );
         } else {
+          final chosen = ReadingDayCounters.chooseLarger(
+            ReadingDayCounters.normalized(
+              activeSeconds: local.activeSeconds,
+              comicSeconds: local.comicSeconds,
+              bookSeconds: local.bookSeconds,
+              sessionsCount: local.sessionsCount,
+            ),
+            remote,
+          );
           await (database.update(
             database.readingDayStats,
           )..where((t) => t.day.equals(day))).write(
             ReadingDayStatsCompanion(
-              activeSeconds: Value(
-                local.activeSeconds > remoteActive
-                    ? local.activeSeconds
-                    : remoteActive,
-              ),
-              comicSeconds: Value(
-                local.comicSeconds > remoteComic
-                    ? local.comicSeconds
-                    : remoteComic,
-              ),
-              bookSeconds: Value(
-                local.bookSeconds > remoteBook ? local.bookSeconds : remoteBook,
-              ),
-              sessionsCount: Value(
-                local.sessionsCount > remoteSessions
-                    ? local.sessionsCount
-                    : remoteSessions,
-              ),
+              activeSeconds: Value(chosen.activeSeconds),
+              comicSeconds: Value(chosen.comicSeconds),
+              bookSeconds: Value(chosen.bookSeconds),
+              sessionsCount: Value(chosen.sessionsCount),
             ),
           );
         }
@@ -690,7 +745,7 @@ class BackupService {
       for (final raw in records.itemTime) {
         final itemId = itemIds[_string(raw['contentHash'])];
         final remoteSeconds = _int(raw['activeSeconds']) ?? 0;
-        if (itemId == null || remoteSeconds <= 0) continue;
+        if (itemId == null || !isValidReadingCounter(remoteSeconds)) continue;
         final local = await (database.select(
           database.readingItemTime,
         )..where((t) => t.itemId.equals(itemId))).getSingleOrNull();
@@ -760,17 +815,14 @@ class BackupService {
         continue;
       }
       final remote = AiBookGraph.fromJson(Map<String, dynamic>.from(graphRaw));
-      if (remote == null) continue;
+      if (remote == null || remote.contentHash != hash) continue;
       final workKey = _string(raw['workKey']);
-      final file = File(
-        p.join(directory.path, AiGraphStore.fileNameFor(hash, workKey: workKey)),
-      );
-      if (await file.exists()) {
-        // Local graph wins; restore never overwrites local content.
+      final graphStore = AiGraphStore(directory);
+      if (await graphStore.read(hash, workKey: workKey) != null) {
+        // A valid local graph wins; an unreadable local file is repairable.
         continue;
       }
-      await directory.create(recursive: true);
-      await file.writeAsString(jsonEncode(remote.toJson()), flush: true);
+      await graphStore.write(remote, workKey: workKey);
       restored++;
     }
     return restored;
@@ -782,63 +834,94 @@ class BackupService {
   ) async {
     var restored = 0;
     final directory = Directory(p.join(supportDirectory.path, 'ai_chat'));
+    final store = JsonAiChatHistoryStore(directory);
     for (final raw in rows) {
       final hash = _string(raw['contentHash']);
       final messagesRaw = raw['messages'];
       final outlineRaw = raw['outline'];
+      final workOutlinesRaw = raw['workOutlines'];
+      final workMessagesRaw = raw['workMessages'];
       if (hash == null ||
           !KaijuanBackupFormat.isSha256(hash) ||
           !itemIds.containsKey(hash) ||
-          (messagesRaw is! List && outlineRaw is! Map)) {
+          (messagesRaw is! List &&
+              outlineRaw is! Map &&
+              workOutlinesRaw is! Map &&
+              workMessagesRaw is! Map)) {
         continue;
       }
       final remote = AiChatSession.fromJson({
         'contentHash': hash,
         'messages': messagesRaw is List ? messagesRaw : const [],
         if (outlineRaw is Map) 'outline': outlineRaw,
+        if (workOutlinesRaw is Map) 'workOutlines': workOutlinesRaw,
+        if (workMessagesRaw is Map) 'workMessages': workMessagesRaw,
       });
-      if (remote.messages.isEmpty && remote.outline == null) continue;
-      final file = File(p.join(directory.path, '$hash.json'));
-      AiChatSession local = AiChatSession(contentHash: hash, itemId: '');
-      if (await file.exists()) {
-        try {
-          final decoded = jsonDecode(await file.readAsString());
-          if (decoded is Map) {
-            local = AiChatSession.fromJson(Map<String, dynamic>.from(decoded));
-          }
-        } catch (_) {}
-      }
-      final seen = <String>{
-        for (final message in local.messages) jsonEncode(message.toJson()),
-      };
-      final merged = <AiChatMessage>[...local.messages];
-      for (final message in remote.messages) {
-        final key = jsonEncode(message.toJson());
-        if (seen.add(key)) merged.add(message);
-      }
-      final bounded = merged.length > 100
-          ? merged.sublist(merged.length - 100)
-          : merged;
-      final outline = local.outline ?? remote.outline;
-      final messagesChanged =
-          jsonEncode([for (final message in bounded) message.toJson()]) !=
-          jsonEncode([for (final message in local.messages) message.toJson()]);
-      final outlineChanged = local.outline == null && remote.outline != null;
-      if (!messagesChanged && !outlineChanged) {
+      if (remote.messages.isEmpty &&
+          remote.outline == null &&
+          remote.workOutlines.isEmpty &&
+          remote.workMessages.isEmpty) {
         continue;
       }
-      await directory.create(recursive: true);
-      await file.writeAsString(
-        jsonEncode(
-          AiChatSession(
-            contentHash: hash,
-            itemId: '',
-            messages: bounded,
-            outline: outline,
-          ).toJson(),
-        ),
-        flush: true,
+      final itemId = itemIds[hash]!;
+      AiChatSession local;
+      try {
+        local =
+            await store.read(contentHash: hash, itemId: itemId) ??
+            AiChatSession(contentHash: hash, itemId: itemId);
+      } on FormatException {
+        // A syntactically corrupt local generation contains no recoverable
+        // messages. JsonAiChatHistoryStore keeps a backup during replacement.
+        local = AiChatSession(contentHash: hash, itemId: itemId);
+      }
+      List<AiChatMessage> mergeMessages(
+        List<AiChatMessage> localMessages,
+        List<AiChatMessage> remoteMessages,
+      ) {
+        final seen = <String>{
+          for (final message in localMessages) jsonEncode(message.toJson()),
+        };
+        final merged = <AiChatMessage>[...localMessages];
+        for (final message in remoteMessages) {
+          final key = jsonEncode(message.toJson());
+          if (seen.add(key)) merged.add(message);
+        }
+        return merged;
+      }
+
+      final workMessages = <String, List<AiChatMessage>>{};
+      for (final key in {
+        ...local.workMessages.keys,
+        ...remote.workMessages.keys,
+      }) {
+        final merged = mergeMessages(
+          local.workMessages[key] ?? const [],
+          remote.workMessages[key] ?? const [],
+        );
+        if (merged.isNotEmpty) workMessages[key] = merged;
+      }
+      final desired = AiChatSession(
+        contentHash: hash,
+        itemId: itemId,
+        messages: mergeMessages(local.messages, remote.messages),
+        // Restore fills gaps but never replaces local analysis.
+        outline: local.outline ?? remote.outline,
+        workOutlines: {...remote.workOutlines, ...local.workOutlines},
+        workMessages: workMessages,
       );
+      final normalizedLocal = AiChatSession(
+        contentHash: hash,
+        itemId: itemId,
+        messages: local.messages,
+        outline: local.outline,
+        workOutlines: local.workOutlines,
+        workMessages: local.workMessages,
+      );
+      if (jsonEncode(desired.toJson()) ==
+          jsonEncode(normalizedLocal.toJson())) {
+        continue;
+      }
+      await store.write(desired);
       restored++;
     }
     return restored;
@@ -870,12 +953,69 @@ class BackupService {
     if (connection == null || connection.type != RemoteSourceType.webDav) {
       throw const BackupServiceException('备份使用的 WebDAV 连接不存在');
     }
+    if (Uri.tryParse(connection.url)?.scheme.toLowerCase() != 'https') {
+      throw const BackupServiceException('备份位置需要使用 HTTPS。请编辑 WebDAV 连接地址后重试');
+    }
     return connection;
   }
 
   Future<File?> _existingItemFile(ReadingItem item) async {
     final paths = LibraryPaths(supportDirectory);
     return paths.resolveExisting(item.filePath, contentHash: item.contentHash);
+  }
+
+  Future<bool> _fileMatchesObject(
+    File file,
+    BackupObjectDescriptor descriptor,
+  ) async {
+    try {
+      if (!await file.exists() || await file.length() != descriptor.size) {
+        return false;
+      }
+      final digest = await sha256.bind(file.openRead()).first;
+      return digest.toString() == descriptor.hash;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _replaceCorruptFile(
+    File existing,
+    File downloaded,
+    BackupObjectDescriptor descriptor,
+  ) async {
+    final suffix = '$pid.${DateTime.now().microsecondsSinceEpoch}';
+    final replacement = File('${existing.path}.backup-repair.$suffix.partial');
+    final previous = File('${existing.path}.backup-repair.$suffix.previous');
+    try {
+      await downloaded.copy(replacement.path);
+      if (!await _fileMatchesObject(replacement, descriptor)) {
+        throw const BackupServiceException('恢复后的书籍文件校验失败');
+      }
+      await existing.rename(previous.path);
+      try {
+        await replacement.rename(existing.path);
+      } catch (_) {
+        if (!await existing.exists() && await previous.exists()) {
+          await previous.rename(existing.path);
+        }
+        rethrow;
+      }
+      if (await previous.exists()) {
+        try {
+          await previous.delete();
+        } catch (_) {
+          // The repaired generation is already active. A stale recovery copy
+          // is preferable to reporting a false restore failure.
+        }
+      }
+      if (await downloaded.exists()) await downloaded.delete();
+    } finally {
+      if (await replacement.exists()) await replacement.delete();
+      if (!await existing.exists() && await previous.exists()) {
+        await previous.rename(existing.path);
+      }
+    }
   }
 
   static String _newId(String prefix) {
@@ -891,12 +1031,15 @@ class BackupService {
     return '我的设备';
   }
 
-  static String _friendlyError(Object error) {
-    if (error is BackupServiceException || error is BackupStoreException) {
-      return error.toString();
-    }
-    return '备份失败，请检查网络、权限或 WebDAV 设置';
+  String userMessageFor(Object error, {required String fallback}) {
+    if (error is BackupServiceException) return error.message;
+    if (error is BackupStoreException) return error.message;
+    if (error is RemoteProtocolException) return error.message;
+    return fallback;
   }
+
+  String _friendlyError(Object error) =>
+      userMessageFor(error, fallback: '备份失败。请检查网络、权限和 WebDAV 设置后重试');
 
   static String? _string(Object? value) =>
       value is String && value.isNotEmpty ? value : null;

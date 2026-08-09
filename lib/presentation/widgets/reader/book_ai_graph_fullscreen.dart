@@ -1,23 +1,33 @@
 import 'package:flutter/material.dart';
 
 import '../../../ai/ai_graph.dart';
-import '../../../core/kaijuan_icons.dart';
-import 'ai_relation_row.dart';
+import '../../../core/theme.dart';
+import 'book_ai_entity_sheet.dart';
 import 'book_ai_graph_view.dart';
 
 /// Fullscreen knowledge-graph explorer: a large force-directed view with the
 /// same data as the tab, plus a per-vertex detail sheet on tap.
-class BookAiGraphFullscreen extends StatelessWidget {
+class BookAiGraphFullscreen extends StatefulWidget {
   const BookAiGraphFullscreen({
     super.key,
     required this.entities,
     required this.relations,
+    required this.graph,
+    required this.gateByProgress,
+    required this.readThrough,
     this.title = '知识图谱',
     this.onJumpToEvidence,
   });
 
   final List<AiGraphEntity> entities;
   final List<AiGraphRelation> relations;
+
+  /// The full graph the (already gated) [entities]/[relations] slices came
+  /// from — the entity detail sheet re-derives its own relation/evidence
+  /// lists from it, so the vertex card matches the panel's card exactly.
+  final AiBookGraph graph;
+  final bool gateByProgress;
+  final int readThrough;
   final String title;
 
   /// Called when the user taps an evidence row: jump the reader to the
@@ -25,247 +35,109 @@ class BookAiGraphFullscreen extends StatelessWidget {
   final void Function(AiGraphEvidence evidence)? onJumpToEvidence;
 
   @override
+  State<BookAiGraphFullscreen> createState() => _BookAiGraphFullscreenState();
+}
+
+class _BookAiGraphFullscreenState extends State<BookAiGraphFullscreen> {
+  int _viewEpoch = 0;
+  bool _showGestureHint = true;
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(title),
+        title: Text(widget.title),
         leading: IconButton(
           tooltip: '关闭',
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                '滚轮缩放 · 拖动平移',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
+          IconButton(
+            tooltip: '重置视图',
+            onPressed: () => setState(() => _viewEpoch++),
+            icon: const Icon(Icons.center_focus_strong_outlined),
           ),
         ],
       ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-          child: BookAiGraphView(
-            entities: entities,
-            relations: relations,
-            onVertexTap: (name) => _showVertexCard(context, name),
-            scrollZoomEnabled: true,
+          child: Column(
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: BookAiGraphView(
+                        key: ValueKey(_viewEpoch),
+                        entities: widget.entities,
+                        relations: widget.relations,
+                        onVertexTap: (entityId) =>
+                            _showVertexCard(context, entityId),
+                        scrollZoomEnabled: true,
+                      ),
+                    ),
+                    if (_showGestureHint)
+                      PositionedDirectional(
+                        top: 8,
+                        start: 8,
+                        child: Material(
+                          color: context.appColors.surfaceContainerHighest
+                              .withValues(alpha: 0.94),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsetsDirectional.only(
+                                  start: 12,
+                                ),
+                                child: Text(
+                                  context.appIsCompact
+                                      ? '缩放与拖动浏览'
+                                      : '双指或滚轮缩放 · 拖动平移',
+                                  style: TextStyle(
+                                    fontSize: context.appCaptionSize,
+                                    color: context.appSecondaryText,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: '隐藏操作提示',
+                                onPressed: () =>
+                                    setState(() => _showGestureHint = false),
+                                icon: const Icon(Icons.close, size: 16),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              BookAiGraphEntityNavigator(
+                entities: widget.entities,
+                onEntityTap: (entityId) => _showVertexCard(context, entityId),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  void _showVertexCard(BuildContext context, String name) {
-    final colors = Theme.of(context).colorScheme;
-    final entity = entities
-        .where((e) => e.name == name || e.aliases.contains(name))
-        .firstOrNull;
-    if (entity == null) return;
-    final occurrences = entity.chapterFreq.values.fold<int>(
-      0,
-      (sum, v) => sum + v,
-    );
-    final relations = this.relations
-        .where((r) => r.source == entity.name || r.target == entity.name)
-        .toList(growable: false);
-    final evidence = entity.evidence;
-    Widget sectionBadge(int count) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-      decoration: BoxDecoration(
-        color: colors.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        '$count',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: colors.primary,
-        ),
-      ),
-    );
-    showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    entity.name,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: colors.onSurface,
-                    ),
-                  ),
-                ),
-                Text(
-                  '$occurrences 章',
-                  style: TextStyle(fontSize: 13, color: colors.onSurfaceVariant),
-                ),
-              ],
-            ),
-            if (entity.aliases.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                '别名：${entity.aliases.join('、')}',
-                style: TextStyle(fontSize: 13, color: colors.onSurfaceVariant),
-              ),
-            ],
-            if (entity.description.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                decoration: BoxDecoration(
-                  color: colors.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  entity.description,
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.5,
-                    color: colors.onSurface,
-                  ),
-                ),
-              ),
-            ],
-            if (relations.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Text(
-                    '关系',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colors.onSurface,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  sectionBadge(relations.length),
-                ],
-              ),
-              const SizedBox(height: 8),
-              for (final r in relations)
-                AiRelationRow(
-                  relation: r,
-                  selfName: entity.name,
-                ),
-            ],
-            if (evidence.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Text(
-                    '出处',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colors.onSurface,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  sectionBadge(evidence.length),
-                ],
-              ),
-              const SizedBox(height: 8),
-              for (final item in evidence)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Material(
-                    color: colors.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(10),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(10),
-                      onTap: onJumpToEvidence == null
-                          ? null
-                          : () {
-                              Navigator.of(sheetContext).pop();
-                              onJumpToEvidence!(item);
-                            },
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 7,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: colors.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '第 ${item.sectionIndex} 节',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.primary,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                item.quote,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.4,
-                                  color: item.spanResolved
-                                      ? colors.onSurface
-                                      : colors.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3),
-                              child: Icon(
-                                KaijuanIcons.forward,
-                                size: 14,
-                                color: colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-            if (relations.isEmpty && evidence.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Text(
-                  '该实体暂无可见内容。',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+  void _showVertexCard(BuildContext context, String entityId) {
+    // Same card as the graph tab's entity sheet (the sheet pops itself
+    // before invoking the evidence callback; the callback's owner then
+    // closes this route after the jump, as the hand-rolled card did).
+    showBookAiEntitySheetById(
+      context,
+      entityId,
+      graph: widget.graph,
+      gateByProgress: widget.gateByProgress,
+      readThrough: widget.readThrough,
+      onJumpToEvidence: widget.onJumpToEvidence,
     );
   }
 }

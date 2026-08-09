@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../ai/ai_graph_family_tree.dart';
+import '../ai_typography.dart';
 
 /// Line-connected organization-chart family tree (spec:
 /// docs/specs/ai-graph-narration.md §5.3): top-down, siblings spread evenly,
@@ -31,11 +32,13 @@ class BookAiGraphFamilyTreeView extends StatefulWidget {
     this.leafStep = 176,
     this.levelHeight = 96,
     this.viewportHeight = 380,
+    this.minScale = 0.1,
+    this.maxScale = 4,
   });
 
   final AiFamilyTree tree;
 
-  /// Tapped a node's canonical name (opens the entity card).
+  /// Tapped a node's stable entity ID (opens the entity card).
   final ValueChanged<String> onVertexTap;
 
   /// Minimum horizontal distance between sibling leaves. At least
@@ -47,32 +50,37 @@ class BookAiGraphFamilyTreeView extends StatefulWidget {
   final double levelHeight;
 
   /// Fixed viewport height; the tree fit-scaling is computed against it.
-  final double viewportHeight;
+  /// Null fills the parent's height constraint (fullscreen); an unbounded
+  /// parent falls back to 380.
+  final double? viewportHeight;
+
+  /// Zoom limits. The fullscreen view passes a much deeper range than the
+  /// panel defaults (a big tree opens fitted way below 1:1, so reading one
+  /// branch needs generous magnification). Wheel zoom is native to
+  /// InteractiveViewer on desktop — no custom handling needed.
+  final double minScale;
+  final double maxScale;
 
   static const double nodeWidth = 88;
   static const double nodeHeight = 44;
-  static const double _spouseRowHeight = 14;
+  static const double _spouseRowHeight = 18;
   static const double horizontalPadding = 24;
 
   /// Edge kinship-label chip size (父子/夫妻…). Fixed so Positioned math
   /// stays simple; the label clips with ellipsis if longer.
-  static const double _edgeLabelWidth = 34;
-  static const double _edgeLabelHeight = 16;
+  static const double _edgeLabelWidth = 44;
+  static const double _edgeLabelHeight = 20;
 
   /// Cap on stretched sibling spacing: a sparse tree fills the panel but a
   /// two-node tree must not spread across an 800px panel.
   static const double maxSiblingStep = 264;
-
-  static const double minScale = 0.1;
-  static const double maxScale = 4;
 
   @override
   State<BookAiGraphFamilyTreeView> createState() =>
       _BookAiGraphFamilyTreeViewState();
 }
 
-class _BookAiGraphFamilyTreeViewState
-    extends State<BookAiGraphFamilyTreeView> {
+class _BookAiGraphFamilyTreeViewState extends State<BookAiGraphFamilyTreeView> {
   final TransformationController _controller = TransformationController();
   bool _fitted = false;
 
@@ -105,10 +113,7 @@ class _BookAiGraphFamilyTreeViewState
     // autoZoomToFit magnifies a small tree to fill the panel (never below
     // minScale), never above 1:1 so a wide tree isn't blown past the panel
     // (it's panned instead).
-    final scale = fit.clamp(
-      BookAiGraphFamilyTreeView.minScale,
-      1.0,
-    );
+    final scale = fit.clamp(widget.minScale, 1.0);
     _controller.value = Matrix4.identity()
       ..setEntry(0, 0, scale)
       ..setEntry(1, 1, scale)
@@ -122,9 +127,10 @@ class _BookAiGraphFamilyTreeViewState
     Set<String> complex,
   ) {
     final layout = _LayoutNode(
+      entityId: node.entityId,
       name: node.name,
       depth: depth,
-      complex: complex.contains(node.name),
+      complex: complex.contains(node.entityId),
       kin: node.kin,
       spouses: node.spouses,
     );
@@ -137,10 +143,9 @@ class _BookAiGraphFamilyTreeViewState
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final complex = widget.tree.complexNames.toSet();
+    final complex = widget.tree.complexEntityIds.toSet();
     final roots = [
-      for (final root in widget.tree.roots)
-        _toLayoutNode(root, 0, complex),
+      for (final root in widget.tree.roots) _toLayoutNode(root, 0, complex),
     ];
     if (roots.isEmpty) return const SizedBox.shrink();
 
@@ -151,7 +156,7 @@ class _BookAiGraphFamilyTreeViewState
     // always plain 配偶); a marriage-only spouse (王皇后) has no tree seat
     // and is untouched. The spouse entry's forward kin is the 婚配 kin —
     // empty-kin 婚配 edges (kin='配偶' both ways) are left alone.
-    final parkedNames = <String>{};
+    final parkedIds = <String>{};
     {
       final all = <_LayoutNode>[];
       void walk(_LayoutNode n) {
@@ -167,16 +172,17 @@ class _BookAiGraphFamilyTreeViewState
       for (final r in [...roots]) {
         _LayoutNode? anchor;
         for (final n in all) {
-          if (n.spouses.any((s) => s.name == r.name && s.kin != '配偶') &&
-              !parkedNames.contains(n.name)) {
+          if (n.spouses.any((s) => s.entityId == r.entityId && s.kin != '配偶') &&
+              !parkedIds.contains(n.entityId)) {
             anchor = n;
             break;
           }
         }
         if (anchor == null || identical(anchor, r)) continue;
-        if (parkedNames.contains(r.name)) continue;
+        if (parkedIds.contains(r.entityId)) continue;
         roots.remove(r);
         final parked = _LayoutNode(
+          entityId: r.entityId,
           name: r.name,
           depth: anchor.depth + 1,
           complex: r.complex,
@@ -193,7 +199,7 @@ class _BookAiGraphFamilyTreeViewState
         }
 
         shiftDepth(parked, anchor.depth + 1);
-        parkedNames.add(r.name);
+        parkedIds.add(r.entityId);
         anchor.children.insert(0, parked);
         // Re-walk for the next candidate (the anchor set may have grown).
         all.clear();
@@ -221,6 +227,12 @@ class _BookAiGraphFamilyTreeViewState
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
+        // Fullscreen passes viewportHeight: null → fill the parent; a
+        // scrollable parent (unbounded height) falls back to the panel
+        // default so the widget never collapses to zero.
+        final viewportH =
+            widget.viewportHeight ??
+            (constraints.maxHeight.isFinite ? constraints.maxHeight : 380);
         final side =
             BookAiGraphFamilyTreeView.horizontalPadding +
             BookAiGraphFamilyTreeView.nodeWidth / 2;
@@ -263,8 +275,7 @@ class _BookAiGraphFamilyTreeViewState
           depthOf(root, 0);
         }
 
-        final contentWidth =
-            side * 2 + math.max(leafCount - 1, 0) * step;
+        final contentWidth = side * 2 + math.max(leafCount - 1, 0) * step;
         final canvasWidth = math.max(contentWidth, maxWidth);
         final canvasHeight = (maxDepth + 1) * widget.levelHeight;
         // Center a narrow tree; a wide tree starts flush and is panned.
@@ -282,18 +293,20 @@ class _BookAiGraphFamilyTreeViewState
               collect(child);
               continue;
             }
-            edges.add(_LayoutEdge(
-              parentCenterX: node.x,
-              parentBottomY:
-                  node.depth * widget.levelHeight +
-                  BookAiGraphFamilyTreeView.nodeHeight +
-                  (node.spouses.isNotEmpty
-                      ? BookAiGraphFamilyTreeView._spouseRowHeight
-                      : 0),
-              childCenterX: child.x + offsetX,
-              childTopY: child.depth * widget.levelHeight,
-              label: child.kin,
-            ));
+            edges.add(
+              _LayoutEdge(
+                parentCenterX: node.x,
+                parentBottomY:
+                    node.depth * widget.levelHeight +
+                    BookAiGraphFamilyTreeView.nodeHeight +
+                    (node.spouses.isNotEmpty
+                        ? BookAiGraphFamilyTreeView._spouseRowHeight
+                        : 0),
+                childCenterX: child.x + offsetX,
+                childTopY: child.depth * widget.levelHeight,
+                label: child.kin,
+              ),
+            );
             collect(child);
           }
         }
@@ -304,11 +317,11 @@ class _BookAiGraphFamilyTreeViewState
 
         // Maternal extra links (母子/母女) the single-parent selection dropped:
         // dashed lines from the consort/mother node to her child.
-        final nodeByName = {for (final n in nodes) n.name: n};
+        final nodeById = {for (final n in nodes) n.entityId: n};
         final extraEdges = <_LayoutEdge>[];
         for (final extra in widget.tree.extraEdges) {
-          final source = nodeByName[extra.source];
-          final target = nodeByName[extra.target];
+          final source = nodeById[extra.sourceId];
+          final target = nodeById[extra.targetId];
           if (source == null || target == null) continue;
           final bottomY =
               source.depth * widget.levelHeight +
@@ -322,21 +335,25 @@ class _BookAiGraphFamilyTreeViewState
             // long fold spanning the canvas.
             final left = math.min(source.x, target.x);
             final right = math.max(source.x, target.x);
-            extraEdges.add(_LayoutEdge(
-              parentCenterX: left + BookAiGraphFamilyTreeView.nodeWidth / 2,
-              parentBottomY: bottomY,
-              childCenterX: right - BookAiGraphFamilyTreeView.nodeWidth / 2,
-              childTopY: bottomY,
-              label: extra.kin,
-            ));
+            extraEdges.add(
+              _LayoutEdge(
+                parentCenterX: left + BookAiGraphFamilyTreeView.nodeWidth / 2,
+                parentBottomY: bottomY,
+                childCenterX: right - BookAiGraphFamilyTreeView.nodeWidth / 2,
+                childTopY: bottomY,
+                label: extra.kin,
+              ),
+            );
           } else {
-            extraEdges.add(_LayoutEdge(
-              parentCenterX: source.x,
-              parentBottomY: bottomY,
-              childCenterX: target.x,
-              childTopY: target.depth * widget.levelHeight,
-              label: extra.kin,
-            ));
+            extraEdges.add(
+              _LayoutEdge(
+                parentCenterX: source.x,
+                parentBottomY: bottomY,
+                childCenterX: target.x,
+                childTopY: target.depth * widget.levelHeight,
+                label: extra.kin,
+              ),
+            );
           }
         }
 
@@ -345,7 +362,7 @@ class _BookAiGraphFamilyTreeViewState
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               _fitToViewport(
-                Size(maxWidth, widget.viewportHeight),
+                Size(maxWidth, viewportH),
                 canvasWidth,
                 canvasHeight,
               );
@@ -355,15 +372,15 @@ class _BookAiGraphFamilyTreeViewState
 
         return SizedBox(
           width: double.infinity,
-          height: widget.viewportHeight,
+          height: viewportH,
           child: InteractiveViewer(
             transformationController: _controller,
             // Keep the canvas at its real size so a wide tree isn't squashed
             // into the viewport — wheel/drag pan reveals the rest.
             constrained: false,
             boundaryMargin: const EdgeInsets.all(double.infinity),
-            minScale: BookAiGraphFamilyTreeView.minScale,
-            maxScale: BookAiGraphFamilyTreeView.maxScale,
+            minScale: widget.minScale,
+            maxScale: widget.maxScale,
             child: SizedBox(
               width: canvasWidth,
               height: canvasHeight,
@@ -382,9 +399,11 @@ class _BookAiGraphFamilyTreeViewState
                   for (final edge in [...edges, ...extraEdges])
                     if (edge.label.isNotEmpty)
                       Positioned(
-                        left: (edge.parentCenterX + edge.childCenterX) / 2 -
+                        left:
+                            (edge.parentCenterX + edge.childCenterX) / 2 -
                             BookAiGraphFamilyTreeView._edgeLabelWidth / 2,
-                        top: (edge.parentBottomY + edge.childTopY) / 2 -
+                        top:
+                            (edge.parentBottomY + edge.childTopY) / 2 -
                             BookAiGraphFamilyTreeView._edgeLabelHeight / 2,
                         child: _EdgeLabel(
                           text: edge.label,
@@ -394,15 +413,14 @@ class _BookAiGraphFamilyTreeViewState
                       ),
                   for (final node in nodes)
                     Positioned(
-                      left: node.x -
-                          BookAiGraphFamilyTreeView.nodeWidth / 2,
+                      left: node.x - BookAiGraphFamilyTreeView.nodeWidth / 2,
                       top: node.depth * widget.levelHeight,
                       child: _TreeNodeCard(
                         name: node.name,
                         width: BookAiGraphFamilyTreeView.nodeWidth,
                         complex: node.complex,
                         spouses: node.spouses,
-                        onTap: () => widget.onVertexTap(node.name),
+                        onTap: () => widget.onVertexTap(node.entityId),
                       ),
                     ),
                 ],
@@ -441,11 +459,7 @@ class _EdgeLabel extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 9,
-          color: foreground,
-          height: 1.2,
-        ),
+        style: TextStyle(fontSize: 12, color: foreground, height: 1.2),
       ),
     );
   }
@@ -476,7 +490,7 @@ class _TreeNodeCard extends StatelessWidget {
       width: width,
       height: hasSpouses
           ? BookAiGraphFamilyTreeView.nodeHeight +
-              BookAiGraphFamilyTreeView._spouseRowHeight
+                BookAiGraphFamilyTreeView._spouseRowHeight
           : BookAiGraphFamilyTreeView.nodeHeight,
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -496,10 +510,12 @@ class _TreeNodeCard extends StatelessWidget {
               name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.onSurface,
-                    fontWeight: FontWeight.w500,
-                  ),
+              style: TextStyle(
+                fontSize: context.aiCaptionSize,
+                height: 1.2,
+                color: colors.onSurface,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
           if (hasSpouses)
@@ -509,7 +525,7 @@ class _TreeNodeCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 9,
+                  fontSize: 12,
                   height: 1.2,
                   color: colors.onSurfaceVariant,
                 ),
@@ -518,12 +534,22 @@ class _TreeNodeCard extends StatelessWidget {
         ],
       ),
     );
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: card,
+    final spouseDescription = spouses
+        .map((spouse) => '${spouse.kin}：${spouse.name}')
+        .join('，');
+    return Semantics(
+      button: true,
+      label: spouseDescription.isEmpty ? name : '$name，$spouseDescription',
+      hint: '打开实体详情',
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(8),
+            child: card,
+          ),
+        ),
       ),
     );
   }
@@ -531,6 +557,7 @@ class _TreeNodeCard extends StatelessWidget {
 
 class _LayoutNode {
   _LayoutNode({
+    required this.entityId,
     required this.name,
     required this.depth,
     required this.complex,
@@ -539,6 +566,7 @@ class _LayoutNode {
     this.spouseAnchor = false,
   });
 
+  final String entityId;
   final String name;
   int depth;
   final bool complex;

@@ -447,12 +447,12 @@ class AppDatabase extends _$AppDatabase {
     bool writeNote = false,
   }) async {
     final existing =
-        await (select(bookAnnotations)..where(
-              (t) => t.itemId.equals(itemId) & t.cfi.equals(cfi),
-            ))
+        await (select(bookAnnotations)
+              ..where((t) => t.itemId.equals(itemId) & t.cfi.equals(cfi)))
             .getSingleOrNull();
     if (existing != null) {
-      final keepOrSetText = selectedText != null && selectedText.trim().isNotEmpty
+      final keepOrSetText =
+          selectedText != null && selectedText.trim().isNotEmpty
           ? Value(selectedText.trim())
           : const Value<String?>.absent();
       await (update(
@@ -489,25 +489,26 @@ class AppDatabase extends _$AppDatabase {
     required String itemId,
     required String cfi,
   }) {
-    return (delete(bookAnnotations)..where(
-          (t) => t.itemId.equals(itemId) & t.cfi.equals(cfi),
-        ))
-        .go();
+    return (delete(
+      bookAnnotations,
+    )..where((t) => t.itemId.equals(itemId) & t.cfi.equals(cfi))).go();
   }
 
   /// Library-wide bookmark count (all items).
   Future<int> countAllBookmarks() async {
     final countExp = bookmarks.id.count();
-    final row = await (selectOnly(bookmarks)..addColumns([countExp]))
-        .getSingle();
+    final row = await (selectOnly(
+      bookmarks,
+    )..addColumns([countExp])).getSingle();
     return row.read(countExp) ?? 0;
   }
 
   /// Library-wide highlight / note count (all items).
   Future<int> countAllAnnotations() async {
     final countExp = bookAnnotations.id.count();
-    final row = await (selectOnly(bookAnnotations)..addColumns([countExp]))
-        .getSingle();
+    final row = await (selectOnly(
+      bookAnnotations,
+    )..addColumns([countExp])).getSingle();
     return row.read(countExp) ?? 0;
   }
 
@@ -569,9 +570,7 @@ class AppDatabase extends _$AppDatabase {
             activeSeconds: Value(dayRow.activeSeconds + seconds),
             comicSeconds: Value(dayRow.comicSeconds + comicAdd),
             bookSeconds: Value(dayRow.bookSeconds + bookAdd),
-            sessionsCount: Value(
-              dayRow.sessionsCount + (countSession ? 1 : 0),
-            ),
+            sessionsCount: Value(dayRow.sessionsCount + (countSession ? 1 : 0)),
           ),
         );
       }
@@ -913,8 +912,7 @@ class AppDatabase extends _$AppDatabase {
     final ids = itemIds.toList();
     if (ids.isEmpty) return;
     await (delete(collectionMembers)..where(
-          (t) =>
-              t.collectionId.equals(collectionId) & t.itemId.isIn(ids),
+          (t) => t.collectionId.equals(collectionId) & t.itemId.isIn(ids),
         ))
         .go();
     await (update(collections)..where((t) => t.id.equals(collectionId))).write(

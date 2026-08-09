@@ -43,11 +43,11 @@ enum AiTranslationLanguage {
 
   /// Alternate language for "改译为…" when source already matches target.
   AiTranslationLanguage get flipSuggestion => switch (this) {
-    AiTranslationLanguage.zhHans || AiTranslationLanguage.zhHant =>
-      AiTranslationLanguage.en,
+    AiTranslationLanguage.zhHans ||
+    AiTranslationLanguage.zhHant => AiTranslationLanguage.en,
     AiTranslationLanguage.en => AiTranslationLanguage.zhHans,
-    AiTranslationLanguage.ja || AiTranslationLanguage.ko =>
-      AiTranslationLanguage.zhHans,
+    AiTranslationLanguage.ja ||
+    AiTranslationLanguage.ko => AiTranslationLanguage.zhHans,
   };
 }
 
@@ -206,9 +206,7 @@ class AiTranslationPreferences {
         json['displayMode'] as String?,
       ),
       includeContext: json['includeContext'] as bool? ?? false,
-      contextChars: chars is int
-          ? chars.clamp(40, 400)
-          : 100,
+      contextChars: chars is int ? chars.clamp(40, 400) : 100,
       noteFormat: AiTranslationNoteFormat.fromStorage(
         json['noteFormat'] as String?,
       ),

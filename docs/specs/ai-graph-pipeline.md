@@ -16,7 +16,7 @@ discovery / relation extraction / knowledge fusion）。
 
 | # | 阶段 | 领域标准方法 | 出处 | 我们的实现 | 状态 |
 |---|---|---|---|---|---|
-| 0 | 正文切片 | 抽取预处理（文档级滑窗） | 非独立标准阶段（工程预处理） | TOC/spine 切分 + metadata/appendix 过滤 + 用户手动排除 | ✅ 我方特有，已对齐 |
+| 0 | 范围规划与正文切片 | 抽取预处理（文档级滑窗） | 非独立标准阶段（工程预处理） | 共享结构识别 → 用户选作品 → 全量单元列表（metadata/appendix 仅默认取消）→ 用户确认 → TOC/spine 切分 | ✅ 我方特有，已对齐 |
 | 1 | 实体识别 NER | LSTM-CRF 序列标注 → LLM-based IE | Lample et al., NAACL 2016；LLM-IE 综述 arXiv:2312.17617 | LLM 逐章单次输出实体 | ✅ |
 | 2 | 关系抽取 RE | distant supervision / 分类 → LLM | Zhao et al. RE 综述 | LLM 输出关系 + 方向性约定（亲属/师徒/隶属/效力/追随） | ✅ |
 | 3 | 实体链接/共指 | 端到端神经共指（OntoNotes） | Lee et al., EMNLP 2017 | 精确 alias 缓存 | ✅ 已对齐（见 §2.1） |
@@ -91,6 +91,11 @@ scope 硬规则（引用句式降级）、evidence 锚定（quote→原文 span�
   方向冲突亲属边（A→B 与 B→A 同 kin）、kin 空亲属边、高频人物误标 reference
   （证据 ≥5 且零引用句式）——这三个是管线本该修掉的东西，残留即进 issues；
   镜像重复对与孤立实体率为信息项（散文集孤立率天然偏高，不设硬阈值）。
+  生产生成链路必须实际调用门禁：结构性 issues 写入 graph 的 `qualityIssues`
+  并进入诊断日志，供回归与故障定位；未通过证据门禁的内容由程序自动隐藏。
+  `qualityIssues` 不作为常驻“待核验”提示展示给读者——当前没有逐项查看或人工
+  核验流程，暴露一个不可操作的告警只会制造困惑。只有存在明确恢复动作的生成
+  失败，才在 UI 显示原因与“重新生成”等操作。
 - **开源借鉴已落地**（深度调研 AI-Reader-V2 / ReadAny / 中文 GraphRAG 后）：
   - 幻觉接地过滤（`_dropUngroundedEntities`，AI-Reader-V2 借鉴）：实体名+全部
     别名在全书正文零字面命中 → 模型编造（预训练泄漏），剔除实体及关联边，
@@ -121,6 +126,48 @@ scope 硬规则（引用句式降级）、evidence 锚定（quote→原文 span�
 测试 +5（依据X/端点失联/异kin镜像/等强镜像/排除节），全量通过。
 
 ## 7. 无书特调原则（配置库，2026-08-07）
+
+### v2 执行顺序与故障语义
+
+```text
+TOC / spine facts
+  → AiBookStructureResolver（沿用现有单本/多作品识别）
+  → AiGraphScopePlanner（全部单元 + 推荐勾选状态）
+  → 用户确认作品与内容范围
+  → untrusted corpus
+  → extractor（完整 JSON）
+  → optional gleaning（首轮遗漏检查；只补新事实，不重写首轮）
+  → schema / enum validator
+  → quote resolver（至少一条精确证据）
+  → mention resolver（entityId / alias 多值索引 / identityHint）
+  → ordered merger（ID 关系）
+  → evidence-only direction review（代际亲属边 keep / reverse / drop）
+  → quality gate
+  → onCheckpoint（章级原子落盘）
+  → optional polisher（失败不回滚 checkpoint）
+```
+
+- 并发只发生在章节抽取；结果逐个收割，单章失败不得丢弃同批已成功章节。稀疏失败
+  在首轮完成后以单并发延后重试；二次失败的章节不写入 `coveredSections`，本轮仍发布
+  已完成图谱，下次增量生成只补这些章节。若一个并发批次全部失败，则视为服务或网络
+  故障并触发熔断，避免长书在不可用状态下继续发出数百次请求。
+- `identityHint` 是同名消歧提示，不是跨章稳定身份键：同一抽取块明确返回多个
+  同名同类实体时，只有身份线索不同且没有共享别名才拆分；共享明确别名的重复行
+  必须先融合。跨章节只有一个同名候选时，即使模型对其身份描述发生措辞漂移也必须
+  合并。否则“婴儿/巫师男孩/学生”会把同一角色拆成多份，并使家族树出现重复节点。
+- 家族树构建器只接受 `entityId` 端点和代际亲属称谓。兄弟姐妹、叔伯姨舅、
+  表亲、泛称“家人/亲戚”等仍是有效关系，但不得被解释成父节点；旧的按名称建树
+  路径必须删除。
+- 方向复核只看到关系的原文证据与已抽取端点，不允许使用书外知识；输出只能是
+  keep / reverse / drop。失败时保留已抽取关系但标记需复核，不得阻断整本生成。
+- 回归分两层：确定性单测验证 schema/合并/建树；可选真实模型评测以跨体裁小语料
+  测召回和类型准确率。预置 JSON 的 fake provider 不能替代真实模型评测。
+- checkpoint 是公开回调契约，不允许整轮结束前只保留内存状态。
+- 所有失败都携带最后 partial graph；润色失败保留未润色结果。
+- 展示方案使用显式三态：自动分析、使用用户确认方案、跳过并使用固定默认。
+- 当前阅读位置只用于“正在阅读”提示和确定本次生成的已读边界，不参与已保存图谱的展示投影或作品选择；多作品出版物必须能从作品列表直接生成任意一部。
+- metadata/appendix 规则只产生 `recommended=false + reason`，选择器仍展示这些单元；只有空正文或引擎无法读取的单元不可选。
+- 缓存写入使用同目录临时文件 + flush + rename；合集扫描按文件隔离损坏。
 
 用户明确要求：pipeline 不应有任何针对某本书/某些人名的处理；词表类规则
 如果有，必须在配置库，而非写死在代码里。审计结果与处理：

@@ -9,26 +9,51 @@ library;
 
 import 'ai_graph.dart';
 
-/// Affinal (姻亲) kinship labels that never enter the blood-line family tree.
-/// The model occasionally emits 夫妻 as 亲属/夫妻 (alongside the correct 婚配
-/// edge); a spouse is not a member of the lineage, so such edges are skipped
-/// at tree build time. Kin-less 亲属 edges are filtered separately (empty kin
-/// is an unconfirmed relation).
-const _affinalKinTerms = {
-  '夫妻', '妻', '妾', '夫', '丈夫', '妻子', '配偶', '正妻', '继室',
-  '侧室', '偏房', '后妃', '妃', '嫔', '皇后', '贵妃', '夫人', '娘子',
-  '翁婿', '婆媳', '妯娌', '连襟', '亲家',
-};
+/// Only generational lineage terms can form a top-down family tree. Sibling,
+/// collateral and affinal relations remain valid graph edges, but interpreting
+/// them as parent→child creates a false hierarchy.
+bool isLineageKin(String kin) {
+  final value = kin.trim();
+  if (value.isEmpty) return false;
+  if (const {
+    '父子',
+    '父女',
+    '母子',
+    '母女',
+    '亲子',
+    '父母',
+    '养父子',
+    '养父女',
+    '养母子',
+    '养母女',
+    '继父子',
+    '继父女',
+    '继母子',
+    '继母女',
+    '祖孙',
+    '外祖孙',
+  }.contains(value)) {
+    return true;
+  }
+  final parentChild =
+      (value.contains('父') || value.contains('母')) &&
+      (value.endsWith('子') || value.endsWith('女'));
+  final grandChild =
+      (value.contains('祖父') || value.contains('祖母')) && value.contains('孙');
+  return parentChild || grandChild;
+}
 
 /// One family-tree node. [children] are kept in book order (firstSection).
 class AiFamilyTreeNode {
   AiFamilyTreeNode({
+    required this.entityId,
     required this.name,
     required this.firstSection,
     this.kin = '',
     this.spouses = const [],
   });
 
+  final String entityId;
   final String name;
   final int firstSection;
 
@@ -42,7 +67,12 @@ class AiFamilyTreeNode {
 
 /// A spouse attached to a tree node (婚配 edge, 旁挂显示).
 class AiFamilySpouse {
-  const AiFamilySpouse({required this.name, required this.kin});
+  const AiFamilySpouse({
+    required this.entityId,
+    required this.name,
+    required this.kin,
+  });
+  final String entityId;
   final String name;
   final String kin;
 }
@@ -52,12 +82,12 @@ class AiFamilySpouse {
 /// node then visibly links to her child (恭妃王氏 → 朱常洛 母子).
 class AiFamilyExtraEdge {
   const AiFamilyExtraEdge({
-    required this.source,
-    required this.target,
+    required this.sourceId,
+    required this.targetId,
     required this.kin,
   });
-  final String source;
-  final String target;
+  final String sourceId;
+  final String targetId;
   final String kin;
 }
 
@@ -67,7 +97,9 @@ class AiFamilyTree {
     required this.roots,
     required this.isolatedCount,
     required this.isolatedNames,
+    required this.isolatedEntityIds,
     required this.complexNames,
+    required this.complexEntityIds,
     required this.extraEdges,
   });
 
@@ -80,10 +112,12 @@ class AiFamilyTree {
 
   /// Names of the isolated persons, book order (for the expandable fold).
   final List<String> isolatedNames;
+  final List<String> isolatedEntityIds;
 
   /// People whose tree edge was dropped (multi-parent runner-ups, ring
   /// members). Sorted by first appearance.
   final List<String> complexNames;
+  final List<String> complexEntityIds;
 
   /// Maternal links a single-parent selection dropped (母子/母女 runner-ups),
   /// drawn as dashed lines from the consort/mother node to the child.
@@ -108,23 +142,42 @@ AiFamilyTree buildFamilyTree({
     for (final e in entities)
       if (e.type == AiGraphEntityType.person &&
           e.scope == AiGraphEntityScope.setting)
-        e.name: e,
+        e.id: e,
   };
+  final personIdsByName = <String, Set<String>>{};
+  for (final person in persons.values) {
+    personIdsByName.putIfAbsent(person.name, () => {}).add(person.id);
+    for (final alias in person.aliases) {
+      personIdsByName.putIfAbsent(alias, () => {}).add(person.id);
+    }
+  }
+
+  String? endpointId(String explicitId, String name) {
+    if (explicitId.isNotEmpty && persons.containsKey(explicitId)) {
+      return explicitId;
+    }
+    final ids = personIdsByName[name];
+    return ids != null && ids.length == 1 ? ids.single : null;
+  }
 
   // child -> candidate parent edges (strength-descending order preserved by
-  // the sort below). Only 亲属 edges with a concrete KIN-SHIP label
-  // participate — and affinal (姻亲) labels never enter the blood-line tree:
-  // the model sometimes emits 夫妻 as 亲属/夫妻 (alongside the real 婚配 edge),
-  // which would draw the consort as a member of the lineage.
-  final incoming = <String, List<AiGraphRelation>>{};
+  // the sort below). Only generational lineage edges participate; siblings,
+  // aunts/uncles, cousins, generic 家人 and marriage remain graph relations.
+  final incoming =
+      <
+        String,
+        List<({AiGraphRelation relation, String parentId, String childId})>
+      >{};
   for (final r in relations) {
-    if (r.type != '亲属' || r.kin.isEmpty) continue;
-    if (_affinalKinTerms.contains(r.kin)) continue;
-    final parent = r.source;
-    final child = r.target;
-    if (parent == child) continue;
-    if (!persons.containsKey(parent) || !persons.containsKey(child)) continue;
-    incoming.putIfAbsent(child, () => []).add(r);
+    if (r.type != '亲属' || !isLineageKin(r.kin)) continue;
+    final parentId = endpointId(r.sourceId, r.source);
+    final childId = endpointId(r.targetId, r.target);
+    if (parentId == null || childId == null || parentId == childId) continue;
+    incoming.putIfAbsent(childId, () => []).add((
+      relation: r,
+      parentId: parentId,
+      childId: childId,
+    ));
   }
 
   // 婚配 edges attach spouses (旁挂) instead of lineage parents. Only
@@ -135,106 +188,122 @@ AiFamilyTree buildFamilyTree({
   final spouseMembers = <String>{};
   final kinParticipants = <String>{
     for (final edges in incoming.values)
-      for (final edge in edges) ...[edge.source, edge.target],
+      for (final edge in edges) ...[edge.parentId, edge.childId],
   };
   for (final r in relations) {
     if (r.type != '婚配') continue;
-    if (!persons.containsKey(r.source) || !persons.containsKey(r.target)) {
-      continue;
-    }
+    final sourceId = endpointId(r.sourceId, r.source);
+    final targetId = endpointId(r.targetId, r.target);
+    if (sourceId == null || targetId == null || sourceId == targetId) continue;
     final forwardKin = r.kin.isEmpty ? '配偶' : r.kin;
     spouses
-        .putIfAbsent(r.source, () => [])
-        .add(AiFamilySpouse(name: r.target, kin: forwardKin));
+        .putIfAbsent(sourceId, () => [])
+        .add(
+          AiFamilySpouse(
+            entityId: targetId,
+            name: persons[targetId]!.name,
+            kin: forwardKin,
+          ),
+        );
     // Reverse end labels the partner as plain 配偶 (王皇后 is 万历's 皇后,
     // not the other way round).
     spouses
-        .putIfAbsent(r.target, () => [])
-        .add(AiFamilySpouse(name: r.source, kin: '配偶'));
-    if (kinParticipants.contains(r.source)) spouseMembers.add(r.source);
-    if (kinParticipants.contains(r.target)) spouseMembers.add(r.target);
+        .putIfAbsent(targetId, () => [])
+        .add(
+          AiFamilySpouse(
+            entityId: sourceId,
+            name: persons[sourceId]!.name,
+            kin: '配偶',
+          ),
+        );
+    if (kinParticipants.contains(sourceId)) spouseMembers.add(sourceId);
+    if (kinParticipants.contains(targetId)) spouseMembers.add(targetId);
   }
 
   final parentOf = <String, String>{};
   final kinOf = <String, String>{};
+  final selectedEdgeOf =
+      <String, ({AiGraphRelation relation, String parentId, String childId})>{};
   final complex = <String>{};
   final extraEdges = <AiFamilyExtraEdge>[];
   for (final entry in incoming.entries) {
     final child = entry.key;
     final candidates = entry.value;
     candidates.sort((a, b) {
-      final byStrength = _edgeStrength(b).compareTo(_edgeStrength(a));
+      final byStrength = _edgeStrength(
+        b.relation,
+      ).compareTo(_edgeStrength(a.relation));
       if (byStrength != 0) return byStrength;
-      return persons[a.source]!.firstSection
-          .compareTo(persons[b.source]!.firstSection);
+      return persons[a.parentId]!.firstSection.compareTo(
+        persons[b.parentId]!.firstSection,
+      );
     });
-    parentOf[child] = candidates.first.source;
-    kinOf[child] = candidates.first.kin;
+    parentOf[child] = candidates.first.parentId;
+    kinOf[child] = candidates.first.relation.kin;
+    selectedEdgeOf[child] = candidates.first;
     for (final runnerUp in candidates.skip(1)) {
-      if (_maternalKin.contains(runnerUp.kin)) {
+      if (_maternalKin.contains(runnerUp.relation.kin)) {
         // The mother's edge lost the single-parent race to the father, but
         // she is a real parent — keep it as a visible extra link (dashed).
-        extraEdges.add(AiFamilyExtraEdge(
-          source: runnerUp.source,
-          target: child,
-          kin: runnerUp.kin,
-        ));
+        extraEdges.add(
+          AiFamilyExtraEdge(
+            sourceId: runnerUp.parentId,
+            targetId: child,
+            kin: runnerUp.relation.kin,
+          ),
+        );
       } else {
-        complex.add(runnerUp.source);
+        complex.add(runnerUp.parentId);
       }
     }
   }
 
-  // Ring detection: Kahn on child→parent. Nodes never removed are on rings;
-  // keep the strongest ring edge, drop the rest — dropped children become
-  // roots, both endpoints are marked complex.
-  final indegree = <String, int>{
-    for (final name in persons.keys) name: 0,
-  };
-  for (final parent in parentOf.values) {
-    indegree[parent] = (indegree[parent] ?? 0) + 1;
-  }
-  final queue = [
-    for (final entry in indegree.entries)
-      if (entry.value == 0) entry.key,
-  ];
-  while (queue.isNotEmpty) {
-    final node = queue.removeLast();
-    final parent = parentOf[node];
-    if (parent == null) continue;
-    final next = indegree[parent]! - 1;
-    indegree[parent] = next;
-    if (next == 0) queue.add(parent);
-  }
-  final ringMembers = <String>[
-    for (final name in persons.keys)
-      if (parentOf[name] != null && indegree[name]! > 0) name,
-  ];
-  if (ringMembers.isNotEmpty) {
-    var bestStrength = -1;
-    String? bestChild;
-    for (final child in ringMembers) {
-      final strength = _kinEdgeStrength(relations, parentOf[child]!, child);
-      if (strength > bestStrength) {
-        bestStrength = strength;
-        bestChild = child;
+  // A functional child→parent graph can contain disjoint cycles. Break each
+  // cycle by dropping exactly its weakest edge; removing every edge except
+  // the strongest destroys otherwise valid lineage chains.
+  final globallyDone = <String>{};
+  for (final start in persons.keys) {
+    if (globallyDone.contains(start)) continue;
+    final path = <String>[];
+    final at = <String, int>{};
+    var cursor = start;
+    while (!globallyDone.contains(cursor) && parentOf[cursor] != null) {
+      final cycleStart = at[cursor];
+      if (cycleStart != null) {
+        final cycle = path.sublist(cycleStart);
+        var weakestChild = cycle.first;
+        var weakestStrength = _edgeStrength(
+          selectedEdgeOf[weakestChild]!.relation,
+        );
+        for (final child in cycle.skip(1)) {
+          final strength = _edgeStrength(selectedEdgeOf[child]!.relation);
+          if (strength < weakestStrength) {
+            weakestChild = child;
+            weakestStrength = strength;
+          }
+        }
+        final formerParent = parentOf.remove(weakestChild);
+        kinOf.remove(weakestChild);
+        selectedEdgeOf.remove(weakestChild);
+        complex.add(weakestChild);
+        if (formerParent != null) complex.add(formerParent);
+        break;
       }
+      at[cursor] = path.length;
+      path.add(cursor);
+      cursor = parentOf[cursor]!;
     }
-    for (final child in ringMembers) {
-      if (child == bestChild) continue;
-      parentOf.remove(child);
-      kinOf.remove(child);
-      complex.add(child);
-    }
+    globallyDone.addAll(path);
   }
 
   final nodes = <String, AiFamilyTreeNode>{
-    for (final name in persons.keys)
-      name: AiFamilyTreeNode(
-        name: name,
-        firstSection: persons[name]!.firstSection,
-        kin: kinOf[name] ?? '',
-        spouses: spouses[name] ?? const [],
+    for (final id in persons.keys)
+      id: AiFamilyTreeNode(
+        entityId: id,
+        name: persons[id]!.name,
+        firstSection: persons[id]!.firstSection,
+        kin: kinOf[id] ?? '',
+        spouses: spouses[id] ?? const [],
       ),
   };
   // Participating = everyone touched by a candidate 亲属 edge (multi-parent
@@ -254,16 +323,16 @@ AiFamilyTree buildFamilyTree({
   // silently invisible.
   final finalExtraEdges = <AiFamilyExtraEdge>[];
   for (final extra in extraEdges) {
-    if (treeMembers.contains(extra.source) &&
-        treeMembers.contains(extra.target)) {
+    if (treeMembers.contains(extra.sourceId) &&
+        treeMembers.contains(extra.targetId)) {
       finalExtraEdges.add(extra);
     } else {
-      complex.add(extra.source);
+      complex.add(extra.sourceId);
     }
   }
   final roots = <AiFamilyTreeNode>[
-    for (final name in treeMembers)
-      if (!parentOf.containsKey(name)) nodes[name]!,
+    for (final id in treeMembers)
+      if (!parentOf.containsKey(id)) nodes[id]!,
   ]..sort((a, b) => a.firstSection.compareTo(b.firstSection));
   for (final entry in parentOf.entries) {
     nodes[entry.value]!.children.add(nodes[entry.key]!);
@@ -275,23 +344,28 @@ AiFamilyTree buildFamilyTree({
   final participating = <String>{
     ...incoming.keys,
     for (final edges in incoming.values)
-      for (final edge in edges) ...[edge.source, edge.target],
+      for (final edge in edges) ...[edge.parentId, edge.childId],
     ...spouseMembers,
   };
-  final isolatedCount = persons.length - participating.length;
-  final isolatedNames = <String>[
-    for (final name in persons.keys)
-      if (!participating.contains(name)) name,
-  ]..sort((a, b) => persons[a]!.firstSection
-      .compareTo(persons[b]!.firstSection));
-  final complexNames = complex.toList()
-    ..sort((a, b) => persons[a]!.firstSection.compareTo(persons[b]!.firstSection));
+  final isolatedEntityIds =
+      <String>[
+        for (final id in persons.keys)
+          if (!participating.contains(id)) id,
+      ]..sort(
+        (a, b) => persons[a]!.firstSection.compareTo(persons[b]!.firstSection),
+      );
+  final complexEntityIds = complex.toList()
+    ..sort(
+      (a, b) => persons[a]!.firstSection.compareTo(persons[b]!.firstSection),
+    );
 
   return AiFamilyTree(
     roots: roots,
-    isolatedCount: isolatedCount,
-    isolatedNames: isolatedNames,
-    complexNames: complexNames,
+    isolatedCount: isolatedEntityIds.length,
+    isolatedNames: [for (final id in isolatedEntityIds) persons[id]!.name],
+    isolatedEntityIds: isolatedEntityIds,
+    complexNames: [for (final id in complexEntityIds) persons[id]!.name],
+    complexEntityIds: complexEntityIds,
     extraEdges: finalExtraEdges,
   );
 }
@@ -302,17 +376,3 @@ const _maternalKin = {'母子', '母女'};
 
 /// Edge strength = evidence count (more chapters corroborate → stronger).
 int _edgeStrength(AiGraphRelation relation) => relation.evidence.length;
-
-/// Strength of the 亲属 edge parent→child in the raw relation list.
-int _kinEdgeStrength(
-  List<AiGraphRelation> relations,
-  String parent,
-  String child,
-) {
-  for (final r in relations) {
-    if (r.type == '亲属' && r.source == parent && r.target == child) {
-      return r.evidence.length;
-    }
-  }
-  return 0;
-}

@@ -91,6 +91,7 @@
 
 - 对话框 / Sheet / 菜单 / Popover 使用强玻璃面（`strongSurface + strongBlur`），配合边框、高光和阴影；
 - SnackBar / Toast / Tooltip 使用轻玻璃反馈面（`surface + blur`），不得直接使用中灰色 `overlay` 作为常规浮窗背景；
+- 面向读者的错误只说明失败的操作和下一步处理方式；异常类名、堆栈、HTTP 状态码、协议/解析术语及服务端响应正文只进入调试日志。表现层不得直接展示 `error.toString()`，未知异常使用当前操作对应的中文通用提示；
 - 纯净皮肤在 `blur=0` 时自动退化为实色面；
 - 重复的行 / 卡片不模糊（`blur: false`）。
 

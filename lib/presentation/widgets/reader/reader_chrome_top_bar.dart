@@ -86,8 +86,8 @@ class ReaderChromeTopBar extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: fg,
-                              fontSize: KaiProductTokens
-                                  .typographyReaderOverlayTitle,
+                              fontSize:
+                                  KaiProductTokens.typographyReaderOverlayTitle,
                               fontWeight: FontWeight.w600,
                             ),
                           )
@@ -120,8 +120,7 @@ class ReaderChromeTopBar extends StatelessWidget {
                   ),
                 ),
                 ...trailing,
-                if (leadingClearance > 0)
-                  SizedBox(width: leadingClearance - 8),
+                if (leadingClearance > 0) SizedBox(width: leadingClearance - 8),
               ],
             ),
           ),

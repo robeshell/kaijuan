@@ -250,10 +250,10 @@ abstract final class EpubKindProbe {
   }
 
   static String? _readText(Archive archive, String entry) {
-    final resolved = _findEntry(
-      {for (final f in archive.files) if (f.isFile) f.name},
-      entry,
-    );
+    final resolved = _findEntry({
+      for (final f in archive.files)
+        if (f.isFile) f.name,
+    }, entry);
     if (resolved == null) return null;
     final file = archive.findFile(resolved);
     final bytes = file?.readBytes();

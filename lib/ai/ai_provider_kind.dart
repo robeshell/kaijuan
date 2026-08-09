@@ -35,10 +35,13 @@ enum AiProviderKind {
   openai,
   anthropic,
   deepseek,
+
   /// xAI Grok — OpenAI-compatible Chat Completions at api.x.ai.
   xai,
+
   /// User-supplied base URL; protocol is [AiSettings.customProtocol].
   custom,
+
   /// Local Ollama — OpenAI-compatible endpoint on localhost, no API key.
   ollama;
 

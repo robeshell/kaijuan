@@ -223,7 +223,8 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
         selection: TextSelection.collapsed(offset: selectedPath.length),
       );
     } catch (error) {
-      if (mounted) showAppSnackBar(context, error.toString());
+      debugPrint('[Backup] save folder failed: $error');
+      if (mounted) showAppSnackBar(context, '无法保存备份位置，请重试');
     }
   }
 
@@ -333,6 +334,15 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
               height: 1.45,
             ),
           ),
+          const SizedBox(height: 4),
+          Text(
+            '备份仅通过 HTTPS 上传；HTTP 连接仍可用于浏览和导入。',
+            style: TextStyle(
+              color: context.settingsMuted,
+              fontSize: context.appCaptionSize,
+              height: 1.45,
+            ),
+          ),
         ],
       ),
     );
@@ -344,8 +354,9 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
       await controller.setDeviceName(_deviceName.text);
       return true;
     } catch (error) {
+      debugPrint('[Backup] save settings failed: $error');
       if (!mounted) return false;
-      showAppSnackBar(context, error.toString());
+      showAppSnackBar(context, '无法保存备份设置，请重试');
       return false;
     }
   }
@@ -431,7 +442,10 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
       final graphText = result.restoredAiGraphs == 0
           ? ''
           : '、${result.restoredAiGraphs} 张图谱';
-      showAppSnackBar(context, '恢复完成，新增 ${result.addedBooks} 本书$chatText$graphText');
+      showAppSnackBar(
+        context,
+        '恢复完成，新增 ${result.addedBooks} 本书$chatText$graphText',
+      );
     } else if (controller.message != null) {
       showAppSnackBar(context, controller.message!);
     }

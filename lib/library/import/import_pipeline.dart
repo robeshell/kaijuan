@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../../domain/reader_models.dart';
 import '../../readers/book/foliate_import_probe.dart';
 import 'package:path/path.dart' as p;
@@ -87,9 +88,15 @@ class ImportPipeline {
         storageExtension: isText ? '.epub' : null,
       );
     } catch (error) {
+      debugPrint(
+        '[Import] staging failed for ${candidate.displayName}: $error',
+      );
       return ImportResult(
         failures: [
-          ImportFailure(path: candidate.displayName, reason: error.toString()),
+          ImportFailure(
+            path: candidate.displayName,
+            reason: '无法读取文件，请确认文件完整且仍可访问',
+          ),
         ],
       );
     }
@@ -136,9 +143,13 @@ class ImportPipeline {
         ],
       );
     } catch (error) {
+      debugPrint('[Import] failed for ${candidate.displayName}: $error');
       return ImportResult(
         failures: [
-          ImportFailure(path: candidate.displayName, reason: error.toString()),
+          ImportFailure(
+            path: candidate.displayName,
+            reason: '导入失败，请确认文件完整且格式受支持',
+          ),
         ],
       );
     }

@@ -1,8 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
-
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
 import 'ai_provider_kind.dart';
 import 'ai_search.dart';
 import 'ai_translation.dart';
@@ -145,6 +140,12 @@ class AiGraphRuleWords {
     '作者简介',
     '关于作者',
     '关于本书',
+    '作者小传',
+    '作者生平',
+    '制作说明',
+    '画廊',
+    '系列封面',
+    '封面画廊',
     '封面语',
     '封底语',
     '!序曲',
@@ -191,56 +192,146 @@ class AiGraphRuleWords {
   ];
 
   static const defaultRelationTypes = <String>[
-    '信任', '效力', '敌对', '弹劾', '师生', '师徒', '同僚', '亲属', '更替',
-    '调停', '协助', '隶属', '婚配', '爱慕', '仇视', '追随', '举荐', '主从',
-    '同盟', '竞争', '仰慕', '忌惮', '庇护', '提携', '投靠', '反目', '和解',
-    '嫌隙', '知遇', '共事', '打压', '倚重',
+    '信任',
+    '效力',
+    '敌对',
+    '弹劾',
+    '师生',
+    '师徒',
+    '同僚',
+    '亲属',
+    '更替',
+    '调停',
+    '协助',
+    '隶属',
+    '婚配',
+    '爱慕',
+    '仇视',
+    '追随',
+    '举荐',
+    '主从',
+    '同盟',
+    '竞争',
+    '仰慕',
+    '忌惮',
+    '庇护',
+    '提携',
+    '投靠',
+    '反目',
+    '和解',
+    '嫌隙',
+    '知遇',
+    '共事',
+    '打压',
+    '倚重',
   ];
 
   static const defaultRelationTypeAliases = <String, String>{
-    'trust': '信任', 'trusts': '信任', 'trusted': '信任',
-    'serve': '效力', 'serves': '效力', 'served': '效力', 'servant': '效力',
-    'works_for': '效力', 'work_for': '效力', 'worked_for': '效力',
-    'employer': '效力', 'employee': '效力',
-    'teacher_student': '师生', 'teacher': '师生', 'student': '师生',
-    'mentor': '师生', 'mentee': '师生', 'apprentice': '师徒',
-    'master': '师徒', 'master_apprentice': '师徒', 'disciple': '师徒',
-    'married': '婚配', 'marriage': '婚配', 'married_to': '婚配',
-    'spouse': '婚配', 'wife': '婚配', 'husband': '婚配', 'lover': '爱慕',
-    'love': '爱慕', 'loves': '爱慕', 'romance': '爱慕', 'affair': '爱慕',
-    'parent': '亲属', 'father': '亲属', 'mother': '亲属', 'son': '亲属',
-    'daughter': '亲属', 'child': '亲属', 'family': '亲属',
-    'relative': '亲属', 'brother': '亲属', 'sister': '亲属',
-    'friend': '同盟', 'friends': '同盟', 'friend_of': '同盟',
-    'allied': '同盟', 'allies': '同盟', 'alliance': '同盟',
-    'enemy': '敌对', 'enemies': '敌对', 'enemy_of': '敌对',
-    'rival': '敌对', 'rivals': '敌对', 'rivalry': '敌对',
-    'conflict': '敌对', 'conflicts': '敌对', 'attacked': '敌对',
-    'impeached': '弹劾', 'accused': '弹劾', 'impeachment': '弹劾',
-    'replaced': '更替', 'replaces': '更替', 'replace': '更替',
-    'succeeded': '更替', 'successor': '更替', 'succession': '更替',
-    'mediated': '调停', 'mediator': '调停', 'mediate': '调停',
-    'helped': '协助', 'helps': '协助', 'helped_by': '协助',
-    'assisted': '协助', 'supports': '协助', 'supported': '协助',
-    'recommended': '举荐', 'recommend': '举荐', 'recommendation': '举荐',
-    'colleague': '同僚', 'colleagues': '同僚', 'worked_with': '同僚',
+    'trust': '信任',
+    'trusts': '信任',
+    'trusted': '信任',
+    'serve': '效力',
+    'serves': '效力',
+    'served': '效力',
+    'servant': '效力',
+    'works_for': '效力',
+    'work_for': '效力',
+    'worked_for': '效力',
+    'employer': '效力',
+    'employee': '效力',
+    'teacher_student': '师生',
+    'teacher': '师生',
+    'student': '师生',
+    'mentor': '师生',
+    'mentee': '师生',
+    'apprentice': '师徒',
+    'master': '师徒',
+    'master_apprentice': '师徒',
+    'disciple': '师徒',
+    'married': '婚配',
+    'marriage': '婚配',
+    'married_to': '婚配',
+    'spouse': '婚配',
+    'wife': '婚配',
+    'husband': '婚配',
+    'lover': '爱慕',
+    'love': '爱慕',
+    'loves': '爱慕',
+    'romance': '爱慕',
+    'affair': '爱慕',
+    'parent': '亲属',
+    'father': '亲属',
+    'mother': '亲属',
+    'son': '亲属',
+    'daughter': '亲属',
+    'child': '亲属',
+    'family': '亲属',
+    'relative': '亲属',
+    'brother': '亲属',
+    'sister': '亲属',
+    'friend': '同盟',
+    'friends': '同盟',
+    'friend_of': '同盟',
+    'allied': '同盟',
+    'allies': '同盟',
+    'alliance': '同盟',
+    'enemy': '敌对',
+    'enemies': '敌对',
+    'enemy_of': '敌对',
+    'rival': '敌对',
+    'rivals': '敌对',
+    'rivalry': '敌对',
+    'conflict': '敌对',
+    'conflicts': '敌对',
+    'attacked': '敌对',
+    'impeached': '弹劾',
+    'accused': '弹劾',
+    'impeachment': '弹劾',
+    'replaced': '更替',
+    'replaces': '更替',
+    'replace': '更替',
+    'succeeded': '更替',
+    'successor': '更替',
+    'succession': '更替',
+    'mediated': '调停',
+    'mediator': '调停',
+    'mediate': '调停',
+    'helped': '协助',
+    'helps': '协助',
+    'helped_by': '协助',
+    'assisted': '协助',
+    'supports': '协助',
+    'supported': '协助',
+    'recommended': '举荐',
+    'recommend': '举荐',
+    'recommendation': '举荐',
+    'colleague': '同僚',
+    'colleagues': '同僚',
+    'worked_with': '同僚',
     'coworker': '同僚',
-    'subordinate': '隶属', 'subordinates': '隶属', 'under': '隶属',
-    'followed': '追随', 'follower': '追随', 'followers': '追随',
-    'fear': '忌惮', 'fears': '忌惮', 'feared': '忌惮',
-    'protects': '庇护', 'protected': '庇护', 'patron': '庇护',
-    'patronage': '庇护', 'promoted': '提携', 'promote': '提携',
-    'collaborates': '共事', 'collaborated': '共事',
-    'worked_together': '共事', 'collaborator': '共事',
+    'subordinate': '隶属',
+    'subordinates': '隶属',
+    'under': '隶属',
+    'followed': '追随',
+    'follower': '追随',
+    'followers': '追随',
+    'fear': '忌惮',
+    'fears': '忌惮',
+    'feared': '忌惮',
+    'protects': '庇护',
+    'protected': '庇护',
+    'patron': '庇护',
+    'patronage': '庇护',
+    'promoted': '提携',
+    'promote': '提携',
+    'collaborates': '共事',
+    'collaborated': '共事',
+    'worked_together': '共事',
+    'collaborator': '共事',
   };
 
   /// Person-title suffixes for the 0.7 stem rule (慈圣太后↔慈圣皇太后).
-  static const defaultPersonTitleSuffixes = <String>[
-    '皇太后',
-    '太后',
-    '皇帝',
-    '皇后',
-  ];
+  static const defaultPersonTitleSuffixes = <String>['皇太后', '太后', '皇帝', '皇后'];
 
   /// Generic honorific / contextual kinship terms excluded from substring
   /// merges (皇帝/太后/哥哥/先生… — roles, not names).
@@ -268,31 +359,72 @@ class AiGraphRuleWords {
   /// bookTitle; empty map when the book is not listed.
   static const defaultBookNamePriors = <String, Map<String, String>>{
     '红楼梦': {
-      '宝二爷': '贾宝玉', '怡红公子': '贾宝玉', '绛珠仙子': '林黛玉',
-      '潇湘妃子': '林黛玉', '颦儿': '林黛玉', '蘅芜君': '薛宝钗',
-      '凤辣子': '王熙凤', '琏二爷': '贾琏', '老祖宗': '贾母',
-      '史太君': '贾母', '稻香老农': '李纨', '蕉下客': '贾探春',
+      '宝二爷': '贾宝玉',
+      '怡红公子': '贾宝玉',
+      '绛珠仙子': '林黛玉',
+      '潇湘妃子': '林黛玉',
+      '颦儿': '林黛玉',
+      '蘅芜君': '薛宝钗',
+      '凤辣子': '王熙凤',
+      '琏二爷': '贾琏',
+      '老祖宗': '贾母',
+      '史太君': '贾母',
+      '稻香老农': '李纨',
+      '蕉下客': '贾探春',
     },
     '西游记': {
-      '行者': '孙悟空', '孙行者': '孙悟空', '美猴王': '孙悟空',
-      '齐天大圣': '孙悟空', '斗战胜佛': '孙悟空', '泼猴': '孙悟空',
-      '弼马温': '孙悟空', '金蝉子': '唐僧', '玄奘': '唐僧',
-      '唐长老': '唐僧', '圣僧': '唐僧', '天蓬元帅': '猪八戒',
-      '猪悟能': '猪八戒', '净坛使者': '猪八戒', '卷帘大将': '沙僧',
+      '行者': '孙悟空',
+      '孙行者': '孙悟空',
+      '美猴王': '孙悟空',
+      '齐天大圣': '孙悟空',
+      '斗战胜佛': '孙悟空',
+      '泼猴': '孙悟空',
+      '弼马温': '孙悟空',
+      '金蝉子': '唐僧',
+      '玄奘': '唐僧',
+      '唐长老': '唐僧',
+      '圣僧': '唐僧',
+      '天蓬元帅': '猪八戒',
+      '猪悟能': '猪八戒',
+      '净坛使者': '猪八戒',
+      '卷帘大将': '沙僧',
       '沙悟净': '沙僧',
     },
     '三国演义': {
-      '孟德': '曹操', '曹孟德': '曹操', '云长': '关羽', '关云长': '关羽',
-      '美髯公': '关羽', '孔明': '诸葛亮', '诸葛孔明': '诸葛亮',
-      '卧龙': '诸葛亮', '玄德': '刘备', '刘玄德': '刘备',
-      '翼德': '张飞', '张翼德': '张飞', '奉先': '吕布', '吕奉先': '吕布',
-      '子龙': '赵云', '赵子龙': '赵云', '仲谋': '孙权', '孙仲谋': '孙权',
+      '孟德': '曹操',
+      '曹孟德': '曹操',
+      '云长': '关羽',
+      '关云长': '关羽',
+      '美髯公': '关羽',
+      '孔明': '诸葛亮',
+      '诸葛孔明': '诸葛亮',
+      '卧龙': '诸葛亮',
+      '玄德': '刘备',
+      '刘玄德': '刘备',
+      '翼德': '张飞',
+      '张翼德': '张飞',
+      '奉先': '吕布',
+      '吕奉先': '吕布',
+      '子龙': '赵云',
+      '赵子龙': '赵云',
+      '仲谋': '孙权',
+      '孙仲谋': '孙权',
     },
     '水浒传': {
-      '公明': '宋江', '宋公明': '宋江', '及时雨': '宋江',
-      '豹子头': '林冲', '林教头': '林冲', '智多星': '吴用', '吴学究': '吴用',
-      '黑旋风': '李逵', '铁牛': '李逵', '花和尚': '鲁智深', '鲁提辖': '鲁智深',
-      '武二郎': '武松', '青面兽': '杨志', '玉麒麟': '卢俊义',
+      '公明': '宋江',
+      '宋公明': '宋江',
+      '及时雨': '宋江',
+      '豹子头': '林冲',
+      '林教头': '林冲',
+      '智多星': '吴用',
+      '吴学究': '吴用',
+      '黑旋风': '李逵',
+      '铁牛': '李逵',
+      '花和尚': '鲁智深',
+      '鲁提辖': '鲁智深',
+      '武二郎': '武松',
+      '青面兽': '杨志',
+      '玉麒麟': '卢俊义',
     },
   };
 
@@ -312,10 +444,8 @@ class AiGraphRuleWords {
       citationQuoteTemplates:
           citationQuoteTemplates ?? this.citationQuoteTemplates,
       relationTypes: relationTypes ?? this.relationTypes,
-      relationTypeAliases:
-          relationTypeAliases ?? this.relationTypeAliases,
-      personTitleSuffixes:
-          personTitleSuffixes ?? this.personTitleSuffixes,
+      relationTypeAliases: relationTypeAliases ?? this.relationTypeAliases,
+      personTitleSuffixes: personTitleSuffixes ?? this.personTitleSuffixes,
       genericPersonTerms: genericPersonTerms ?? this.genericPersonTerms,
       bookNamePriors: bookNamePriors ?? this.bookNamePriors,
     );
@@ -349,32 +479,28 @@ class AiGraphRuleWords {
       relationTypes:
           (map['relationTypes'] as List?)?.cast<String>() ??
           defaults.relationTypes,
-      relationTypeAliases:
-          map['relationTypeAliases'] is Map
-              ? Map<String, String>.from(
-                  (map['relationTypeAliases'] as Map).map(
-                    (key, value) => MapEntry(key.toString(), value.toString()),
-                  ),
-                )
-              : defaults.relationTypeAliases,
+      relationTypeAliases: map['relationTypeAliases'] is Map
+          ? Map<String, String>.from(
+              (map['relationTypeAliases'] as Map).map(
+                (key, value) => MapEntry(key.toString(), value.toString()),
+              ),
+            )
+          : defaults.relationTypeAliases,
       personTitleSuffixes:
           (map['personTitleSuffixes'] as List?)?.cast<String>() ??
           defaults.personTitleSuffixes,
       genericPersonTerms:
           (map['genericPersonTerms'] as List?)?.cast<String>() ??
           defaults.genericPersonTerms,
-      bookNamePriors:
-          map['bookNamePriors'] is Map
-              ? {
-                  for (final entry
-                      in (map['bookNamePriors'] as Map).entries)
-                    entry.key.toString(): {
-                      for (final alias in
-                          (entry.value as Map? ?? const {}).entries)
-                        alias.key.toString(): alias.value.toString(),
-                    },
-                }
-              : defaults.bookNamePriors,
+      bookNamePriors: map['bookNamePriors'] is Map
+          ? {
+              for (final entry in (map['bookNamePriors'] as Map).entries)
+                entry.key.toString(): {
+                  for (final alias in (entry.value as Map? ?? const {}).entries)
+                    alias.key.toString(): alias.value.toString(),
+                },
+            }
+          : defaults.bookNamePriors,
     );
   }
 }
@@ -406,7 +532,8 @@ class AiSettings {
   /// Model id. Empty means "use the preset default".
   final String model;
 
-  /// When true, generated book outlines may include unread sections.
+  /// When true, knowledge-graph generation/display may include unread sections.
+  /// Chat and outline always use their explicit whole-work scopes.
   final bool allowUnreadContext;
 
   /// Selection / whole-book translation preferences (not per-provider).
@@ -422,8 +549,7 @@ class AiSettings {
   AiApiProtocol get resolvedProtocol =>
       providerKind.fixedProtocol ?? customProtocol;
 
-  bool get usesAnthropicProtocol =>
-      resolvedProtocol == AiApiProtocol.anthropic;
+  bool get usesAnthropicProtocol => resolvedProtocol == AiApiProtocol.anthropic;
 
   bool get usesOpenAiProtocol => resolvedProtocol == AiApiProtocol.openai;
 
@@ -432,6 +558,31 @@ class AiSettings {
     if (trimmed.isNotEmpty) return _stripTrailingSlash(trimmed);
     return _stripTrailingSlash(providerKind.defaultBaseUrl);
   }
+
+  /// Null when the endpoint is safe and syntactically usable.
+  ///
+  /// Plain HTTP is deliberately limited to the built-in, no-key local backend
+  /// on loopback. A BYOK secret must never cross the network in clear text.
+  String? get endpointValidationError {
+    final raw = resolvedBaseUrl.trim();
+    if (raw.isEmpty) return '请填写接口地址';
+    final uri = Uri.tryParse(raw);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      return '接口地址格式无效';
+    }
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') {
+      return '接口地址只支持 HTTPS；本机 Ollama 可使用 HTTP';
+    }
+    if (scheme == 'https') return null;
+    final host = uri.host.toLowerCase();
+    final loopback =
+        host == 'localhost' || host == '127.0.0.1' || host == '::1';
+    if (providerKind.isLocalBackend && !requiresApiKey && loopback) return null;
+    return '携带 API Key 的接口必须使用 HTTPS';
+  }
+
+  bool get hasValidEndpoint => endpointValidationError == null;
 
   String get resolvedModel {
     final trimmed = model.trim();
@@ -506,232 +657,5 @@ class AiSettings {
       return value.substring(0, value.length - 1);
     }
     return value;
-  }
-}
-
-abstract interface class AiSettingsStore {
-  Future<AiSettings> read();
-  Future<void> write(AiSettings settings);
-}
-
-/// API keys are stored **per** [AiProviderKind] so switching providers never
-/// reuses another vendor's secret. Search keys are per [AiSearchProviderKind].
-abstract interface class AiCredentialStore {
-  Future<String?> readApiKey(AiProviderKind kind);
-  Future<void> writeApiKey(AiProviderKind kind, String apiKey);
-  Future<void> deleteApiKey(AiProviderKind kind);
-
-  Future<String?> readSearchApiKey(AiSearchProviderKind kind);
-  Future<void> writeSearchApiKey(AiSearchProviderKind kind, String apiKey);
-  Future<void> deleteSearchApiKey(AiSearchProviderKind kind);
-}
-
-class JsonAiSettingsStore implements AiSettingsStore {
-  JsonAiSettingsStore(this._file);
-
-  final File _file;
-
-  @override
-  Future<AiSettings> read() async {
-    try {
-      if (!await _file.exists()) return const AiSettings();
-      final json = jsonDecode(await _file.readAsString());
-      if (json is! Map) return const AiSettings();
-      return AiSettings.fromJson(Map<String, dynamic>.from(json));
-    } catch (_) {
-      return const AiSettings();
-    }
-  }
-
-  @override
-  Future<void> write(AiSettings settings) async {
-    await _file.parent.create(recursive: true);
-    await _file.writeAsString(
-      jsonEncode(settings.toJson()),
-      flush: true,
-    );
-  }
-}
-
-class SecureAiCredentialStore implements AiCredentialStore {
-  SecureAiCredentialStore({FlutterSecureStorage? storage})
-    : _storage =
-          storage ??
-          const FlutterSecureStorage(
-            // Same as WebDAV credentials: avoid data-protection keychain so
-            // ad-hoc sandboxed macOS debug builds do not need Keychain Sharing.
-            mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-          );
-
-  /// Pre–per-provider key; migrated into the active provider slot once.
-  static const _legacyKey = 'kaijuan.ai.api_key';
-
-  final FlutterSecureStorage _storage;
-  bool _legacyMigrated = false;
-
-  String _storageKey(AiProviderKind kind) =>
-      'kaijuan.ai.api_key.${kind.storageValue}';
-
-  String _searchStorageKey(AiSearchProviderKind kind) =>
-      'kaijuan.ai.search_api_key.${kind.storageValue}';
-
-  @override
-  Future<String?> readApiKey(AiProviderKind kind) async {
-    await _migrateLegacyIfNeeded(kind);
-    try {
-      final value = await _storage.read(key: _storageKey(kind));
-      if (value == null || value.isEmpty) return null;
-      return value;
-    } catch (_) {
-      // Missing entitlement / keychain errors must not crash settings UI.
-      return null;
-    }
-  }
-
-  @override
-  Future<void> writeApiKey(AiProviderKind kind, String apiKey) async {
-    final trimmed = apiKey.trim();
-    if (trimmed.isEmpty) {
-      await deleteApiKey(kind);
-      return;
-    }
-    try {
-      await _storage.write(key: _storageKey(kind), value: trimmed);
-    } catch (_) {
-      // Best-effort; UI still holds the in-memory draft.
-    }
-  }
-
-  @override
-  Future<void> deleteApiKey(AiProviderKind kind) async {
-    final key = _storageKey(kind);
-    try {
-      await _storage.delete(key: key);
-    } catch (_) {
-      // macOS can return -34018 (missing entitlement) on delete for some
-      // ad-hoc sandbox setups. Overwrite with empty so reads treat as cleared.
-      try {
-        await _storage.write(key: key, value: '');
-      } catch (_) {}
-    }
-  }
-
-  @override
-  Future<String?> readSearchApiKey(AiSearchProviderKind kind) async {
-    try {
-      final value = await _storage.read(key: _searchStorageKey(kind));
-      if (value == null || value.isEmpty) return null;
-      return value;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  @override
-  Future<void> writeSearchApiKey(
-    AiSearchProviderKind kind,
-    String apiKey,
-  ) async {
-    final trimmed = apiKey.trim();
-    if (trimmed.isEmpty) {
-      await deleteSearchApiKey(kind);
-      return;
-    }
-    try {
-      await _storage.write(key: _searchStorageKey(kind), value: trimmed);
-    } catch (_) {}
-  }
-
-  @override
-  Future<void> deleteSearchApiKey(AiSearchProviderKind kind) async {
-    final key = _searchStorageKey(kind);
-    try {
-      await _storage.delete(key: key);
-    } catch (_) {
-      try {
-        await _storage.write(key: key, value: '');
-      } catch (_) {}
-    }
-  }
-
-  /// One-shot: if an old single-key value exists and the slot for [kind] is
-  /// empty, copy it there then remove the legacy entry.
-  Future<void> _migrateLegacyIfNeeded(AiProviderKind kind) async {
-    if (_legacyMigrated) return;
-    _legacyMigrated = true;
-    try {
-      final legacy = await _storage.read(key: _legacyKey);
-      if (legacy == null || legacy.isEmpty) return;
-      final existing = await _storage.read(key: _storageKey(kind));
-      if (existing == null || existing.isEmpty) {
-        await _storage.write(key: _storageKey(kind), value: legacy);
-      }
-      try {
-        await _storage.delete(key: _legacyKey);
-      } catch (_) {
-        try {
-          await _storage.write(key: _legacyKey, value: '');
-        } catch (_) {}
-      }
-    } catch (_) {
-      // Best-effort migration; ignore secure-storage edge failures.
-    }
-  }
-}
-
-class MemoryAiSettingsStore implements AiSettingsStore {
-  AiSettings _settings = const AiSettings();
-
-  @override
-  Future<AiSettings> read() async => _settings;
-
-  @override
-  Future<void> write(AiSettings settings) async {
-    _settings = settings;
-  }
-}
-
-class MemoryAiCredentialStore implements AiCredentialStore {
-  final Map<AiProviderKind, String> _keys = {};
-  final Map<AiSearchProviderKind, String> _searchKeys = {};
-
-  @override
-  Future<String?> readApiKey(AiProviderKind kind) async => _keys[kind];
-
-  @override
-  Future<void> writeApiKey(AiProviderKind kind, String apiKey) async {
-    final trimmed = apiKey.trim();
-    if (trimmed.isEmpty) {
-      _keys.remove(kind);
-    } else {
-      _keys[kind] = trimmed;
-    }
-  }
-
-  @override
-  Future<void> deleteApiKey(AiProviderKind kind) async {
-    _keys.remove(kind);
-  }
-
-  @override
-  Future<String?> readSearchApiKey(AiSearchProviderKind kind) async =>
-      _searchKeys[kind];
-
-  @override
-  Future<void> writeSearchApiKey(
-    AiSearchProviderKind kind,
-    String apiKey,
-  ) async {
-    final trimmed = apiKey.trim();
-    if (trimmed.isEmpty) {
-      _searchKeys.remove(kind);
-    } else {
-      _searchKeys[kind] = trimmed;
-    }
-  }
-
-  @override
-  Future<void> deleteSearchApiKey(AiSearchProviderKind kind) async {
-    _searchKeys.remove(kind);
   }
 }

@@ -12,8 +12,6 @@ bool get appUsesDesktopPlatform =>
     defaultTargetPlatform == TargetPlatform.windows ||
     defaultTargetPlatform == TargetPlatform.linux;
 
-
-
 enum AppWindowClass { compact, medium, wide }
 
 enum AppComponentProfile { mobile, desktop }
@@ -106,6 +104,7 @@ abstract final class AppNavigationChromeMetrics {
   static const double barHeightShort = 44;
   static const double barMinBottom = 6;
   static const double barMinBottomShort = 4;
+
   /// Gap between last content / FAB and the top of the nav chrome.
   static const double contentGap = 16;
 }
@@ -537,8 +536,7 @@ extension AppThemeContext on BuildContext {
   }
 
   /// Max tile width for library / collection cover grids (fold-adaptive).
-  double get appCoverGridMaxExtent =>
-      resolveCoverGridMaxExtent(appWindowClass);
+  double get appCoverGridMaxExtent => resolveCoverGridMaxExtent(appWindowClass);
 
   double get appPageTitleSize => appComponentProfile.pageTitleSize;
 

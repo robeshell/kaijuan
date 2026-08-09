@@ -88,11 +88,5 @@ class BookExcerptPalette {
     accent: Color(0xFFA8A29E),
   );
 
-  static const all = <BookExcerptPalette>[
-    paper,
-    night,
-    warm,
-    sage,
-    ink,
-  ];
+  static const all = <BookExcerptPalette>[paper, night, warm, sage, ink];
 }

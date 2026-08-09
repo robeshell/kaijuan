@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'ai_chat_retrieve.dart';
+import 'ai_provider.dart';
 
 /// Names the model may call during book chat (text protocol, no LangChain).
 abstract final class AiChatToolNames {
@@ -61,6 +62,8 @@ abstract interface class AiChatToolHost {
 
 /// Parse / format the ```kaijuan_tools ... ``` protocol.
 abstract final class AiChatTools {
+  static const protocolFenceHead = '```kaijuan_tools';
+
   static final _exactToolFenceRe = RegExp(
     r'^\s*```kaijuan_tools\s*([\s\S]*?)```\s*$',
     caseSensitive: false,
@@ -81,11 +84,26 @@ abstract final class AiChatTools {
     caseSensitive: false,
   );
 
+  static final _toolFenceHeadAnywhereRe = RegExp(
+    r'```kaijuan_tools',
+    caseSensitive: false,
+  );
+
   /// True if [text] looks like a tool-call turn (not a final user answer).
   static bool looksLikeToolTurn(String text) {
     final t = text.trim();
     if (t.isEmpty) return false;
-    return _exactToolFenceRe.hasMatch(t) || _partialToolFenceRe.hasMatch(t);
+    return _exactToolFenceRe.hasMatch(t) ||
+        _partialToolFenceRe.hasMatch(t) ||
+        _danglingToolFencePrefixStart(t) == 0;
+  }
+
+  /// Whether a reply contains a complete protocol head or ends while spelling
+  /// one. This is deliberately broader than [looksLikeToolTurn]: callers use
+  /// it to reject/repair malformed attempts, never to execute embedded tools.
+  static bool containsToolProtocolAttempt(String text) {
+    return _toolFenceHeadAnywhereRe.hasMatch(text) ||
+        _danglingToolFencePrefixStart(text) != null;
   }
 
   static List<AiChatToolCall> parseCalls(String text) {
@@ -130,25 +148,54 @@ abstract final class AiChatTools {
   static String stripToolProtocol(String text) {
     var cleaned = text.replaceAll(_toolFenceAnywhereRe, '');
     cleaned = cleaned.replaceFirst(_partialToolFenceAtEndRe, '');
+    final danglingStart = _danglingToolFencePrefixStart(cleaned);
+    if (danglingStart != null) {
+      cleaned = cleaned.substring(0, danglingStart);
+    }
     return cleaned.trimRight();
+  }
+
+  /// Finds a line-level suffix such as ```k / ```kaijuan_t. Requiring at
+  /// least the first letter avoids eating an ordinary Markdown closing ```.
+  static int? _danglingToolFencePrefixStart(String text) {
+    final lower = text.toLowerCase();
+    final start = lower.lastIndexOf('```');
+    if (start < 0) return null;
+    final lineStart = start == 0 ? 0 : lower.lastIndexOf('\n', start - 1) + 1;
+    if (lower.substring(lineStart, start).trim().isNotEmpty) return null;
+    final tail = lower.substring(start).trimRight();
+    if (tail.length < 4 || !protocolFenceHead.startsWith(tail)) return null;
+    return start;
   }
 
   static Future<String> runAll(
     List<AiChatToolCall> calls,
-    AiChatToolHost host,
-  ) async {
+    AiChatToolHost host, {
+    int maxTotalChars = 18000,
+    CancelToken? cancelToken,
+  }) async {
     if (calls.isEmpty) return '(no tools)';
     final buf = StringBuffer();
-    for (var i = 0; i < calls.length; i++) {
-      final call = calls[i];
-      buf.writeln('### tool ${i + 1}: ${call.name}');
+    final seen = <String>{};
+    final budget = maxTotalChars.clamp(1000, 48000);
+    var emitted = 0;
+    for (final call in calls) {
+      cancelToken?.throwIfCancelled();
+      final signature = _signature(call);
+      if (!seen.add(signature)) continue;
+      if (buf.length >= budget) break;
+      emitted++;
+      buf.writeln('### tool $emitted: ${call.name}');
       try {
         final result = await _runOne(call, host);
-        final clipped = result.length > 20000
-            ? '${result.substring(0, 20000)}…'
+        cancelToken?.throwIfCancelled();
+        final remaining = budget - buf.length;
+        final clipped = result.length > remaining
+            ? '${result.substring(0, remaining.clamp(0, result.length))}…'
             : result;
         buf.writeln(clipped.isEmpty ? '(empty)' : clipped);
       } catch (e) {
+        if (cancelToken?.isCancelled ?? false) rethrow;
         buf.writeln('Error: $e');
       }
       buf.writeln();
@@ -156,26 +203,47 @@ abstract final class AiChatTools {
     return buf.toString().trimRight();
   }
 
+  static String _signature(AiChatToolCall call) => switch (call.name) {
+    AiChatToolNames.getChapter => '${call.name}:${call.sectionIndex}',
+    AiChatToolNames.searchBook => '${call.name}:${_clipQuery(call.query)}',
+    _ => call.name,
+  };
+
+  static int _boundedMax(int? requested, int fallback, int ceiling) =>
+      (requested ?? fallback).clamp(256, ceiling);
+
+  static String _clipQuery(String query) {
+    final normalized = query.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return normalized.length <= 160 ? normalized : normalized.substring(0, 160);
+  }
+
   static Future<String> _runOne(AiChatToolCall call, AiChatToolHost host) {
-    final max = call.maxChars;
     return switch (call.name) {
       AiChatToolNames.getToc => host.toolGetToc(),
       AiChatToolNames.getCurrentChapter => host.toolGetCurrentChapter(
-        maxChars: max ?? 10000,
+        maxChars: _boundedMax(call.maxChars, 10000, 12000),
       ),
       AiChatToolNames.getChapter => () async {
         final idx = call.sectionIndex;
         if (idx == null || idx < 1) {
           return 'Error: get_chapter needs sectionIndex (1-based from get_toc).';
         }
-        return host.toolGetChapter(idx, maxChars: max ?? 10000);
+        return host.toolGetChapter(
+          idx,
+          maxChars: _boundedMax(call.maxChars, 10000, 12000),
+        );
       }(),
       AiChatToolNames.searchBook => () async {
-        final q = call.query;
+        final q = _clipQuery(call.query);
         if (q.isEmpty) return 'Error: search_book needs query.';
-        return host.toolSearchBook(q, maxChars: max ?? 12000);
+        return host.toolSearchBook(
+          q,
+          maxChars: _boundedMax(call.maxChars, 10000, 12000),
+        );
       }(),
-      AiChatToolNames.sampleBook => host.toolSampleBook(maxChars: max ?? 36000),
+      AiChatToolNames.sampleBook => host.toolSampleBook(
+        maxChars: _boundedMax(call.maxChars, 18000, 18000),
+      ),
       _ => Future.value('Error: unknown tool ${call.name}'),
     };
   }
@@ -204,7 +272,7 @@ abstract final class AiChatTools {
 Tools (call only when you need more book text; prefer few calls):
 - get_toc — list section index + title
 - get_current_chapter — plain text of the chapter the reader is in (optional maxChars)
-- get_chapter — one section by 1-based sectionIndex from get_toc (optional maxChars)
+- get_chapter — one section by 1-based sectionIndex from get_toc (optional maxChars). Never infer sectionIndex from a human title such as “第8章”; call get_toc first unless an exact §n from this turn is already available.
 - search_book — keyword search in this book (query required)
 - sample_book — even samples from every section (for whole-book overview / cast)
 

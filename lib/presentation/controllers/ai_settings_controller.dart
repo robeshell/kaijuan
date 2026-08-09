@@ -3,10 +3,13 @@ import 'package:flutter/foundation.dart';
 import '../../ai/ai_log.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_provider.dart';
+import '../../ai/ai_provider_factory.dart';
 import '../../ai/ai_provider_kind.dart';
 import '../../ai/ai_search.dart';
 import '../../ai/ai_settings.dart';
+import '../../ai/ai_settings_store.dart';
 import '../../ai/ai_translation.dart';
+import '../../ai/ai_user_error.dart';
 
 /// Presentation state for AI settings. Never exposes raw HTTP or secure storage
 /// handles to widgets.
@@ -55,20 +58,19 @@ class AiSettingsController extends ChangeNotifier {
   bool get hasSearchApiKey => _searchApiKey.trim().isNotEmpty;
 
   /// Search Key present for the selected search provider (chat 联网 toggle).
-  bool get isSearchReady => hasSearchApiKey;
+  bool get isSearchReady => _settings.enabled && hasSearchApiKey;
 
   /// Ready for M1+ language features: switch on, key present (cloud only),
   /// URL/model resolvable.
   bool get isReadyForRequests =>
       _settings.enabled &&
       (!_settings.requiresApiKey || hasApiKey) &&
-      _settings.resolvedBaseUrl.isNotEmpty &&
+      _settings.hasValidEndpoint &&
       _settings.resolvedModel.isNotEmpty;
 
   Future<void> load() async {
     _settings = await settingsStore.read();
-    _apiKey =
-        await credentialStore.readApiKey(_settings.providerKind) ?? '';
+    _apiKey = await credentialStore.readApiKey(_settings.providerKind) ?? '';
     _searchApiKey =
         await credentialStore.readSearchApiKey(_settings.searchProviderKind) ??
         '';
@@ -206,12 +208,17 @@ class AiSettingsController extends ChangeNotifier {
   Future<List<AiWebSearchHit>> searchWeb(
     String query, {
     int maxResults = 5,
+    CancelToken? cancelToken,
   }) {
+    if (!_settings.enabled) {
+      throw AiProviderException('AI 已关闭');
+    }
     return searchService.search(
       provider: _settings.searchProviderKind,
       apiKey: _searchApiKey,
       query: query,
       maxResults: maxResults,
+      cancelToken: cancelToken,
     );
   }
 
@@ -316,11 +323,16 @@ class AiSettingsController extends ChangeNotifier {
   /// Probes the configured search provider with one trivial query.
   Future<void> testSearch() async {
     if (_testingSearch) return;
+    if (!_settings.enabled) {
+      _searchTestMessage = '请先启用 AI';
+      notifyListeners();
+      return;
+    }
     _testingSearch = true;
     _searchTestMessage = null;
     notifyListeners();
     try {
-      final hits = await AiWebSearchService().search(
+      final hits = await searchService.search(
         provider: _settings.searchProviderKind,
         apiKey: _searchApiKey,
         query: '开卷阅读器联网搜索测试',
@@ -329,8 +341,12 @@ class AiSettingsController extends ChangeNotifier {
       _searchTestMessage = hits.isEmpty
           ? '搜索服务可用，但返回了空结果'
           : '搜索服务可用（测试返回 ${hits.length} 条结果）';
-    } catch (e) {
-      _searchTestMessage = '搜索失败：$e';
+    } catch (error, stack) {
+      AiLog.d('testSearch failed: $error\n$stack');
+      _searchTestMessage = aiUserErrorMessage(
+        error,
+        operation: AiUserOperation.search,
+      );
     } finally {
       _testingSearch = false;
       notifyListeners();
@@ -375,6 +391,13 @@ class AiSettingsController extends ChangeNotifier {
       notifyListeners();
       return result;
     }
+    final endpointError = _settings.endpointValidationError;
+    if (endpointError != null) {
+      final result = AiConnectionTestResult.failure(endpointError);
+      _applyTest(result);
+      notifyListeners();
+      return result;
+    }
     if (_settings.resolvedModel.isEmpty) {
       final result = const AiConnectionTestResult.failure('请填写模型名称');
       AiLog.d('testConnection fail: empty model');
@@ -383,10 +406,7 @@ class AiSettingsController extends ChangeNotifier {
       return result;
     }
 
-    final provider = providerFactory.create(
-      settings: _settings,
-      apiKey: key,
-    );
+    final provider = providerFactory.create(settings: _settings, apiKey: key);
     if (provider == null) {
       final result = const AiConnectionTestResult.failure('无法创建连接，请检查配置');
       AiLog.d('testConnection fail: factory returned null');
@@ -431,16 +451,16 @@ class AiSettingsController extends ChangeNotifier {
         'testConnection fail in ${sw.elapsedMilliseconds}ms '
         'status=${error.statusCode} msg=${error.message}',
       );
-      final result = AiConnectionTestResult.failure(error.message);
+      final result = AiConnectionTestResult.failure(
+        aiUserErrorMessage(error, operation: AiUserOperation.connect),
+      );
       _applyTest(result);
       return result;
     } catch (error, stack) {
       AiLog.d(
         'testConnection error in ${sw.elapsedMilliseconds}ms: $error\n$stack',
       );
-      final result = const AiConnectionTestResult.failure(
-        '无法连接，请检查网络与接口地址',
-      );
+      final result = const AiConnectionTestResult.failure('无法连接，请检查网络与接口地址');
       _applyTest(result);
       return result;
     } finally {
@@ -483,11 +503,15 @@ class AiSettingsController extends ChangeNotifier {
       AiLog.d('fetchModels fail: empty base url');
       throw AiProviderException(_modelsError!);
     }
+    final endpointError = _settings.endpointValidationError;
+    if (endpointError != null) {
+      _modelsError = endpointError;
+      _availableModels = const [];
+      notifyListeners();
+      throw AiProviderException(endpointError);
+    }
 
-    final provider = providerFactory.create(
-      settings: _settings,
-      apiKey: key,
-    );
+    final provider = providerFactory.create(settings: _settings, apiKey: key);
     if (provider == null) {
       _modelsError = '无法创建连接，请检查配置';
       _availableModels = const [];
@@ -512,12 +536,15 @@ class AiSettingsController extends ChangeNotifier {
       return models;
     } on AiProviderException catch (error) {
       _availableModels = const [];
-      _modelsError = error.message;
+      _modelsError = aiUserErrorMessage(
+        error,
+        operation: AiUserOperation.loadModels,
+      );
       AiLog.d(
         'fetchModels fail in ${sw.elapsedMilliseconds}ms '
         'status=${error.statusCode} msg=${error.message}',
       );
-      rethrow;
+      throw AiProviderException(_modelsError!, statusCode: error.statusCode);
     } catch (error, stack) {
       _availableModels = const [];
       _modelsError = '获取模型失败，请检查网络与接口地址';

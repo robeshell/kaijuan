@@ -150,14 +150,12 @@ class CollectionsScreen extends StatelessWidget {
                           hPad,
                           context.appContentBottomPadding,
                         ),
-                        gridDelegate:
-                            SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent:
-                                  context.appCoverGridMaxExtent,
-                              mainAxisSpacing: AppSpacing.x6,
-                              crossAxisSpacing: AppSpacing.x4,
-                              childAspectRatio: 0.65,
-                            ),
+                        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: context.appCoverGridMaxExtent,
+                          mainAxisSpacing: AppSpacing.x6,
+                          crossAxisSpacing: AppSpacing.x4,
+                          childAspectRatio: 0.65,
+                        ),
                         itemCount: list.length,
                         itemBuilder: (context, i) {
                           final summary = list[i];
@@ -770,8 +768,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                             overflow: TextOverflow.ellipsis,
                                             style: context.appGridTitleStyle
                                                 .copyWith(
-                                                  color:
-                                                      context.appPrimaryText,
+                                                  color: context.appPrimaryText,
                                                 ),
                                           ),
                                         ),

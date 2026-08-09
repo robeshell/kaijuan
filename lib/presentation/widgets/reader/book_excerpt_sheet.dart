@@ -92,9 +92,9 @@ class _BookExcerptSheetState extends State<BookExcerptSheet> {
         showAppSnackBar(context, message);
       }
     } catch (error) {
+      debugPrint('[Excerpt] export failed: $error');
       if (!mounted) return;
-      final text = error.toString().replaceFirst(RegExp(r'^[^:]+:\s*'), '');
-      showAppSnackBar(context, text.isEmpty ? '操作失败' : text);
+      showAppSnackBar(context, '无法生成摘录，请重试');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

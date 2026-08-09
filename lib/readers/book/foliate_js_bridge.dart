@@ -147,6 +147,7 @@ class FoliateRelocation {
   const FoliateRelocation({
     required this.cfi,
     required this.percentage,
+    this.sectionIndex,
     this.chapterHref,
     this.chapterTitle,
     this.bookCurrentPage,
@@ -154,6 +155,7 @@ class FoliateRelocation {
   });
 
   final String cfi;
+  final int? sectionIndex;
   final String? chapterHref;
   final String? chapterTitle;
   final int? bookCurrentPage;
@@ -173,6 +175,7 @@ class FoliateRelocation {
     final chapterTitle = payload['chapterTitle']?.toString().trim();
     return FoliateRelocation(
       cfi: cfi,
+      sectionIndex: _nonNegativeInt(payload['sectionIndex']),
       chapterHref: payload['chapterHref']?.toString(),
       chapterTitle: (chapterTitle == null || chapterTitle.isEmpty)
           ? null
@@ -192,6 +195,16 @@ class FoliateRelocation {
     };
     if (parsed == null || parsed <= 0) return null;
     return parsed;
+  }
+
+  static int? _nonNegativeInt(Object? value) {
+    final parsed = switch (value) {
+      int number => number,
+      num number => number.toInt(),
+      String text => int.tryParse(text),
+      _ => null,
+    };
+    return parsed != null && parsed >= 0 ? parsed : null;
   }
 }
 
@@ -310,8 +323,7 @@ class FoliateAnnotationClick {
     if (payload == null) return null;
     final annotation = payload['annotation'];
     if (annotation is! Map) return null;
-    final cfi =
-        (annotation['value'] ?? annotation['cfi'])?.toString() ?? '';
+    final cfi = (annotation['value'] ?? annotation['cfi'])?.toString() ?? '';
     if (cfi.isEmpty) return null;
     final pos = FoliateNormalizedBox.tryParse(payload['pos']);
     if (pos == null) return null;
@@ -363,7 +375,6 @@ class FoliateTtsUtterance {
     return FoliateTtsUtterance(text: text);
   }
 }
-
 
 /// External `http(s)` / `mailto` link emitted by Foliate's view click handler.
 class FoliateExternalLink {
@@ -490,10 +501,7 @@ final class FoliateSearchDone extends FoliateSearchEvent {
 }
 
 final class FoliateSearchChapterHits extends FoliateSearchEvent {
-  const FoliateSearchChapterHits({
-    required this.label,
-    required this.hits,
-  });
+  const FoliateSearchChapterHits({required this.label, required this.hits});
 
   final String label;
   final List<FoliateSearchHit> hits;

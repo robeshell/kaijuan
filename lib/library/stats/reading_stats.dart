@@ -31,16 +31,26 @@ enum StatsPeriod {
   /// Month = today−29 … today (30 days). All = no lower bound (`null`).
   String? inclusiveStartDayKey(DateTime now) {
     final local = now.toLocal();
-    final today = DateTime(local.year, local.month, local.day);
     return switch (this) {
-      StatsPeriod.week =>
-        AppDatabase.localDayKey(today.subtract(const Duration(days: 6))),
-      StatsPeriod.month =>
-        AppDatabase.localDayKey(today.subtract(const Duration(days: 29))),
+      StatsPeriod.week => AppDatabase.localDayKey(
+        _localCalendarDay(local, dayOffset: -6),
+      ),
+      StatsPeriod.month => AppDatabase.localDayKey(
+        _localCalendarDay(local, dayOffset: -29),
+      ),
       StatsPeriod.all => null,
     };
   }
 }
+
+/// Local calendar arithmetic must not use fixed 24-hour durations: those can
+/// skip or duplicate a date across daylight-saving transitions.
+DateTime _localCalendarDay(DateTime at, {int dayOffset = 0}) {
+  final local = at.toLocal();
+  return DateTime(local.year, local.month, local.day + dayOffset);
+}
+
+int _nonNegative(int value) => value < 0 ? 0 : value;
 
 /// One cover row on the stats surface (recent or finished).
 class StatsItemRow {
@@ -202,11 +212,10 @@ List<StatsDayBar> buildLast7DayBars({
   required DateTime now,
 }) {
   final local = now.toLocal();
-  final today = DateTime(local.year, local.month, local.day);
   return [
     for (var i = 6; i >= 0; i--)
       () {
-        final day = today.subtract(Duration(days: i));
+        final day = _localCalendarDay(local, dayOffset: -i);
         final key = AppDatabase.localDayKey(day);
         final row = byDay[key];
         // DateTime.weekday: Mon=1 … Sun=7
@@ -214,7 +223,7 @@ List<StatsDayBar> buildLast7DayBars({
         return StatsDayBar(
           dayKey: key,
           weekdayLabel: label,
-          seconds: row?.activeSeconds ?? 0,
+          seconds: _nonNegative(row?.activeSeconds ?? 0),
           isToday: i == 0,
         );
       }(),
@@ -227,17 +236,17 @@ int buildCurrentStreakDays({
   required DateTime now,
 }) {
   final local = now.toLocal();
-  var cursor = DateTime(local.year, local.month, local.day);
+  var cursor = _localCalendarDay(local);
   final todayKey = AppDatabase.localDayKey(cursor);
   if ((byDay[todayKey]?.activeSeconds ?? 0) <= 0) {
-    cursor = cursor.subtract(const Duration(days: 1));
+    cursor = _localCalendarDay(cursor, dayOffset: -1);
   }
   var streak = 0;
   while (true) {
     final key = AppDatabase.localDayKey(cursor);
     if ((byDay[key]?.activeSeconds ?? 0) > 0) {
       streak++;
-      cursor = cursor.subtract(const Duration(days: 1));
+      cursor = _localCalendarDay(cursor, dayOffset: -1);
     } else {
       break;
     }
@@ -255,22 +264,28 @@ List<StatsHeatmapCell> buildHeatmapCells({
 }) {
   assert(weeks > 0);
   final local = now.toLocal();
-  final today = DateTime(local.year, local.month, local.day);
+  final today = _localCalendarDay(local);
   // Align to Monday of the current week.
-  final thisMonday = today.subtract(Duration(days: today.weekday - 1));
-  final startMonday = thisMonday.subtract(Duration(days: 7 * (weeks - 1)));
+  final thisMonday = _localCalendarDay(today, dayOffset: -(today.weekday - 1));
+  final startMonday = _localCalendarDay(
+    thisMonday,
+    dayOffset: -7 * (weeks - 1),
+  );
   final cells = <StatsHeatmapCell>[];
   for (var w = 0; w < weeks; w++) {
     for (var d = 0; d < 7; d++) {
-      final day = startMonday.add(Duration(days: w * 7 + d));
+      final day = _localCalendarDay(startMonday, dayOffset: w * 7 + d);
       final key = AppDatabase.localDayKey(day);
       final inFuture = day.isAfter(today);
-      final seconds = inFuture ? 0 : (byDay[key]?.activeSeconds ?? 0);
+      final seconds = inFuture
+          ? 0
+          : _nonNegative(byDay[key]?.activeSeconds ?? 0);
       cells.add(
         StatsHeatmapCell(
           dayKey: key,
           seconds: seconds,
-          isToday: day.year == today.year &&
+          isToday:
+              day.year == today.year &&
               day.month == today.month &&
               day.day == today.day,
           inFuture: inFuture,
@@ -281,13 +296,15 @@ List<StatsHeatmapCell> buildHeatmapCells({
   return cells;
 }
 
-/// GitHub-style intensity 0…4 from seconds relative to [peak] (max day in range).
-int contributionLevel(int seconds, int peak) {
-  if (seconds <= 0 || peak <= 0) return 0;
-  final t = seconds / peak;
-  if (t <= 0.25) return 1;
-  if (t <= 0.5) return 2;
-  if (t <= 0.75) return 3;
+/// Stable contribution intensity 0…4.
+///
+/// Fixed minute thresholds keep the same duration visually comparable across
+/// years and prevent one unusually long day from flattening every other cell.
+int contributionLevel(int seconds) {
+  if (seconds <= 0) return 0;
+  if (seconds < 15 * 60) return 1;
+  if (seconds < 30 * 60) return 2;
+  if (seconds < 60 * 60) return 3;
   return 4;
 }
 
@@ -301,6 +318,7 @@ ReadingStatsSnapshot buildReadingStats({
   required StatsPeriod period,
   required DateTime now,
   List<ReadingDayStat> dayStats = const [],
+
   /// itemId → cumulative seconds from [ReadingItemTime].
   Map<String, int> itemSecondsById = const {},
   int recentLimit = 12,
@@ -308,6 +326,7 @@ ReadingStatsSnapshot buildReadingStats({
   int topByTimeLimit = 8,
 }) {
   final windowStartDay = period.inclusiveStartDayKey(now);
+  final todayDay = AppDatabase.localDayKey(_localCalendarDay(now));
 
   var comicCount = 0;
   var bookCount = 0;
@@ -329,9 +348,9 @@ ReadingStatsSnapshot buildReadingStats({
       bookCount++;
     }
 
-    if (entry.isUnread) {
-      unreadCount++;
-    } else if (entry.isFinished) {
+    // Progress is the authoritative completion rule. Keep these categories
+    // mutually exclusive even when a restored legacy row lacks lastOpenedAt.
+    if (entry.isFinished) {
       finishedCount++;
       finishedRows.add(
         StatsItemRow(
@@ -339,6 +358,8 @@ ReadingStatsSnapshot buildReadingStats({
           progressFraction: entry.progressFraction,
         ),
       );
+    } else if (entry.isUnread) {
+      unreadCount++;
     } else {
       readingCount++;
     }
@@ -353,15 +374,18 @@ ReadingStatsSnapshot buildReadingStats({
     if (lastOpened != null) {
       final openDay = AppDatabase.localDayKey(lastOpened);
       final inWindow =
-          windowStartDay == null || openDay.compareTo(windowStartDay) >= 0;
+          (windowStartDay == null || openDay.compareTo(windowStartDay) >= 0) &&
+          openDay.compareTo(todayDay) <= 0;
       if (inWindow) {
         openedInPeriod++;
-        opened.add(
-          StatsItemRow(
-            item: entry.item,
-            progressFraction: entry.progressFraction,
-          ),
-        );
+        if (!entry.isFinished) {
+          opened.add(
+            StatsItemRow(
+              item: entry.item,
+              progressFraction: entry.progressFraction,
+            ),
+          );
+        }
       }
     }
   }
@@ -387,15 +411,19 @@ ReadingStatsSnapshot buildReadingStats({
   var periodBook = 0;
   var hasStoredDuration = false;
   for (final row in dayStats) {
-    if (row.activeSeconds > 0) {
+    final active = _nonNegative(row.activeSeconds);
+    final comic = _nonNegative(row.comicSeconds);
+    final book = _nonNegative(row.bookSeconds);
+    if (active > 0) {
       hasStoredDuration = true;
     }
-    if (windowStartDay != null && row.day.compareTo(windowStartDay) < 0) {
+    if ((windowStartDay != null && row.day.compareTo(windowStartDay) < 0) ||
+        row.day.compareTo(todayDay) > 0) {
       continue;
     }
-    periodActive += row.activeSeconds;
-    periodComic += row.comicSeconds;
-    periodBook += row.bookSeconds;
+    periodActive += active;
+    periodComic += comic;
+    periodBook += book;
   }
 
   const heatmapWeeks = 53;

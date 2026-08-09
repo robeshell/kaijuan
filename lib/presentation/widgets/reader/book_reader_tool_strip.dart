@@ -85,6 +85,8 @@ class _BookReaderToolStripState extends State<BookReaderToolStrip> {
             stepBackLabel: stepBackLabel,
             stepForwardLabel: stepForwardLabel,
             semanticValue: '$progressPct%',
+            semanticValueForFraction: (value) =>
+                '${(value * 100).toStringAsFixed(1)}%',
             onStepBack: () {
               if (controller.hasPageMode) {
                 controller.goPreviousPage();
@@ -229,9 +231,7 @@ class _TtsPanel extends StatelessWidget {
               onPressed: () => unawaited(controller.ttsSkipPrevious()),
             ),
             _TtsIconButton(
-              icon: playing
-                  ? KaijuanIcons.pause
-                  : KaijuanIcons.play,
+              icon: playing ? KaijuanIcons.pause : KaijuanIcons.play,
               label: playing ? '暂停' : (active ? '继续' : '开始'),
               fg: accent,
               enabled: true,
@@ -378,7 +378,6 @@ String _marginBandLabel(double value, double min, double max) {
   return '宽';
 }
 
-
 class _BrightnessPanel extends StatefulWidget {
   const _BrightnessPanel({
     required this.controller,
@@ -434,6 +433,8 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                 thumbColor: widget.accent,
                 semanticLabel: '亮度',
                 semanticValue: '${(t * 100).round()}%',
+                semanticValueForFraction: (value) =>
+                    '${(value * 100).round()}%',
                 onDragStart: (v) {
                   _dragging = true;
                   final next =
@@ -572,6 +573,11 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           title: '字号',
           icon: KaijuanIcons.fontIncrease,
           valueLabel: _previewFontSize.round().toString(),
+          semanticValueForFraction: (value) => _lerp(
+            BookReadingPreferences.minFontSize,
+            BookReadingPreferences.maxFontSize,
+            value,
+          ).round().toString(),
           fraction: _t(
             _previewFontSize,
             BookReadingPreferences.minFontSize,
@@ -622,6 +628,11 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           title: '行间距',
           icon: KaijuanIcons.lineSpacing,
           valueLabel: _previewLineHeight.toStringAsFixed(1),
+          semanticValueForFraction: (value) => _lerp(
+            BookReadingPreferences.minLineHeight,
+            BookReadingPreferences.maxLineHeight,
+            value,
+          ).toStringAsFixed(1),
           fraction: _t(
             _previewLineHeight,
             BookReadingPreferences.minLineHeight,
@@ -674,6 +685,15 @@ class _TypographyPanelState extends State<_TypographyPanel> {
                 BookReadingPreferences.minMargin,
                 BookReadingPreferences.maxMargin,
               ),
+              semanticValueForFraction: (value) => _marginBandLabel(
+                _lerp(
+                  BookReadingPreferences.minMargin,
+                  BookReadingPreferences.maxMargin,
+                  value,
+                ),
+                BookReadingPreferences.minMargin,
+                BookReadingPreferences.maxMargin,
+              ),
               fraction: _t(
                 _previewMargin,
                 BookReadingPreferences.minMargin,
@@ -718,6 +738,15 @@ class _TypographyPanelState extends State<_TypographyPanel> {
               icon: KaijuanIcons.swapVertical,
               valueLabel: _marginBandLabel(
                 _previewVerticalMargin,
+                BookReadingPreferences.minVerticalMargin,
+                BookReadingPreferences.maxVerticalMargin,
+              ),
+              semanticValueForFraction: (value) => _marginBandLabel(
+                _lerp(
+                  BookReadingPreferences.minVerticalMargin,
+                  BookReadingPreferences.maxVerticalMargin,
+                  value,
+                ),
                 BookReadingPreferences.minVerticalMargin,
                 BookReadingPreferences.maxVerticalMargin,
               ),
@@ -1226,10 +1255,7 @@ class _UserFontTile extends StatelessWidget {
           ? Duration.zero
           : const Duration(milliseconds: 120),
       height: 44,
-      padding: const EdgeInsets.only(
-        left: AppSpacing.x3,
-        right: AppSpacing.x1,
-      ),
+      padding: const EdgeInsets.only(left: AppSpacing.x3, right: AppSpacing.x1),
       decoration: BoxDecoration(
         color: selected ? accent.withValues(alpha: 0.10) : Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadii.menu),
@@ -1356,6 +1382,13 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
           icon: KaijuanIcons.letterSpacing,
           valueLabel: _fmt(_previewLetter),
           semanticLabel: '字间距',
+          semanticValueForFraction: (value) => _fmt(
+            _lerp(
+              BookReadingPreferences.minLetterSpacing,
+              BookReadingPreferences.maxLetterSpacing,
+              value,
+            ),
+          ),
           fraction: _t(
             _previewLetter,
             BookReadingPreferences.minLetterSpacing,
@@ -1402,6 +1435,13 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
           icon: KaijuanIcons.paragraphSpacing,
           valueLabel: _fmt(_previewParagraph),
           semanticLabel: '段间距',
+          semanticValueForFraction: (value) => _fmt(
+            _lerp(
+              BookReadingPreferences.minParagraphSpacing,
+              BookReadingPreferences.maxParagraphSpacing,
+              value,
+            ),
+          ),
           fraction: _t(
             _previewParagraph,
             BookReadingPreferences.minParagraphSpacing,
@@ -1726,6 +1766,7 @@ class _PrefScrubberRow extends StatelessWidget {
   const _PrefScrubberRow({
     required this.icon,
     required this.valueLabel,
+    required this.semanticValueForFraction,
     required this.fraction,
     required this.accent,
     required this.fgMuted,
@@ -1741,6 +1782,7 @@ class _PrefScrubberRow extends StatelessWidget {
   final String? semanticLabel;
   final IconData icon;
   final String valueLabel;
+  final String Function(double fraction) semanticValueForFraction;
   final double fraction;
   final Color accent;
   final Color fgMuted;
@@ -1766,6 +1808,7 @@ class _PrefScrubberRow extends StatelessWidget {
             thumbColor: accent,
             semanticLabel: label,
             semanticValue: valueLabel,
+            semanticValueForFraction: semanticValueForFraction,
             onDragStart: onDragStart,
             onDragUpdate: onDragUpdate,
             onDragEnd: onDragEnd,

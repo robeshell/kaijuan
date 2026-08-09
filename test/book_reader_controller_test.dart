@@ -3,9 +3,13 @@ import 'dart:io';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
+import 'package:kaijuan/ai/ai_chat_store.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
+import 'package:kaijuan/ai/ai_graph_scope.dart';
+import 'package:kaijuan/ai/ai_graph_store.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/app/book_reading_preferences.dart';
@@ -103,6 +107,101 @@ void main() {
     });
   });
 
+  test('saved full graph stays visible across device-local progress', () async {
+    final item = await insertBook(id: 'cross-device-graph');
+    final controller = BookReaderController(database: database, item: item);
+    await controller.attachEngine(sectionMap, tocTitles);
+    final store = AiGraphStore(tempDir);
+    controller.attachAiGraphStore(store);
+    await store.write(
+      AiBookGraph(
+        contentHash: item.contentHash,
+        generatedAt: DateTime.utc(2026, 8, 9),
+        model: 'test',
+        includesUnread: true,
+        coveredSections: const [5],
+        sectionTitles: const {5: '第五章'},
+        entities: const [
+          AiGraphEntity(
+            name: '移动端不应隐藏的人物',
+            type: AiGraphEntityType.person,
+            evidence: [
+              AiGraphEvidence(
+                sectionIndex: 5,
+                quote: '移动端不应隐藏的人物出场。',
+                spanResolved: true,
+              ),
+            ],
+            chapterFreq: {5: 1},
+            firstSection: 5,
+            lastSection: 5,
+          ),
+        ],
+        relations: const [],
+      ),
+    );
+
+    // This device is still at section 1 and may have the local unread switch
+    // off. The saved graph's generation scope remains the source of truth.
+    await controller.loadBookGraph();
+    expect(controller.sectionIndex, 0);
+    expect(controller.visibleBookGraph?.entities, hasLength(1));
+    expect(controller.visibleBookGraph?.entities.single.name, '移动端不应隐藏的人物');
+    controller.dispose();
+  });
+
+  test('empty covered graph cannot suppress a fresh extraction run', () {
+    const emptyCovered = AiBookGraph(
+      contentHash: 'empty-covered',
+      coveredSections: [1, 2, 3],
+    );
+    const grounded = AiBookGraph(
+      contentHash: 'grounded',
+      coveredSections: [1],
+      entities: [
+        AiGraphEntity(
+          name: '有效实体',
+          type: AiGraphEntityType.concept,
+          evidence: [
+            AiGraphEvidence(sectionIndex: 1, quote: '有效实体', spanResolved: true),
+          ],
+          chapterFreq: {1: 1},
+          firstSection: 1,
+          lastSection: 1,
+        ),
+      ],
+    );
+
+    expect(
+      BookReaderController.graphCanResumeIncrementally(emptyCovered),
+      isFalse,
+    );
+    expect(BookReaderController.graphCanResumeIncrementally(grounded), isTrue);
+  });
+
+  test('confirmed graph range is not clipped by renderer progress', () {
+    expect(
+      BookReaderController.graphReadThroughForGeneration(
+        userConfirmedScope: true,
+        resettingEmptySnapshot: false,
+        existingIncludesUnread: false,
+        allowUnread: false,
+        readThrough: 1,
+      ),
+      isNull,
+    );
+    expect(
+      BookReaderController.graphReadThroughForGeneration(
+        userConfirmedScope: false,
+        resettingEmptySnapshot: false,
+        existingIncludesUnread: false,
+        allowUnread: false,
+        readThrough: 7,
+      ),
+      7,
+    );
+  });
+
   test('attachEngine makes controller ready and exposes metadata', () async {
     final item = await insertBook(id: 'attach');
     final controller = BookReaderController(database: database, item: item);
@@ -123,22 +222,21 @@ void main() {
     final item = await insertBook(id: 'chat-session');
     final controller = BookReaderController(database: database, item: item);
     await controller.attachEngine(sectionMap, tocTitles);
-    controller.attachChatHistoryStore(JsonAiChatHistoryStore(tempDir));
+    final store = JsonAiChatHistoryStore(tempDir);
+    controller.attachChatHistoryStore(store);
 
     final outline = AiBookOutline(
       createdAt: DateTime.utc(2026, 1, 1),
       model: 'test',
       overview: '概述',
-      units: const [
-        AiOutlineUnit(title: '主题', blurb: '一句话说明。'),
-      ],
+      units: const [AiOutlineUnit(title: '主题', blurb: '一句话说明。')],
     );
     final fresh = AiChatSession(
       contentHash: item.contentHash,
       itemId: item.id,
       workOutlines: {'s1': outline},
     );
-    await controller.saveChatSession(fresh);
+    await store.write(fresh);
 
     // A stale sheet snapshot (no work outlines, e.g. before generation)
     // must not wipe the freshly generated outline on save.
@@ -155,50 +253,96 @@ void main() {
     controller.dispose();
   });
 
-  test('saveChatSession stale snapshot never rolls back disk outlines', () async {
-    final item = await insertBook(id: 'chat-session-v2');
+  test(
+    'saveChatSession stale snapshot never rolls back disk outlines',
+    () async {
+      final item = await insertBook(id: 'chat-session-v2');
+      final controller = BookReaderController(database: database, item: item);
+      await controller.attachEngine(sectionMap, tocTitles);
+      final store = JsonAiChatHistoryStore(tempDir);
+      controller.attachChatHistoryStore(store);
+
+      final v1 = AiBookOutline(
+        createdAt: DateTime.utc(2026, 1, 1),
+        model: 'test',
+        overview: '旧版',
+        units: const [AiOutlineUnit(title: '旧', blurb: '旧主题。')],
+      );
+      final v2 = AiBookOutline(
+        createdAt: DateTime.utc(2026, 1, 2),
+        model: 'test',
+        overview: '新版',
+        units: const [AiOutlineUnit(title: '新', blurb: '新主题。')],
+      );
+      // Disk already holds V2 (fresh generation); the sheet snapshot is stale
+      // V1 plus a new chat message — saving it must keep V2.
+      await store.write(
+        AiChatSession(
+          contentHash: item.contentHash,
+          itemId: item.id,
+          workOutlines: {'s1': v2},
+        ),
+      );
+      final stale = AiChatSession(
+        contentHash: item.contentHash,
+        itemId: item.id,
+        workOutlines: {'s1': v1},
+        messages: [
+          AiChatMessage(
+            role: AiMessageRole.user,
+            content: 'hi',
+            createdAt: DateTime.utc(2026, 1, 3),
+          ),
+        ],
+      );
+      await controller.saveChatSession(stale);
+
+      final reloaded = await controller.loadChatSession();
+      expect(reloaded.workOutlines['s1']?.overview, '新版');
+      expect(reloaded.messages.length, 1);
+
+      controller.dispose();
+    },
+  );
+
+  test('saveChatSession does not resurrect a deleted outline', () async {
+    final item = await insertBook(id: 'chat-session-deleted');
     final controller = BookReaderController(database: database, item: item);
     await controller.attachEngine(sectionMap, tocTitles);
-    controller.attachChatHistoryStore(JsonAiChatHistoryStore(tempDir));
+    final store = JsonAiChatHistoryStore(tempDir);
+    controller.attachChatHistoryStore(store);
 
-    final v1 = AiBookOutline(
+    final deletedSnapshot = AiChatSession(
+      contentHash: item.contentHash,
+      itemId: item.id,
+    );
+    await store.write(deletedSnapshot);
+    final staleOutline = AiBookOutline(
       createdAt: DateTime.utc(2026, 1, 1),
       model: 'test',
-      overview: '旧版',
+      overview: '已经删除',
       units: const [AiOutlineUnit(title: '旧', blurb: '旧主题。')],
     );
-    final v2 = AiBookOutline(
-      createdAt: DateTime.utc(2026, 1, 2),
-      model: 'test',
-      overview: '新版',
-      units: const [AiOutlineUnit(title: '新', blurb: '新主题。')],
-    );
-    // Disk already holds V2 (fresh generation); the sheet snapshot is stale
-    // V1 plus a new chat message — saving it must keep V2.
     await controller.saveChatSession(
       AiChatSession(
         contentHash: item.contentHash,
         itemId: item.id,
-        workOutlines: {'s1': v2},
+        outline: staleOutline,
+        workOutlines: {'s1': staleOutline},
+        messages: [
+          AiChatMessage(
+            role: AiMessageRole.user,
+            content: '保留这条聊天',
+            createdAt: DateTime.utc(2026, 1, 2),
+          ),
+        ],
       ),
     );
-    final stale = AiChatSession(
-      contentHash: item.contentHash,
-      itemId: item.id,
-      workOutlines: {'s1': v1},
-      messages: [
-        AiChatMessage(
-          role: AiMessageRole.user,
-          content: 'hi',
-          createdAt: DateTime.utc(2026, 1, 3),
-        ),
-      ],
-    );
-    await controller.saveChatSession(stale);
 
     final reloaded = await controller.loadChatSession();
-    expect(reloaded.workOutlines['s1']?.overview, '新版');
-    expect(reloaded.messages.length, 1);
+    expect(reloaded.outline, isNull);
+    expect(reloaded.workOutlines, isEmpty);
+    expect(reloaded.messages.single.content, '保留这条聊天');
 
     controller.dispose();
   });
@@ -471,9 +615,10 @@ void main() {
   });
 
   group('graph section chooser', () {
-    test('chat scope narrows the body to the reading work, indices round-trip',
-        () {
-      const body = '''
+    test(
+      'chat scope narrows the body to the reading work, indices round-trip',
+      () {
+        const body = '''
 [§1@1 目录]
 目录列表
 [§2@4 狂人日记]
@@ -483,40 +628,311 @@ void main() {
 [§4@9 故乡]
 我冒了严寒。
 ''';
-      const work = AiGraphWorkCandidate(
-        title: '鲁迅小说精品',
-        startSection: 4,
-        endSectionExclusive: 8,
-      );
+        const work = AiGraphWorkCandidate(
+          id: 's4',
+          title: '鲁迅小说精品',
+          startSection: 4,
+          endSectionExclusive: 8,
+        );
 
-      final scoped = scopeChatBodyToWork(body, work);
-      final sections = AiChatRetrieve.splitSections(scoped);
-      expect(sections.map((s) => s.label), ['狂人日记', '孔乙己']);
-      expect(sections.map((s) => s.index), [2, 3]);
-      expect(sections.map((s) => s.originSectionIndex), [4, 4]);
+        final scoped = scopeChatBodyToWork(body, work);
+        final sections = AiChatRetrieve.splitSections(scoped);
+        expect(sections.map((s) => s.label), ['狂人日记', '孔乙己']);
+        expect(sections.map((s) => s.index), [2, 3]);
+        expect(sections.map((s) => s.originSectionIndex), [4, 4]);
 
-      // A null work (plain book) is untouched too.
-      expect(
-        scopeChatBodyToWork(body, null),
-        body,
-      );
-    });
-    test('auto-filter drops front/back matter, keeps body chapters',
-        () async {
-      final item = await insertBook(id: 'graph-sections');
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
-      controller.attachAnnotationBridge(
-        renderAll: (_) {},
-        add: (_) {},
-        remove: (_) {},
-        clearSelection: () {},
-        getSelectedText: () async => '',
-        setMenuCursorZone: (_) {},
-        setMenuOpen: (_) {},
-        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+        // A null work (plain book) is untouched too.
+        expect(scopeChatBodyToWork(body, null), body);
+      },
+    );
+
+    test(
+      'chat scope falls back to the whole body when work cannot resolve',
+      () {
+        const body = '[§1@1 甲]\n甲正文\n[§2@2 乙]\n乙正文';
+        const missing = AiGraphWorkCandidate(
+          id: 's9',
+          title: '不存在的作品',
+          startSection: 9,
+          endSectionExclusive: 10,
+        );
+
+        expect(scopeChatBodyToWork(body, missing), body);
+      },
+    );
+
+    test(
+      'chat scope does not collapse when one chapter matches work title',
+      () {
+        const body = '''
+[§40@70 Ⅰ 哈利·波特与魔法石]
+作品扉页。
+[§41@71 第一章 大难不死的男孩]
+第一章正文。
+''';
+        const work = AiGraphWorkCandidate(
+          id: 's70',
+          title: 'Ⅰ 哈利·波特与魔法石',
+          startSection: 70,
+          endSectionExclusive: 90,
+        );
+
+        final sections = AiChatRetrieve.splitSections(
+          scopeChatBodyToWork(body, work),
+        );
+        expect(sections.map((section) => section.index), [40, 41]);
+      },
+    );
+
+    test(
+      'all chat tools share one ranged corpus, index space, and frozen chapter',
+      () async {
+        final item = await insertBook(id: 'chat-tools-ranged-omnibus');
+        final controller = BookReaderController(database: database, item: item);
+        final loads =
+            <({bool toc, int? startSection, int? endSectionExclusive})>[];
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getChapterText: () async => '翻页后另一部作品的正文',
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async {
+                loads.add((
+                  toc: toc,
+                  startSection: startSection,
+                  endSectionExclusive: endSectionExclusive,
+                ));
+                // Include out-of-range rows to prove every tool still applies the
+                // frozen work boundary even if an engine ignores range options.
+                return '''
+[§7@20 其他作品]
+不应泄漏的伏地魔正文。
+[§41@70 第七章 分院帽]
+哈利参加了分院仪式。
+[§42@71 第八章 魔药课老师]
+斯内普在魔药课上向哈利提问牛黄。
+[§90@100 下一部作品]
+不应泄漏的蛇怪正文。
+''';
+              },
+        );
+        const work = AiGraphWorkCandidate(
+          id: 's70',
+          title: 'Ⅰ 哈利·波特与魔法石',
+          startSection: 70,
+          endSectionExclusive: 90,
+        );
+        final host = createBookChatToolHostForTesting(
+          controller: controller,
+          work: work,
+          context: const AiChatContextBundle(
+            chapterTitle: '第八章 魔药课老师',
+            chapterText: '提问发出时冻结的第八章正文。',
+          ),
+        );
+
+        final toc = await host.toolGetToc();
+        final chapter = await host.toolGetChapter(42);
+        final search = await host.toolSearchBook('斯内普');
+        final sample = await host.toolSampleBook();
+        final current = await host.toolGetCurrentChapter();
+
+        expect(toc, '§41 第七章 分院帽\n§42 第八章 魔药课老师');
+        expect(chapter, contains('斯内普在魔药课上'));
+        expect(await host.toolGetChapter(8), contains('section 8 not found'));
+        expect(search, contains('斯内普在魔药课上'));
+        expect(search, isNot(contains('不应泄漏')));
+        expect(sample, contains('分院仪式'));
+        expect(sample, contains('斯内普在魔药课上'));
+        expect(sample, isNot(contains('不应泄漏')));
+        expect(current, contains('提问发出时冻结的第八章正文'));
+        expect(current, isNot(contains('翻页后另一部作品')));
+        expect(loads, [
+          (toc: false, startSection: 70, endSectionExclusive: 90),
+        ]);
+        controller.dispose();
+      },
+    );
+
+    test(
+      'same-spine uncertain structure keeps whole-file AI available',
+      () async {
+        final item = await insertBook(id: 'same-spine-omnibus');
+        final controller = BookReaderController(database: database, item: item);
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async => toc
+              ? '[§1@4~ 合订正文]\n正文'
+              : '''
+[§1@4#1 呐喊]
+[§2@4#2 狂人日记]
+正文一
+[§3@4#1 彷徨]
+[§4@4#2 祝福]
+正文二
+''',
+        );
+
+        expect(await controller.resolveGraphWorkCandidates(), isNull);
+        expect(controller.hasAmbiguousInternalWorks, isTrue);
+        expect(controller.canChatAtCurrentPosition, isTrue);
+        expect(controller.aiStructureUnavailableMessage, contains('无法可靠判断'));
+        controller.dispose();
+      },
+    );
+    test(
+      'flat evocative chapter titles keep plain-book chat available',
+      () async {
+        final item = await insertBook(id: 'flat-single-work');
+        final controller = BookReaderController(database: database, item: item);
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async => toc
+              ? '''
+[§1@2~ 风起]
+正文一
+[§2@3~ 云涌]
+正文二
+[§3@4~ 潮落]
+正文三
+'''
+              : '''
+[§1@2 风起]
+正文一
+[§2@3 云涌]
+正文二
+[§3@4 潮落]
+正文三
+''',
+        );
+
+        expect(await controller.resolveGraphWorkCandidates(), isNull);
+        expect(
+          controller.bookStructureManifest?.kind,
+          AiBookStructureKind.singleWork,
+        );
+        expect(controller.currentReadingWork, isNull);
+        expect(controller.hasCollectionWorks, isFalse);
+        expect(controller.hasAmbiguousInternalWorks, isFalse);
+        expect(controller.canChatAtCurrentPosition, isTrue);
+        final scope = await controller.graphScopePlan(null);
+        expect(scope.selectable, hasLength(3));
+        controller.dispose();
+      },
+    );
+    test(
+      'current work follows the renderer section index in a long omnibus',
+      () async {
+        final item = await insertBook(id: 'long-omnibus-location');
+        final controller = BookReaderController(database: database, item: item);
+        await controller.attachEngine(
+          BookSectionMap(
+            startIndices: List<int>.generate(80, (index) => index),
+            totalParagraphs: 80,
+          ),
+          List<String>.generate(80, (index) => '第 ${index + 1} 节'),
+        );
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async => toc
+              ? '''
+[§1@2~ 制作说明]
+说明
+[§2@7~+17 Ⅰ 哈利·波特与魔法石]
+第一部
+[§3@27~+18 Ⅱ 哈利·波特与密室]
+第二部
+[§4@51~+22 Ⅲ 哈利·波特与阿兹卡班的囚徒]
+第三部
+'''
+              : '[§1@10 第一章]\n正文',
+        );
+
+        expect(await controller.resolveGraphWorkCandidates(), hasLength(3));
+        expect(controller.currentReadingWork, isNull); // front matter
+
+        controller.reportRenditionLocation(
+          sectionIndex: 9,
+          progress: 0.12,
+          cfi: 'epubcfi(/6/20!/4/2)',
+        );
+        expect(controller.currentReadingWork?.title, contains('魔法石'));
+
+        controller.reportRenditionLocation(
+          sectionIndex: 29,
+          progress: 0.38,
+          cfi: 'epubcfi(/6/60!/4/2)',
+        );
+        expect(controller.currentReadingWork?.title, contains('密室'));
+        controller.dispose();
+      },
+    );
+    test(
+      'scope keeps front/back matter visible but recommends exclusion',
+      () async {
+        final item = await insertBook(id: 'graph-sections');
+        final controller = BookReaderController(database: database, item: item);
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async => '''
 [§1@1 封面]
 万历十五年
 [§2@2 目录]
@@ -533,25 +949,75 @@ void main() {
 [§7@7 参考书目]
 黄仁宇《万历十五年》
 ''',
-      );
+        );
 
-      final sections = await controller.graphSectionChoices(null);
-      final labels = sections.map((s) => s.label).toList();
+        final scope = await controller.graphScopePlan(null);
+        expect(scope.choices.map((choice) => choice.section.label), [
+          '封面',
+          '目录',
+          '前言',
+          '中文版序言',
+          '第一章 万历皇帝',
+          '附录一 万历十五年大事纪',
+          '参考书目',
+        ]);
+        expect(
+          scope.choices
+              .where((choice) => choice.selectedByDefault)
+              .map((choice) => choice.section.label),
+          ['中文版序言', '第一章 万历皇帝'],
+        );
+        controller.dispose();
+      },
+    );
 
-      // 封面/目录/前言/附录/参考书目 are filtered automatically. The
-      // compound title 中文版序言 slips past the prefix word list — exactly
-      // the case the dialog's manual section chooser exists for.
-      expect(labels, ['中文版序言', '第一章 万历皇帝']);
-      controller.dispose();
-    });
+    test(
+      'scope marks series gallery and author biography as suggestions',
+      () async {
+        final item = await insertBook(id: 'graph-series-metadata');
+        final controller = BookReaderController(database: database, item: item);
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async => '''
+[§1@1 系列封面画廊]
+各地区版本封面说明
+[§2@2 作者罗琳小传]
+作者生平
+[§3@3 魔法石：德思礼家的异常]
+第一章正文
+''',
+        );
 
-    test('per-work choices keep the heading level (tree rebuild input)',
-        () async {
+        final scope = await controller.graphScopePlan(null);
+        expect(scope.choices.map((choice) => choice.section.label), [
+          '系列封面画廊',
+          '作者罗琳小传',
+          '魔法石：德思礼家的异常',
+        ]);
+        expect(scope.choices.map((choice) => choice.role), [
+          AiGraphSectionRole.suggestedSupplement,
+          AiGraphSectionRole.suggestedSupplement,
+          AiGraphSectionRole.body,
+        ]);
+        controller.dispose();
+      },
+    );
+
+    test('per-work choices keep the logical heading level', () async {
       final item = await insertBook(id: 'graph-levels');
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
+      final controller = BookReaderController(database: database, item: item);
       controller.attachAnnotationBridge(
         renderAll: (_) {},
         add: (_) {},
@@ -560,7 +1026,13 @@ void main() {
         getSelectedText: () async => '',
         setMenuCursorZone: (_) {},
         setMenuOpen: (_) {},
-        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+        getBookPlainText:
+            (
+              maxChars, {
+              bool toc = true,
+              int? startSection,
+              int? endSectionExclusive,
+            }) async => '''
 [§1@4#1 呐喊]
 
 [§2@4#2 狂人日记]
@@ -578,6 +1050,7 @@ void main() {
       // mode (toc:false), which is what this mock body represents.
       final sections = await controller.graphSectionChoices(
         AiGraphWorkCandidate(
+          id: 's4',
           title: '鲁迅小说精品',
           startSection: 4,
           endSectionExclusive: 6,
@@ -595,13 +1068,67 @@ void main() {
       controller.dispose();
     });
 
-    test('manual exclude drops the compound front matter (中文版序言)',
-        () async {
+    test(
+      'per-work choices replace EPUB resource paths with TOC titles',
+      () async {
+        final item = await insertBook(id: 'graph-readable-section-titles');
+        final controller = BookReaderController(database: database, item: item);
+        await controller.attachEngine(
+          const BookSectionMap(
+            startIndices: [0, 1, 2, 3, 4, 5],
+            totalParagraphs: 6,
+          ),
+          const [
+            '封面',
+            '目录',
+            '哈利·波特与魔法石',
+            '第一章 大难不死的男孩',
+            '第二章 悄悄消失的玻璃',
+            '第三章 猫头鹰传书',
+          ],
+        );
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async => '''
+[§1@4 OEBPS/Text/v1ch01.xhtml]
+第一章正文。
+[§2@5 OEBPS/Text/v1ch02.xhtml]
+第二章正文。
+''',
+        );
+
+        final sections = await controller.graphSectionChoices(
+          AiGraphWorkCandidate(
+            id: 's4',
+            title: '哈利·波特与魔法石',
+            startSection: 4,
+            endSectionExclusive: 6,
+          ),
+        );
+
+        expect(sections.map((section) => section.label), [
+          '第一章 大难不死的男孩',
+          '第二章 悄悄消失的玻璃',
+        ]);
+        controller.dispose();
+      },
+    );
+
+    test('manual exclude drops the compound front matter (中文版序言)', () async {
       final item = await insertBook(id: 'graph-sections-exclude');
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
+      final controller = BookReaderController(database: database, item: item);
       controller.attachAnnotationBridge(
         renderAll: (_) {},
         add: (_) {},
@@ -610,7 +1137,13 @@ void main() {
         getSelectedText: () async => '',
         setMenuCursorZone: (_) {},
         setMenuOpen: (_) {},
-        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+        getBookPlainText:
+            (
+              maxChars, {
+              bool toc = true,
+              int? startSection,
+              int? endSectionExclusive,
+            }) async => '''
 [§1@1 中文版序言]
 黄仁宇序
 [§2@2 第一章 万历皇帝]
@@ -622,14 +1155,8 @@ void main() {
 
       final choices = await controller.graphSectionChoices(null);
       // User unchecks 中文版序言 (§1) in the dialog.
-      final kept = BookReaderController.excludeGraphSections(
-        choices,
-        {1},
-      );
-      expect(kept.map((s) => s.label).toList(), [
-        '第一章 万历皇帝',
-        '第二章 首辅申时行',
-      ]);
+      final kept = BookReaderController.excludeGraphSections(choices, {1});
+      expect(kept.map((s) => s.label).toList(), ['第一章 万历皇帝', '第二章 首辅申时行']);
 
       // Excluding everything must fail loudly, not generate an empty graph.
       expect(
@@ -639,22 +1166,26 @@ void main() {
       controller.dispose();
     });
 
-    test('spine-dedupe: multiple logical sections on one spine stay once',
-        () async {
-      final item = await insertBook(id: 'graph-sections-dedupe');
-      final controller = BookReaderController(
-        database: database,
-        item: item,
-      );
-      controller.attachAnnotationBridge(
-        renderAll: (_) {},
-        add: (_) {},
-        remove: (_) {},
-        clearSelection: () {},
-        getSelectedText: () async => '',
-        setMenuCursorZone: (_) {},
-        setMenuOpen: (_) {},
-        getBookPlainText: (maxChars, {bool toc = true}) async => '''
+    test(
+      'fine-grained scope keeps logical sections that share one spine',
+      () async {
+        final item = await insertBook(id: 'graph-sections-dedupe');
+        final controller = BookReaderController(database: database, item: item);
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async => '''
 [§1@1 第一章 万历皇帝]
 第一节正文
 [§2@1 第一节 少年天子]
@@ -664,16 +1195,19 @@ void main() {
 [§4@2 第二章 首辅申时行]
 第二章正文
 ''',
-      );
+        );
 
-      final sections = await controller.graphSectionChoices(null);
-      // Same spine (1) for the first three logical sections → deduped to the
-      // first; spine 2 stays.
-      expect(sections.map((s) => s.label).toList(), [
-        '第一章 万历皇帝',
-        '第二章 首辅申时行',
-      ]);
-      controller.dispose();
-    });
+        final sections = await controller.graphSectionChoices(null);
+        // The user can select each logical unit even when several share one
+        // physical EPUB spine document.
+        expect(sections.map((s) => s.label).toList(), [
+          '第一章 万历皇帝',
+          '第一节 少年天子',
+          '第二节 张居正',
+          '第二章 首辅申时行',
+        ]);
+        controller.dispose();
+      },
+    );
   });
 }

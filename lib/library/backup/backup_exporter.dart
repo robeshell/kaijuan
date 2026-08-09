@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../../ai/ai_chat.dart';
 import '../../ai/ai_graph.dart';
+import '../../ai/ai_graph_store.dart';
 import '../persistence/app_database.dart';
 import '../storage/library_paths.dart';
 import 'backup_format.dart';
@@ -245,6 +246,19 @@ class BackupExporter {
             for (final message in session.messages) message.toJson(),
           ],
           if (session.outline != null) 'outline': session.outline!.toJson(),
+          if (session.workOutlines.isNotEmpty)
+            'workOutlines': session.workOutlines.map(
+              (key, value) => MapEntry(key, value.toJson()),
+            ),
+          if (session.workMessages.isNotEmpty)
+            'workMessages': session.workMessages.map(
+              (key, value) => MapEntry(
+                key,
+                value
+                    .map((message) => message.toJson())
+                    .toList(growable: false),
+              ),
+            ),
         });
       } catch (_) {
         // A damaged chat file must not make the entire library backup fail.

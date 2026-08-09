@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | 已实现（M5；G1–G4 落地） |
+| **状态** | 已实现（M5；v3 范围与任务链路重构中） |
 | **日期** | 2026-08-06 |
 | **PRODUCT** | [§6](../PRODUCT.md) · [§10.2](../PRODUCT.md) |
 | **相关** | [ai.md](./ai.md)、[webdav-backup.md](./webdav-backup.md)、[reader-chrome.md](./reader-chrome.md)、[book-reader.md](./book-reader.md) |
@@ -15,11 +15,11 @@
 
 ## 1. 结论（先读）
 
-**知识图谱 = 一本书的实体（人物 / 地点 / 事件）+ 关系 + 出处的本地缓存视图**，是「本书 AI」工作区的第三个 Tab（对话 / 大纲 / 知识图谱）。
+**知识图谱 = 一本书的实体（人物 / 地点 / 事件 / 组织 / 物件 / 概念 / 非人角色）+ 关系 + 出处的本地缓存视图**，是「本书 AI」工作区的第二个 Tab（对话 / 知识图谱）。
 
 | 决策 | 取值 | 理由 |
 |------|------|------|
-| 范围 | **跟随 `allowUnreadContext`**：关 = 只处理已读章节及之前的正文；开 = 全书 | 该设置注释与 UI 已预留「防剧透」语义；与大纲「始终全书」相反，形成差异化 |
+| 范围 | **用户显式确认**：多作品文件先选作品，再选内容单元；程序只提供默认勾选建议。`allowUnreadContext` 继续限制未读内容是否可进入任务 | 出版结构与内容清洗都不可能仅靠标题规则百分之百可靠，最终决定权必须在用户 |
 | 生成 | **章级增量**：按章节对比已处理集合，只抽新章；断点续跑 | 数十万字一次吞全书成本高、易超时；随读随抽体验好 |
 | 协议 | **fenced JSON**（复用对话的 robust 解析），不引 LangChain / 原生 tool-call | 与 ai.md 既定取舍一致；跨 OpenAI / Anthropic / DeepSeek 可移植 |
 | 存储 | 按 **contentHash** 的本地文件 `ai_graph/$hash.json`；随用户主动 WebDAV 快照备份；**Key 永不备份** | 与 `ai_chat/` 同构，备份合并逻辑可扩展复用 |
@@ -28,7 +28,7 @@
 
 ### 当前实现状态
 
-- **G1–G4 已全部落地**：数据模型与抽取管线（`lib/ai/ai_graph.dart` + `ai_graph_service.dart`，含章级增量 / 合并 / 断点续跑）、图谱 Tab（`book_ai_chat_sheet.dart` 实体列表 / 合集著作列表）、关系图（`book_ai_graph_view.dart` + `flutter_graph_view`）、全屏视图（`book_ai_graph_fullscreen.dart`）、WebDAV `aiGraphs` 备份（`backup_service.dart`）。
+- **G1–G4 已全部落地**：数据模型与抽取管线（`lib/ai/ai_graph.dart` + `ai_graph_service.dart`，含章级增量 / 合并 / 断点续跑）、图谱 Tab（`book_ai_chat_sheet.dart` 实体列表 / 文件内合订著作列表）、关系图（`book_ai_graph_view.dart` + `flutter_graph_view`）、全屏视图（`book_ai_graph_fullscreen.dart`）、WebDAV `aiGraphs` 备份（`backup_service.dart`）。
 - 实现时的命名与 §9 规划略有出入（见 §12）；本页交互与验收描述仍然有效。
 
 ---
@@ -37,14 +37,18 @@
 
 ### 做
 
-- **实体抽取**：人物、地点、事件三类（v1）；`organization / item / concept` 类型字段预留，v1 不生成。
+- **实体抽取**：`person / location / event / organization / item / concept /
+  creature` 七类始终合法。展示方案只调整抽取侧重，不能改变 schema。UI 将后三类
+  合并为“事物”索引，避免入口过载；底层仍保留独立类型，防止魔法物件、思想概念、
+  非人角色被硬塞成地点或人物。
 - **关系抽取**：类型化关系（小写 `snake_case` 词表，如 `father_of`、`married_to`、`work_at`、`lives_in`、`participates_in`），双向语义（抽到 `A-B` 时 UI 可双向展示）。
 - **出处（证据）**：每条实体与关系至少一条原文证据；点击证据跳回书内位置（`BookLocator`：section + progressInSection）。
 - **章级增量**：只对新章节抽取并合并进已有图谱；进度、停止、断点续跑、重生成（= 删除重建）。
-- **排除附录类单元**：参考书目 / 附录 / 索引 / 致谢 / 后记 / 年表等不进图谱（复用大纲元数据过滤后再加图谱专属过滤）。这些单元人物关系价值低、输出密度最高（易截断），还带进一次性人名；正文章节不受影响。**前言 / 序 / 自序 / 代序 / 凡例 / 出版说明 / 编者按 / 导读 / 题记**同样过滤（作者前言与故事无关）。
-- **合集选书**：合集 / 分卷书生成图谱前先让用户**单选一部著作**，只生成该书范围（一整个合集的人物关系混杂多本书，图谱会崩坏）。检测与候选**优先基于大纲**（`planStructure` 已把「同一部作品或一卷的连续节合并」为一个 unit，故「覆盖 ≥2 节的大纲单元 ≥2 个」即判定合集，候选 = 这些单元，end 由下一单元 start 推导、最后一本开放至书末）；**无大纲时自动补跑一次轻量结构识别**（复用 `planStructure`，单次短调用，相对几十次抽取可忽略），识别到合集同样弹选择器，识别失败退回全量生成。普通书（章节多为单节单元）不弹选择器、行为不变。
-- **多作品图谱存储与交互**：每部著作一个独立图谱文件（`ai_graph/$hash.$workKey.json`，workKey = `s` + 起始节；整本书图谱仍是 `$hash.json`），**互不覆盖**，可逐本生成/查看/删除。图谱 Tab 对合集书显示**著作列表**（不弹窗）：每行 = 著作名 + 状态徽章（已生成 / 未生成 / 生成中进度）；点击已生成的进入该著作图谱视图（顶部「‹ 全部著作」返回），未生成的点击即生成。WebDAV 备份/恢复按 workKey 保留（行字段 `workKey`）。
-- **防剧透**：`allowUnreadContext` 关时，未读章节的实体、关系与证据**既不生成也不展示**（图谱按当前阅读位置过滤，读得越深图越全）。
+- **辅文推荐排除**：参考书目 / 附录 / 索引 / 致谢 / 后记 / 年表，以及前言 / 序 / 自序 / 凡例 / 出版说明 / 编者按 / 导读 / 题记等，只由规则标为“建议排除”并默认取消勾选。它们仍须出现在范围列表，用户可以重新勾选；程序不得在选择器之前删除。
+- **文件内多作品选书**：多作品出版物生成图谱前显示完整作品列表，用户可以直接选择任意一部，不依赖当前阅读位置。作品范围由共享的 `AiBookStructureResolver` 读取 TOC 层级、导航锚点、spine 与 heading 等确定性事实产生，不依赖大纲或额外 AI 请求；普通单本与单本分部/分卷不暴露为多作品列表。证据不足或同一 spine 内无法定位作品时保持不确定并进入完整单元手选，不得静默把多个作品混成一个任务。
+- **多作品图谱存储与交互**：每部作品一个独立图谱文件（`ai_graph/$hash.$workKey.json`，workKey = `s` + 起始节；整本书图谱仍是 `$hash.json`），**互不覆盖**，可逐本生成/查看/删除。图谱 Tab 对文件内多作品出版物始终显示**作品列表**：每行 = 作品名 + 状态（已生成 / 未生成 / 生成中 / 失败）；当前阅读作品可以标注但不能自动打开或替用户选择。点击已生成项进入图谱，点击未生成/失败项进入范围确认。详情顶部提供“全部作品”返回。WebDAV 备份/恢复按 workKey 保留（行字段 `workKey`）。
+- **生成范围选择**：作品边界先由共享结构识别确定；确认界面列出该作品内全部内容叶子。章节显示目录名或文档标题，禁止显示 `OEBPS/Text/*.xhtml` 等内部资源路径；每项包含勾选状态与“正文 / 建议排除 / 不可读取”说明，支持整行切换、独立滚动与持续可见的已选计数。“选择推荐 / 全选可读项 / 清空”收进单一“批量选择”菜单；弹窗标题下不重复堆叠“选择内容范围”“内容单元”和通用说明，排除建议直接跟随对应内容单元展示。展示方案分析是可选设置，加载失败不得阻塞范围确认。
+- **防剧透**：`allowUnreadContext` 只决定本次生成可读取的正文范围。关时未读章节不进入生成；开时生成并保存全书图谱。展示以图谱自身持久化的 `includesUnread` 与实际数据为准，不再使用另一台设备的本地开关或尚未恢复的阅读位置二次裁剪缓存。
 - **实体卡**：描述（依据驱动的 3–5 句）、别名、关系列表、证据列表、章节频次。
 - **缓存与备份**：按 `contentHash` 落盘；手动 WebDAV 快照上传，恢复时按书合并、本地优先、不覆盖；Key / 搜索 Key / WebDAV 凭据永不备份。
 
@@ -62,29 +66,49 @@
 
 ## 3. 数据模型
 
+### 3.0 schema v2 正确性契约（2026-08）
+
+图谱缓存升级为 `version = 2`。v2 把“实体身份”和“显示名称”分开：
+
+- `entityId` 是稳定、无展示语义的内部主键；`name` 只负责显示。
+- 关系以 `sourceId + targetId + type` 为唯一键，同时冗余端点名称用于迁移和降级展示；改名不再改变关系身份。
+- 同名同类型实体允许并存。别名索引为 `alias -> Set<entityId>`；只有唯一命中才可自动解析，多个命中进入歧义状态，禁止覆盖或强并。
+- 抽取输出先视为 mention。`identityHint`（身份/角色提示）、本章关系和证据共同参与 mention → entity 的消歧；它不是跨章主键。同一文本单元多个同名同类行若共享明确别名则视为重复 mention 并融合；没有共享别名且身份线索不同时才拆分。跨文本单元仅有一个同名候选时，即使提示措辞漂移也复用已有 ID。
+- v1 缓存读取时迁移为确定性的 legacy ID；迁移只保证继续展示，不声称恢复 v1 已经发生的同名误并。
+
+生成与展示同时遵守以下边界：
+
+- 正式实体/关系至少携带一条 `spanResolved=true` 的原文证据；只有章节级线索的候选进入 `needsReview`，不进入默认列表、关系图或家族树。
+- 每章顺序合并后产生一次 graph checkpoint，由 controller/repository 原子落盘；停止、网络失败和应用重启均从最后 checkpoint 续跑。
+- description、aliases、关系和证据保留来源范围；生成阶段按当时的已读边界裁剪输入，展示阶段不再按设备当前位置重复裁剪。
+- 正文、标题、证据摘录和已知实体表统一放在 `<untrusted_context>` 中；只接受完整 JSON（允许包一层完整 fenced JSON），回复前后夹带普通文本一律拒绝。
+
 ### 3.1 实体（`AiGraphEntity`）
 
 ```dart
 class AiGraphEntity {
+  final String entityId;        // v2 稳定内部主键
   final String name;            // canonical 名（大小写/繁简已规范，只增不删）
-  final AiGraphEntityType type; // person | location | event（v1）
+  final String identityHint;    // 同名消歧提示，不作为 UI 主标题
+  final AiGraphEntityType type; // person/location/event/organization/item/concept/creature
   final List<String> aliases;   // 别名，并入 canonical 索引
   final String description;     // 依据驱动的 3–5 句
   final List<AiGraphEvidence> evidence; // 至少 1 条
-  final Map<int, int> chapterFreq;      // sectionIndex -> 出现次数（合并时累加）
+  final Map<int, int> chapterFreq;      // sectionIndex -> 已定位出处数（不是原文词频）
   final int firstSection;               // 首次出现章节（演化/防剧透用）
   final int lastSection;                // 最后出现章节
 }
 ```
 
-- **唯一键 = `name + type`**；同名不同类（人物「王五」vs 地点「王五」）是不同节点。
-- 同名歧义（两个不同的人同名）：**绝不合并**，靠类型 + 描述 + 关系上下文区分；抽取器无法消歧时映射到待审名单，不强并。
-- 实体 `id` 由 `name + type` 派生（如 `sha1(name)|person`），不存自增号。
+- **唯一键 = `entityId`**；同名同类型实体可以同时存在。
+- 同名歧义（同一文本单元内两个不同的人同名）：靠 `identityHint` + 关系端点提示区分；跨章唯一同名候选直接复用，避免模型把同一人的不同身份描述拆成多个实体。
 
 ### 3.2 关系（`AiGraphRelation`）
 
 ```dart
 class AiGraphRelation {
+  final String sourceId;      // v2 entityId
+  final String targetId;
   final String source;        // canonical name
   final String target;        // canonical name
   final String type;          // snake_case 词表，如 married_to
@@ -94,7 +118,7 @@ class AiGraphRelation {
 }
 ```
 
-- **唯一键 = `source + target + type`**（无向关系生成时统一 `source < target` 字典序排序，避免 A-B 与 B-A 分裂）。
+- **唯一键 = `sourceId + targetId + type`**；无向关系按 ID 规范化，显示名称不参与身份判断。
 - 关系类型：v1 内置常见词表（血缘、婚姻、友谊/敌意、雇佣、隶属、居住、参与、认识等），**不限制**模型提出新类型（词表之外原样保留小写 snake_case）；UI 仅对已知类型着色。
 
 ### 3.3 证据 / 出处（`AiGraphEvidence`）
@@ -129,13 +153,13 @@ class AiGraphEvidence {
 
 ## 4. 抽取管线（`AiBookGraphService`）
 
-复用 `AiBookOutlineService` 的章节切分（`planStructure`：导航单元 / 逻辑单元）与 `AiChatService` 的 fenced JSON robust 解析，**不引 LangChain**。
+复用 `AiBookStructureResolver` 的文件结构结果、`AiBookOutlineService` 的章节切分与 `AiChatService` 的 fenced JSON robust 解析，**不引 LangChain**。
 
 ### 4.1 流程
 
 ```text
-输入：sections（导航单元切分结果）+ allowUnreadContext（决定范围）
-  → 范围裁剪：关 = 只保留已读 section；开 = 全部（随后排除附录类单元，见 §2）
+输入：用户确认的 sections（细粒度逻辑单元）+ 已保存的生成范围
+  → 范围裁剪：只消费已确认单元；确认窗中的勾选结果是最终输入，确认后不得再按 renderer 当前进度暗中移除单元
   → 已处理集合 = coveredSections ∩ 范围内；只对新 section 走抽取
   → 每 section 切成 800–2000 token 的 chunk（相邻 5–10% 重叠）
   → 每 chunk 一次 fenced JSON 抽取调用（温度 0；带 chunk_id + sectionIndex）
@@ -147,7 +171,8 @@ class AiGraphEvidence {
 
 - **chunk 预算**：输出 `max_tokens` 设输入的 1/3–1/2；单章过长时先抽首尾再补中间，不能由书前部耗尽上限。
 - **并行与限流**：chunk 间可并行，但按 TPM / 连接数做信号量；停止 = `CancelToken`（复用现有 `ai_outline.dart` 的取消协议），已完成的章节结果**保留**。
-- **范围与增量**：`allowUnreadContext` 从关切到开 → 只补抽新增未读章节（coveredSections 并集）；从开切到关 → 图谱内容不变（避免删数据），但 UI 展示过滤为已读范围（见 §6 防剧透）。
+- **范围与增量**：`allowUnreadContext` 从关切到开 → 只补抽新增未读章节（coveredSections 并集）；从开切到关 → 已保存图谱内容与展示均不变，开关在下一次生成/补充时生效。
+- **超长出版物**：范围选择器必须保留全部可读单元；150 万字符预算只用于正文样本。超出预算时按所有单元均衡保留样本，禁止按阅读顺序截断后部单元。
 
 ### 4.2 合并（顺序增量共指消解）
 
@@ -209,7 +234,7 @@ class AiGraphEvidence {
 
 1. **schema 校验**：类型枚举（person/location/event）、关系类型词表、字段必填、`evidence` 非空。
 2. **引文存在性**：quote 在原文归一化搜索；搜不到 → 重试（≤2 次）或降级为章节级证据，绝不静默收下。
-3. **唯一键幂等**：`name+type`、`source+target+type` upsert，重复批次不产生脏数据。
+3. **唯一键幂等**：`entityId`、`sourceId+targetId+type` upsert，重复批次不产生脏数据；证据按 `(sectionIndex, normalizedQuote)` 去重。
 4. **歧义拒绝**：同名异人（两个「王五」）→ 映射待审名单，**绝不合并**——误并是关系图最脏的错误。
 
 ### 5.3 共指消解（防分裂与误并）
@@ -257,9 +282,10 @@ class AiGraphEvidence {
 ```text
 本书 AI → 知识图谱
   → 未生成：范围说明 +「生成图谱」（含 stop/进度）
-  → 生成中：章节批次进度 +「停止」（保留已完成章节）
+  → 生成中：章节批次进度 +「停止」（保留已完成章节）；状态条固定在图谱页签顶部、位于滚动内容之外，手机滚动位置、空快照或旧内容都不得遮掉它
   → 已生成：顶部范围 badge + 视图切换（实体列表 | 关系图）
-       → 实体列表：按类型分组、可过滤（人物/地点/事件）、可搜索、按章节频次排序（可选加「关系数 / degree 中心性」排序档，纯本地计算、零 LLM 成本；degree 越高越接近关系枢纽）
+       → 固定索引：人物/地点/事件/组织/事物；可搜索，每类实体使用独立的排序策略
+       → 探索层：关系图/家族树；AI 仅推荐首次视图，不改变固定导航顺序
        → 关系图（可简）：力导向；节点=实体（类型着色）；边=关系（类型着色）
        → hover 高亮邻居（桌面；移动端点击聚焦）
        → 点击实体 → 实体卡：描述 / 别名 / 关系列表 / 证据列表（点证据跳原文并关面板）
@@ -267,8 +293,24 @@ class AiGraphEvidence {
        → 顶部操作：重新生成（= 删除重建）；删除图谱
 ```
 
-- **范围 badge**：`allowUnreadContext` 关 → 「仅已读章节」（读到 N 章，图谱止于 N）；开 → 「全书」。
-- **防剧透展示过滤**：范围开→关切换不清数据，只过滤展示（未读章节证据隐藏、节点若全部证据未读则灰显或隐藏）。
+- **范围 badge**：按保存图谱标记展示；`includesUnread=false` → 「生成时已读范围」，`includesUnread=true` → 「全书」。不能用当前设备开关改写已保存图谱的范围标签。
+- **跨设备展示一致性**：controller 直接校验并展示保存图谱，不基于当前设备设置或 renderer 的临时 section 重新生成 read-safe snapshot；因此桌面生成并备份的全书图谱在移动端仍显示同一实体与关系数量。
+- **空快照不是成品**：没有任何可展示实体或关系的缓存不得进入人物/地点/事件等全 0 索引，也不得仅凭 `coveredSections` 判定增量工作已经完成。界面显示“尚无有效图谱数据”与重新生成入口；下一次生成自动清空这份空覆盖记录并重新抽取正文。
+- **所见即所得的范围**：手机、平板、折叠屏和桌面端在确认窗显示并勾选的章节，必须原样进入抽取管线。阅读位置尚未恢复、停在封面或处于所选范围以前时，不得把已选工作集裁成 0；若内部工作集意外为空，应作为错误暴露，不能保存成“生成成功”的空图谱。
+- **分类排序契约**：排序是展示层策略，不依赖生成时数组恰好的顺序。用户的选择按视图独立保留。
+
+  | 视图 | 默认顺序 | 可选顺序 |
+  |---|---|---|
+  | 人物 | 涉及章节（降序） | 涉及章节、关系数量、出处数量、首次出场 |
+  | 地点 | 首次出现 | 首次出现、涉及章节、出处数量 |
+  | 事件 | 情节顺序 | 情节顺序、重要程度、涉及章节 |
+  | 组织 | 关系数量（降序） | 关系数量、涉及章节、出处数量、首次出现 |
+  | 事物 | 涉及章节（降序） | 涉及章节、关系数量、出处数量、首次出现、实体类型 |
+
+  「涉及章节」=`chapterFreq.keys.length`；「出处数量」=`evidence.length`（它不是原文词频，禁止标成“出现次数”）；「关系数量」=去重后的入边+出边数；「首次出现/情节顺序」先比较 section，同一 section 再比较最早已定位证据的 `progressInSection`。所有比较器都必须提供确定性次级键，不得继承缓存或生成顺序。
+- **无障碍等价入口**：关系画布不是唯一操作路径。嵌入视图与全屏视图都必须提供可聚焦、可键盘操作、可被读屏识别的实体列表；画布只承担空间探索。列表项可打开与画布节点相同的实体卡。家族树节点、折叠区和动态进度暴露名称、按钮/展开状态与 live region。
+- **颜色与排版**：类型色只作为圆点、图形或边框等冗余提示；小字号标签正文使用主题语义文字色并满足 4.5:1。关系图和家族树的关键关系文字初始显示不小于 12px，自动适配不得把可读性完全依赖于手动放大。
+- **窄屏导航**：人物/地点/事件/组织/事物索引允许横向滚动或换行，不以淡出截断隐藏标签；全屏缩放说明放在画布内的可消退提示中，窄屏 AppBar 只保留标题和操作按钮。
 - **手动修正 override 层**：实体别名可手动合并 / 拆分（如「孙悟空 = 美猴王」），覆盖层与抽取数据分离、可撤销、重生成不污染（v1 最小实现：合并 = 追加别名到目标实体并删除被并实体；拆分 = 恢复抽取原始名）。不强求：v1 允许只做「删除实体」，别名手动合并留待 v2。
 - **停止 / 重试**：失败章节提供「重试本章」；停止后保留已生成章节（与大纲一致）。
 - 图谱 Tab 复用对话/大纲的**生成物语义**：结果不因关闭面板取消；读者主动停止或退出阅读器才取消；重新打开直接展示缓存。
@@ -279,7 +321,8 @@ class AiGraphEvidence {
 |------|----------|
 | 未生成 + allowUnreadContext 关 | 「图谱覆盖已读章节（第 1–N 章）。开启『允许未读上下文』可分析全书。」+「生成图谱」 |
 | 未生成 + allowUnreadContext 开 | 「将分析全书生成人物、地点与事件图谱。」+「生成图谱」 |
-| 生成中 | 章节进度 +「停止」（停止后保留已完成章节） |
+| 生成中 | 页签顶部固定状态条显示当前阶段、章节进度 +「停止」；状态条不随内容滚动（停止后保留已完成章节） |
+| 已生成但为空 | 不显示全 0 索引；提示“尚无有效图谱数据”，允许直接重新抽取，旧 `coveredSections` 不得跳过正文 |
 | 已生成 | 范围 badge + 实体数 / 关系数 +「重新生成」「删除图谱」 |
 | 无证据实体 | 实体卡标记「引用待确认」；列表默认不展示 |
 
@@ -321,10 +364,11 @@ class AiGraphEvidence {
 
 ```text
 lib/ai/ai_graph.dart          — 模型（entity/relation/evidence/graph 包）+ AiGraphStore
-lib/ai/ai_graph_service.dart  — 管线：范围裁剪 → 抽取 → 校验回填 → 顺序增量合并（内联，未独立 merge 文件）→ 落盘 → 进度/取消
+lib/ai/ai_graph_scope.dart    — 用户范围计划：完整内容单元 + 默认勾选建议，不删除辅文
+lib/ai/ai_graph_service.dart  — 管线：消费确认范围 → 抽取 → 校验回填 → 顺序增量合并（内联，未独立 merge 文件）→ 落盘 → 进度/取消
 lib/library/backup/           — aiGraphs 导出 / 恢复合并（扩展现有 aiChats 逻辑）
 lib/presentation/controllers/ — 图谱控制器（或并入 BookReaderController 的 AI 工作区状态）
-lib/presentation/widgets/reader/book_ai_chat_sheet.dart — 图谱 Tab（实体列表 / 合集著作列表）
+lib/presentation/widgets/reader/book_ai_chat_sheet.dart — 图谱 Tab（实体列表 / 文件内合订著作列表）
 lib/presentation/widgets/reader/book_ai_graph_view.dart / book_ai_graph_fullscreen.dart — 关系图视图
 ```
 
@@ -348,8 +392,8 @@ lib/presentation/widgets/reader/book_ai_graph_view.dart / book_ai_graph_fullscre
 
 ### G3 — 图谱 Tab UI ✅
 
-- 实体列表（类型过滤/搜索/频次排序）→ 实体卡（描述/别名/关系/证据）→ 点证据跳原文并关面板；范围 badge + 防剧透过滤。
-- 验收：allowUnreadContext 关时未读章节实体/证据不出现；开到关切换不清数据；打开面板直接展示缓存不重复请求。
+- 固定实体索引（人物/地点/事件/组织/事物，按上述分类策略搜索与排序）→ 实体卡（描述/别名/关系/关系出处/实体出处）→ 点出处跳原文并关面板；范围 badge 取自保存图谱，跨设备保持一致。
+- 验收：allowUnreadContext 关时未读章节不进入生成；开到关切换不清空也不隐藏已有数据；跨设备打开同一缓存时实体与关系数量一致；打开面板不重复请求。
 
 ### G4（可延后）— 关系图视图 ✅
 
@@ -373,5 +417,5 @@ lib/presentation/widgets/reader/book_ai_graph_view.dart / book_ai_graph_fullscre
 
 - 手动别名 override（合并/拆分）：v1 已做「删除实体」；别名合并 / 拆分留 v2（§5.5 覆盖层）。
 - 关系图渲染库：已采用 `flutter_graph_view`（G4 落地），图质量优先于零依赖偏好；列表视图仍可完全避开。
-- `allowUnreadContext` 文案：已按实际行为修正（对话 / 大纲不裁剪、图谱才裁剪）。
-- **展示方案驱动 + 家族树 + 地图文字版**：已实现，见 [ai-graph-narration.md](./ai-graph-narration.md)（第 0 步方案输出、方向性关系约定、连线架构图家族树、organization 实体反哺、地点链；组织树后置）。
+- `allowUnreadContext` 文案：已按实际行为修正（对话 / 大纲不裁剪；图谱在生成输入阶段裁剪，已保存结果不二次裁剪）。
+- **展示方案驱动 + 家族树 + 地点叙事顺序**：已实现，见 [ai-graph-narration.md](./ai-graph-narration.md)（第 0 步只推荐首次视图、固定索引/探索导航、方向性关系约定、连线架构图家族树、organization 独立索引、地点首次出现顺序；组织树后置）。

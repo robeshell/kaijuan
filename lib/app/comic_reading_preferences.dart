@@ -45,10 +45,10 @@ class ComicReadingPreferences extends ChangeNotifier {
       if (await file.exists()) {
         final json =
             jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-    final brightness = (((json['brightness'] as num?)?.toDouble() ??
-                defaultBrightness)
-            .clamp(minBrightness, maxBrightness))
-        .toDouble();
+        final brightness =
+            (((json['brightness'] as num?)?.toDouble() ?? defaultBrightness)
+                    .clamp(minBrightness, maxBrightness))
+                .toDouble();
         return ComicReadingPreferences._(
           file,
           ComicReaderMode.fromStorage(json['mode'] as String?),
@@ -91,9 +91,7 @@ class ComicReadingPreferences extends ChangeNotifier {
   }
 
   Future<void> setBrightness(double value) async {
-    final next = value
-        .clamp(minBrightness, maxBrightness)
-        .toDouble();
+    final next = value.clamp(minBrightness, maxBrightness).toDouble();
     if (next == _brightness) return;
     _brightness = next;
     notifyListeners();

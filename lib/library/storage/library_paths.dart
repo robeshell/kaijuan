@@ -20,7 +20,9 @@ class LibraryPaths {
   final Directory supportDirectory;
 
   /// Matches [bootstrap] support-root resolution for [BrandConfig.app].
-  static Future<LibraryPaths> forApp({BrandConfig brand = BrandConfig.app}) async {
+  static Future<LibraryPaths> forApp({
+    BrandConfig brand = BrandConfig.app,
+  }) async {
     final root = await getApplicationSupportDirectory();
     final dir = brand.storageNamespace.isEmpty
         ? root
@@ -36,6 +38,12 @@ class LibraryPaths {
 
   Directory get coversDirectory =>
       Directory(p.join(supportDirectory.path, 'covers'));
+
+  Directory get aiChatDirectory =>
+      Directory(p.join(supportDirectory.path, 'ai_chat'));
+
+  Directory get aiGraphDirectory =>
+      Directory(p.join(supportDirectory.path, 'ai_graph'));
 
   /// Path to store in the DB: relative to [supportDirectory] when possible.
   String toStoragePath(String absolutePath) {
@@ -151,7 +159,8 @@ class LibraryPaths {
 
       // Write absolute paths under the *current* support root so Image.file /
       // open() keep working. Relative forms are normalized via [resolve] first.
-      final newFilePath = file?.path ??
+      final newFilePath =
+          file?.path ??
           (p.isAbsolute(item.filePath)
               ? resolve(toStoragePath(item.filePath)).path
               : resolve(item.filePath).path);
@@ -172,9 +181,9 @@ class LibraryPaths {
         continue;
       }
 
-      await (database.update(database.readingItems)
-            ..where((t) => t.id.equals(item.id)))
-          .write(
+      await (database.update(
+        database.readingItems,
+      )..where((t) => t.id.equals(item.id))).write(
         ReadingItemsCompanion(
           filePath: Value(newFilePath),
           coverPath: Value(newCoverPath),

@@ -4,16 +4,16 @@ import 'package:kaijuan/ai/ai_graph_family_tree.dart';
 
 AiGraphEntity person(
   String name, {
+  String? id,
   int firstSection = 1,
   AiGraphEntityScope scope = AiGraphEntityScope.setting,
 }) {
   return AiGraphEntity(
+    entityId: id ?? '',
     name: name,
     type: AiGraphEntityType.person,
     scope: scope,
-    evidence: [
-      AiGraphEvidence(sectionIndex: firstSection, quote: '$name 出场'),
-    ],
+    evidence: [AiGraphEvidence(sectionIndex: firstSection, quote: '$name 出场')],
     chapterFreq: {firstSection: 1},
     firstSection: firstSection,
     lastSection: firstSection,
@@ -23,12 +23,16 @@ AiGraphEntity person(
 AiGraphRelation kin(
   String elder,
   String younger, {
+  String sourceId = '',
+  String targetId = '',
   int evidenceCount = 1,
   String label = '父子',
 }) {
   return AiGraphRelation(
     source: elder,
     target: younger,
+    sourceId: sourceId,
+    targetId: targetId,
     type: '亲属',
     kin: label,
     description: '',
@@ -40,8 +44,9 @@ AiGraphRelation kin(
   );
 }
 
-List<String> names(List<AiFamilyTreeNode> nodes) =>
-    [for (final n in nodes) n.name];
+List<String> names(List<AiFamilyTreeNode> nodes) => [
+  for (final n in nodes) n.name,
+];
 
 /// Flattened book-order traversal for assertions.
 List<String> flatten(AiFamilyTreeNode root) {
@@ -52,8 +57,10 @@ List<String> flatten(AiFamilyTreeNode root) {
   return out;
 }
 
-List<AiFamilyTreeNode> _flattenNodes(AiFamilyTreeNode node) =>
-    [node, for (final c in node.children) ..._flattenNodes(c)];
+List<AiFamilyTreeNode> _flattenNodes(AiFamilyTreeNode node) => [
+  node,
+  for (final c in node.children) ..._flattenNodes(c),
+];
 
 void main() {
   group('buildFamilyTree', () {
@@ -64,10 +71,7 @@ void main() {
           person('父亲', firstSection: 2),
           person('儿子', firstSection: 3),
         ],
-        relations: [
-          kin('祖父', '父亲'),
-          kin('父亲', '儿子'),
-        ],
+        relations: [kin('祖父', '父亲'), kin('父亲', '儿子')],
       );
 
       expect(tree.isolatedCount, 0);
@@ -76,8 +80,7 @@ void main() {
       expect(flatten(tree.roots.single), ['祖父', '父亲', '儿子']);
     });
 
-    test('multi-parent: strongest edge wins, runner-up is marked complex',
-        () {
+    test('multi-parent: strongest edge wins, runner-up is marked complex', () {
       final tree = buildFamilyTree(
         entities: [
           person('亲父', firstSection: 1),
@@ -95,41 +98,40 @@ void main() {
       expect(tree.isolatedCount, 0);
     });
 
-    test('ring A-B-A keeps the stronger edge, breaks the other, marks complex',
-        () {
-      final tree = buildFamilyTree(
-        entities: [
-          person('甲', firstSection: 1),
-          person('乙', firstSection: 2),
-        ],
-        relations: [
-          kin('甲', '乙', evidenceCount: 2),
-          kin('乙', '甲', evidenceCount: 1),
-        ],
-      );
+    test(
+      'ring A-B-A keeps the stronger edge, breaks the other, marks complex',
+      () {
+        final tree = buildFamilyTree(
+          entities: [
+            person('甲', firstSection: 1),
+            person('乙', firstSection: 2),
+          ],
+          relations: [
+            kin('甲', '乙', evidenceCount: 2),
+            kin('乙', '甲', evidenceCount: 1),
+          ],
+        );
 
-      // 甲→乙 (2 证据) 保留；乙→甲 (1 证据) 被断 → 甲是根、乙是其子。
-      expect(names(tree.roots), ['甲']);
-      expect(flatten(tree.roots.single), ['甲', '乙']);
-      expect(tree.complexNames, isNotEmpty);
-      expect(tree.isolatedCount, 0);
-    });
+        // 甲→乙 (2 证据) 保留；乙→甲 (1 证据) 被断 → 甲是根、乙是其子。
+        expect(names(tree.roots), ['甲']);
+        expect(flatten(tree.roots.single), ['甲', '乙']);
+        expect(tree.complexNames, isNotEmpty);
+        expect(tree.isolatedCount, 0);
+      },
+    );
 
-    test('three-node ring keeps one edge, drops the other two', () {
+    test('three-node ring drops exactly one weakest edge', () {
       final tree = buildFamilyTree(
         entities: [
           person('A', firstSection: 1),
           person('B', firstSection: 2),
           person('C', firstSection: 3),
         ],
-        relations: [
-          kin('A', 'B'),
-          kin('B', 'C'),
-          kin('C', 'A'),
-        ],
+        relations: [kin('A', 'B'), kin('B', 'C'), kin('C', 'A')],
       );
 
       expect(tree.roots.length, 1);
+      expect(flatten(tree.roots.single), hasLength(3));
       expect(tree.complexNames.length, 2);
       expect(tree.isolatedCount, 0);
     });
@@ -140,9 +142,7 @@ void main() {
           person('族长', firstSection: 1),
           person('旁支', firstSection: 5),
         ],
-        relations: [
-          kin('族长', '旁支'),
-        ],
+        relations: [kin('族长', '旁支')],
       );
 
       expect(tree.roots.length, 1);
@@ -157,10 +157,7 @@ void main() {
           person('兰尼斯特始祖', firstSection: 4),
           person('兰尼斯特幼子', firstSection: 6),
         ],
-        relations: [
-          kin('史塔克始祖', '史塔克幼子'),
-          kin('兰尼斯特始祖', '兰尼斯特幼子'),
-        ],
+        relations: [kin('史塔克始祖', '史塔克幼子'), kin('兰尼斯特始祖', '兰尼斯特幼子')],
       );
 
       expect(names(tree.roots), ['史塔克始祖', '兰尼斯特始祖']);
@@ -176,9 +173,7 @@ void main() {
           person('过客', firstSection: 4),
           person('村民', firstSection: 6),
         ],
-        relations: [
-          kin('族长', '村民'),
-        ],
+        relations: [kin('族长', '村民')],
       );
 
       expect(names(tree.roots), ['族长']);
@@ -198,9 +193,7 @@ void main() {
             type: '亲属',
             kin: '父子',
             description: '父子关系。',
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '父子'),
-            ],
+            evidence: [AiGraphEvidence(sectionIndex: 1, quote: '父子')],
             weight: 1,
           ),
         ],
@@ -226,9 +219,7 @@ void main() {
             type: '亲属',
             kin: '夫妻',
             description: '',
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '万历与王皇后为夫妻'),
-            ],
+            evidence: [AiGraphEvidence(sectionIndex: 1, quote: '万历与王皇后为夫妻')],
             weight: 1,
           ),
           kin('万历皇帝', '朱常洛'),
@@ -244,8 +235,7 @@ void main() {
       expect(wl, isNot(contains('王皇后')));
     });
 
-    test('marriage attaches spouses; maternal link becomes an extra edge',
-        () {
+    test('marriage attaches spouses; maternal link becomes an extra edge', () {
       final tree = buildFamilyTree(
         entities: [
           person('万历皇帝', firstSection: 1),
@@ -293,8 +283,10 @@ void main() {
       final wanli = tree.roots
           .expand((r) => _flattenNodes(r))
           .firstWhere((n) => n.name == '万历皇帝');
-      expect(wanli.spouses.map((s) => '${s.kin}:${s.name}'),
-          containsAll(['皇后:王皇后', '妃嫔:恭妃王氏']));
+      expect(
+        wanli.spouses.map((s) => '${s.kin}:${s.name}'),
+        containsAll(['皇后:王皇后', '妃嫔:恭妃王氏']),
+      );
 
       // 王皇后 has no lineage edge → no tree card (folded as isolated); she
       // is visible only on 万历's card. 恭妃 participates as 朱常洛's mother
@@ -307,8 +299,8 @@ void main() {
       // The maternal link survives as an extra edge; 恭妃 is not "complex".
       expect(tree.extraEdges, hasLength(1));
       final extra = tree.extraEdges.single;
-      expect(extra.source, '恭妃王氏');
-      expect(extra.target, '朱常洛');
+      expect(extra.sourceId, person('恭妃王氏').id);
+      expect(extra.targetId, person('朱常洛').id);
       expect(extra.kin, '母子');
       expect(tree.complexNames, isNot(contains('恭妃王氏')));
 
@@ -363,9 +355,7 @@ void main() {
             type: '亲属',
             kin: '',
             description: '',
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '万历与恭妃'),
-            ],
+            evidence: [AiGraphEvidence(sectionIndex: 1, quote: '万历与恭妃')],
             weight: 1,
           ),
           kin('万历皇帝', '朱常洛'),
@@ -398,9 +388,7 @@ void main() {
             target: '村民',
             type: '婚配',
             description: '',
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '族长与村民成婚'),
-            ],
+            evidence: [AiGraphEvidence(sectionIndex: 1, quote: '族长与村民成婚')],
             weight: 1,
           ),
         ],
@@ -410,41 +398,82 @@ void main() {
       expect(tree.isolatedCount, 0);
     });
 
-    test('caller-side spoiler gate drops unread-evidence edges before build',
-        () {
-      // Simulates _buildFamilyTreeView's evidence-based filter: edges whose
-      // evidence is entirely in unread chapters must not pull an otherwise-
-      // isolated person into the tree or leak a late-plot kinship.
-      final entities = [
-        person('甲', firstSection: 1),
-        person('乙', firstSection: 1),
-      ];
-      final unreadOnlyEdge = AiGraphRelation(
-        source: '甲',
-        target: '乙',
-        type: '亲属',
-        kin: '父子',
-        description: '',
-        evidence: [
-          AiGraphEvidence(sectionIndex: 99, quote: '第99章才揭晓的父子关系'),
-        ],
-        weight: 1,
-      );
-
-      const readThrough = 5;
-      final visible = unreadOnlyEdge.evidence
-          .any((e) => e.sectionIndex <= readThrough);
-      expect(visible, isFalse);
-
+    test('same display name with different stable IDs never collapses', () {
+      final first = person('张伟').copyWith(entityId: 'person-reporter');
+      final second = person('张伟').copyWith(entityId: 'person-doctor');
       final tree = buildFamilyTree(
-        entities: entities,
-        relations: visible ? [unreadOnlyEdge] : const [],
+        entities: [first, second, person('孩子')],
+        relations: [
+          AiGraphRelation(
+            source: '张伟',
+            target: '孩子',
+            sourceId: first.id,
+            targetId: graphEntityIdFor(
+              type: AiGraphEntityType.person,
+              name: '孩子',
+            ),
+            type: '亲属',
+            kin: '父子',
+          ),
+        ],
       );
-      // With the spoiler edge dropped, neither person has a tree edge: both
-      // fall into the isolated fold rather than forming a fake parent/child.
-      expect(tree.roots, isEmpty);
-      expect(tree.isolatedCount, 2);
-      expect(tree.isolatedNames, containsAll(['甲', '乙']));
+
+      expect(tree.roots.single.entityId, first.id);
+      expect(tree.roots.single.children.single.name, '孩子');
+      expect(tree.isolatedEntityIds, [second.id]);
+      expect(tree.isolatedNames, ['张伟']);
     });
+
+    test('sibling and collateral kin stay in the graph, not the hierarchy', () {
+      final tree = buildFamilyTree(
+        entities: [person('姐姐'), person('弟弟'), person('姑妈')],
+        relations: [
+          kin('姐姐', '弟弟', label: '姐弟'),
+          kin('姑妈', '弟弟', label: '姑侄'),
+        ],
+      );
+
+      expect(tree.roots, isEmpty);
+      expect(tree.isolatedCount, 3);
+      expect(tree.isolatedNames, ['姐姐', '弟弟', '姑妈']);
+    });
+
+    test(
+      'caller-side spoiler gate drops unread-evidence edges before build',
+      () {
+        // Simulates _buildFamilyTreeView's evidence-based filter: edges whose
+        // evidence is entirely in unread chapters must not pull an otherwise-
+        // isolated person into the tree or leak a late-plot kinship.
+        final entities = [
+          person('甲', firstSection: 1),
+          person('乙', firstSection: 1),
+        ];
+        final unreadOnlyEdge = AiGraphRelation(
+          source: '甲',
+          target: '乙',
+          type: '亲属',
+          kin: '父子',
+          description: '',
+          evidence: [AiGraphEvidence(sectionIndex: 99, quote: '第99章才揭晓的父子关系')],
+          weight: 1,
+        );
+
+        const readThrough = 5;
+        final visible = unreadOnlyEdge.evidence.any(
+          (e) => e.sectionIndex <= readThrough,
+        );
+        expect(visible, isFalse);
+
+        final tree = buildFamilyTree(
+          entities: entities,
+          relations: visible ? [unreadOnlyEdge] : const [],
+        );
+        // With the spoiler edge dropped, neither person has a tree edge: both
+        // fall into the isolated fold rather than forming a fake parent/child.
+        expect(tree.roots, isEmpty);
+        expect(tree.isolatedCount, 2);
+        expect(tree.isolatedNames, containsAll(['甲', '乙']));
+      },
+    );
   });
 }

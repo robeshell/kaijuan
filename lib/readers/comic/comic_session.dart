@@ -10,12 +10,7 @@ import '../../library/import/comic_archive.dart';
 /// Page order matches [ComicArchive.listFromArchive] (CBZ natural sort or
 /// EPUB OPF spine). Dispose with [close] when leaving the reader.
 class ComicSession {
-  ComicSession._(
-    this.path,
-    this.pageNames,
-    this._input,
-    this._archive,
-  );
+  ComicSession._(this.path, this.pageNames, this._input, this._archive);
 
   final String path;
   final List<String> pageNames;

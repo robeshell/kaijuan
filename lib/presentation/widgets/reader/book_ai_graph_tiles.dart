@@ -3,6 +3,17 @@ import 'package:flutter/material.dart';
 import '../../../ai/ai_graph.dart';
 import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
+import '../ai_typography.dart';
+
+String graphEntityTypeLabel(AiGraphEntityType type) => switch (type) {
+  AiGraphEntityType.person => '人物',
+  AiGraphEntityType.location => '地点',
+  AiGraphEntityType.event => '事件',
+  AiGraphEntityType.organization => '组织',
+  AiGraphEntityType.item => '物件',
+  AiGraphEntityType.concept => '概念',
+  AiGraphEntityType.creature => '非人角色',
+};
 
 /// Entity-type accent color (dot + highlight tint in list rows).
 Color graphEntityTypeColor(BuildContext context, AiGraphEntityType type) {
@@ -12,21 +23,78 @@ Color graphEntityTypeColor(BuildContext context, AiGraphEntityType type) {
     AiGraphEntityType.location => Colors.teal,
     AiGraphEntityType.event => Colors.amber.shade700,
     AiGraphEntityType.organization => const Color(0xffec4899),
+    AiGraphEntityType.item => const Color(0xff8b5cf6),
+    AiGraphEntityType.concept => const Color(0xff6366f1),
+    AiGraphEntityType.creature => const Color(0xfff97316),
   };
 }
 
 /// Event-type accent color (8 event categories).
 Color graphEventTypeColor(AiGraphEventType type) => switch (type) {
-      AiGraphEventType.combat => const Color(0xffef4444),
-      AiGraphEventType.growth => const Color(0xff3b82f6),
-      AiGraphEventType.social => const Color(0xff10b981),
-      AiGraphEventType.travel => const Color(0xfff97316),
-      AiGraphEventType.appearance => const Color(0xff8b5cf6),
-      AiGraphEventType.object => const Color(0xffeab308),
-      AiGraphEventType.organization => const Color(0xffec4899),
-      AiGraphEventType.relationship => const Color(0xff06b6d4),
-      AiGraphEventType.other => Colors.blueGrey,
-    };
+  AiGraphEventType.combat => const Color(0xffef4444),
+  AiGraphEventType.growth => const Color(0xff3b82f6),
+  AiGraphEventType.social => const Color(0xff10b981),
+  AiGraphEventType.travel => const Color(0xfff97316),
+  AiGraphEventType.appearance => const Color(0xff8b5cf6),
+  AiGraphEventType.object => const Color(0xffeab308),
+  AiGraphEventType.organization => const Color(0xffec4899),
+  AiGraphEventType.relationship => const Color(0xff06b6d4),
+  AiGraphEventType.other => Colors.blueGrey,
+};
+
+/// Shared flat-row shell in the outline-unit language: no card, no border —
+/// a transparent [Material] whose only states are an [appTint] hover and an
+/// [appTint] highlight (the 2s jump-target flash). The outline tab's unit
+/// rows, these tiles and the isolated fold row all read as one list idiom.
+class _FlatGraphRow extends StatelessWidget {
+  const _FlatGraphRow({
+    required this.highlighted,
+    required this.onTap,
+    required this.child,
+  });
+
+  final bool highlighted;
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: highlighted ? context.appTint(0.06) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        hoverColor: context.appTint(0.035),
+        focusColor: context.appTint(0.05),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Leading type-color dot, optically aligned with the first title line.
+class _TypeDot extends StatelessWidget {
+  const _TypeDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 7),
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      ),
+    );
+  }
+}
 
 /// One entity row in the persons/locations list (resting plain, highlight on
 /// jump-target). Pure presentation — computed values arrive as parameters.
@@ -34,7 +102,7 @@ class GraphEntityTile extends StatelessWidget {
   const GraphEntityTile({
     super.key,
     required this.entity,
-    required this.relationCount,
+    required this.metadata,
     required this.typeColor,
     required this.highlighted,
     required this.bodySize,
@@ -42,7 +110,7 @@ class GraphEntityTile extends StatelessWidget {
   });
 
   final AiGraphEntity entity;
-  final int relationCount;
+  final String metadata;
   final Color typeColor;
   final bool highlighted;
   final double bodySize;
@@ -50,62 +118,57 @@ class GraphEntityTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final occurrences = entity.chapterFreq.values.fold<int>(
-      0,
-      (sum, value) => sum + value,
-    );
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      color: highlighted ? typeColor.withValues(alpha: 0.08) : null,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        // Structure only on the highlighted state; resting rows are plain
-        // like the rest of the workspace lists.
-        side: BorderSide(
-          color: highlighted
-              ? typeColor.withValues(alpha: 0.6)
-              : Colors.transparent,
-          width: highlighted ? 1.4 : 0,
-        ),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
-        leading: Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: typeColor,
-            shape: BoxShape.circle,
-          ),
-        ),
-        title: Text(
-          entity.name,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: bodySize,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: entity.description.isEmpty
-            ? null
-            : Text(
-                entity.description,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  color: context.appSecondaryText,
-                ),
-              ),
-        trailing: Text(
-          '$occurrences 章 · $relationCount 关系',
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: context.appSecondaryText,
-          ),
-        ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: _FlatGraphRow(
+        highlighted: highlighted,
         onTap: onTap,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _TypeDot(color: typeColor),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entity.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: bodySize,
+                      fontWeight: FontWeight.w600,
+                      height: 1.4,
+                      color: context.appPrimaryText,
+                    ),
+                  ),
+                  if (entity.description.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      entity.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: context.aiDetailSize,
+                        height: 1.55,
+                        color: context.appSecondaryText,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 3),
+                  Text(
+                    metadata,
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -117,81 +180,110 @@ class GraphEventTile extends StatelessWidget {
     super.key,
     required this.entity,
     required this.bodySize,
+    required this.trailingLabel,
     required this.onTap,
+    this.highlighted = false,
   });
 
   final AiGraphEntity entity;
   final double bodySize;
+  final String trailingLabel;
   final VoidCallback onTap;
+
+  /// Jump-target flash, same contract as [GraphEntityTile.highlighted] —
+  /// force-graph vertices include events, so tapping one highlights its row
+  /// here too (previously the events view had no highlight channel).
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
     final typeColor = graphEventTypeColor(entity.eventType);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: typeColor.withValues(alpha: 0.18),
-          width: 1,
-        ),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 2, 8, 2),
-        leading: Container(
-          width: 10,
-          height: 10,
-          margin: const EdgeInsets.symmetric(vertical: 18),
-          decoration: BoxDecoration(
-            color: typeColor,
-            shape: BoxShape.circle,
-          ),
-        ),
-        title: Row(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: _FlatGraphRow(
+        highlighted: highlighted,
+        onTap: onTap,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Flexible(
+            _TypeDot(color: typeColor),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          entity.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: bodySize,
+                            fontWeight: FontWeight.w600,
+                            height: 1.4,
+                            color: context.appPrimaryText,
+                          ),
+                        ),
+                      ),
+                      if (entity.importance >= 3) ...[
+                        const SizedBox(width: 6),
+                        GraphImportanceBadge(importance: entity.importance),
+                      ],
+                    ],
+                  ),
+                  if (entity.description.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      entity.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: context.aiDetailSize,
+                        height: 1.55,
+                        color: context.appSecondaryText,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 3),
+                  Text(
+                    entity.eventType.label,
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      // The category is already redundantly encoded by the
+                      // leading dot. Keep small text on a semantic foreground
+                      // instead of using accent hues that fail 4.5:1.
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Trailing occurrence anchor, optically aligned with the title's
+            // first line: events are chapter-scoped, and the right edge was
+            // left empty by the flat-row restyle (「第 N 节」matches the
+            // evidence-row wording).
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
               child: Text(
-                entity.name,
-                overflow: TextOverflow.ellipsis,
+                trailingLabel,
                 style: TextStyle(
-                  fontSize: bodySize,
-                  fontWeight: FontWeight.w600,
+                  fontSize: context.appCaptionSmallSize,
+                  color: context.appMutedText,
                 ),
               ),
             ),
-            if (entity.importance >= 3) ...[
-              const SizedBox(width: 6),
-              GraphImportanceBadge(importance: entity.importance),
-            ],
           ],
         ),
-        subtitle: entity.description.isEmpty
-            ? null
-            : Text(
-                entity.description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  height: 1.35,
-                  color: context.appSecondaryText,
-                ),
-              ),
-        trailing: Text(
-          entity.eventType.label,
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: typeColor,
-          ),
-        ),
-        onTap: onTap,
       ),
     );
   }
 }
 
-/// Small「重要/一般」badge next to major events.
+/// Small「重要/一般」badge next to major events. 重要 uses the primary accent —
+/// never error red, which reads as a problem rather than "major".
 class GraphImportanceBadge extends StatelessWidget {
   const GraphImportanceBadge({super.key, required this.importance});
 
@@ -199,21 +291,25 @@ class GraphImportanceBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = switch (importance) {
-      3 => ('重要', context.appColors.error),
-      _ => ('一般', context.appColors.primary),
+    final (label, textColor, bgColor) = switch (importance) {
+      3 => (
+        '重要',
+        context.appColors.primary,
+        context.appColors.primary.withValues(alpha: 0.1),
+      ),
+      _ => ('一般', context.appSecondaryText, context.appTint(0.06)),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: bgColor,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: TextStyle(
-          fontSize: context.appCaptionSize - 2,
-          color: color,
+          fontSize: context.appCaptionSmallSize,
+          color: textColor,
         ),
       ),
     );
@@ -241,22 +337,47 @@ class GraphIsolatedRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        ListTile(
-          contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 0, 8, 0),
-          minVerticalPadding: 0,
-          title: Text(
-            '其余 $count 个实体',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
+        Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          clipBehavior: Clip.antiAlias,
+          child: Semantics(
+            button: true,
+            expanded: expanded,
+            label: '其余 $count 个实体',
+            child: InkWell(
+              onTap: onToggle,
+              borderRadius: BorderRadius.circular(10),
+              hoverColor: context.appTint(0.035),
+              child: ExcludeSemantics(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        '其余 $count 个实体',
+                        style: TextStyle(
+                          fontSize: context.appCaptionSize,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(
+                        expanded
+                            ? KaijuanIcons.chevronDown
+                            : KaijuanIcons.chevronRight,
+                        size: 18,
+                        color: context.appSecondaryText,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
-          trailing: Icon(
-            expanded ? KaijuanIcons.chevronDown : KaijuanIcons.chevronRight,
-            size: 18,
-            color: context.appSecondaryText,
-          ),
-          onTap: onToggle,
         ),
         if (expanded) ...expandedChildren,
       ],
@@ -264,7 +385,7 @@ class GraphIsolatedRow extends StatelessWidget {
   }
 }
 
-/// 「地点链 · 按书中出现顺序」chips: locations in narrative order (first
+/// 「地点首次出现顺序」chips: locations in narrative order (first
 /// appearance, then in-chapter progress), capped at 20 with an overflow
 /// hint. Tapping a pill opens the entity card via [onPillTap].
 class GraphLocationChain extends StatelessWidget {
@@ -296,14 +417,15 @@ class GraphLocationChain extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visible = [
-      for (final e in locations)
-        if (!gateByProgress || e.firstSection <= readThrough) e,
-    ]..sort((a, b) {
-        final bySection = a.firstSection.compareTo(b.firstSection);
-        if (bySection != 0) return bySection;
-        return _chainProgress(a).compareTo(_chainProgress(b));
-      });
+    final visible =
+        [
+          for (final e in locations)
+            if (!gateByProgress || e.firstSection <= readThrough) e,
+        ]..sort((a, b) {
+          final bySection = a.firstSection.compareTo(b.firstSection);
+          if (bySection != 0) return bySection;
+          return _chainProgress(a).compareTo(_chainProgress(b));
+        });
     if (visible.isEmpty) return const SizedBox.shrink();
     final shown = visible.take(_cap).toList(growable: false);
     final total = visible.length;
@@ -312,14 +434,16 @@ class GraphLocationChain extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: context.appColors.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
+        color: context.appColors.surfaceContainerHighest.withValues(
+          alpha: 0.42,
+        ),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '地点链 · 按书中出现顺序',
+            '地点首次出现顺序（非地理路线）',
             style: TextStyle(
               fontSize: context.appCaptionSize,
               color: context.appSecondaryText,
@@ -334,18 +458,11 @@ class GraphLocationChain extends StatelessWidget {
             children: [
               for (var i = 0; i < shown.length; i++) ...[
                 if (i > 0)
-                  Text(
-                    '→',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize - 1,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
+                  Text('·', style: TextStyle(color: context.appMutedText)),
                 _LocationChainPill(
                   name: shown[i].name,
-                  mentionCount: shown[i].chapterFreq.values
-                      .fold<int>(0, (sum, v) => sum + v),
-                  onTap: () => onPillTap(shown[i].name),
+                  mentionCount: shown[i].chapterFreq.keys.length,
+                  onTap: () => onPillTap(shown[i].id),
                 ),
               ],
             ],
@@ -356,7 +473,7 @@ class GraphLocationChain extends StatelessWidget {
               child: Text(
                 '等 ${total - _cap} 处…',
                 style: TextStyle(
-                  fontSize: context.appCaptionSize - 1,
+                  fontSize: context.appCaptionSmallSize,
                   color: context.appSecondaryText,
                 ),
               ),
@@ -380,9 +497,8 @@ class _LocationChainPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     return Material(
-      color: colors.surfaceContainerHighest.withValues(alpha: 0.8),
+      color: context.appColors.surfaceContainerHighest.withValues(alpha: 0.8),
       borderRadius: BorderRadius.circular(999),
       child: InkWell(
         borderRadius: BorderRadius.circular(999),
@@ -394,19 +510,20 @@ class _LocationChainPill extends StatelessWidget {
             children: [
               Text(
                 name,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  fontWeight: FontWeight.w500,
+                  color: context.appPrimaryText,
+                ),
               ),
               if (mentionCount > 1) ...[
                 const SizedBox(width: 4),
                 Text(
                   '×$mentionCount',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontSize: 10,
-                        color: colors.onSurfaceVariant,
-                      ),
+                  style: TextStyle(
+                    fontSize: context.appCaptionSmallSize,
+                    color: context.appMutedText,
+                  ),
                 ),
               ],
             ],

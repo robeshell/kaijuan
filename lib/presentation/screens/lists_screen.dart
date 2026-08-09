@@ -420,13 +420,15 @@ class _ListDetailScreen extends StatelessWidget {
                                               fit: BoxFit.cover,
                                               errorBuilder: (_, _, _) =>
                                                   ColoredBox(
-                                                    color: Theme.of(context)
-                                                        .scaffoldBackgroundColor,
+                                                    color: Theme.of(
+                                                      context,
+                                                    ).scaffoldBackgroundColor,
                                                   ),
                                             )
                                           : ColoredBox(
-                                              color: Theme.of(context)
-                                                  .scaffoldBackgroundColor,
+                                              color: Theme.of(
+                                                context,
+                                              ).scaffoldBackgroundColor,
                                             ),
                                     ),
                                   ),
@@ -437,12 +439,10 @@ class _ListDetailScreen extends StatelessWidget {
                                   trailing: AppIconButton(
                                     icon: KaijuanIcons.bookmarkRemove,
                                     tooltip: '移出书单',
-                                    onPressed: () =>
-                                        _removeItem(context, item),
+                                    onPressed: () => _removeItem(context, item),
                                   ),
                                   onTap: () => openItem(context, item),
-                                  onLongPress: () =>
-                                      _removeItem(context, item),
+                                  onLongPress: () => _removeItem(context, item),
                                 ),
                             ],
                           ),

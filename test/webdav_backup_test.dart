@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -11,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:kaijuan/library/backup/backup_service.dart';
 import 'package:kaijuan/library/backup/backup_store.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
+import 'package:kaijuan/ai/ai_chat_store.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
@@ -176,10 +178,30 @@ void main() {
             createdAt: DateTime.utc(2026, 8, 3, 12),
             model: 'backup-test',
             overview: '远端大纲。',
-            units: const [
-              AiOutlineUnit(title: '主题', blurb: '远端主题说明。'),
-            ],
+            units: const [AiOutlineUnit(title: '主题', blurb: '远端主题说明。')],
           ),
+          workOutlines: {
+            's3': AiBookOutline(
+              createdAt: DateTime.utc(2026, 8, 3, 12, 5),
+              model: 'backup-test',
+              overview: '合集篇目大纲。',
+              units: const [AiOutlineUnit(title: '篇目主题', blurb: '篇目主题说明。')],
+            ),
+          },
+          workMessages: {
+            's3': [
+              AiChatMessage(
+                role: AiMessageRole.user,
+                content: '这篇作品讲什么？',
+                createdAt: DateTime.utc(2026, 8, 3, 12, 6),
+              ),
+              AiChatMessage(
+                role: AiMessageRole.assistant,
+                content: '这是篇目范围内的回答。',
+                createdAt: DateTime.utc(2026, 8, 3, 12, 7),
+              ),
+            ],
+          },
         ).toJson(),
       ),
     );
@@ -201,9 +223,7 @@ void main() {
               name: '张三',
               type: AiGraphEntityType.person,
               description: '远端实体描述。',
-              evidence: [
-                AiGraphEvidence(sectionIndex: 1, quote: '张三出场'),
-              ],
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '张三出场')],
               firstSection: 1,
               lastSection: 1,
             ),
@@ -213,9 +233,7 @@ void main() {
               source: '张三',
               target: '李四',
               type: 'meet',
-              evidence: [
-                AiGraphEvidence(sectionIndex: 1, quote: '张三与李四相遇'),
-              ],
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '张三与李四相遇')],
             ),
           ],
         ).toJson(),
@@ -269,10 +287,18 @@ void main() {
         server.files.keys.any((key) => key.endsWith('/manifest.json')),
         isTrue,
       );
+      expect(server.requests.last, endsWith('.manifest.json.partial'));
+
+      final chunkKey = server.files.keys.singleWhere(
+        (key) => key.endsWith('.bin'),
+      );
+      final validChunk = List<int>.from(server.files[chunkKey]!);
+      server.files[chunkKey] = [for (final byte in validChunk) byte ^ 0xff];
 
       final second = await sourceBackup.backup();
       expect(second.uploadedObjects, 0);
       expect(second.reusedObjects, 1);
+      expect(server.files[chunkKey], validChunk);
       expect(second.manifest.snapshotId, isNot(first.manifest.snapshotId));
       final snapshots = await sourceBackup.listSnapshots();
       expect(snapshots, hasLength(2));
@@ -358,6 +384,10 @@ void main() {
     expect(restoredChat.messages, hasLength(2));
     expect(restoredChat.outline?.overview, '远端大纲。');
     expect(restoredChat.outline?.units.single.title, '主题');
+    expect(restoredChat.workOutlines['s3']?.overview, '合集篇目大纲。');
+    expect(restoredChat.workOutlines['s3']?.units.single.title, '篇目主题');
+    expect(restoredChat.workMessages['s3'], hasLength(2));
+    expect(restoredChat.workMessages['s3']?.first.content, '这篇作品讲什么？');
 
     final restoredGraph = AiBookGraph.fromJson(
       jsonDecode(
@@ -371,6 +401,64 @@ void main() {
     expect(restoredGraph!.entities.single.name, '张三');
     expect(restoredGraph.relations.single.type, 'meet');
     expect(restoredGraph.coveredSections, [1]);
+
+    final targetItem =
+        (await targetDb.select(targetDb.readingItems).get()).single;
+    final localMessages = [
+      for (var index = 0; index < 105; index++)
+        AiChatMessage(
+          role: AiMessageRole.user,
+          content: '本地消息 $index',
+          createdAt: DateTime.utc(2026, 8, 4).add(Duration(minutes: index)),
+        ),
+    ];
+    final chatStore = JsonAiChatHistoryStore(
+      Directory(p.join(targetDir.path, 'ai_chat')),
+    );
+    await chatStore.write(
+      AiChatSession(
+        contentHash: targetHash,
+        itemId: targetItem.id,
+        messages: localMessages,
+      ),
+    );
+    final damagedFile = File(targetItem.filePath);
+    await damagedFile.writeAsBytes(
+      List<int>.filled(await damagedFile.length(), 0x5a),
+      flush: true,
+    );
+
+    final repaired = await targetBackup.restore(backup.manifest);
+    expect(repaired.updatedBooks, 1);
+    expect(
+      (await sha256.bind(damagedFile.openRead()).first).toString(),
+      targetHash,
+    );
+    final mergedChat = await chatStore.read(
+      contentHash: targetHash,
+      itemId: targetItem.id,
+    );
+    expect(mergedChat?.messages, hasLength(107));
+    expect(mergedChat?.messages.first.content, '本地消息 0');
+  });
+
+  test('backup store rejects insecure HTTP connections', () async {
+    final store = WebDavBackupStore(
+      connection: _connection().copyWith(url: 'http://dav.example/root/'),
+      credentials: const RemoteCredentials(username: 'u', password: 'p'),
+      client: WebDavClient(clientFactory: server.createClient),
+    );
+
+    await expectLater(
+      store.withSession<void>('KaijuanBackup/v1', (_, _) async {}),
+      throwsA(
+        isA<BackupStoreException>().having(
+          (error) => error.message,
+          'message',
+          contains('需要使用 HTTPS'),
+        ),
+      ),
+    );
   });
 }
 
@@ -393,11 +481,13 @@ Future<File> _createCbz(Directory dir, String name) async {
 class _FakeDavServer {
   final Map<String, List<int>> files = {};
   final Set<String> directories = {'/root'};
+  final List<String> requests = [];
 
   http.Client createClient() => _FakeDavClient(this);
 
   Future<http.StreamedResponse> handle(http.BaseRequest request) async {
     final path = _key(request.url.path);
+    requests.add('${request.method} $path');
     switch (request.method) {
       case 'MKCOL':
         if (directories.contains(path)) return _response(405, request: request);

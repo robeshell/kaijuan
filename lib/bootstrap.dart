@@ -23,7 +23,7 @@ import 'library/remote/remote_source_controller.dart';
 import 'library/remote/remote_store.dart';
 import 'library/persistence/app_database.dart';
 import 'library/storage/library_paths.dart';
-import 'ai/ai_settings.dart';
+import 'ai/ai_settings_store.dart';
 import 'presentation/controllers/library_controller.dart';
 import 'presentation/controllers/backup_controller.dart';
 import 'presentation/controllers/ai_settings_controller.dart';

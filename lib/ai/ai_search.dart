@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
 import 'ai_log.dart';
 import 'ai_models.dart';
+import 'ai_cancel.dart';
+import 'ai_user_error.dart';
 
 /// Web search backend for book-chat「联网」(user BYOK).
 enum AiSearchProviderKind {
@@ -107,7 +110,9 @@ class AiWebSearchService {
     required String apiKey,
     required String query,
     int maxResults = 5,
+    CancelToken? cancelToken,
   }) async {
+    cancelToken?.throwIfCancelled();
     final q = query.trim();
     final key = apiKey.trim();
     if (q.isEmpty) return const [];
@@ -122,9 +127,10 @@ class AiWebSearchService {
     final sw = Stopwatch()..start();
     try {
       final hits = await switch (provider) {
-        AiSearchProviderKind.tavily => _tavily(key, q, n),
-        AiSearchProviderKind.brave => _brave(key, q, n),
+        AiSearchProviderKind.tavily => _tavily(key, q, n, cancelToken),
+        AiSearchProviderKind.brave => _brave(key, q, n, cancelToken),
       };
+      cancelToken?.throwIfCancelled();
       AiLog.d(
         'webSearch ok in ${sw.elapsedMilliseconds}ms hits=${hits.length}',
       );
@@ -135,30 +141,38 @@ class AiWebSearchService {
     }
   }
 
-  Future<List<AiWebSearchHit>> _tavily(String key, String q, int n) async {
+  Future<List<AiWebSearchHit>> _tavily(
+    String key,
+    String q,
+    int n,
+    CancelToken? cancelToken,
+  ) async {
     final uri = Uri.parse('https://api.tavily.com/search');
     // Current Tavily docs require Authorization: Bearer; body api_key kept
     // for older gateways that still accept it.
-    final response = await _client
-        .post(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $key',
-          },
-          body: jsonEncode({
-            'api_key': key,
-            'query': q,
-            'max_results': n,
-            'include_answer': false,
-            'search_depth': 'basic',
-          }),
-        )
-        .timeout(const Duration(seconds: 25));
+    final response = await _awaitCancelable(
+      _client
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $key',
+            },
+            body: jsonEncode({
+              'api_key': key,
+              'query': q,
+              'max_results': n,
+              'include_answer': false,
+              'search_depth': 'basic',
+            }),
+          )
+          .timeout(const Duration(seconds: 25)),
+      cancelToken,
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw AiProviderException(
-        _httpError('Tavily', response.statusCode, response.body),
+        _httpError(response.statusCode, response.body),
         statusCode: response.statusCode,
       );
     }
@@ -185,24 +199,32 @@ class AiWebSearchService {
     return out;
   }
 
-  Future<List<AiWebSearchHit>> _brave(String key, String q, int n) async {
+  Future<List<AiWebSearchHit>> _brave(
+    String key,
+    String q,
+    int n,
+    CancelToken? cancelToken,
+  ) async {
     final uri = Uri.https('api.search.brave.com', '/res/v1/web/search', {
       'q': q,
       'count': '$n',
     });
-    final response = await _client
-        .get(
-          uri,
-          headers: {
-            'Accept': 'application/json',
-            'Accept-Encoding': 'gzip',
-            'X-Subscription-Token': key,
-          },
-        )
-        .timeout(const Duration(seconds: 25));
+    final response = await _awaitCancelable(
+      _client
+          .get(
+            uri,
+            headers: {
+              'Accept': 'application/json',
+              'Accept-Encoding': 'gzip',
+              'X-Subscription-Token': key,
+            },
+          )
+          .timeout(const Duration(seconds: 25)),
+      cancelToken,
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw AiProviderException(
-        _httpError('Brave', response.statusCode, response.body),
+        _httpError(response.statusCode, response.body),
         statusCode: response.statusCode,
       );
     }
@@ -231,12 +253,30 @@ class AiWebSearchService {
     return out;
   }
 
-  static String _httpError(String name, int code, String body) {
-    if (code == 401 || code == 403) return '$name：Key 无效或无权限';
-    if (code == 429) return '$name：请求过于频繁';
-    final trimmed = body.trim();
-    if (trimmed.isEmpty) return '$name：请求失败 ($code)';
-    final short = trimmed.length > 120 ? '${trimmed.substring(0, 120)}…' : trimmed;
-    return '$name：请求失败 ($code) $short';
+  static String _httpError(int code, String body) =>
+      aiProviderHttpErrorMessage(code, providerMessage: body);
+}
+
+Future<T> _awaitCancelable<T>(Future<T> future, CancelToken? cancelToken) {
+  if (cancelToken == null) return future;
+  cancelToken.throwIfCancelled();
+  final completer = Completer<T>();
+  void cancel() {
+    if (!completer.isCompleted) {
+      completer.completeError(AiProviderException('已取消'));
+    }
   }
+
+  cancelToken.addCancelListener(cancel);
+  future
+      .then(
+        (value) {
+          if (!completer.isCompleted) completer.complete(value);
+        },
+        onError: (Object error, StackTrace stack) {
+          if (!completer.isCompleted) completer.completeError(error, stack);
+        },
+      )
+      .whenComplete(() => cancelToken.removeCancelListener(cancel));
+  return completer.future;
 }

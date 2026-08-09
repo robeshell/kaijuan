@@ -100,6 +100,7 @@ class ReaderFractionTrack extends StatelessWidget {
     required this.onDragEnd,
     this.semanticLabel,
     this.semanticValue,
+    required this.semanticValueForFraction,
   });
 
   final double fraction;
@@ -111,6 +112,7 @@ class ReaderFractionTrack extends StatelessWidget {
   final ValueChanged<double> onDragEnd;
   final String? semanticLabel;
   final String? semanticValue;
+  final String Function(double fraction) semanticValueForFraction;
 
   double _valueFor(Offset local, double width) {
     if (width <= 0) return 0;
@@ -126,7 +128,9 @@ class ReaderFractionTrack extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final valueText = semanticValue ?? '${(fraction * 100).round()}%';
+    final valueText = semanticValue ?? semanticValueForFraction(fraction);
+    final increasedFraction = (fraction + 0.05).clamp(0.0, 1.0);
+    final decreasedFraction = (fraction - 0.05).clamp(0.0, 1.0);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
@@ -135,6 +139,12 @@ class ReaderFractionTrack extends StatelessWidget {
           slider: true,
           label: semanticLabel,
           value: valueText,
+          increasedValue: fraction >= 1
+              ? null
+              : semanticValueForFraction(increasedFraction),
+          decreasedValue: fraction <= 0
+              ? null
+              : semanticValueForFraction(decreasedFraction),
           onIncrease: fraction >= 1 ? null : () => _nudge(0.05),
           onDecrease: fraction <= 0 ? null : () => _nudge(-0.05),
           child: SizedBox(
@@ -219,6 +229,7 @@ class ReaderProgressScrubber extends StatelessWidget {
     required this.stepBackLabel,
     required this.stepForwardLabel,
     required this.semanticValue,
+    required this.semanticValueForFraction,
     required this.onStepBack,
     required this.onStepForward,
     required this.onDragStart,
@@ -236,6 +247,7 @@ class ReaderProgressScrubber extends StatelessWidget {
   final String stepBackLabel;
   final String stepForwardLabel;
   final String semanticValue;
+  final String Function(double fraction) semanticValueForFraction;
   final VoidCallback onStepBack;
   final VoidCallback onStepForward;
   final ValueChanged<double> onDragStart;
@@ -266,6 +278,7 @@ class ReaderProgressScrubber extends StatelessWidget {
             thumbColor: accent,
             semanticLabel: semanticLabel,
             semanticValue: semanticValue,
+            semanticValueForFraction: semanticValueForFraction,
             onDragStart: onDragStart,
             onDragUpdate: onDragUpdate,
             onDragEnd: onDragEnd,
@@ -436,9 +449,7 @@ class ReaderToolStripLayout extends StatelessWidget {
               : Padding(
                   padding: EdgeInsets.fromLTRB(
                     AppSpacing.x4,
-                    context.appIsShortViewport
-                        ? AppSpacing.x2
-                        : AppSpacing.x3,
+                    context.appIsShortViewport ? AppSpacing.x2 : AppSpacing.x3,
                     AppSpacing.x4,
                     AppSpacing.x2,
                   ),
@@ -452,8 +463,7 @@ class ReaderToolStripLayout extends StatelessWidget {
                   ),
                 ),
         ),
-        if (panel != null)
-          Divider(height: 1, thickness: 1, color: hairline),
+        if (panel != null) Divider(height: 1, thickness: 1, color: hairline),
         Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.x4,

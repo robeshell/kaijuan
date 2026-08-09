@@ -187,7 +187,7 @@ class ShelfScreen extends StatelessWidget {
                         padding: const EdgeInsetsDirectional.only(end: 24),
                         itemCount: onShelf.length,
                         separatorBuilder: (_, _) =>
-                              const SizedBox(width: AppSpacing.x4),
+                            const SizedBox(width: AppSpacing.x4),
                         itemBuilder: (context, i) {
                           final item = onShelf[i];
                           return _CoverCard(
@@ -327,7 +327,9 @@ class _HeroCard extends StatelessWidget {
                               fontSize: context.appCaptionSmallSize,
                               color: muted,
                               letterSpacing: 0.2,
-                              fontFeatures: const [FontFeature.tabularFigures()],
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
                             ),
                           ),
                         ],

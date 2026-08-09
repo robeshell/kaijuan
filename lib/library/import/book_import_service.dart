@@ -102,7 +102,8 @@ class BookImportService {
       } on FoliateImportException catch (e) {
         failures.add(ImportFailure(path: path, reason: e.message));
       } catch (e) {
-        failures.add(ImportFailure(path: path, reason: e.toString()));
+        debugPrint('[Import] book import failed for $path: $e');
+        failures.add(ImportFailure(path: path, reason: '导入失败，请确认文件完整且格式受支持'));
       }
     }
     return ImportResult(added: added, updated: updated, failures: failures);
@@ -132,10 +133,11 @@ class BookImportService {
         failures: [ImportFailure(path: path, reason: e.message)],
       );
     } catch (e) {
+      debugPrint('[Import] book import failed for $path: $e');
       return ImportResult(
         added: 0,
         updated: 0,
-        failures: [ImportFailure(path: path, reason: e.toString())],
+        failures: [ImportFailure(path: path, reason: '导入失败，请确认文件完整且格式受支持')],
       );
     }
   }

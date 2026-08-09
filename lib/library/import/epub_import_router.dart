@@ -75,8 +75,9 @@ class EpubImportRouter {
         failures: [ImportFailure(path: path, reason: e.message)],
       );
     } catch (e) {
+      debugPrint('[Import] EPUB import failed for $path: $e');
       return ImportResult(
-        failures: [ImportFailure(path: path, reason: e.toString())],
+        failures: [ImportFailure(path: path, reason: '导入失败，请确认文件完整且格式受支持')],
       );
     }
   }
@@ -130,7 +131,8 @@ class EpubImportRouter {
       } on ImportException catch (e) {
         failures.add(ImportFailure(path: path, reason: e.message));
       } catch (e) {
-        failures.add(ImportFailure(path: path, reason: e.toString()));
+        debugPrint('[Import] EPUB import failed for $path: $e');
+        failures.add(ImportFailure(path: path, reason: '导入失败，请确认文件完整且格式受支持'));
       }
     }
     return ImportResult(added: added, updated: updated, failures: failures);

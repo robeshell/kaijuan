@@ -208,7 +208,9 @@ export class View extends HTMLElement {
       total: totalPages
     }
 
-    this.lastLocation = { ...progress, tocItem, pageItem, cfi, range, chapterLocation }
+    // Preserve the renderer's authoritative section index. Reconstructing it
+    // later from CFI/href can diverge for long or non-EPUB publications.
+    this.lastLocation = { ...progress, index, tocItem, pageItem, cfi, range, chapterLocation }
     if (reason === 'snap' || reason === 'page' || reason === 'scroll')
       this.history.replaceState(cfi)
 

@@ -6,8 +6,8 @@ import 'package:flutter/services.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_provider_kind.dart';
 import '../../ai/ai_search.dart';
-import '../../ai/ai_settings.dart';
 import '../../ai/ai_translation.dart';
+import '../../ai/ai_user_error.dart';
 import '../../core/kaijuan_icons.dart';
 import '../../core/theme.dart';
 import '../controllers/ai_settings_controller.dart';
@@ -15,6 +15,7 @@ import '../navigation/app_page_route.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/settings_components.dart';
+import 'ai_graph_rules_screen.dart';
 
 /// Settings subpage: BYOK, provider preset, model, test connection.
 class AiSettingsScreen extends StatefulWidget {
@@ -27,9 +28,7 @@ class AiSettingsScreen extends StatefulWidget {
     required AiSettingsController controller,
   }) {
     return Navigator.of(context).push<void>(
-      appPageRoute<void>(
-        (_) => AiSettingsScreen(controller: controller),
-      ),
+      appPageRoute<void>((_) => AiSettingsScreen(controller: controller)),
     );
   }
 
@@ -42,19 +41,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   late final TextEditingController _baseUrl;
   late final TextEditingController _model;
   late final TextEditingController _searchApiKey;
-  late final TextEditingController _appendixWords;
-  late final TextEditingController _metadataWords;
-  late final TextEditingController _citationTemplates;
-  late final TextEditingController _relationTypes;
-  late final TextEditingController _relationAliases;
-  late final TextEditingController _titleSuffixes;
-  late final TextEditingController _genericTerms;
-  late final TextEditingController _bookPriors;
   bool _obscureKey = true;
   bool _obscureSearchKey = true;
   bool _seeded = false;
-  bool _ruleWordsDirty = false;
-  bool _showAdvancedRules = false;
 
   AiSettingsController get controller => widget.controller;
 
@@ -74,42 +63,13 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     _baseUrl = TextEditingController();
     _model = TextEditingController();
     _searchApiKey = TextEditingController();
-    _appendixWords = TextEditingController();
-    _metadataWords = TextEditingController();
-    _citationTemplates = TextEditingController();
-    _relationTypes = TextEditingController();
-    _relationAliases = TextEditingController();
-    _titleSuffixes = TextEditingController();
-    _genericTerms = TextEditingController();
-    _bookPriors = TextEditingController();
     // Rebuild only this State when text changes — never push keystrokes into
     // ChangeNotifier (that rebuilds the form mid-paste on macOS).
     _apiKey.addListener(_onDraftChanged);
     _baseUrl.addListener(_onDraftChanged);
     _model.addListener(_onDraftChanged);
     _searchApiKey.addListener(_onDraftChanged);
-    // Graph-rule fields are saved EXPLICITLY (保存规则 button); edits only
-    // mark them dirty so leaving without saving can warn.
-    for (final c in _ruleWordControllers) {
-      c.addListener(_onRuleWordsChanged);
-    }
     unawaited(_ensureLoaded());
-  }
-
-  List<TextEditingController> get _ruleWordControllers => [
-        _appendixWords,
-        _metadataWords,
-        _citationTemplates,
-        _relationTypes,
-        _relationAliases,
-        _titleSuffixes,
-        _genericTerms,
-        _bookPriors,
-      ];
-
-  void _onRuleWordsChanged() {
-    _ruleWordsDirty = true;
-    if (mounted) setState(() {});
   }
 
   void _onDraftChanged() {
@@ -150,111 +110,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         offset: controller.searchApiKey.length,
       ),
     );
-    _appendixWords.text = settings.graphRuleWords.appendixUnits.join('\n');
-    _metadataWords.text = settings.graphRuleWords.metadataUnits.join('\n');
-    _citationTemplates.text = settings
-        .graphRuleWords
-        .citationQuoteTemplates
-        .join('\n');
-    _relationTypes.text = settings.graphRuleWords.relationTypes.join('\n');
-    _relationAliases.text = settings
-        .graphRuleWords
-        .relationTypeAliases
-        .entries
-        .map((e) => '${e.key}=${e.value}')
-        .join('\n');
-    _titleSuffixes.text = settings
-        .graphRuleWords
-        .personTitleSuffixes
-        .join('\n');
-    _genericTerms.text = settings.graphRuleWords.genericPersonTerms.join('\n');
-    _bookPriors.text = settings
-        .graphRuleWords
-        .bookNamePriors
-        .entries
-        .expand((entry) => [
-              for (final alias in entry.value.entries)
-                '${entry.key}::${alias.key}=${alias.value}',
-            ])
-        .join('\n');
     _seeded = true;
     setState(() {});
-  }
-
-  Future<void> _saveRuleWords() async {
-    final words = AiGraphRuleWords(
-      appendixUnits: _parseWords(_appendixWords.text),
-      metadataUnits: _parseWords(_metadataWords.text),
-      citationQuoteTemplates: _parseWords(_citationTemplates.text),
-      relationTypes: _parseWords(_relationTypes.text),
-      relationTypeAliases: _parseAliases(_relationAliases.text),
-      personTitleSuffixes: _parseWords(_titleSuffixes.text),
-      genericPersonTerms: _parseWords(_genericTerms.text),
-      bookNamePriors: _parseBookPriors(_bookPriors.text),
-    );
-    final skipped = _skippedLineCount();
-    await controller.applyDraft(
-      apiKey: _apiKey.text,
-      baseUrl: _baseUrl.text,
-      model: _model.text,
-      graphRuleWords: words,
-    );
-    _ruleWordsDirty = false;
-    if (mounted) {
-      setState(() {});
-      showAppSnackBar(
-        context,
-        skipped == 0
-            ? '图谱规则已保存'
-            : '图谱规则已保存（$skipped 行格式不对，已忽略）',
-      );
-    }
-  }
-
-  /// Counts malformed lines across the three keyed textareas (alias + priors)
-  /// so the user knows what was dropped, not silently lost.
-  int _skippedLineCount() {
-    var skipped = 0;
-    for (final line in _relationAliases.text.split('\n')) {
-      final t = line.trim();
-      if (t.isEmpty) continue;
-      final eq = t.indexOf('=');
-      if (eq <= 0 || eq == t.length - 1) skipped++;
-    }
-    for (final line in _bookPriors.text.split('\n')) {
-      final t = line.trim();
-      if (t.isEmpty) continue;
-      final sep = t.indexOf('::');
-      if (sep <= 0) {
-        skipped++;
-        continue;
-      }
-      final eq = t.indexOf('=', sep);
-      if (eq <= sep + 2 || eq == t.length - 1) skipped++;
-    }
-    return skipped;
-  }
-
-  /// Parses `书名::别名=规范名` lines into the book priors map; malformed
-  /// lines are skipped.
-  static Map<String, Map<String, String>> _parseBookPriors(String text) {
-    final priors = <String, Map<String, String>>{};
-    for (final line in text.split('\n')) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty) continue;
-      final sep = trimmed.indexOf('::');
-      if (sep <= 0) continue;
-      final book = trimmed.substring(0, sep).trim();
-      final eq = trimmed.indexOf('=', sep);
-      if (eq <= sep + 2 || eq == trimmed.length - 1) continue;
-      priors
-          .putIfAbsent(book, () => {})
-          .putIfAbsent(
-            trimmed.substring(sep + 2, eq).trim(),
-            () => trimmed.substring(eq + 1).trim(),
-          );
-    }
-    return priors;
   }
 
   Future<void> _flushDraft({bool notifyController = true}) async {
@@ -263,46 +120,15 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         apiKey: _apiKey.text,
         baseUrl: _baseUrl.text,
         model: _model.text,
-        graphRuleWords: AiGraphRuleWords(
-          appendixUnits: _parseWords(_appendixWords.text),
-          metadataUnits: _parseWords(_metadataWords.text),
-          citationQuoteTemplates: _parseWords(_citationTemplates.text),
-          relationTypes: _parseWords(_relationTypes.text),
-          relationTypeAliases: _parseAliases(_relationAliases.text),
-          personTitleSuffixes: _parseWords(_titleSuffixes.text),
-          genericPersonTerms: _parseWords(_genericTerms.text),
-          bookNamePriors: _parseBookPriors(_bookPriors.text),
-        ),
       );
       await controller.setSearchApiKey(_searchApiKey.text, notify: true);
     }
   }
 
-  /// Splits a word-list textarea into trimmed, non-empty lines.
-  static List<String> _parseWords(String text) => [
-    for (final line in text.split('\n'))
-      if (line.trim().isNotEmpty) line.trim(),
-  ];
-
-  /// Parses `english=中文` lines into an alias map; malformed lines are
-  /// skipped (keeps hand edits from silently corrupting the map).
-  static Map<String, String> _parseAliases(String text) {
-    final map = <String, String>{};
-    for (final line in text.split('\n')) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty) continue;
-      final eq = trimmed.indexOf('=');
-      if (eq <= 0 || eq == trimmed.length - 1) continue;
-      map[trimmed.substring(0, eq).trim()] = trimmed.substring(eq + 1).trim();
-    }
-    return map;
-  }
-
   @override
   void dispose() {
-    // Connection fields persist best-effort on leave; graph-rule words are
-    // saved EXPLICITLY via the 保存规则 button and are NOT flushed here
-    // (a half-finished edit must not silently overwrite the config).
+    // Connection fields persist best-effort on leave. Advanced graph rules
+    // live on their own explicitly-saved route.
     unawaited(
       controller.applyDraft(
         apiKey: _apiKey.text,
@@ -310,9 +136,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
         model: _model.text,
       ),
     );
-    unawaited(
-      controller.setSearchApiKey(_searchApiKey.text, notify: false),
-    );
+    unawaited(controller.setSearchApiKey(_searchApiKey.text, notify: false));
     _apiKey
       ..removeListener(_onDraftChanged)
       ..dispose();
@@ -323,21 +147,6 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       ..removeListener(_onDraftChanged)
       ..dispose();
     _searchApiKey
-      ..removeListener(_onDraftChanged)
-      ..dispose();
-    _appendixWords
-      ..removeListener(_onDraftChanged)
-      ..dispose();
-    _metadataWords
-      ..removeListener(_onDraftChanged)
-      ..dispose();
-    _citationTemplates
-      ..removeListener(_onDraftChanged)
-      ..dispose();
-    _relationTypes
-      ..removeListener(_onDraftChanged)
-      ..dispose();
-    _relationAliases
       ..removeListener(_onDraftChanged)
       ..dispose();
     super.dispose();
@@ -460,7 +269,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
       );
       await controller.setModel(selected);
     } on AiProviderException catch (error) {
-      if (mounted) showAppSnackBar(context, error.message);
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          aiUserErrorMessage(error, operation: AiUserOperation.loadModels),
+        );
+      }
     } catch (_) {
       if (mounted) showAppSnackBar(context, '获取模型失败');
     }
@@ -477,7 +291,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
           AppMenuAction<String>(
             value: model.id,
             label: model.id,
-            subtitle: model.displayName != null &&
+            subtitle:
+                model.displayName != null &&
                     model.displayName!.isNotEmpty &&
                     model.displayName != model.id
                 ? model.displayName
@@ -491,12 +306,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final hPad = context.appPageGutter;
-    return PopScope(
-      canPop: !_ruleWordsDirty,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && mounted) _confirmDiscardRules();
-      },
-      child: Scaffold(
+    return Scaffold(
       backgroundColor: context.settingsCanvas,
       body: AppSettingsSafeArea(
         bottom: true,
@@ -512,6 +322,16 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
             final enabled = settings.enabled;
             final fieldsEnabled = enabled && !controller.isBusy;
             final hasKey = _apiKey.text.trim().isNotEmpty;
+            final liveStatus = controller.isListingModels
+                ? '正在获取模型'
+                : controller.isTesting
+                ? '正在测试模型连接'
+                : controller.isTestingSearch
+                ? '正在测试搜索服务'
+                : controller.modelsError ??
+                      controller.searchTestMessage ??
+                      controller.testMessage ??
+                      '';
 
             return AppSettingsScrollView(
               maxWidth: AppSettingsMetrics.formMaxWidth,
@@ -534,6 +354,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                       }
                     }());
                   },
+                ),
+                Semantics(
+                  container: true,
+                  liveRegion: true,
+                  label: liveStatus,
+                  child: const SizedBox.shrink(),
                 ),
                 const SizedBox(height: AppSettingsMetrics.headerGap),
                 Text(
@@ -653,7 +479,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                 AppSettingsGroup(
                   padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
                   children: [
-                    if (settings.providerKind.isLocalBackend) ...[ //
+                    if (settings.providerKind.isLocalBackend) ...[
+                      //
                       AppSettingsFormField(
                         label: '本地模型服务',
                         child: Text(
@@ -667,7 +494,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                         ),
                       ),
                       const SizedBox(height: 20),
-                    ] else ...[ //
+                    ] else ...[
+                      //
                       AppSettingsFormField(
                         label: 'API Key',
                         child: AppTextField(
@@ -693,10 +521,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                                 ),
                                 IconButton(
                                   tooltip: '复制',
-                                  icon: const Icon(
-                                    KaijuanIcons.copy,
-                                    size: 18,
-                                  ),
+                                  icon: const Icon(KaijuanIcons.copy, size: 18),
                                   onPressed: fieldsEnabled
                                       ? () => _copyFrom(_apiKey)
                                       : null,
@@ -760,8 +585,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                                 settings.providerKind.isLocalBackend
                                     ? '例如：llama3.2（先「获取模型」）'
                                     : settings.providerKind.defaultModel.isEmpty
-                                        ? '例如：gpt-5.4-mini'
-                                        : settings.providerKind.defaultModel,
+                                    ? '例如：gpt-5.4-mini'
+                                    : settings.providerKind.defaultModel,
                               ),
                             ),
                           ),
@@ -804,9 +629,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                             (hasKey || settings.providerKind.isLocalBackend)
                         ? () => unawaited(_test())
                         : null,
-                    child: Text(
-                      controller.isTesting ? '测试中…' : '测试连接',
-                    ),
+                    child: Text(controller.isTesting ? '测试中…' : '测试连接'),
                   ),
                 ),
                 if (controller.testMessage != null) ...[
@@ -916,12 +739,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.tonal(
-                            onPressed: controller.hasSearchApiKey
+                            onPressed: enabled && controller.hasSearchApiKey
                                 ? () => unawaited(controller.testSearch())
                                 : null,
-                            child: Text(controller.isTestingSearch
-                                ? '测试中…'
-                                : '测试搜索服务'),
+                            child: Text(
+                              controller.isTestingSearch ? '测试中…' : '测试搜索服务',
+                            ),
                           ),
                         ),
                         if (controller.searchTestMessage != null) ...[
@@ -946,7 +769,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                   children: [
                     _TranslationPickerRow<AiTranslationLanguage>(
                       title: '目标语言',
-                      valueLabel: settings.translation.targetLanguage.displayName,
+                      valueLabel:
+                          settings.translation.targetLanguage.displayName,
                       enabled: true,
                       actions: [
                         for (final lang in AiTranslationLanguage.values)
@@ -965,7 +789,8 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                     ),
                     _TranslationPickerRow<AiTranslationDirectionMode>(
                       title: '方向策略',
-                      valueLabel: settings.translation.directionMode.displayName,
+                      valueLabel:
+                          settings.translation.directionMode.displayName,
                       enabled: true,
                       actions: [
                         for (final mode in AiTranslationDirectionMode.values)
@@ -1027,8 +852,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                           AppMenuAction(
                             value: format,
                             label: format.displayName,
-                            selected:
-                                format == settings.translation.noteFormat,
+                            selected: format == settings.translation.noteFormat,
                           ),
                       ],
                       onSelected: (format) => unawaited(
@@ -1050,149 +874,34 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                   ],
                 ),
                 const SizedBox(height: AppSettingsMetrics.sectionGap),
-                const _SectionLabel('知识图谱规则'),
+                const _SectionLabel('知识图谱'),
                 const SizedBox(height: 10),
                 AppSettingsGroup(
-                  padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
                   children: [
                     AppSettingsSwitchRow(
-                      title: '图谱范围：已读章节',
-                      subtitle: '关闭时，知识图谱仅覆盖已读章节（防剧透）；开启则分析全书。对话与大纲不受影响',
+                      title: '分析未读内容',
+                      subtitle: '开启后图谱可分析全书；关闭时只覆盖已读内容。对话和大纲不受影响',
                       value: settings.allowUnreadContext,
-                      onChanged: (value) => unawaited(
-                        controller.setAllowUnreadContext(value),
+                      onChanged: (value) =>
+                          unawaited(controller.setAllowUnreadContext(value)),
+                    ),
+                    AppListRow(
+                      title: const Text('高级图谱规则'),
+                      subtitle: const Text('辅文、关系词表、别名与书名先验'),
+                      trailing: Icon(
+                        KaijuanIcons.chevronRight,
+                        size: 18,
+                        color: context.settingsMuted,
                       ),
-                    ),
-                    const Divider(
-                      height: 24,
-                      indent: 14,
-                      endIndent: 14,
-                    ),
-                    _GraphRuleWordsField(
-                      label: '正文前的辅文',
-                      helper: '每行一个词，按开头匹配；以 ! 开头的行表示排除，如 !序曲（附录、后记等）',
-                      controller: _appendixWords,
                       enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _appendixWords.text = AiGraphRuleWords
-                            .defaultAppendixUnits
-                            .join('\n');
-                      }),
-                    ),
-                    const SizedBox(height: 20),
-                    _GraphRuleWordsField(
-                      label: '目录/版权页标题',
-                      helper: '每行一个词，完全匹配，如 目录',
-                      controller: _metadataWords,
-                      enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _metadataWords.text = AiGraphRuleWords
-                            .defaultMetadataUnits
-                            .join('\n');
-                      }),
-                    ),
-                    const SizedBox(height: 20),
-                    _GraphRuleWordsField(
-                      label: '引用识别句式',
-                      helper: '每行一个句式，{name} 替换为实体名，如 据{name}；命中的实体视为外部引用',
-                      controller: _citationTemplates,
-                      enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _citationTemplates.text = AiGraphRuleWords
-                            .defaultCitationQuoteTemplates
-                            .join('\n');
-                      }),
-                    ),
-                    const SizedBox(height: 20),
-                    _GraphRuleWordsField(
-                      label: '关系词表',
-                      helper: '每行一个关系词，如 信任、敌对、师徒',
-                      controller: _relationTypes,
-                      enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _relationTypes.text = AiGraphRuleWords
-                            .defaultRelationTypes
-                            .join('\n');
-                      }),
-                    ),
-                    const SizedBox(height: 12),
-                    Center(
-                      child: TextButton.icon(
-                        onPressed: () => setState(
-                            () => _showAdvancedRules = !_showAdvancedRules),
-                        icon: Icon(
-                          _showAdvancedRules
-                              ? Icons.expand_less
-                              : Icons.expand_more,
-                          size: 18,
-                        ),
-                        label: Text(_showAdvancedRules
-                            ? '收起高级规则'
-                            : '高级规则（别名/称谓/先验）'),
-                      ),
-                    ),
-                    if (_showAdvancedRules) ...[
-                    _GraphRuleWordsField(
-                      label: '英文关系别名',
-                      helper: '每行 英文=中文，如 trusts=信任、teacher_student=师生',
-                      controller: _relationAliases,
-                      enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _relationAliases.text = AiGraphRuleWords
-                            .defaultRelationTypeAliases
-                            .entries
-                            .map((e) => '${e.key}=${e.value}')
-                            .join('\n');
-                      }),
-                    ),
-                    const SizedBox(height: 20),
-                    _GraphRuleWordsField(
-                      label: '称谓后缀',
-                      helper: '每行一个，同一人称号的后缀变体，如 皇太后、皇帝',
-                      controller: _titleSuffixes,
-                      enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _titleSuffixes.text = AiGraphRuleWords
-                            .defaultPersonTitleSuffixes
-                            .join('\n');
-                      }),
-                    ),
-                    const SizedBox(height: 20),
-                    _GraphRuleWordsField(
-                      label: '泛称拦截词',
-                      helper: '每行一个；这些称呼（皇帝、哥哥、先生…）不会与具体'
-                          '人名合并，防止张冠李戴',
-                      controller: _genericTerms,
-                      enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _genericTerms.text = AiGraphRuleWords
-                            .defaultGenericPersonTerms
-                            .join('\n');
-                      }),
-                    ),
-                    const SizedBox(height: 20),
-                    _GraphRuleWordsField(
-                      label: '书名别名先验',
-                      helper: '每行 书名::别名=规范名，如 西游记::行者=孙悟空；'
-                          '该书生成图谱时别名直接归并为规范名',
-                      controller: _bookPriors,
-                      enabled: !controller.isBusy,
-                      onReset: () => setState(() {
-                        _bookPriors.text = AiGraphRuleWords
-                            .defaultBookNamePriors
-                            .entries
-                            .expand((entry) => [
-                                  for (final alias in entry.value.entries)
-                                    '${entry.key}::${alias.key}=${alias.value}',
-                                ])
-                            .join('\n');
-                      }),
-                    ),
-                    ],
-                    const SizedBox(height: 8),
-                    FilledButton.tonal(
-                      onPressed: controller.isBusy ? null : _saveRuleWords,
-                      child: const Text('保存图谱规则'),
+                      onTap: controller.isBusy
+                          ? null
+                          : () => unawaited(
+                              AiGraphRulesScreen.open(
+                                context,
+                                controller: controller,
+                              ),
+                            ),
                     ),
                   ],
                 ),
@@ -1209,114 +918,6 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
             );
           },
         ),
-      ),
-      ),
-    );
-  }
-
-  /// Unsaved graph-rule edits block leaving until the user chooses.
-  Future<void> _confirmDiscardRules() async {
-    final leave = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('图谱规则未保存'),
-        content: const Text('你对图谱规则的修改还没有保存。放弃修改并离开？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('留下继续编辑'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop(true);
-            },
-            child: const Text('放弃修改'),
-          ),
-        ],
-      ),
-    );
-    if (leave == true && mounted) {
-      _ruleWordsDirty = false;
-      Navigator.of(context).pop();
-    }
-  }
-}
-
-/// Multi-line editor for one graph rule word list, with a per-list
-/// restore-defaults action. Edits are drafts flushed on page exit.
-class _GraphRuleWordsField extends StatelessWidget {
-  const _GraphRuleWordsField({
-    required this.label,
-    required this.helper,
-    required this.controller,
-    required this.enabled,
-    required this.onReset,
-  });
-
-  final String label;
-  final String helper;
-  final TextEditingController controller;
-  final bool enabled;
-  final VoidCallback onReset;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appColors;
-    return AppSettingsFormField(
-      label: label,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          AppTextField(
-            controller: controller,
-            enabled: enabled,
-            maxLines: 7,
-            minLines: 4,
-            keyboardType: TextInputType.multiline,
-            textInputAction: TextInputAction.newline,
-            decoration: InputDecoration(
-              hintText: helper,
-              isDense: true,
-              filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : Colors.black.withValues(alpha: 0.04),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 12,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppRadii.control),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  helper,
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    height: 1.35,
-                    color: context.settingsSecondary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: enabled ? onReset : null,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  foregroundColor: colors.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                child: const Text('恢复默认'),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }

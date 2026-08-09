@@ -6,6 +6,11 @@ abstract final class KaijuanBackupFormat {
   static const id = 'com.kaijuan.backup';
   static const version = 1;
   static const chunkSize = 32 * 1024 * 1024;
+  static const maxCompressedRecordsBytes = 64 * 1024 * 1024;
+  static const maxUncompressedRecordsBytes = 256 * 1024 * 1024;
+  static const maxRecordRows = 500000;
+  static const maxManifestObjects = 100000;
+  static const maxDeviceNameCharacters = 256;
 
   static bool isSha256(String value) =>
       RegExp(r'^[a-f0-9]{64}$').hasMatch(value);
@@ -15,6 +20,9 @@ abstract final class KaijuanBackupFormat {
 
   static bool isExtension(String value) =>
       RegExp(r'^\.[a-z0-9]{1,12}$').hasMatch(value);
+
+  static String truncateDeviceName(String value) =>
+      String.fromCharCodes(value.trim().runes.take(maxDeviceNameCharacters));
 }
 
 class BackupChunkDescriptor {
@@ -175,10 +183,11 @@ class BackupSnapshotManifest {
         deviceId.isEmpty ||
         !KaijuanBackupFormat.isPathSegment(deviceId) ||
         deviceName is! String ||
-        deviceName.length > 256 ||
+        deviceName.runes.length > KaijuanBackupFormat.maxDeviceNameCharacters ||
         createdAt == null ||
         records is! Map ||
         objects is! List ||
+        objects.length > KaijuanBackupFormat.maxManifestObjects ||
         counts is! Map) {
       return null;
     }
@@ -187,7 +196,8 @@ class BackupSnapshotManifest {
     if (recordsSha256 is! String ||
         !KaijuanBackupFormat.isSha256(recordsSha256) ||
         recordsBytes is! int ||
-        recordsBytes < 0) {
+        recordsBytes < 0 ||
+        recordsBytes > KaijuanBackupFormat.maxCompressedRecordsBytes) {
       return null;
     }
     if (records['path'] != null && records['path'] != 'data.json.gz') {
@@ -300,9 +310,12 @@ class BackupRecords {
       return null;
     }
 
+    var totalRows = 0;
     List<Map<String, Object?>>? list(String key) {
       final value = raw[key];
       if (value is! List) return null;
+      totalRows += value.length;
+      if (totalRows > KaijuanBackupFormat.maxRecordRows) return null;
       final result = <Map<String, Object?>>[];
       for (final item in value) {
         if (item is! Map) return null;
@@ -397,6 +410,8 @@ class BackupTargetSettings {
     DateTime? lastSuccessfulAt,
     String? lastError,
     bool clearLastError = false,
+    bool clearLastSnapshotId = false,
+    bool clearLastSuccessfulAt = false,
   }) => BackupTargetSettings(
     connectionId: clearConnectionId
         ? null
@@ -406,8 +421,12 @@ class BackupTargetSettings {
     deviceName: deviceName ?? this.deviceName,
     autoBackup: autoBackup ?? this.autoBackup,
     wifiOnly: wifiOnly ?? this.wifiOnly,
-    lastSnapshotId: lastSnapshotId ?? this.lastSnapshotId,
-    lastSuccessfulAt: lastSuccessfulAt ?? this.lastSuccessfulAt,
+    lastSnapshotId: clearLastSnapshotId
+        ? null
+        : (lastSnapshotId ?? this.lastSnapshotId),
+    lastSuccessfulAt: clearLastSuccessfulAt
+        ? null
+        : (lastSuccessfulAt ?? this.lastSuccessfulAt),
     lastError: clearLastError ? null : (lastError ?? this.lastError),
   );
 

@@ -225,7 +225,8 @@ class WifiTransferService extends ChangeNotifier {
       _notify();
     } catch (error) {
       if (!_isCurrentGeneration(generation)) return;
-      _error = error.toString();
+      debugPrint('[WiFiTransfer] start failed: $error');
+      _error = _wifiUserError(error, fallback: '无法启动传书，请检查网络后重试');
       _phase = WifiTransferPhase.failed;
       _notify();
       rethrow;
@@ -348,11 +349,13 @@ class WifiTransferService extends ChangeNotifier {
         headers: _jsonHeaders,
       );
     } catch (error) {
+      debugPrint('[WiFiTransfer] queue request failed: $error');
+      final message = _wifiUserError(error, fallback: '无法处理文件列表，请重试');
       return Response(
         error is _WifiTransferException
             ? HttpStatus.badRequest
             : HttpStatus.internalServerError,
-        body: jsonEncode({'ok': false, 'message': error.toString()}),
+        body: jsonEncode({'ok': false, 'message': message}),
         headers: _jsonHeaders,
       );
     }
@@ -514,14 +517,16 @@ class WifiTransferService extends ChangeNotifier {
       );
     } catch (error) {
       if (!_isCurrentGeneration(generation)) return _sessionEnded();
+      debugPrint('[WiFiTransfer] upload failed: $error');
+      final message = _wifiUserError(error, fallback: '上传失败，请重新选择文件后重试');
       _phase = WifiTransferPhase.failed;
-      _error = error.toString();
+      _error = message;
       _updateQueueItem(
         itemId,
         phase: WifiTransferItemPhase.failed,
         receivedBytes: _receivedBytes,
         totalBytes: _totalBytes,
-        error: error.toString(),
+        error: message,
       );
       _notify();
       final statusCode =
@@ -530,7 +535,7 @@ class WifiTransferService extends ChangeNotifier {
           : HttpStatus.internalServerError;
       return Response(
         statusCode,
-        body: jsonEncode({'ok': false, 'message': error.toString()}),
+        body: jsonEncode({'ok': false, 'message': message}),
         headers: _jsonHeaders,
       );
     } finally {
@@ -810,13 +815,13 @@ class WifiTransferService extends ChangeNotifier {
             updateQueueItem(index, 'completed', '已完成');
           } catch (error) {
             updateQueueItem(index, 'failed', '失败');
-            status.textContent = `第 ${index + 1} 个文件失败：${file.name}\n${error.message || error}`;
+            status.textContent = `第 ${index + 1} 个文件上传失败，请重试：${file.name}`;
           }
         }
         const failed = Array.from(queue.querySelectorAll('.failed')).length;
         status.textContent = failed ? `队列完成：${files.length - failed} 个成功，${failed} 个失败` : `队列完成：已导入 ${files.length} 个文件`;
       } catch (error) {
-        status.textContent = `队列创建失败：${error.message || error}`;
+        status.textContent = '无法创建传输队列，请重新选择文件后重试';
         files.forEach((_, index) => updateQueueItem(index, 'failed', '未传输'));
       } finally {
         selectedFiles = [];
@@ -828,6 +833,14 @@ class WifiTransferService extends ChangeNotifier {
   </script>
 </body>
 </html>''';
+}
+
+String _wifiUserError(Object error, {required String fallback}) {
+  if (error is _WifiTransferException) return error.message;
+  if (error is SocketException && error.message.contains('局域网地址')) {
+    return '无法获取局域网地址，请确认设备已连接 Wi-Fi';
+  }
+  return fallback;
 }
 
 class _WifiTransferException implements Exception {

@@ -200,7 +200,10 @@ class BookFontStore extends ChangeNotifier {
   Future<void> deleteUserFont(String id) async {
     final font = byId(id);
     if (font == null) return;
-    _fonts = [for (final f in _fonts) if (f.id != id) f];
+    _fonts = [
+      for (final f in _fonts)
+        if (f.id != id) f,
+    ];
     await _saveManifest();
     BookLoopbackServer.sharedOrNull?.unmountFont(id);
     final file = fileFor(font);
@@ -221,7 +224,9 @@ class BookFontStore extends ChangeNotifier {
     try {
       final request = await client.getUrl(Uri.parse(url));
       request.headers.set(HttpHeaders.userAgentHeader, 'KaikaReader/1.0');
-      final response = await request.close().timeout(const Duration(seconds: 60));
+      final response = await request.close().timeout(
+        const Duration(seconds: 60),
+      );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.drain<void>();
         throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(url));

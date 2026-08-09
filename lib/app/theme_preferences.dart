@@ -38,7 +38,8 @@ class ThemePreferences extends ChangeNotifier {
     final fallbackAccent = defaultAccent ?? AppColors.defaultAccent;
     try {
       if (await file.exists()) {
-        final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        final json =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
         return ThemePreferences._(
           file,
           _skinIdFromJson(json),
@@ -69,10 +70,7 @@ class ThemePreferences extends ChangeNotifier {
   Future<void> _save() async {
     await _file.parent.create(recursive: true);
     await _file.writeAsString(
-      jsonEncode({
-        'skinPreset': _skinId,
-        'accentPreset': _accent.id,
-      }),
+      jsonEncode({'skinPreset': _skinId, 'accentPreset': _accent.id}),
       flush: true,
     );
   }

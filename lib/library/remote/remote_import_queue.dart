@@ -107,9 +107,10 @@ class RemoteImportQueueController extends ChangeNotifier {
         item.status = RemoteQueueStatus.completed;
       }
     } catch (error) {
+      debugPrint('[RemoteImport] import failed: $error');
       item
         ..status = RemoteQueueStatus.failed
-        ..error = error.toString();
+        ..error = '导入失败，请检查网络和文件后重试';
     }
     _notify();
   }

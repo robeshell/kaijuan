@@ -28,7 +28,9 @@ import 'widgets/desktop_title_bar.dart';
 /// Match kaiting: fall back to brand mac title inset when the platform reports 0.
 double get _effectiveDesktopTitleBarHeight {
   final platformHeight = platformTitleBarHeight;
-  return platformHeight > 0 ? platformHeight : KaiBrandLayout.macOSTitlebarInset;
+  return platformHeight > 0
+      ? platformHeight
+      : KaiBrandLayout.macOSTitlebarInset;
 }
 
 class AppShell extends StatefulWidget {
@@ -61,6 +63,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
+
   /// Content-navigator subpage for 阅读统计 (not a root tab index).
   bool _readingStatsOpen = false;
   final GlobalKey<NavigatorState> _contentNavigatorKey =
@@ -286,6 +289,7 @@ class _SideRail extends StatelessWidget {
   });
 
   final int index;
+
   /// True while the content navigator hosts [ReadingStatsScreen].
   final bool readingStatsActive;
   final ValueChanged<int> onSelect;

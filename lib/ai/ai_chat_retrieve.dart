@@ -9,6 +9,7 @@ class AiBookSectionSlice {
     required this.text,
     this.sourceSectionIndex,
     this.isNavigationUnit = false,
+    this.navigationChildCount = 0,
     this.level = 1,
   });
 
@@ -22,10 +23,13 @@ class AiBookSectionSlice {
   /// True when the reader formed this slice from a navigation target range.
   final bool isNavigationUnit;
 
+  /// Number of direct children on the original navigation entry. This is a
+  /// deterministic signal that a title is a container, not a flat chapter.
+  final int navigationChildCount;
+
   /// Heading depth inside the spine document: 1 = book/volume, 2 = piece.
-  /// Container nodes (level 1 with empty [text]) group their level-2 pieces
-  /// into the work → book → piece tree the range chooser renders; generation
-  /// extracts the leaves only.
+  /// Empty level-1 containers preserve hierarchy for deterministic structure
+  /// recognition; generation and the flat range picker use body leaves only.
   final int level;
 
   int get originSectionIndex => sourceSectionIndex ?? index;
@@ -108,8 +112,9 @@ abstract final class AiChatRetrieve {
     final text = bookBody.trim();
     if (text.isEmpty) return const [];
 
-    final re =
-        RegExp(r'\[§(\d+)(?:@(\d+)(~)?(?:#(\d+))?)?\s*([^\]]*)\]\s*');
+    final re = RegExp(
+      r'\[§(\d+)(?:@(\d+)(~)?(?:\+(\d+))?(?:#(\d+))?)?\s*([^\]]*)\]\s*',
+    );
     final matches = re.allMatches(text).toList();
     if (matches.isEmpty) {
       return [AiBookSectionSlice(index: 1, label: 'body', text: text)];
@@ -121,9 +126,9 @@ abstract final class AiChatRetrieve {
       final start = m.end;
       final end = i + 1 < matches.length ? matches[i + 1].start : text.length;
       final slice = text.substring(start, end).trim();
-      final label = (m.group(5) ?? '').trim();
-      // Containers (book/volume level, no body) carry only a marker: keep
-      // them so the range chooser can rebuild the work → book → piece tree.
+      final label = (m.group(6) ?? '').trim();
+      // Containers (book/volume level, no body) carry only a marker. Keep
+      // them as deterministic evidence for file-internal work recognition.
       if (slice.isEmpty && label.isEmpty) continue;
       final sourceSectionIndex = int.tryParse(m.group(2) ?? '');
       out.add(
@@ -134,7 +139,8 @@ abstract final class AiChatRetrieve {
               ? sourceSectionIndex
               : null,
           isNavigationUnit: m.group(3) != null,
-          level: int.tryParse(m.group(4) ?? '') ?? 1,
+          navigationChildCount: int.tryParse(m.group(4) ?? '') ?? 0,
+          level: int.tryParse(m.group(5) ?? '') ?? 1,
           label: label,
           text: slice,
         ),
@@ -172,7 +178,11 @@ abstract final class AiChatRetrieve {
 
     if (isWholeBookQuery(userText) && selection.trim().isEmpty) {
       return AiChatPackedBody(
-        relatedSections: _sampleEvenly(sections, maxRelatedChars),
+        relatedSections: _sampleEvenly(
+          sections,
+          maxRelatedChars,
+          maxSections: maxSections,
+        ),
         mode: AiChatPackMode.wholeBook,
         note: 'whole-book even sample across ${sections.length} sections',
         sectionOutline: outline,
@@ -218,7 +228,11 @@ abstract final class AiChatRetrieve {
       // Whole-book-ish fallback if user asked overview with odd phrasing.
       if (isWholeBookQuery(userText)) {
         return AiChatPackedBody(
-          relatedSections: _sampleEvenly(sections, maxRelatedChars),
+          relatedSections: _sampleEvenly(
+            sections,
+            maxRelatedChars,
+            maxSections: maxSections,
+          ),
           mode: AiChatPackMode.wholeBook,
           note: 'whole-book sample (no keyword hits)',
           sectionOutline: outline,
@@ -257,24 +271,45 @@ abstract final class AiChatRetrieve {
     );
   }
 
-  /// Take a slice from **every** section so 汉/唐/宋/明/清 all appear.
+  /// Take slices spanning the whole book; include every section when it fits.
   static List<AiBookSectionSlice> _sampleEvenly(
     List<AiBookSectionSlice> sections,
-    int maxChars,
-  ) {
-    if (sections.isEmpty) return const [];
-    final n = sections.length;
-    // Each section gets a fair share; clamp so tiny books still get meat.
-    final per = (maxChars / n).floor().clamp(500, 6000);
+    int maxChars, {
+    required int maxSections,
+  }) {
+    final readable = sections
+        .where((section) => section.text.trim().isNotEmpty)
+        .toList();
+    if (readable.isEmpty || maxChars < 80 || maxSections < 1) return const [];
+
+    // If every section does not fit, pick positions spanning the entire book
+    // instead of consuming the budget from the front. Both endpoints are
+    // retained; intermediate samples are evenly distributed.
+    final count = maxSections.clamp(1, readable.length);
+    final selected = <AiBookSectionSlice>[];
+    if (count == readable.length) {
+      selected.addAll(readable);
+    } else if (count == 1) {
+      selected.add(readable.first);
+    } else {
+      for (var i = 0; i < count; i++) {
+        final index = (i * (readable.length - 1) / (count - 1)).round();
+        final section = readable[index];
+        if (selected.isEmpty || selected.last.index != section.index) {
+          selected.add(section);
+        }
+      }
+    }
+
+    final per = (maxChars / selected.length).floor().clamp(80, 6000);
     final out = <AiBookSectionSlice>[];
     var used = 0;
-    for (final s in sections) {
+    for (final s in selected) {
       if (used >= maxChars) break;
       final room = (maxChars - used).clamp(0, per);
       if (room < 80) break;
       final body = s.text.trim();
-      if (body.isEmpty) continue;
-      final text = body.length <= room ? body : '${body.substring(0, room)}…';
+      final text = body.length <= room ? body : _headAndTail(body, room);
       out.add(
         AiBookSectionSlice(
           index: s.index,
@@ -286,6 +321,14 @@ abstract final class AiChatRetrieve {
       used += text.length;
     }
     return out;
+  }
+
+  static String _headAndTail(String text, int maxChars) {
+    if (text.length <= maxChars) return text;
+    if (maxChars < 8) return '${text.substring(0, maxChars)}…';
+    final head = (maxChars * 0.7).floor();
+    final tail = maxChars - head;
+    return '${text.substring(0, head)}…${text.substring(text.length - tail)}';
   }
 
   static List<AiBookSectionSlice> _takeChars(

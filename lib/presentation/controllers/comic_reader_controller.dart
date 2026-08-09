@@ -27,7 +27,8 @@ class ComicReaderController extends ChangeNotifier {
       _direction = readingPreferences?.direction ?? ComicReadDirection.ltr,
       _readingTheme =
           readingPreferences?.readingTheme ?? ComicReadingTheme.comicDefault,
-      _brightness = readingPreferences?.brightness ??
+      _brightness =
+          readingPreferences?.brightness ??
           ComicReadingPreferences.defaultBrightness;
 
   final AppDatabase _database;
@@ -323,8 +324,10 @@ class ComicReaderController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    _sliderPreview =
-        (fraction.clamp(0.0, 1.0) * (total - 1)).round().clamp(0, total - 1);
+    _sliderPreview = (fraction.clamp(0.0, 1.0) * (total - 1)).round().clamp(
+      0,
+      total - 1,
+    );
     notifyListeners();
   }
 

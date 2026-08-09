@@ -119,9 +119,7 @@ class BookRenditionSession {
       sincePrevious: elapsed - previous,
     );
     _timings.add(timing);
-    PipelineDiagnostics.instance.record(
-      '[BookRendition][$_mountId] $timing',
-    );
+    PipelineDiagnostics.instance.record('[BookRendition][$_mountId] $timing');
     _timingListener?.call(timing);
   }
 

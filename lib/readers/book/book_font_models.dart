@@ -6,17 +6,17 @@ enum BookFontKind { book, system, user }
 /// Persisted body-font choice (book / system id / installed user id).
 class BookFontSelection {
   const BookFontSelection.book()
-      : kind = BookFontKind.book,
-        systemId = null,
-        userFontId = null;
+    : kind = BookFontKind.book,
+      systemId = null,
+      userFontId = null;
 
   const BookFontSelection.system(this.systemId)
-      : kind = BookFontKind.system,
-        userFontId = null;
+    : kind = BookFontKind.system,
+      userFontId = null;
 
   const BookFontSelection.user(this.userFontId)
-      : kind = BookFontKind.user,
-        systemId = null;
+    : kind = BookFontKind.user,
+      systemId = null;
 
   factory BookFontSelection.fromJson(Map<String, dynamic>? json) {
     if (json == null) return BookFontSelection.system(BookSystemFont.defaultId);
@@ -43,17 +43,19 @@ class BookFontSelection {
   /// Maps legacy [BookBodyFont] / `bodyFont` string storage.
   factory BookFontSelection.fromLegacyBodyFont(String? value) {
     return switch (value) {
-      null || 'defaultFont' => BookFontSelection.system(BookSystemFont.defaultId),
+      null ||
+      'defaultFont' => BookFontSelection.system(BookSystemFont.defaultId),
       'system' => BookFontSelection.system(BookSystemFont.systemUiId),
       'georgia' ||
       'crimsonPro' ||
       'libreBaskerville' ||
       'lora' ||
       'notoSerif' ||
-      'ptSerif' =>
-        BookFontSelection.system(BookSystemFont.songtiId),
-      'lexend' || 'nunito' || 'ptSans' || 'publicSans' =>
-        BookFontSelection.system(BookSystemFont.defaultId),
+      'ptSerif' => BookFontSelection.system(BookSystemFont.songtiId),
+      'lexend' ||
+      'nunito' ||
+      'ptSans' ||
+      'publicSans' => BookFontSelection.system(BookSystemFont.defaultId),
       _ => BookFontSelection.system(BookSystemFont.defaultId),
     };
   }
@@ -62,8 +64,9 @@ class BookFontSelection {
   final String? systemId;
   final String? userFontId;
 
-  static final BookFontSelection defaultSelection =
-      BookFontSelection.system(BookSystemFont.defaultId);
+  static final BookFontSelection defaultSelection = BookFontSelection.system(
+    BookSystemFont.defaultId,
+  );
 
   String get label {
     switch (kind) {
@@ -77,10 +80,10 @@ class BookFontSelection {
   }
 
   Map<String, dynamic> toJson() => {
-        'kind': kind.name,
-        if (systemId != null) 'systemId': systemId,
-        if (userFontId != null) 'userFontId': userFontId,
-      };
+    'kind': kind.name,
+    if (systemId != null) 'systemId': systemId,
+    if (userFontId != null) 'userFontId': userFontId,
+  };
 
   @override
   bool operator ==(Object other) =>
@@ -121,11 +124,7 @@ class BookSystemFont {
       label: '默认字体',
       cssFontName: BookReadingTheme.cssReadingFontFamily,
     ),
-    const BookSystemFont(
-      id: systemUiId,
-      label: '系统界面',
-      cssFontName: 'system',
-    ),
+    const BookSystemFont(id: systemUiId, label: '系统界面', cssFontName: 'system'),
     const BookSystemFont(
       id: heitiId,
       label: '黑体',
@@ -136,8 +135,7 @@ class BookSystemFont {
     const BookSystemFont(
       id: songtiId,
       label: '宋体',
-      cssFontName:
-          '"Songti SC", "STSong", "Noto Serif SC", "SimSun", serif',
+      cssFontName: '"Songti SC", "STSong", "Noto Serif SC", "SimSun", serif',
       previewFamily: 'Songti SC',
     ),
     const BookSystemFont(
@@ -187,7 +185,8 @@ class BookUserFont {
       id: json['id'] as String,
       displayName: json['displayName'] as String? ?? json['id'] as String,
       fileName: json['fileName'] as String,
-      source: BookUserFontSource.values.asNameMap()[json['source'] as String?] ??
+      source:
+          BookUserFontSource.values.asNameMap()[json['source'] as String?] ??
           BookUserFontSource.import,
       catalogId: json['catalogId'] as String?,
     );
@@ -203,12 +202,12 @@ class BookUserFont {
   String get cssFamilyName => '"KaikaUserFont_$id"';
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'displayName': displayName,
-        'fileName': fileName,
-        'source': source.name,
-        if (catalogId != null) 'catalogId': catalogId,
-      };
+    'id': id,
+    'displayName': displayName,
+    'fileName': fileName,
+    'source': source.name,
+    if (catalogId != null) 'catalogId': catalogId,
+  };
 }
 
 /// Built-in downloadable OFL catalog entry (China-reachable mirrors).

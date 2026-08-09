@@ -132,8 +132,7 @@ class _CoverCardInkState extends State<CoverCardInk> {
   Widget build(BuildContext context) {
     final interactive = widget.onTap != null || widget.onLongPress != null;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final allowScale =
-        widget.enablePressScale && interactive && !reduceMotion;
+    final allowScale = widget.enablePressScale && interactive && !reduceMotion;
     final accent = Theme.of(context).colorScheme.primary;
 
     return Material(

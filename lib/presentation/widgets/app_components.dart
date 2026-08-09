@@ -694,20 +694,36 @@ class AppDialog extends StatelessWidget {
   }
 }
 
+/// Places an overlay in the trailing/bottom sub-screen when a fold or hinge
+/// divides the window. On a regular display this is simply the bottom-right
+/// (LTR) or bottom-left (RTL) corner.
+Offset appTrailingBottomOverlayAnchor(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  return Offset(
+    Directionality.of(context) == TextDirection.ltr ? size.width : 0,
+    size.height,
+  );
+}
+
 Future<T?> showAppBottomSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
   bool isScrollControlled = true,
   bool showHandle = true,
   bool useRootNavigator = false,
+  bool isDismissible = true,
+  bool enableDrag = true,
   double maxWidth = 760,
   Color? barrierColor,
   Color? surfaceColor,
+  Offset? anchorPoint,
 }) {
   final dark = Theme.of(context).brightness == Brightness.dark;
   return showModalBottomSheet<T>(
     context: context,
     useRootNavigator: useRootNavigator,
+    isDismissible: isDismissible,
+    enableDrag: enableDrag,
     requestFocus: true,
     useSafeArea: true,
     isScrollControlled: isScrollControlled,
@@ -715,6 +731,7 @@ Future<T?> showAppBottomSheet<T>(
     barrierColor:
         barrierColor ?? Colors.black.withValues(alpha: dark ? 0.62 : 0.38),
     elevation: 0,
+    anchorPoint: anchorPoint,
     constraints: BoxConstraints(maxWidth: maxWidth),
     builder: (sheetContext) => AppBottomSheet(
       showHandle: showHandle,
@@ -735,6 +752,7 @@ Future<T?> showAppAdaptivePanel<T>({
   Color? barrierColor,
   Color? surfaceColor,
   bool sideSheetBlur = true,
+  Offset? anchorPoint,
 }) {
   if (context.appIsCompact) {
     return showAppBottomSheet<T>(
@@ -745,6 +763,7 @@ Future<T?> showAppAdaptivePanel<T>({
       showHandle: true,
       barrierColor: barrierColor,
       surfaceColor: surfaceColor,
+      anchorPoint: anchorPoint,
     );
   }
   return showAppSideSheet<T>(
@@ -754,6 +773,7 @@ Future<T?> showAppAdaptivePanel<T>({
     barrierColor: barrierColor,
     surfaceColor: surfaceColor,
     blur: sideSheetBlur,
+    anchorPoint: anchorPoint,
   );
 }
 
@@ -783,6 +803,7 @@ Future<T?> showAppSideSheet<T>({
   Color? barrierColor,
   Color? surfaceColor,
   bool blur = true,
+  Offset? anchorPoint,
 }) {
   final dark = Theme.of(context).brightness == Brightness.dark;
 
@@ -790,6 +811,7 @@ Future<T?> showAppSideSheet<T>({
     context: context,
     useRootNavigator: useRootNavigator,
     requestFocus: true,
+    anchorPoint: anchorPoint,
     barrierDismissible: true,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor:

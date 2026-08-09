@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'ai_log.dart';
 import 'ai_models.dart';
 import 'ai_provider.dart';
+import 'ai_user_error.dart';
 
 /// Anthropic Messages API (`/v1/messages`).
 class AnthropicAiProvider implements AiProvider {
@@ -184,6 +185,8 @@ class AnthropicAiProvider implements AiProvider {
     AiLog.d('anthropic POST $url model=$model stream=false');
     final sw = Stopwatch()..start();
     late final http.Response response;
+    void abortRequest() => _client.close();
+    cancelToken?.addCancelListener(abortRequest);
     try {
       response = await _client
           .post(
@@ -197,6 +200,8 @@ class AnthropicAiProvider implements AiProvider {
         'anthropic POST complete network error after ${sw.elapsedMilliseconds}ms: $error',
       );
       rethrow;
+    } finally {
+      cancelToken?.removeCancelListener(abortRequest);
     }
     cancelToken?.throwIfCancelled();
     AiLog.d(
@@ -243,84 +248,98 @@ class AnthropicAiProvider implements AiProvider {
     CancelToken? cancelToken,
   }) async* {
     cancelToken?.throwIfCancelled();
-    final url = _messagesUrl;
-    AiLog.d('anthropic POST $url model=$model stream=true');
-    final sw = Stopwatch()..start();
-    final httpRequest = http.Request('POST', url)
-      ..headers.addAll({
-        ..._headers,
-        'Accept': 'text/event-stream',
-      })
-      ..body = jsonEncode(_body(request, stream: true));
-    late final http.StreamedResponse streamed;
+    void abortRequest() => _client.close();
+    cancelToken?.addCancelListener(abortRequest);
     try {
-      streamed = await _client.send(httpRequest).timeout(
-        const Duration(seconds: 45),
-      );
-    } catch (error) {
-      AiLog.d(
-        'anthropic POST stream network error after ${sw.elapsedMilliseconds}ms: $error',
-      );
-      rethrow;
-    }
-    cancelToken?.throwIfCancelled();
-    AiLog.d(
-      'anthropic POST stream status=${streamed.statusCode} '
-      'in ${sw.elapsedMilliseconds}ms',
-    );
-    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-      final body = await streamed.stream.bytesToString();
-      AiLog.d('anthropic POST stream error body=${AiLog.bodyPreview(body)}');
-      throw AiProviderException(
-        _errorMessageFromBody(streamed.statusCode, body),
-        statusCode: streamed.statusCode,
-      );
-    }
-
-    final lines = streamed.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter());
-    await for (final line in lines) {
-      cancelToken?.throwIfCancelled();
-      if (line.isEmpty || line.startsWith(':')) continue;
-      if (!line.startsWith('data:')) continue;
-      final payload = line.substring(5).trim();
-      if (payload.isEmpty) continue;
+      final url = _messagesUrl;
+      AiLog.d('anthropic POST $url model=$model stream=true');
+      final sw = Stopwatch()..start();
+      final httpRequest = http.Request('POST', url)
+        ..headers.addAll({..._headers, 'Accept': 'text/event-stream'})
+        ..body = jsonEncode(_body(request, stream: true));
+      late final http.StreamedResponse streamed;
       try {
-        final decoded = jsonDecode(payload);
-        if (decoded is! Map) continue;
-        final type = decoded['type'];
-        if (type == 'content_block_delta') {
-          final delta = decoded['delta'];
-          if (delta is Map) {
-            final piece = extractStreamDeltaText(delta);
-            if (piece.isNotEmpty) {
-              yield AiStreamChunk(text: piece);
+        streamed = await _client
+            .send(httpRequest)
+            .timeout(const Duration(seconds: 45));
+      } catch (error) {
+        AiLog.d(
+          'anthropic POST stream network error after ${sw.elapsedMilliseconds}ms: $error',
+        );
+        rethrow;
+      }
+      cancelToken?.throwIfCancelled();
+      AiLog.d(
+        'anthropic POST stream status=${streamed.statusCode} '
+        'in ${sw.elapsedMilliseconds}ms',
+      );
+      if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+        final body = await streamed.stream.bytesToString();
+        AiLog.d('anthropic POST stream error body=${AiLog.bodyPreview(body)}');
+        throw AiProviderException(
+          _errorMessageFromBody(streamed.statusCode, body),
+          statusCode: streamed.statusCode,
+        );
+      }
+
+      final lines = streamed.stream
+          .timeout(
+            request.timeout ?? const Duration(seconds: 45),
+            onTimeout: (sink) {
+              sink.addError(AiProviderException('流式响应等待超时，请重试'));
+              sink.close();
+            },
+          )
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+      var truncated = false;
+      await for (final line in lines) {
+        cancelToken?.throwIfCancelled();
+        if (line.isEmpty || line.startsWith(':')) continue;
+        if (!line.startsWith('data:')) continue;
+        final payload = line.substring(5).trim();
+        if (payload.isEmpty) continue;
+        try {
+          final decoded = jsonDecode(payload);
+          if (decoded is! Map) continue;
+          final type = decoded['type'];
+          if (type == 'content_block_delta') {
+            final delta = decoded['delta'];
+            if (delta is Map) {
+              final piece = extractStreamDeltaText(delta);
+              if (piece.isNotEmpty) {
+                yield AiStreamChunk(text: piece);
+              }
             }
-          }
-        } else if (type == 'message_delta') {
-          // Optional: log stop_reason on final delta.
-          final delta = decoded['delta'];
-          if (delta is Map) {
-            final stop = delta['stop_reason'];
-            if (stop != null) {
-              AiLog.d('anthropic stream message_delta stop_reason=$stop');
+          } else if (type == 'message_delta') {
+            // Optional: log stop_reason on final delta.
+            final delta = decoded['delta'];
+            if (delta is Map) {
+              final stop = delta['stop_reason'];
+              if (stop != null) {
+                AiLog.d('anthropic stream message_delta stop_reason=$stop');
+                truncated = stop == 'max_tokens';
+              }
             }
-          }
-        } else if (type == 'message_stop' || type == 'error') {
-          if (type == 'error') {
+          } else if (type == 'error') {
             AiLog.d(
               'anthropic stream error event body=${AiLog.bodyPreview(payload)}',
             );
+            throw AiProviderException('AI 服务返回错误，请稍后重试');
+          } else if (type == 'message_stop') {
+            yield AiStreamChunk(text: '', isFinal: true, truncated: truncated);
+            return;
           }
-          yield const AiStreamChunk(text: '', isFinal: true);
-          return;
+        } on AiProviderException {
+          rethrow;
+        } catch (_) {
+          // Skip malformed SSE frames.
         }
-      } catch (_) {
-        // Skip malformed SSE frames.
       }
+      throw AiProviderException('流式响应意外中断，请重试');
+    } finally {
+      cancelToken?.removeCancelListener(abortRequest);
     }
-    yield const AiStreamChunk(text: '', isFinal: true);
   }
 
   String _errorMessage(http.Response response) {
@@ -329,14 +348,7 @@ class AnthropicAiProvider implements AiProvider {
 
   String _errorMessageFromBody(int statusCode, String body) {
     final parsed = _tryParseError(body);
-    if (parsed != null) return parsed;
-    return switch (statusCode) {
-      401 || 403 => '密钥无效或没有权限，请检查 API Key',
-      404 => '接口地址不正确，请检查 Base URL',
-      429 => '请求过于频繁或额度不足，请稍后再试',
-      >= 500 => '服务暂时不可用（$statusCode），请稍后再试',
-      _ => '请求失败（$statusCode）',
-    };
+    return aiProviderHttpErrorMessage(statusCode, providerMessage: parsed);
   }
 
   String? _tryParseError(String body) {
@@ -347,10 +359,6 @@ class AnthropicAiProvider implements AiProvider {
       if (error is Map) {
         final message = error['message'];
         if (message is String && message.trim().isNotEmpty) {
-          final type = error['type'];
-          if (type is String && type.isNotEmpty) {
-            return '$message ($type)';
-          }
           return message.trim();
         }
       }

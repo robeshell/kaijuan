@@ -62,13 +62,15 @@ void main() {
     final relocation = FoliateRelocation.fromHandlerArguments([
       {
         'cfi': 'epubcfi(/6/4!/4/2)',
+        'sectionIndex': 87,
         'chapterHref': 'Text/b.xhtml',
         'percentage': '1.2',
       },
     ]);
 
     expect(relocation, isNotNull);
-    expect(relocation!.chapterHref, 'Text/b.xhtml');
+    expect(relocation!.sectionIndex, 87);
+    expect(relocation.chapterHref, 'Text/b.xhtml');
     expect(relocation.percentage, 1);
     expect(FoliateRelocation.fromHandlerArguments(const []), isNull);
     expect(
@@ -77,6 +79,15 @@ void main() {
       ]),
       isNull,
     );
+  });
+
+  test('relocation rejects a negative renderer section index', () {
+    final relocation = FoliateRelocation.fromHandlerArguments([
+      {'cfi': 'epubcfi(/6/4!/4/2)', 'sectionIndex': -1, 'percentage': 0.5},
+    ]);
+
+    expect(relocation, isNotNull);
+    expect(relocation!.sectionIndex, isNull);
   });
 
   test('viewport click accepts strings and uses safe defaults', () {

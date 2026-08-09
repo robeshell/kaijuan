@@ -71,6 +71,8 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
             fraction: fraction,
             centerLabel: controller.pageLabel,
             semanticValue: '$progressPct% · ${controller.pageLabel}',
+            semanticValueForFraction: (value) =>
+                '${(value * 100).toStringAsFixed(1)}%',
             fgMuted: widget.fgMuted,
             accent: widget.accent,
             stepBackLabel: '上一页',
@@ -94,10 +96,8 @@ class _ComicReaderToolStripState extends State<ComicReaderToolStrip> {
               fg: widget.fg,
               accent: widget.accent,
               selected: false,
-              onTap: () => showComicThumbnailsSheet(
-                context,
-                controller: controller,
-              ),
+              onTap: () =>
+                  showComicThumbnailsSheet(context, controller: controller),
             ),
             ReaderToolKey(
               tooltip: '书签',
@@ -223,6 +223,8 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                 thumbColor: widget.accent,
                 semanticLabel: '亮度',
                 semanticValue: '${(t * 100).round()}%',
+                semanticValueForFraction: (value) =>
+                    '${(value * 100).round()}%',
                 onDragStart: (v) {
                   _dragging = true;
                   final next =

@@ -6,10 +6,7 @@ import 'comic_session.dart';
 
 /// LRU cache of decoded [ui.Image] pages for the active comic session.
 class ComicPageCache {
-  ComicPageCache({
-    required this.session,
-    this.capacity = 12,
-  });
+  ComicPageCache({required this.session, this.capacity = 12});
 
   final ComicSession session;
   final int capacity;

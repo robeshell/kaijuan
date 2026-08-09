@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../ai/ai_language_service.dart';
-import '../../../ai/ai_models.dart';
 import '../../../ai/ai_provider.dart';
 import '../../../ai/ai_translation.dart';
+import '../../../ai/ai_user_error.dart';
 import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../../readers/book/book_language_actions.dart';
 import '../../controllers/book_reader_controller.dart';
+import '../ai_typography.dart';
 import '../app_components.dart';
 import '../app_overlays.dart';
 import 'ai_result_body.dart';
@@ -29,6 +30,7 @@ Future<void> showBookAiLanguageSheet(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
+    anchorPoint: appTrailingBottomOverlayAnchor(context),
     builder: (sheetContext) => _BookAiLanguageSheet(
       controller: controller,
       operation: operation,
@@ -183,9 +185,10 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
           return;
         }
         setState(() {
-          _error = error is AiProviderException
-              ? error.message
-              : '生成失败，请稍后重试';
+          _error = aiUserErrorMessage(
+            error,
+            operation: AiUserOperation.language,
+          );
           _done = true;
         });
       },
@@ -209,6 +212,18 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
       _displayTarget = lang;
     });
     _start();
+  }
+
+  Future<void> _stop() async {
+    _cancel.cancel();
+    final sub = _sub;
+    _sub = null;
+    await sub?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _done = true;
+      _error = _body.trim().isEmpty ? '已停止生成' : '已停止生成，以上内容可能不完整';
+    });
   }
 
   @override
@@ -265,7 +280,8 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
-    final canWriteNote = (widget.cfi ?? '').trim().isNotEmpty &&
+    final canWriteNote =
+        (widget.cfi ?? '').trim().isNotEmpty &&
         _body.trim().isNotEmpty &&
         _done &&
         !_sameLanguage &&
@@ -279,6 +295,22 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
         _prefs.displayMode == AiTranslationDisplayMode.bilingual;
     final flip = _displayTarget.flipSuggestion;
     final showSource = source.isNotEmpty && (bilingual || _isTranslate);
+    final sourceExpanded = _sourceExpanded || bilingual;
+    final canToggleSource = !bilingual && source.length > 96;
+    final canUseResult =
+        _body.trim().isNotEmpty && _done && !_sameLanguage && _error == null;
+    final liveStatus = _sameLanguage
+        ? '原文与目标语言相同'
+        : _error != null
+        ? _error!
+        : !_done
+        ? '$_title生成中'
+        : _body.trim().isEmpty
+        ? '$_title没有生成内容'
+        : '$_title已完成';
+    final systemFallbackLabel =
+        widget.operation == BookLanguageOperation.dictionary ? '系统词典' : '系统翻译';
+    final actionTextStyle = TextStyle(fontSize: context.aiLabelSize);
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
@@ -290,6 +322,12 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Semantics(
+                container: true,
+                liveRegion: true,
+                label: liveStatus,
+                child: const SizedBox.shrink(),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 4, 0),
                 child: Row(
@@ -297,7 +335,7 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                     Text(
                       _title,
                       style: TextStyle(
-                        fontSize: context.appListTitleSize,
+                        fontSize: context.aiBodySize,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -318,10 +356,7 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                     if (!_done && !_sameLanguage)
                       IconButton(
                         tooltip: '停止生成',
-                        onPressed: () {
-                          _cancel.cancel();
-                          setState(() => _done = true);
-                        },
+                        onPressed: () => unawaited(_stop()),
                         icon: Icon(
                           KaijuanIcons.stopFilled,
                           size: 22,
@@ -355,13 +390,60 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                               ),
                             ),
                           ),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => setState(
-                            () => _sourceExpanded = !_sourceExpanded,
-                          ),
-                          child: Text(
-                            (_sourceExpanded || bilingual)
+                        if (canToggleSource)
+                          Semantics(
+                            button: true,
+                            expanded: _sourceExpanded,
+                            hint: _sourceExpanded ? '收起原文' : '展开完整原文',
+                            child: Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () => setState(
+                                  () => _sourceExpanded = !_sourceExpanded,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 6,
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          sourceExpanded
+                                              ? widget.text.trim()
+                                              : sourceCollapsed,
+                                          style: TextStyle(
+                                            fontSize: context.appCaptionSize,
+                                            height: 1.4,
+                                            color: context.appSecondaryText,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 1),
+                                        child: Icon(
+                                          sourceExpanded
+                                              ? KaijuanIcons.chevronDown
+                                              : KaijuanIcons.chevronRight,
+                                          size: 18,
+                                          color: context.appSecondaryText,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Text(
+                            sourceExpanded
                                 ? widget.text.trim()
                                 : sourceCollapsed,
                             style: TextStyle(
@@ -370,7 +452,6 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                               color: context.appSecondaryText,
                             ),
                           ),
-                        ),
                         const SizedBox(height: 14),
                         if (bilingual &&
                             !_sameLanguage &&
@@ -391,7 +472,7 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                         Text(
                           '原文已是${_displayTarget.displayName}。无需同语改写。',
                           style: TextStyle(
-                            fontSize: context.appBodySize,
+                            fontSize: context.aiBodySize,
                             height: 1.5,
                             color: context.appPrimaryText,
                           ),
@@ -400,25 +481,46 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                         Align(
                           alignment: Alignment.centerLeft,
                           child: FilledButton.tonal(
+                            style: FilledButton.styleFrom(
+                              textStyle: actionTextStyle,
+                            ),
                             onPressed: () => _onTargetChanged(flip),
                             child: Text('改译为 ${flip.displayName}'),
                           ),
                         ),
                       ] else if (_error != null)
-                        Text(
-                          _error!,
-                          style: TextStyle(
-                            color: context.appColors.error,
-                            fontSize: context.appBodySize,
-                            height: 1.45,
-                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (_body.trim().isNotEmpty) ...[
+                              SelectionArea(
+                                child: Text(
+                                  _body,
+                                  style: TextStyle(
+                                    fontSize: context.aiBodySize,
+                                    height: 1.55,
+                                    color: context.appPrimaryText,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            Text(
+                              _error!,
+                              style: TextStyle(
+                                color: context.appColors.error,
+                                fontSize: context.aiBodySize,
+                                height: 1.45,
+                              ),
+                            ),
+                          ],
                         )
                       else if (_body.isEmpty && !_done)
                         Text(
                           '生成中…',
                           style: TextStyle(
                             color: context.appSecondaryText,
-                            fontSize: context.appBodySize,
+                            fontSize: context.aiBodySize,
                           ),
                         )
                       else if (_isTranslate)
@@ -430,7 +532,7 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                                 child: Text(
                                   _body,
                                   style: TextStyle(
-                                    fontSize: context.appBodySize,
+                                    fontSize: context.aiBodySize,
                                     height: 1.55,
                                     color: context.appPrimaryText,
                                   ),
@@ -439,7 +541,7 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                             : Text(
                                 _body,
                                 style: TextStyle(
-                                  fontSize: context.appBodySize,
+                                  fontSize: context.aiBodySize,
                                   height: 1.55,
                                   color: context.appPrimaryText,
                                 ),
@@ -457,13 +559,13 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                   runSpacing: 0,
                   children: [
                     TextButton.icon(
-                      onPressed: _body.trim().isEmpty
-                          ? null
-                          : () => unawaited(_copy()),
+                      style: TextButton.styleFrom(textStyle: actionTextStyle),
+                      onPressed: canUseResult ? () => unawaited(_copy()) : null,
                       icon: const Icon(KaijuanIcons.copy, size: 18),
                       label: const Text('复制'),
                     ),
                     TextButton.icon(
+                      style: TextButton.styleFrom(textStyle: actionTextStyle),
                       onPressed: canWriteNote && !_savingNote
                           ? () => unawaited(_writeNote())
                           : null,
@@ -472,13 +574,15 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
                     ),
                     if (_isTranslate && !_sameLanguage)
                       TextButton(
+                        style: TextButton.styleFrom(textStyle: actionTextStyle),
                         // Re-run with live prefs + current chip override (if any).
                         onPressed: _done || _error != null ? _start : null,
                         child: const Text('再译'),
                       ),
                     TextButton(
+                      style: TextButton.styleFrom(textStyle: actionTextStyle),
                       onPressed: () => unawaited(_useSystemFallback()),
-                      child: const Text('系统翻译'),
+                      child: Text(systemFallbackLabel),
                     ),
                   ],
                 ),

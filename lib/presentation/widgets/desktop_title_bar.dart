@@ -117,9 +117,7 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> {
               ),
               const SizedBox(width: 2),
               _WindowControlButton(
-                icon: _maximized
-                    ? KaijuanIcons.maximize
-                    : KaijuanIcons.restore,
+                icon: _maximized ? KaijuanIcons.maximize : KaijuanIcons.restore,
                 tooltip: _maximized ? '向下还原' : '最大化',
                 onPressed: () => unawaited(_toggleMaximize()),
               ),

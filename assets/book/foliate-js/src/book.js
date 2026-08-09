@@ -1552,13 +1552,14 @@ class Reader {
   }
 
   #onRelocate({ detail }) {
-    const { cfi, fraction, location, tocItem, pageItem, chapterLocation } = detail
+    const { cfi, fraction, location, tocItem, pageItem, chapterLocation, index } = detail
     const loc = pageItem
       ? `Page ${pageItem.label}`
       : `Loc ${location.current}`
     this.#checkCurrentPageBookmark()
     onRelocated({
       cfi,
+      index,
       fraction,
       loc,
       tocItem,
@@ -2085,6 +2086,7 @@ const onRelocated = (currentInfo) => {
     bookTotalPages,
     bookCurrentPage,
     cfi,
+    sectionIndex: currentInfo.index,
     percentage,
     bookmark: currentInfo.bookmark,
     writingMode: reader.view.renderer.writingMode,
@@ -2857,9 +2859,12 @@ const plainText = value => String(value || '').replace(/\s+/g, ' ').trim()
 
 const sampleTextFromBothEnds = (text, maxChars) => {
   if (text.length <= maxChars) return text
-  const head = Math.floor(maxChars * 0.72)
-  const tail = maxChars - head
-  return `${text.slice(0, head)}\n…\n${text.slice(text.length - tail)}`
+  if (maxChars <= 3) return text.slice(0, Math.max(0, maxChars))
+  const separator = '\n…\n'
+  const contentBudget = maxChars - separator.length
+  const head = Math.floor(contentBudget * 0.72)
+  const tail = contentBudget - head
+  return `${text.slice(0, head)}${separator}${text.slice(text.length - tail)}`
 }
 
 const tocItemsForLogicalSections = toc => {
@@ -2908,7 +2913,11 @@ const tocSectionStarts = async (book, tocItems) => {
     try {
       const target = await book.resolveHref(item.href)
       if (Number.isInteger(target?.index) && target.index >= 0)
-        starts.push({ index: target.index, label: item.label })
+        starts.push({
+          index: target.index,
+          label: item.label,
+          childCount: Array.isArray(item?.subitems) ? item.subitems.length : 0,
+        })
     } catch (e) {
       console.warn('[Kaika][AI outline] TOC target resolve failed=', item.label, e)
     }
@@ -3039,7 +3048,7 @@ const logicalSectionsFromDocument = (doc, fallbackLabel, tocLabels = []) => {
       }
     }
     if (pieceHeadings.length >= 2) {
-      // 书 = 容器（空正文，Dart 侧用来组树），篇 = 叶子。书前奏并入第一篇。
+      // 书 = 结构识别容器（空正文），篇 = 正文叶子。书前奏并入第一篇。
       output.push({ label: bookLabel, text: '', level: 1 })
       const bookPrelude = textBetween(book, pieceHeadings[0])
       for (let j = 0; j < pieceHeadings.length; j++) {
@@ -3056,160 +3065,6 @@ const logicalSectionsFromDocument = (doc, fallbackLabel, tocLabels = []) => {
   return output
 }
 
-const outlineRangeEnd = (start, nextStart, endExclusive) => {
-  const end = Number.isInteger(nextStart) ? nextStart : endExclusive
-  return Number.isInteger(end) && end > start ? end : null
-}
-
-const findOutlineTocNode = async (book, items, startIndex) => {
-  for (const item of items || []) {
-    let target = null
-    try { target = item?.href ? await book.resolveHref(item.href) : null } catch (e) {}
-    if (target?.index === startIndex && Array.isArray(item?.subitems) && item.subitems.length)
-      return item
-    const nested = await findOutlineTocNode(book, item?.subitems, startIndex)
-    if (nested) return nested
-  }
-  return null
-}
-
-const outlineTocCandidates = async (book, startIndex, endExclusive) => {
-  const parent = await findOutlineTocNode(book, book?.toc, startIndex)
-  if (!parent?.subitems?.length) return []
-  const resolved = []
-  for (const item of parent.subitems) {
-    const label = plainText(item?.label)
-    if (!label || !item?.href) continue
-    try {
-      const target = await book.resolveHref(item.href)
-      if (Number.isInteger(target?.index) && target.index >= startIndex &&
-          (!Number.isInteger(endExclusive) || target.index < endExclusive)) {
-        resolved.push({ label, start: target.index })
-      }
-    } catch (e) {
-      console.warn('[Kaika][AI outline] child TOC target resolve failed=', label, e)
-    }
-  }
-  resolved.sort((a, b) => a.start - b.start)
-  const unique = resolved.filter((item, index, all) =>
-    index === 0 || item.start !== all[index - 1].start)
-  return unique.map((item, index) => ({
-    label: item.label,
-    start: item.start,
-    end: outlineRangeEnd(item.start, unique[index + 1]?.start, endExclusive),
-    source: 'toc',
-  }))
-}
-
-const outlineHeadingCandidates = async (sections, startIndex, endExclusive) => {
-  const output = []
-  const last = Number.isInteger(endExclusive) ? Math.min(endExclusive, sections.length) : sections.length
-  for (let index = startIndex; index < last; index++) {
-    const section = sections[index]
-    if (!section?.createDocument) continue
-    try {
-      const doc = await section.createDocument()
-      const headings = [...(doc?.querySelectorAll?.('h1, h2, h3, h4, h5, h6') || [])]
-        .map(heading => ({ heading, label: plainText(heading.textContent) }))
-        .filter(item => item.label.length >= 2)
-      if (!headings.length) continue
-      // The document's first real heading is its stable section-level anchor.
-      // We deliberately avoid multiple offsets inside one XHTML until a CFI
-      // locator is carried through the bridge.
-      output.push({
-        label: headings[0].label,
-        start: index,
-        end: index + 1,
-        source: 'heading',
-      })
-    } catch (e) {
-      console.warn('[Kaika][AI outline] heading read failed=', index + 1, e)
-    }
-  }
-  return output.length >= 2 ? output : []
-}
-
-const outlineSemanticCandidates = (sections, startIndex, endExclusive) => {
-  const last = Number.isInteger(endExclusive) ? Math.min(endExclusive, sections.length) : sections.length
-  const output = []
-  for (let index = startIndex; index < last; index++) {
-    const section = sections[index]
-    if (!section) continue
-    output.push({
-      label: String(section.href || section.id || `第 ${index + 1} 节`),
-      start: index,
-      end: index + 1,
-      source: 'semantic',
-    })
-  }
-  return output.length >= 2 ? output : []
-}
-
-const outlineCandidateBodies = async (sections, candidates, maxChars) => {
-  if (!candidates.length) return []
-  const perCandidate = Math.max(2400, Math.floor(maxChars / candidates.length))
-  const output = []
-  for (const candidate of candidates) {
-    const last = Number.isInteger(candidate.end)
-      ? Math.min(candidate.end, sections.length)
-      : sections.length
-    let body = ''
-    for (let index = candidate.start; index < last; index++) {
-      const section = sections[index]
-      if (!section?.createDocument) continue
-      try {
-        const doc = await section.createDocument()
-        const text = plainText(doc?.body?.textContent)
-        if (text) body += `${body ? '\n\n' : ''}${text}`
-      } catch (e) {
-        console.warn('[Kaika][AI outline] child body read failed=', index + 1, e)
-      }
-    }
-    const text = sampleTextFromBothEnds(body, perCandidate)
-    if (!text) continue
-    output.push({
-      label: candidate.label,
-      startSectionIndex: candidate.start + 1,
-      endSectionIndexExclusive: Number.isInteger(candidate.end) ? candidate.end + 1 : null,
-      text,
-      source: candidate.source,
-    })
-  }
-  return output
-}
-
-/// Reader-derived child ranges for a generated outline node. This returns
-/// only JSON-compatible values for the Flutter WebView bridge.
-window.getOutlineChildren = async (opts = {}) => {
-  const sections = reader?.view?.book?.sections || []
-  const book = reader?.view?.book
-  const start = Math.max(0, (Number(opts?.startSectionIndex) || 1) - 1)
-  const rawEnd = Number(opts?.endSectionIndexExclusive)
-  const end = Number.isFinite(rawEnd) && rawEnd > start + 1
-    ? Math.min(Math.floor(rawEnd) - 1, sections.length)
-    : null
-  const rawMax = Number(opts?.maxChars)
-  const maxChars = Number.isFinite(rawMax) && rawMax > 0
-    ? Math.min(Math.floor(rawMax), 300000)
-    : 120000
-  if (!sections.length || start >= sections.length) return []
-
-  let candidates = await outlineTocCandidates(book, start, end)
-  if (!candidates.length) candidates = await outlineHeadingCandidates(sections, start, end)
-  if (!candidates.length) candidates = outlineSemanticCandidates(sections, start, end)
-  // A one-item fallback would just restate the parent, so cache it as leaf.
-  if (candidates.length < 2) return []
-  const output = await outlineCandidateBodies(sections, candidates, maxChars)
-  console.log(
-    '[Kaika][AI outline] children=',
-    `range=${start + 1}-${end || sections.length}`,
-    `source=${candidates[0]?.source || 'none'}`,
-    `candidates=${output.length}`,
-    `labels=${JSON.stringify(output.slice(0, 24).map(item => item.label))}`,
-  )
-  return output
-}
-
 /// Concatenate spine section plain text for book-wide AI chat (no spoiler gate).
 /// Caps total length; collapses whitespace to keep tokens useful.
 window.getBookPlainText = async (opts = {}) => {
@@ -3223,6 +3078,20 @@ window.getBookPlainText = async (opts = {}) => {
   const sections = reader?.view?.book?.sections || []
   if (!sections.length) return ''
 
+  // Dart passes 1-based physical spine boundaries from AiBookWork. Restrict
+  // the source range before applying maxChars so a late work in an omnibus is
+  // not lost because earlier works consumed the whole-file character budget.
+  const requestedStart = Number(opts?.startSection)
+  const requestedEnd = Number(opts?.endSectionExclusive)
+  const startIndex = Number.isFinite(requestedStart) && requestedStart >= 1
+    ? Math.min(sections.length, Math.floor(requestedStart) - 1)
+    : 0
+  const endIndexExclusive = Number.isFinite(requestedEnd) && requestedEnd >= 1
+    ? Math.min(sections.length, Math.floor(requestedEnd) - 1)
+    : sections.length
+  if (endIndexExclusive <= startIndex) return ''
+  const hasSectionRange = startIndex > 0 || endIndexExclusive < sections.length
+
   let out = ''
   let logicalIndex = 0
   const book = reader?.view?.book
@@ -3233,22 +3102,35 @@ window.getBookPlainText = async (opts = {}) => {
   // toc:false opts out of TOC grouping — the graph pipeline wants one piece
   // per spine section so evidence quotes resolve to the exact section, not
   // the start of a multi-section work/chapter.
-  const useTocTargets = opts?.toc !== false && tocStarts.length >= 2
+  const useTocTargets = opts?.toc !== false
+    && !hasSectionRange
+    && tocStarts.length >= 2
   const tocPieces = []
+  const spinePieces = []
   let activeTocPiece = null
   const flushTocPiece = () => {
     if (activeTocPiece?.text.trim()) tocPieces.push(activeTocPiece)
     activeTocPiece = null
   }
-  const appendPiece = (label, text, sourceSectionIndex, navigation = false, level = 1) => {
+  const appendPiece = (
+    label,
+    text,
+    sourceSectionIndex,
+    navigation = false,
+    level = 1,
+    navigationChildCount = 0,
+  ) => {
     if (out.length >= maxChars || !text.trim()) return false
     logicalIndex += 1
     const navigationUnit = navigation ? '~' : ''
-    // #level carries the heading depth (1 = book/volume, 2 = piece) so the
-    // Dart side can rebuild the work → book → piece tree for the range
-    // chooser; plain books emit level 1 everywhere (no tree).
+    const navigationChildren = navigationChildCount > 0
+      ? `+${navigationChildCount}`
+      : ''
+    // #level carries heading depth (1 = book/volume, 2 = piece) as
+    // deterministic structure evidence; the flat range chooser only renders
+    // non-empty body leaves.
     const levelUnit = level > 1 ? `#${level}` : ''
-    const piece = `\n\n[§${logicalIndex}@${sourceSectionIndex}${navigationUnit}${levelUnit} ${label}]\n${text.trim()}`
+    const piece = `\n\n[§${logicalIndex}@${sourceSectionIndex}${navigationUnit}${navigationChildren}${levelUnit} ${label}]\n${text.trim()}`
     const room = maxChars - out.length
     if (piece.length > room) {
       out += piece.slice(0, room)
@@ -3263,8 +3145,9 @@ window.getBookPlainText = async (opts = {}) => {
     'maxChars=', maxChars,
     'tocLabels=', tocLabels.length,
     'useTocTargets=', useTocTargets,
+    'range=', `${startIndex + 1}..<${endIndexExclusive + 1}`,
   )
-  for (let i = 0; i < sections.length; i++) {
+  for (let i = startIndex; i < endIndexExclusive; i++) {
     if (out.length >= maxChars) break
     const section = sections[i]
     if (!section?.createDocument) continue
@@ -3276,9 +3159,17 @@ window.getBookPlainText = async (opts = {}) => {
       // Falling back to the bare href hides that and lets appendix text into
       // the graph as ordinary chapters.
       const tocStart = tocStartsBySection.get(i)
+      // Resource hrefs are stable engine identifiers, not user-facing
+      // chapter names. EPUB documents commonly carry an accurate <title>
+      // even when they have only one heading (so the logical-heading splitter
+      // intentionally does not activate). Prefer that title and fall back to
+      // a neutral section number; never expose `OEBPS/Text/ch01.xhtml` in the
+      // graph range chooser.
+      const documentLabel = plainText(doc?.title)
+        || plainText(doc?.querySelector?.('h1, h2, h3, h4, h5, h6')?.textContent)
       const fallbackLabel = tocStart
         ? tocStart.label
-        : String(section.href || section.id || (i + 1))
+        : (documentLabel || `第 ${i + 1} 节`)
       if (useTocTargets) {
         const tocStart = tocStartsBySection.get(i)
         if (tocStart) {
@@ -3288,6 +3179,7 @@ window.getBookPlainText = async (opts = {}) => {
             sourceSectionIndex: i + 1,
             text: '',
             navigation: true,
+            navigationChildCount: tocStart.childCount,
           }
         }
         // Text before the first work is front matter. Giving it a stable
@@ -3316,20 +3208,16 @@ window.getBookPlainText = async (opts = {}) => {
         'labels=', JSON.stringify(pieces.slice(0, 24).map(piece => piece.label)),
       )
       for (const piece of pieces) {
-        if (!piece.text.trim()) {
-          // Container (book/volume level, no body): emit the bare marker so
-          // the Dart side can rebuild the work → book → piece tree; the
-          // chooser shows it as an expandable parent, extraction skips it.
-          // The explicit #level distinguishes it from an empty metadata
-          // section (目录/版权) that must still be filtered out. A level-2
-          // empty piece (two adjacent headings with no body) is dropped.
-          if (piece.level > 1) continue
-          if (out.length >= maxChars) break
-          logicalIndex += 1
-          out += `\n\n[§${logicalIndex}@${i + 1}#${piece.level} ${piece.label}]\n`
-          continue
-        }
-        if (!appendPiece(piece.label, piece.text, i + 1, false, piece.level)) break
+        // Collect first, budget second. Appending while traversing made a long
+        // early work consume maxChars and erased later units from the user's
+        // graph range chooser.
+        if (!piece.text.trim() && piece.level > 1) continue
+        spinePieces.push({
+          label: piece.label,
+          text: piece.text,
+          sourceSectionIndex: i + 1,
+          level: piece.level,
+        })
       }
     } catch (e) {
       console.warn('[Kaika] getBookPlainText section failed', i, e)
@@ -3345,12 +3233,52 @@ window.getBookPlainText = async (opts = {}) => {
     )
     for (const piece of tocPieces) {
       const sample = sampleTextFromBothEnds(piece.text, maxTocPieceChars)
-      if (!appendPiece(piece.label, sample, piece.sourceSectionIndex, piece.navigation !== false)) break
+      if (!appendPiece(
+        piece.label,
+        sample,
+        piece.sourceSectionIndex,
+        piece.navigation !== false,
+        1,
+        piece.navigationChildCount || 0,
+      )) break
     }
     console.log(
       '[Kaika][AI outline] TOC units=', tocPieces.length,
       'perUnitChars=', maxTocPieceChars,
       'labels=', JSON.stringify(tocPieces.map(piece => piece.label)),
+    )
+  } else {
+    // Reserve every logical marker first, then distribute the remaining body
+    // budget evenly. This keeps the complete selectable range visible for very
+    // long books while still bounding the bridge payload.
+    const markerChars = spinePieces.reduce((sum, piece, index) =>
+      sum + `\n\n[§${index + 1}@${piece.sourceSectionIndex}${piece.level > 1 ? `#${piece.level}` : ''} ${piece.label}]\n`.length,
+    0)
+    const nonEmptyCount = spinePieces.filter(piece => piece.text.trim()).length
+    const bodyBudget = Math.max(0, maxChars - markerChars)
+    const perPieceChars = nonEmptyCount > 0
+      ? Math.max(1, Math.floor(bodyBudget / nonEmptyCount))
+      : 0
+    for (const piece of spinePieces) {
+      if (!piece.text.trim()) {
+        if (out.length >= maxChars) break
+        logicalIndex += 1
+        out += `\n\n[§${logicalIndex}@${piece.sourceSectionIndex}#${piece.level} ${piece.label}]\n`
+        continue
+      }
+      const sample = sampleTextFromBothEnds(piece.text, perPieceChars)
+      if (!appendPiece(
+        piece.label,
+        sample,
+        piece.sourceSectionIndex,
+        false,
+        piece.level,
+      )) break
+    }
+    console.log(
+      '[Kaika][AI outline] spine units=', spinePieces.length,
+      'perUnitChars=', perPieceChars,
+      'markerChars=', markerChars,
     )
   }
   console.log(

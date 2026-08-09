@@ -110,12 +110,13 @@ class WebDavClient {
         ? createLenientRemoteClient()
         : _clientFactory();
     try {
-      final request = http.Request('GET', Uri.parse(url));
+      final uri = Uri.parse(url);
+      final request = http.Request('GET', uri);
       _applyCredentials(request, credentials);
       final response = await client.send(request).timeout(_timeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.stream.drain<void>();
-        throw RemoteProtocolException(_statusMessage(response.statusCode));
+        throw _protocolError('GET', uri, response.statusCode);
       }
       yield* response.stream;
     } finally {
@@ -136,11 +137,11 @@ class WebDavClient {
     final response = await client.send(request).timeout(_timeout);
     if (response.statusCode == 401 || response.statusCode == 403) {
       await response.stream.drain<void>();
-      throw const RemoteProtocolException('认证失败，请检查用户名和密码');
+      throw _protocolError('PROPFIND', uri, response.statusCode);
     }
     if (response.statusCode != 207) {
       await response.stream.drain<void>();
-      throw RemoteProtocolException(_statusMessage(response.statusCode));
+      throw _protocolError('PROPFIND', uri, response.statusCode);
     }
     final body = await _readBody(response).timeout(_timeout);
     return _parse(body, baseUri: uri);
@@ -206,6 +207,10 @@ class WebDavClient {
     http.BaseRequest request,
     RemoteCredentials credentials,
   ) {
+    // Authentication must never be replayed to a redirect target. WebDAV
+    // endpoints are configured explicitly; redirects are treated as protocol
+    // errors and can be corrected in the saved connection URL.
+    request.followRedirects = false;
     if (credentials.isEmpty) return;
     request.headers['Authorization'] =
         'Basic ${base64Encode(utf8.encode('${credentials.username}:${credentials.password}'))}';
@@ -247,7 +252,26 @@ class WebDavClient {
     final decoded = Uri.decodeFull(value.trim());
     final parsed = Uri.tryParse(decoded);
     if (parsed == null) return null;
-    return parsed.hasScheme ? parsed : base.resolveUri(parsed);
+    final resolved = parsed.hasScheme ? parsed : base.resolveUri(parsed);
+    if (resolved.userInfo.isNotEmpty ||
+        resolved.query.isNotEmpty ||
+        resolved.fragment.isNotEmpty ||
+        resolved.scheme.toLowerCase() != base.scheme.toLowerCase() ||
+        resolved.host.toLowerCase() != base.host.toLowerCase() ||
+        resolved.port != base.port) {
+      return null;
+    }
+    final baseSegments = base.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    final resolvedSegments = resolved.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (resolvedSegments.length < baseSegments.length) return null;
+    for (var index = 0; index < baseSegments.length; index++) {
+      if (resolvedSegments[index] != baseSegments[index]) return null;
+    }
+    return resolved;
   }
 
   bool _sameResource(Uri left, Uri right) {
@@ -316,7 +340,27 @@ class WebDavClient {
     }
   }
 
-  static String _statusMessage(int status) => '服务器返回 HTTP $status';
+  static String _statusMessage(int status) => switch (status) {
+    401 || 403 => '认证失败，请检查用户名和密码',
+    404 => '没有找到远程目录，请检查地址',
+    409 => '远程路径冲突，请检查备份目录后重试',
+    413 => '文件过大，服务器无法接收',
+    429 => '服务器请求较多，请稍后重试',
+    >= 500 => '远程服务器暂时不可用，请稍后重试',
+    _ => '远程服务器未能完成请求，请稍后重试',
+  };
+
+  static RemoteProtocolException _protocolError(
+    String method,
+    Uri uri,
+    int statusCode, {
+    String? message,
+  }) => RemoteProtocolException(
+    message ?? _statusMessage(statusCode),
+    method: method,
+    uri: uri,
+    statusCode: statusCode,
+  );
 
   static String _friendlyError(Object error) {
     final text = error.toString().toLowerCase();
@@ -329,12 +373,26 @@ class WebDavClient {
 }
 
 class RemoteProtocolException implements Exception {
-  const RemoteProtocolException(this.message);
+  const RemoteProtocolException(
+    this.message, {
+    this.method,
+    this.uri,
+    this.statusCode,
+  });
 
   final String message;
+  final String? method;
+  final Uri? uri;
+  final int? statusCode;
 
   @override
-  String toString() => message;
+  String toString() {
+    final details = <String>[];
+    if (method case final value?) details.add(value);
+    if (uri case final value?) details.add(value.path);
+    if (statusCode case final value?) details.add('HTTP $value');
+    return details.isEmpty ? message : '$message [${details.join(' ')}]';
+  }
 }
 
 const _propfindBody = '''<?xml version="1.0" encoding="utf-8"?>
@@ -367,14 +425,82 @@ class WebDavSession {
 
   Future<void> makeCollection(Uri uri) async {
     final response = await _send(http.Request('MKCOL', uri));
-    // 405 means the collection already exists, which is the desired result
-    // for an idempotent directory ensure operation.
-    if ((response.statusCode < 200 || response.statusCode >= 300) &&
-        response.statusCode != 405) {
-      await response.stream.drain<void>();
-      throw RemoteProtocolException(_statusMessage(response.statusCode));
-    }
+    final status = response.statusCode;
     await response.stream.drain<void>();
+    if (status >= 200 && status < 300) return;
+
+    // RFC 4918 uses 405 for an existing collection. Some providers return
+    // 409 instead, so verify the resource type before deciding whether the
+    // idempotent ensure succeeded. This also prevents an existing ordinary
+    // file from being mistaken for a directory.
+    if (status == 405 || status == 409) {
+      final kind = await _resourceKind(uri);
+      if (kind == _WebDavResourceKind.collection) return;
+      if (kind == _WebDavResourceKind.other) {
+        throw WebDavClient._protocolError(
+          'MKCOL',
+          uri,
+          status,
+          message: '远程路径与同名文件冲突，请选择其他备份目录',
+        );
+      }
+      if (status == 409) {
+        throw WebDavClient._protocolError(
+          'MKCOL',
+          uri,
+          status,
+          message: '无法创建远程文件夹，请确认上级目录仍然存在后重试',
+        );
+      }
+    }
+    throw WebDavClient._protocolError('MKCOL', uri, status);
+  }
+
+  /// Reads the exact resource type without listing child entries.
+  Future<_WebDavResourceKind> _resourceKind(Uri uri) async {
+    final request = http.Request('PROPFIND', uri)
+      ..headers['Depth'] = '0'
+      ..headers['Content-Type'] = 'application/xml; charset=utf-8'
+      ..body = _propfindBody;
+    final response = await _send(request);
+    final status = response.statusCode;
+    if (status == 404 || status == 410) {
+      await response.stream.drain<void>();
+      return _WebDavResourceKind.absent;
+    }
+    if (status != 200 && status != 207) {
+      await response.stream.drain<void>();
+      throw WebDavClient._protocolError('PROPFIND', uri, status);
+    }
+
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in response.stream) {
+      if (bytes.length + chunk.length > WebDavClient._maxXmlBytes) {
+        throw WebDavClient._protocolError(
+          'PROPFIND',
+          uri,
+          status,
+          message: '远程服务器返回的目录信息过大，请更换备份目录',
+        );
+      }
+      bytes.add(chunk);
+    }
+    try {
+      final document = XmlDocument.parse(utf8.decode(bytes.takeBytes()));
+      final isCollection = document.descendants.whereType<XmlElement>().any(
+        (element) => element.name.local == 'collection',
+      );
+      return isCollection
+          ? _WebDavResourceKind.collection
+          : _WebDavResourceKind.other;
+    } catch (_) {
+      throw WebDavClient._protocolError(
+        'PROPFIND',
+        uri,
+        status,
+        message: '远程服务器返回了无法识别的目录信息，请重新选择备份目录',
+      );
+    }
   }
 
   Future<WebDavStat?> stat(Uri uri) async {
@@ -383,7 +509,7 @@ class WebDavSession {
     await response.stream.drain<void>();
     if (status == 404 || status == 410) return null;
     if (status < 200 || status >= 300) {
-      throw RemoteProtocolException(_statusMessage(status));
+      throw WebDavClient._protocolError('HEAD', uri, status);
     }
     return WebDavStat(
       uri: uri,
@@ -424,7 +550,7 @@ class WebDavSession {
     final response = await responseFuture;
     if (response.statusCode < 200 || response.statusCode >= 300) {
       await response.stream.drain<void>();
-      throw RemoteProtocolException(_statusMessage(response.statusCode));
+      throw WebDavClient._protocolError('PUT', uri, response.statusCode);
     }
     await response.stream.drain<void>();
   }
@@ -433,7 +559,7 @@ class WebDavSession {
     final response = await _send(http.Request('GET', uri));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       await response.stream.drain<void>();
-      throw RemoteProtocolException(_statusMessage(response.statusCode));
+      throw WebDavClient._protocolError('GET', uri, response.statusCode);
     }
     yield* response.stream;
   }
@@ -449,7 +575,7 @@ class WebDavSession {
     final response = await _send(request);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       await response.stream.drain<void>();
-      throw RemoteProtocolException(_statusMessage(response.statusCode));
+      throw WebDavClient._protocolError('MOVE', source, response.statusCode);
     }
     await response.stream.drain<void>();
   }
@@ -459,7 +585,7 @@ class WebDavSession {
     if (response.statusCode != 404 &&
         (response.statusCode < 200 || response.statusCode >= 300)) {
       await response.stream.drain<void>();
-      throw RemoteProtocolException(_statusMessage(response.statusCode));
+      throw WebDavClient._protocolError('DELETE', uri, response.statusCode);
     }
     await response.stream.drain<void>();
   }
@@ -471,6 +597,7 @@ class WebDavSession {
   }
 
   void _applyCredentials(http.BaseRequest request) {
+    request.followRedirects = false;
     if (credentials.isEmpty) return;
     request.headers['Authorization'] =
         'Basic ${base64Encode(utf8.encode('${credentials.username}:${credentials.password}'))}';
@@ -482,9 +609,9 @@ class WebDavSession {
     }
     return null;
   }
-
-  static String _statusMessage(int status) => '服务器返回 HTTP $status';
 }
+
+enum _WebDavResourceKind { absent, collection, other }
 
 class WebDavStat {
   const WebDavStat({

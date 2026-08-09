@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'ai_chat.dart';
 import 'ai_chat_retrieve.dart';
@@ -43,11 +44,18 @@ class AiChatService {
   static const maxHistoryTotalChars = 24000;
 
   static const maxToolRounds = 4;
+  static const maxToolContextChars = 48000;
+  static const maxToolRoundChars = 18000;
 
-  /// Per-turn streaming budget. Large enough for a complete prose answer
-  /// (a no-tools turn streams straight to the user) and for tool-call fences;
-  /// a fence stops its stream early once the closing fence arrives.
-  static const toolIntentProbeMaxTokens = 2000;
+  /// Per-call answer budget. A tool fence normally finishes much earlier; a
+  /// prose answer that reaches this limit is continued automatically.
+  static const answerMaxTokens = 4096;
+  static const toolIntentProbeMaxTokens = answerMaxTokens;
+
+  /// Safety valve, not a product length limit. Eight continuation calls plus
+  /// the initial call covers very long outlines while preventing a broken
+  /// provider/model from continuing forever.
+  static const maxAnswerContinuationRounds = 8;
   static const maxSuggestedQuestionAnswerChars = 6000;
 
   bool get isAvailable => isAvailableFn();
@@ -194,10 +202,12 @@ class AiChatService {
     // runs its tools; anything else is prose and flows to the user live. The
     // model is never asked to answer twice (the old probe-then-restream design
     // made the second ask return empty or malformed/JSON content).
-    const fenceHead = '```kaijuan_tools';
+    const fenceHead = AiChatTools.protocolFenceHead;
     if (tools != null) {
+      var remainingToolChars = maxToolContextChars;
       for (var round = 0; round < maxToolRounds; round++) {
         cancelToken?.throwIfCancelled();
+        if (remainingToolChars <= 0) break;
         AiLog.d('chat tool round=${round + 1}/$maxToolRounds');
 
         final rawBuf = StringBuffer();
@@ -205,7 +215,9 @@ class AiChatService {
         var decided = false;
         var isToolTurn = false;
         var fenceComplete = false;
-        await for (final chunk in provider.stream(
+        var streamTruncated = false;
+        await for (final chunk in streamWithRetryBeforeFirstText(
+          provider,
           AiCompletionRequest(
             messages: working,
             maxTokens: toolIntentProbeMaxTokens,
@@ -213,6 +225,7 @@ class AiChatService {
           ),
           cancelToken: cancelToken,
         )) {
+          if (chunk.truncated) streamTruncated = true;
           if (chunk.text.isNotEmpty) {
             rawBuf.write(chunk.text);
             final raw = rawBuf.toString();
@@ -253,23 +266,68 @@ class AiChatService {
             onToolStatus?.call(null);
             final cleaned = AiChatTools.stripToolProtocol(rawText).trim();
             if (cleaned.isNotEmpty) yield cleaned;
+            if (streamTruncated) {
+              await for (final continued in _continueTruncatedProse(
+                provider: provider,
+                baseMessages: working,
+                partial: cleaned,
+                cancelToken: cancelToken,
+                onStatus: onToolStatus,
+              )) {
+                yield continued;
+              }
+            }
             return;
           }
-        } else if (!isToolTurn) {
-          // Prose streamed live above — done, unless it came out empty.
+        } else if (!isToolTurn &&
+            !AiChatTools.containsToolProtocolAttempt(rawText)) {
+          // Plain prose streamed live above — done, unless it came out empty.
+          // A later embedded/dangling protocol marker takes the repair path
+          // below instead of being persisted as a completed answer.
           onToolStatus?.call(null);
-          if (proseBuf.toString().trim().isNotEmpty) return;
+          if (proseBuf.toString().trim().isNotEmpty) {
+            if (streamTruncated) {
+              await for (final continued in _continueTruncatedProse(
+                provider: provider,
+                baseMessages: working,
+                partial: proseBuf.toString(),
+                cancelToken: cancelToken,
+                onStatus: onToolStatus,
+              )) {
+                yield continued;
+              }
+            }
+            return;
+          }
           break;
         }
 
         var fenceText = rawText;
         var calls = AiChatTools.parseCalls(fenceText);
-        // Fence truncated/malformed → one non-streaming re-probe, as before.
+        // A truncated or non-standalone fence is never executed. Give the
+        // model one constrained chance to restate this turn as either one
+        // valid standalone fence or plain prose.
         if (calls.isEmpty) {
+          final repairMessages = <AiMessage>[
+            ...working,
+            AiMessage(
+              role: AiMessageRole.assistant,
+              content: _clip(fenceText, 2000),
+            ),
+            const AiMessage(
+              role: AiMessageRole.user,
+              content:
+                  'The previous assistant turn contained an invalid, '
+                  'incomplete, or non-standalone tool protocol attempt. '
+                  'Retry that turn now. If a tool is needed, output ONLY one '
+                  'complete ```kaijuan_tools fenced JSON block. Otherwise '
+                  'answer in normal prose without any tool protocol marker.',
+            ),
+          ];
           fenceText = (await completeWithRetry(
             provider,
             AiCompletionRequest(
-              messages: working,
+              messages: repairMessages,
               maxTokens: 900,
               temperature: 0.2,
             ),
@@ -277,13 +335,33 @@ class AiChatService {
           )).text.trim();
           calls = AiChatTools.parseCalls(fenceText);
           if (calls.isEmpty || !AiChatTools.looksLikeToolTurn(fenceText)) {
-            break;
+            final cleaned = AiChatTools.stripToolProtocol(fenceText).trim();
+            if (cleaned.isNotEmpty &&
+                !AiChatTools.containsToolProtocolAttempt(fenceText)) {
+              onToolStatus?.call(null);
+              yield cleaned;
+              return;
+            }
+            // Clear any already-shown preface so the UI cannot save it as a
+            // successful assistant answer when the repair also failed.
+            if (proseBuf.toString().trim().isNotEmpty) yield '';
+            throw AiProviderException('模型工具调用格式不完整，请重试');
           }
         }
 
+        // A malformed attempt may already have streamed a prose preface. The
+        // stream contract is a replaceable snapshot, so clear it before the
+        // repaired standalone tool call runs.
+        if (proseBuf.toString().trim().isNotEmpty) yield '';
         AiLog.d('chat tools: ${calls.map((c) => c.name).join(', ')}');
         onToolStatus?.call(AiChatTools.describeCalls(calls));
-        final observation = await AiChatTools.runAll(calls, tools);
+        final observation = await AiChatTools.runAll(
+          calls,
+          tools,
+          maxTotalChars: math.min(maxToolRoundChars, remainingToolChars),
+          cancelToken: cancelToken,
+        );
+        remainingToolChars -= observation.length;
         working.add(
           AiMessage(
             role: AiMessageRole.assistant,
@@ -308,17 +386,20 @@ class AiChatService {
 
     final request = AiCompletionRequest(
       messages: working,
-      maxTokens: 2000,
+      maxTokens: answerMaxTokens,
       temperature: 0.45,
     );
 
     final rawBuffer = StringBuffer();
     final buffer = StringBuffer();
     var sawChunk = false;
-    await for (final chunk in provider.stream(
+    var streamTruncated = false;
+    await for (final chunk in streamWithRetryBeforeFirstText(
+      provider,
       request,
       cancelToken: cancelToken,
     )) {
+      if (chunk.truncated) streamTruncated = true;
       if (chunk.text.isNotEmpty) {
         sawChunk = true;
         rawBuffer.write(chunk.text);
@@ -331,6 +412,22 @@ class AiChatService {
         }
       }
       if (chunk.isFinal) break;
+    }
+    if (AiChatTools.containsToolProtocolAttempt(rawBuffer.toString())) {
+      if (buffer.toString().trim().isNotEmpty) yield '';
+      throw AiProviderException('模型工具调用格式不完整，请重试');
+    }
+    if (streamTruncated) {
+      await for (final continued in _continueTruncatedProse(
+        provider: provider,
+        baseMessages: working,
+        partial: buffer.toString(),
+        cancelToken: cancelToken,
+        onStatus: onToolStatus,
+      )) {
+        yield continued;
+      }
+      return;
     }
     if (!sawChunk || buffer.toString().trim().isEmpty) {
       final once = await completeWithRetry(
@@ -348,7 +445,100 @@ class AiChatService {
         throw AiProviderException('模型未给出正文回答，请重试');
       }
       yield cleaned;
+      if (once.truncated) {
+        await for (final continued in _continueTruncatedProse(
+          provider: provider,
+          baseMessages: working,
+          partial: cleaned,
+          cancelToken: cancelToken,
+          onStatus: onToolStatus,
+        )) {
+          yield continued;
+        }
+      }
     }
+  }
+
+  Stream<String> _continueTruncatedProse({
+    required AiProvider provider,
+    required List<AiMessage> baseMessages,
+    required String partial,
+    CancelToken? cancelToken,
+    void Function(String? status)? onStatus,
+  }) async* {
+    var assembled = partial;
+    try {
+      for (var round = 1; round <= maxAnswerContinuationRounds; round++) {
+        cancelToken?.throwIfCancelled();
+        onStatus?.call('正在续写…');
+        AiLog.d(
+          'chat continuation round=$round/$maxAnswerContinuationRounds '
+          'chars=${assembled.length}',
+        );
+
+        final raw = StringBuffer();
+        var truncated = false;
+        await for (final chunk in streamWithRetryBeforeFirstText(
+          provider,
+          AiCompletionRequest(
+            messages: [
+              ...baseMessages,
+              AiMessage(role: AiMessageRole.assistant, content: assembled),
+              const AiMessage(
+                role: AiMessageRole.user,
+                content:
+                    'Continue the previous answer exactly from where it '
+                    'stopped. Output only the continuation. Do not repeat '
+                    'completed text, headings, table headers, or rows. Do '
+                    'not call tools and do not comment on the continuation.',
+              ),
+            ],
+            maxTokens: answerMaxTokens,
+            temperature: 0.35,
+          ),
+          cancelToken: cancelToken,
+        )) {
+          if (chunk.truncated) truncated = true;
+          if (chunk.text.isNotEmpty) {
+            raw.write(chunk.text);
+            final continuation = AiChatTools.stripToolProtocol(raw.toString());
+            if (continuation.isNotEmpty) {
+              yield _stitchContinuation(assembled, continuation);
+            }
+          }
+          if (chunk.isFinal) break;
+        }
+
+        final rawText = raw.toString();
+        if (AiChatTools.containsToolProtocolAttempt(rawText)) {
+          throw AiProviderException('自动续写返回了无效内容，已保留生成的部分');
+        }
+        final continuation = AiChatTools.stripToolProtocol(rawText);
+        if (continuation.trim().isEmpty) {
+          throw AiProviderException('自动续写没有返回内容，已保留生成的部分');
+        }
+        assembled = _stitchContinuation(assembled, continuation);
+        if (!truncated) return;
+      }
+      throw AiProviderException('回答很长，自动续写多次后仍未结束，已保留生成内容');
+    } finally {
+      onStatus?.call(null);
+    }
+  }
+
+  static String _stitchContinuation(String current, String continuation) {
+    if (current.isEmpty) return continuation;
+    if (continuation.isEmpty) return current;
+    final maxOverlap = math.min(
+      800,
+      math.min(current.length, continuation.length),
+    );
+    for (var overlap = maxOverlap; overlap >= 2; overlap--) {
+      if (current.endsWith(continuation.substring(0, overlap))) {
+        return '$current${continuation.substring(overlap)}';
+      }
+    }
+    return '$current$continuation';
   }
 
   /// Lean bootstrap: metadata + current chapter + selection + tool catalog.
@@ -400,12 +590,12 @@ class AiChatService {
         ..writeln()
         ..writeln(
           'Scope: this book is a collection (or volume set) of several '
-          'independent works. The reader is in ONE work: 《$scopeLabel》. '
-          'Every tool result, the TOC, and any quoted body text are already '
+          'independent works. The reader is in ONE work identified inside '
+          '<untrusted_context>. Every tool result, the TOC, and any quoted body text are already '
           'trimmed to that work\'s range.',
         )
         ..writeln(
-          '- "这本书 / 整本书 / 全书" refers to 《$scopeLabel》 alone — never '
+          '- "这本书 / 整本书 / 全书" refers to that scoped work alone — never '
           'summarize or enumerate the whole collection or its other works.',
         )
         ..writeln(
@@ -439,8 +629,25 @@ class AiChatService {
         '- Without web results, label external knowledge as 「补充说明」 and never claim real-time search.',
       )
       ..writeln()
+      ..writeln('Answer presentation:')
       ..writeln(
-        'After enough context, answer in normal prose only. Never output a tool fence or tool-call JSON in the final answer.',
+        '- Use GitHub-flavored Markdown when structure helps: headings, lists, tables, task lists, quotes, footnotes, and fenced code.',
+      )
+      ..writeln(
+        '- When the user asks for a mind map or another diagram, output one complete standalone ```mermaid fenced block. Use Mermaid mindmap syntax for a mind map; do not imitate one with box-drawing characters.',
+      )
+      ..writeln(
+        '- Put math in LaTeX delimiters: inline \$...\$ or display \$\$...\$\$.',
+      )
+      ..writeln(
+        '- For a data chart, use a ```chart fenced JSON object with type (bar, line, or pie), labels, and series. Keep explanatory prose outside the fence.',
+      )
+      ..writeln(
+        '- Never emit raw HTML, JavaScript, SVG, iframe, or a remote image unless the user explicitly asks for that image.',
+      )
+      ..writeln()
+      ..writeln(
+        'After enough context, answer normally using the presentation formats above. Never output a kaijuan_tools fence or tool-call JSON in the final answer.',
       );
 
     final contextPayload = StringBuffer()
@@ -533,6 +740,7 @@ class AiChatService {
     final usable = history
         .where(
           (m) =>
+              m.status == AiChatTurnStatus.completed &&
               (m.role == AiMessageRole.user ||
                   m.role == AiMessageRole.assistant) &&
               m.content.trim().isNotEmpty,

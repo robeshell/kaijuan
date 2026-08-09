@@ -127,8 +127,7 @@ Future<void> showComicThumbnailsSheet(
                                                   fontSize: context
                                                       .appCaptionSmallSize,
                                                   fontFeatures: const [
-                                                    FontFeature
-                                                        .tabularFigures(),
+                                                    FontFeature.tabularFigures(),
                                                   ],
                                                 ),
                                               ),

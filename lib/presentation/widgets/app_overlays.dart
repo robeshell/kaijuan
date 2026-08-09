@@ -68,8 +68,9 @@ class AppIconButton extends StatelessWidget {
       visualDensity: visualDensity,
       style: IconButton.styleFrom(
         foregroundColor: color ?? secondary,
-        disabledForegroundColor:
-            secondary.withValues(alpha: appDisabledForegroundOpacity),
+        disabledForegroundColor: secondary.withValues(
+          alpha: appDisabledForegroundOpacity,
+        ),
       ),
       icon: Icon(icon, size: size, weight: AppIcons.weight),
     );
@@ -110,6 +111,7 @@ Future<bool?> showAppConfirmDialog(
 }) {
   return showDialog<bool>(
     context: context,
+    anchorPoint: appTrailingBottomOverlayAnchor(context),
     barrierColor: appDialogBarrierColor(context),
     builder: (ctx) => AppAlertDialog(
       title: title,
@@ -140,6 +142,7 @@ Future<String?> showAppTextPrompt(
 }) {
   return showDialog<String>(
     context: context,
+    anchorPoint: appTrailingBottomOverlayAnchor(context),
     barrierColor: appDialogBarrierColor(context),
     builder: (ctx) => _AppTextPromptDialog(
       title: title,
@@ -172,6 +175,7 @@ Future<T?> showAppChoiceDialog<T>(
 }) {
   return showDialog<T>(
     context: context,
+    anchorPoint: appTrailingBottomOverlayAnchor(context),
     barrierColor: appDialogBarrierColor(context),
     builder: (dialogContext) => AppDialog(
       maxWidth: 360,
@@ -350,12 +354,14 @@ Future<T?> showAppSheet<T>({
   required WidgetBuilder builder,
   bool isScrollControlled = false,
   bool useRootNavigator = false,
+  Offset? anchorPoint,
 }) {
   return showAppBottomSheet<T>(
     context,
     builder: builder,
     isScrollControlled: isScrollControlled,
     useRootNavigator: useRootNavigator,
+    anchorPoint: anchorPoint,
   );
 }
 

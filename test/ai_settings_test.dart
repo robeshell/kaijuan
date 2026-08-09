@@ -1,13 +1,17 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider.dart';
+import 'package:kaijuan/ai/ai_provider_factory.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
+import 'package:kaijuan/ai/ai_settings_store.dart';
 import 'package:kaijuan/ai/ai_translation.dart';
 import 'package:kaijuan/ai/anthropic_provider.dart';
 import 'package:kaijuan/ai/openai_compatible_provider.dart';
@@ -91,6 +95,23 @@ void main() {
       const cloud = AiSettings(providerKind: AiProviderKind.openai);
       expect(cloud.requiresApiKey, isTrue);
     });
+
+    test('plaintext endpoints are limited to no-key loopback backends', () {
+      const cloud = AiSettings(
+        providerKind: AiProviderKind.custom,
+        baseUrl: 'http://api.example.com/v1',
+        model: 'model',
+      );
+      expect(cloud.hasValidEndpoint, isFalse);
+      expect(cloud.endpointValidationError, contains('HTTPS'));
+
+      const local = AiSettings(
+        providerKind: AiProviderKind.ollama,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: 'llama3.2',
+      );
+      expect(local.hasValidEndpoint, isTrue);
+    });
   });
 
   group('AiSettings', () {
@@ -167,6 +188,20 @@ void main() {
       expect(restored.searchProviderKind, AiSearchProviderKind.brave);
       expect(jsonEncode(settings.toJson()), isNot(contains('sk-')));
     });
+
+    test('json store recovers the previous atomic generation', () async {
+      final directory = await Directory.systemTemp.createTemp('ai-settings-');
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/ai_settings.json');
+      final store = JsonAiSettingsStore(file);
+      await store.write(const AiSettings(enabled: false));
+      await store.write(const AiSettings(enabled: true));
+      await file.writeAsString('{broken', flush: true);
+
+      final recovered = await store.read();
+
+      expect(recovered.enabled, isFalse);
+    });
   });
 
   group('search credentials', () {
@@ -181,6 +216,7 @@ void main() {
       expect(controller.isSearchReady, isFalse);
 
       await controller.setSearchApiKey('tvly-test-key');
+      await controller.setEnabled(true);
       expect(controller.isSearchReady, isTrue);
       expect(controller.searchApiKey, 'tvly-test-key');
       expect(
@@ -219,10 +255,7 @@ void main() {
     });
 
     test('keeps short free-form questions', () {
-      final q = buildAiWebSearchQuery(
-        userText: '张居正父亲叫什么',
-        bookTitle: '万历十五年',
-      );
+      final q = buildAiWebSearchQuery(userText: '张居正父亲叫什么', bookTitle: '万历十五年');
       expect(q, contains('张居正父亲叫什么'));
       expect(q, contains('万历十五年'));
     });
@@ -262,9 +295,11 @@ void main() {
     });
 
     test('empty key throws', () async {
-      final service = AiWebSearchService(client: MockClient((_) async {
-        fail('should not request');
-      }));
+      final service = AiWebSearchService(
+        client: MockClient((_) async {
+          fail('should not request');
+        }),
+      );
       expect(
         () => service.search(
           provider: AiSearchProviderKind.tavily,
@@ -274,12 +309,95 @@ void main() {
         throwsA(isA<AiProviderException>()),
       );
     });
+
+    test(
+      'cancel ends a pending search without waiting for the response',
+      () async {
+        final response = Completer<http.Response>();
+        final service = AiWebSearchService(
+          client: MockClient((_) => response.future),
+        );
+        final cancel = CancelToken();
+        final pending = service.search(
+          provider: AiSearchProviderKind.tavily,
+          apiKey: 'key',
+          query: 'query',
+          cancelToken: cancel,
+        );
+
+        cancel.cancel();
+
+        await expectLater(
+          pending.timeout(const Duration(seconds: 1)),
+          throwsA(isA<AiProviderException>()),
+        );
+        response.complete(http.Response('{"results":[]}', 200));
+      },
+    );
   });
 
   group('OpenAiCompatibleAiProvider', () {
+    test('cancel aborts an in-flight completion immediately', () async {
+      final client = _AbortableClient();
+      final provider = OpenAiCompatibleAiProvider(
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        model: 'gpt-4o-mini',
+        client: client,
+      );
+      final cancel = CancelToken();
+      final pending = provider.complete(
+        const AiCompletionRequest(
+          messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
+          timeout: Duration(seconds: 120),
+        ),
+        cancelToken: cancel,
+      );
+      await client.started.future;
+
+      cancel.cancel();
+
+      await expectLater(
+        pending.timeout(const Duration(seconds: 1)),
+        throwsA(isA<StateError>()),
+      );
+      expect(client.closed, isTrue);
+    });
+
+    test('cancel aborts an in-flight stream immediately', () async {
+      final client = _AbortableClient();
+      final provider = OpenAiCompatibleAiProvider(
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        model: 'gpt-4o-mini',
+        client: client,
+      );
+      final cancel = CancelToken();
+      final pending = provider
+          .stream(
+            const AiCompletionRequest(
+              messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
+            ),
+            cancelToken: cancel,
+          )
+          .drain<void>();
+      await client.started.future;
+
+      cancel.cancel();
+
+      await expectLater(
+        pending.timeout(const Duration(seconds: 1)),
+        throwsA(isA<StateError>()),
+      );
+      expect(client.closed, isTrue);
+    });
+
     test('complete parses chat completions payload', () async {
       final client = MockClient((request) async {
-        expect(request.url.toString(), 'https://api.openai.com/v1/chat/completions');
+        expect(
+          request.url.toString(),
+          'https://api.openai.com/v1/chat/completions',
+        );
         expect(request.headers['Authorization'], 'Bearer test-key');
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         expect(body['stream'], isFalse);
@@ -312,6 +430,69 @@ void main() {
       expect(result.text, 'ok');
     });
 
+    test('stream reports a length-truncated terminal chunk', () async {
+      final client = MockClient((request) async {
+        return http.Response(
+          'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n'
+          'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
+          200,
+          headers: {'content-type': 'text/event-stream'},
+        );
+      });
+      final provider = OpenAiCompatibleAiProvider(
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        model: 'gpt-4o-mini',
+        client: client,
+      );
+
+      final chunks = await provider
+          .stream(
+            const AiCompletionRequest(
+              messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
+            ),
+          )
+          .toList();
+
+      expect(chunks.first.text, 'partial');
+      expect(chunks.last.isFinal, isTrue);
+      expect(chunks.last.truncated, isTrue);
+    });
+
+    test('stream rejects EOF without a protocol completion event', () async {
+      final provider = OpenAiCompatibleAiProvider(
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        model: 'gpt-4o-mini',
+        client: MockClient(
+          (_) async => http.Response(
+            'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n',
+            200,
+            headers: {'content-type': 'text/event-stream'},
+          ),
+        ),
+      );
+
+      await expectLater(
+        provider
+            .stream(
+              const AiCompletionRequest(
+                messages: [
+                  AiMessage(role: AiMessageRole.user, content: 'ping'),
+                ],
+              ),
+            )
+            .drain<void>(),
+        throwsA(
+          isA<AiProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('意外中断'),
+          ),
+        ),
+      );
+    });
+
     test('openai multiparts and anthropic text blocks parse', () {
       expect(
         OpenAiCompatibleAiProvider.extractMessageText({
@@ -337,40 +518,43 @@ void main() {
       );
     });
 
-    test('deepseek disables thinking and reads reasoning_content fallback', () async {
-      final client = MockClient((request) async {
-        final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['thinking'], {'type': 'disabled'});
-        return http.Response(
-          jsonEncode({
-            'choices': [
-              {
-                'finish_reason': 'stop',
-                'message': {
-                  'role': 'assistant',
-                  'content': null,
-                  'reasoning_content': 'ok from reasoning',
+    test(
+      'deepseek disables thinking and reads reasoning_content fallback',
+      () async {
+        final client = MockClient((request) async {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['thinking'], {'type': 'disabled'});
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'finish_reason': 'stop',
+                  'message': {
+                    'role': 'assistant',
+                    'content': null,
+                    'reasoning_content': 'ok from reasoning',
+                  },
                 },
-              },
-            ],
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        });
+        final provider = OpenAiCompatibleAiProvider(
+          baseUrl: 'https://api.deepseek.com/v1',
+          apiKey: 'k',
+          model: 'deepseek-v4-flash',
+          client: client,
         );
-      });
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.deepseek.com/v1',
-        apiKey: 'k',
-        model: 'deepseek-v4-flash',
-        client: client,
-      );
-      final result = await provider.complete(
-        const AiCompletionRequest(
-          messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-        ),
-      );
-      expect(result.text, 'ok from reasoning');
-    });
+        final result = await provider.complete(
+          const AiCompletionRequest(
+            messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
+          ),
+        );
+        expect(result.text, 'ok from reasoning');
+      },
+    );
 
     test('listModels filters non-chat ids', () async {
       final client = MockClient((request) async {
@@ -423,7 +607,7 @@ void main() {
           isA<AiProviderException>().having(
             (e) => e.message,
             'message',
-            contains('Incorrect API key'),
+            'API Key 无效或没有访问权限，请检查设置',
           ),
         ),
       );
@@ -431,6 +615,61 @@ void main() {
   });
 
   group('AnthropicAiProvider', () {
+    test('cancel aborts an in-flight completion immediately', () async {
+      final client = _AbortableClient();
+      final provider = AnthropicAiProvider(
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'anth-key',
+        model: 'claude-sonnet-4-5',
+        client: client,
+      );
+      final cancel = CancelToken();
+      final pending = provider.complete(
+        const AiCompletionRequest(
+          messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
+          timeout: Duration(seconds: 120),
+        ),
+        cancelToken: cancel,
+      );
+      await client.started.future;
+
+      cancel.cancel();
+
+      await expectLater(
+        pending.timeout(const Duration(seconds: 1)),
+        throwsA(isA<StateError>()),
+      );
+      expect(client.closed, isTrue);
+    });
+
+    test('cancel aborts an in-flight stream immediately', () async {
+      final client = _AbortableClient();
+      final provider = AnthropicAiProvider(
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'anth-key',
+        model: 'claude-sonnet-4-5',
+        client: client,
+      );
+      final cancel = CancelToken();
+      final pending = provider
+          .stream(
+            const AiCompletionRequest(
+              messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
+            ),
+            cancelToken: cancel,
+          )
+          .drain<void>();
+      await client.started.future;
+
+      cancel.cancel();
+
+      await expectLater(
+        pending.timeout(const Duration(seconds: 1)),
+        throwsA(isA<StateError>()),
+      );
+      expect(client.closed, isTrue);
+    });
+
     test('complete uses messages endpoint and x-api-key', () async {
       final client = MockClient((request) async {
         expect(request.url.toString(), 'https://api.anthropic.com/v1/messages');
@@ -465,6 +704,70 @@ void main() {
         ),
       );
       expect(result.text, 'hello');
+    });
+
+    test(
+      'stream surfaces error events instead of completing normally',
+      () async {
+        final client = MockClient((request) async {
+          return http.Response(
+            'data: {"type":"error","error":{"message":"overloaded"}}\n\n',
+            200,
+            headers: {'content-type': 'text/event-stream'},
+          );
+        });
+        final provider = AnthropicAiProvider(
+          baseUrl: 'https://api.anthropic.com',
+          apiKey: 'anth-key',
+          model: 'claude-sonnet-4-5',
+          client: client,
+        );
+
+        expect(
+          provider
+              .stream(
+                const AiCompletionRequest(
+                  messages: [
+                    AiMessage(role: AiMessageRole.user, content: 'Hi'),
+                  ],
+                ),
+              )
+              .drain<void>(),
+          throwsA(
+            isA<AiProviderException>().having(
+              (error) => error.message,
+              'message',
+              'AI 服务返回错误，请稍后重试',
+            ),
+          ),
+        );
+      },
+    );
+
+    test('stream rejects EOF without message_stop', () async {
+      final provider = AnthropicAiProvider(
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'anth-key',
+        model: 'claude-sonnet-4-5',
+        client: MockClient(
+          (_) async => http.Response(
+            'data: {"type":"content_block_delta","delta":{"text":"partial"}}\n\n',
+            200,
+            headers: {'content-type': 'text/event-stream'},
+          ),
+        ),
+      );
+
+      await expectLater(
+        provider
+            .stream(
+              const AiCompletionRequest(
+                messages: [AiMessage(role: AiMessageRole.user, content: 'Hi')],
+              ),
+            )
+            .drain<void>(),
+        throwsA(isA<AiProviderException>()),
+      );
     });
 
     test('listModels parses Anthropic data', () async {
@@ -507,6 +810,68 @@ void main() {
 
       await controller.setApiKey('sk-test');
       expect(controller.isReadyForRequests, isTrue);
+    });
+
+    test('global switch also gates web search readiness', () async {
+      final controller = AiSettingsController(
+        settingsStore: MemoryAiSettingsStore(),
+        credentialStore: MemoryAiCredentialStore(),
+      );
+      await controller.load();
+      await controller.setSearchApiKey('search-key');
+      expect(controller.hasSearchApiKey, isTrue);
+      expect(controller.isSearchReady, isFalse);
+
+      await controller.setEnabled(true);
+      expect(controller.isSearchReady, isTrue);
+      await controller.setEnabled(false);
+      expect(controller.isSearchReady, isFalse);
+    });
+
+    test(
+      'reader AI preference switches persist through the settings store',
+      () async {
+        final settingsStore = MemoryAiSettingsStore();
+        final controller = AiSettingsController(
+          settingsStore: settingsStore,
+          credentialStore: MemoryAiCredentialStore(),
+        );
+        await controller.load();
+
+        await controller.setAllowUnreadContext(true);
+        await controller.updateTranslation(
+          (translation) => translation.copyWith(includeContext: true),
+        );
+
+        final reloaded = AiSettingsController(
+          settingsStore: settingsStore,
+          credentialStore: MemoryAiCredentialStore(),
+        );
+        await reloaded.load();
+        expect(reloaded.settings.allowUnreadContext, isTrue);
+        expect(reloaded.settings.translation.includeContext, isTrue);
+      },
+    );
+
+    test('search connection test cannot bypass the global switch', () async {
+      var requested = false;
+      final controller = AiSettingsController(
+        settingsStore: MemoryAiSettingsStore(),
+        credentialStore: MemoryAiCredentialStore(),
+        searchService: AiWebSearchService(
+          client: MockClient((_) async {
+            requested = true;
+            return http.Response('{"results":[]}', 200);
+          }),
+        ),
+      );
+      await controller.load();
+      await controller.setSearchApiKey('search-key');
+
+      await controller.testSearch();
+
+      expect(requested, isFalse);
+      expect(controller.searchTestMessage, '请先启用 AI');
     });
 
     test('switching preset refreshes default url and model', () async {
@@ -711,14 +1076,32 @@ void main() {
   });
 }
 
+class _AbortableClient extends http.BaseClient {
+  final started = Completer<void>();
+  final _response = Completer<http.StreamedResponse>();
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    if (!started.isCompleted) started.complete();
+    return _response.future;
+  }
+
+  @override
+  void close() {
+    closed = true;
+    if (!_response.isCompleted) {
+      _response.completeError(StateError('request aborted'));
+    }
+  }
+}
+
 class _FakeProviderFactory implements AiProviderFactory {
   _FakeProviderFactory(this.provider);
 
   final AiProvider provider;
 
   @override
-  AiProvider? create({
-    required AiSettings settings,
-    required String apiKey,
-  }) => provider;
+  AiProvider? create({required AiSettings settings, required String apiKey}) =>
+      provider;
 }

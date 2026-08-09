@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../domain/reader_models.dart';
@@ -49,7 +50,8 @@ class ComicImportService {
       } on ImportException catch (e) {
         failures.add(ImportFailure(path: path, reason: e.message));
       } catch (e) {
-        failures.add(ImportFailure(path: path, reason: e.toString()));
+        debugPrint('[Import] comic import failed for $path: $e');
+        failures.add(ImportFailure(path: path, reason: '导入失败，请确认文件完整且格式受支持'));
       }
     }
     return ImportResult(added: added, updated: updated, failures: failures);

@@ -76,8 +76,7 @@ class _ItemDetailBodyState extends State<_ItemDetailBody> {
   }
 
   Future<void> _loadReadingSeconds() async {
-    final seconds =
-        await widget.controller.database.itemReadingSeconds(_item.id);
+    final seconds = await widget.controller.itemReadingSeconds(_item.id);
     if (!mounted) return;
     setState(() => _readingSeconds = seconds);
   }

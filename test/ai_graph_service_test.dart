@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_graph_service.dart';
+import 'package:kaijuan/ai/ai_graph_store.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
@@ -22,14 +23,14 @@ void main() {
   }
 
   group('AiBookGraph serialization', () {
-    test('event type parses both Chinese labels and English wire names',
-        () {
+    test('event type parses both Chinese labels and English wire names', () {
       expect(AiGraphEventType.fromWireName('战斗'), AiGraphEventType.combat);
       expect(AiGraphEventType.fromWireName('combat'), AiGraphEventType.combat);
-      expect(AiGraphEventType.fromWireName('关系变化'),
-          AiGraphEventType.relationship);
-      expect(AiGraphEventType.fromWireName('不存在的类型'),
-          AiGraphEventType.other);
+      expect(
+        AiGraphEventType.fromWireName('关系变化'),
+        AiGraphEventType.relationship,
+      );
+      expect(AiGraphEventType.fromWireName('不存在的类型'), AiGraphEventType.other);
       expect(AiGraphEventType.fromWireName(null), AiGraphEventType.other);
     });
 
@@ -68,105 +69,260 @@ void main() {
       ]);
     });
 
-    test('JSON round-trip preserves graph, entities, relations and evidence',
-        () {
+    test(
+      'JSON round-trip preserves graph, entities, relations and evidence',
+      () {
+        final source = AiBookGraph(
+          contentHash: 'h1',
+          generatedAt: DateTime.utc(2026, 8, 5, 12),
+          model: 'graph-test',
+          includesUnread: false,
+          coveredSections: const [1, 2],
+          sectionTitles: const {2: '第二章'},
+          entities: const [
+            AiGraphEntity(
+              name: '张三',
+              type: AiGraphEntityType.person,
+              aliases: ['三哥'],
+              description: '主角。',
+              evidence: [
+                AiGraphEvidence(
+                  sectionIndex: 1,
+                  quote: '张三进京',
+                  progressInSection: 0.5,
+                  spanResolved: true,
+                ),
+              ],
+              chapterFreq: {1: 1},
+              firstSection: 1,
+              lastSection: 2,
+            ),
+            AiGraphEntity(
+              name: '罗素',
+              type: AiGraphEntityType.person,
+              scope: AiGraphEntityScope.reference,
+              evidence: [AiGraphEvidence(sectionIndex: 2, quote: '如罗素所言')],
+              chapterFreq: {2: 1},
+              firstSection: 2,
+              lastSection: 2,
+            ),
+            AiGraphEntity(
+              name: '城门相争',
+              type: AiGraphEntityType.event,
+              eventType: AiGraphEventType.combat,
+              importance: 3,
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '两军于城门外交战')],
+              chapterFreq: {1: 1},
+              firstSection: 1,
+              lastSection: 1,
+            ),
+          ],
+          relations: const [
+            AiGraphRelation(
+              source: '张三',
+              target: '李四',
+              type: 'meet',
+              description: '在城门相遇。',
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '张三与李四相遇')],
+              weight: 1,
+            ),
+          ],
+        );
+
+        final restored = AiBookGraph.fromJson(source.toJson());
+
+        expect(restored, isNotNull);
+        expect(restored!.contentHash, 'h1');
+        expect(restored.includesUnread, isFalse);
+        expect(restored.coveredSections, [1, 2]);
+        final entity = restored.entities.firstWhere((e) => e.name == '张三');
+        expect(entity.name, '张三');
+        expect(entity.type, AiGraphEntityType.person);
+        expect(entity.scope, AiGraphEntityScope.setting);
+        expect(entity.aliases, ['三哥']);
+        expect(entity.chapterFreq, {1: 1});
+        expect(entity.evidence.single.spanResolved, isTrue);
+        expect(entity.evidence.single.progressInSection, 0.5);
+        final reference = restored.entities.firstWhere((e) => e.name == '罗素');
+        expect(reference.scope, AiGraphEntityScope.reference);
+        final event = restored.entities.firstWhere((e) => e.name == '城门相争');
+        expect(event.eventType, AiGraphEventType.combat);
+        expect(event.importance, 3);
+        expect(restored.sectionTitles, {2: '第二章'});
+        expect(restored.relations.single.mergeKey, contains('meet'));
+      },
+    );
+
+    test('v1 cache migrates to stable entity and relation IDs', () {
       final source = AiBookGraph(
         contentHash: 'h1',
-        generatedAt: DateTime.utc(2026, 8, 5, 12),
-        model: 'graph-test',
-        includesUnread: false,
-        coveredSections: const [1, 2],
-        sectionTitles: const {2: '第二章'},
         entities: const [
+          AiGraphEntity(name: '张三', type: AiGraphEntityType.person),
+          AiGraphEntity(name: '李四', type: AiGraphEntityType.person),
+        ],
+        relations: const [
+          AiGraphRelation(source: '张三', target: '李四', type: '朋友'),
+        ],
+      );
+      final old = {...source.toJson(), 'version': 1};
+      final migrated = AiBookGraph.fromJson(old)!;
+      expect(migrated.entities.every((entity) => entity.id.isNotEmpty), isTrue);
+      expect(migrated.relations.single.sourceId, migrated.entities.first.id);
+      expect(migrated.relations.single.targetId, migrated.entities.last.id);
+    });
+
+    test('duplicate stable IDs are fused when a cached graph is read', () {
+      final personId = graphEntityIdFor(
+        type: AiGraphEntityType.person,
+        name: '海格',
+        identityHint: '猎场看守',
+      );
+      final placeId = graphEntityIdFor(
+        type: AiGraphEntityType.location,
+        name: '霍格沃茨',
+      );
+      final source = AiBookGraph(
+        contentHash: 'h1',
+        qualityIssues: const ['发现 1 个重复实体 ID'],
+        entities: [
           AiGraphEntity(
-            name: '张三',
+            entityId: personId,
+            name: '海格',
             type: AiGraphEntityType.person,
-            aliases: ['三哥'],
-            description: '主角。',
-            evidence: [
-              AiGraphEvidence(
-                sectionIndex: 1,
-                quote: '张三进京',
-                progressInSection: 0.5,
-                spanResolved: true,
-              ),
-            ],
-            chapterFreq: {1: 1},
+            identityHint: '猎场看守',
+            evidence: const [AiGraphEvidence(sectionIndex: 1, quote: '海格推门进来')],
+            chapterFreq: const {1: 1},
             firstSection: 1,
-            lastSection: 2,
+            lastSection: 1,
           ),
           AiGraphEntity(
-            name: '罗素',
+            entityId: personId,
+            name: '海格',
             type: AiGraphEntityType.person,
-            scope: AiGraphEntityScope.reference,
-            evidence: [
-              AiGraphEvidence(sectionIndex: 2, quote: '如罗素所言'),
+            identityHint: '猎场看守',
+            evidence: const [
+              AiGraphEvidence(sectionIndex: 2, quote: '海格带他去学校'),
             ],
-            chapterFreq: {2: 1},
+            chapterFreq: const {2: 1},
             firstSection: 2,
             lastSection: 2,
           ),
           AiGraphEntity(
-            name: '城门相争',
-            type: AiGraphEntityType.event,
-            eventType: AiGraphEventType.combat,
-            importance: 3,
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '两军于城门外交战'),
-            ],
-            chapterFreq: {1: 1},
-            firstSection: 1,
-            lastSection: 1,
+            entityId: placeId,
+            name: '霍格沃茨',
+            type: AiGraphEntityType.location,
           ),
         ],
-        relations: const [
+        relations: [
           AiGraphRelation(
-            source: '张三',
-            target: '李四',
-            type: 'meet',
-            description: '在城门相遇。',
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '张三与李四相遇'),
+            sourceId: personId,
+            targetId: placeId,
+            source: '海格',
+            target: '霍格沃茨',
+            type: '任职',
+            evidence: const [
+              AiGraphEvidence(sectionIndex: 1, quote: '海格在霍格沃茨任职'),
             ],
-            weight: 1,
+          ),
+          AiGraphRelation(
+            sourceId: personId,
+            targetId: placeId,
+            source: '海格',
+            target: '霍格沃茨',
+            type: '任职',
+            evidence: const [
+              AiGraphEvidence(sectionIndex: 2, quote: '海格回到霍格沃茨'),
+            ],
           ),
         ],
       );
 
-      final restored = AiBookGraph.fromJson(source.toJson());
-
-      expect(restored, isNotNull);
-      expect(restored!.contentHash, 'h1');
-      expect(restored.includesUnread, isFalse);
-      expect(restored.coveredSections, [1, 2]);
-      final entity = restored.entities
-          .firstWhere((e) => e.name == '张三');
-      expect(entity.name, '张三');
-      expect(entity.type, AiGraphEntityType.person);
-      expect(entity.scope, AiGraphEntityScope.setting);
-      expect(entity.aliases, ['三哥']);
-      expect(entity.chapterFreq, {1: 1});
-      expect(entity.evidence.single.spanResolved, isTrue);
-      expect(entity.evidence.single.progressInSection, 0.5);
-      final reference = restored.entities
-          .firstWhere((e) => e.name == '罗素');
-      expect(reference.scope, AiGraphEntityScope.reference);
-      final event = restored.entities.firstWhere((e) => e.name == '城门相争');
-      expect(event.eventType, AiGraphEventType.combat);
-      expect(event.importance, 3);
-      expect(restored.sectionTitles, {2: '第二章'});
-      expect(restored.relations.single.mergeKey, contains('meet'));
+      final restored = AiBookGraph.fromJson(source.toJson())!;
+      expect(restored.entities, hasLength(2));
+      final hagrid = restored.entityById(personId)!;
+      expect(hagrid.evidence, hasLength(2));
+      expect(hagrid.chapterFreq, {1: 1, 2: 1});
+      expect(restored.relations, hasLength(1));
+      expect(restored.relations.single.evidence, hasLength(2));
+      expect(restored.qualityIssues, isEmpty);
     });
 
-    test('older generator version cache is rejected', () {
-      final source = AiBookGraph(
-        contentHash: 'h1',
-        entities: const [],
-      );
-      final old = {
-        ...source.toJson(),
-        'version': AiBookGraph.currentVersion - 1,
-      };
+    test(
+      'cached life-stage duplicates fuse by shared alias and rewire edges',
+      () {
+        const mainId = 'harry-main';
+        const babyId = 'harry-baby';
+        final source = AiBookGraph(
+          contentHash: 'h1',
+          entities: const [
+            AiGraphEntity(
+              entityId: mainId,
+              name: '哈利·波特',
+              type: AiGraphEntityType.person,
+              identityHint: '巫师学生',
+              aliases: ['哈利', '波特'],
+              evidence: [
+                AiGraphEvidence(sectionIndex: 2, quote: '哈利走进学校'),
+                AiGraphEvidence(sectionIndex: 3, quote: '波特举起魔杖'),
+              ],
+              firstSection: 2,
+              lastSection: 3,
+            ),
+            AiGraphEntity(
+              entityId: babyId,
+              name: '哈利·波特',
+              type: AiGraphEntityType.person,
+              identityHint: '男婴',
+              aliases: ['哈利'],
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '男婴哈利')],
+              firstSection: 1,
+              lastSection: 1,
+            ),
+            AiGraphEntity(
+              entityId: 'zhang-reporter',
+              name: '张伟',
+              type: AiGraphEntityType.person,
+              identityHint: '记者',
+            ),
+            AiGraphEntity(
+              entityId: 'zhang-doctor',
+              name: '张伟',
+              type: AiGraphEntityType.person,
+              identityHint: '医生',
+            ),
+            AiGraphEntity(
+              entityId: 'lily',
+              name: '莉莉',
+              type: AiGraphEntityType.person,
+            ),
+          ],
+          relations: const [
+            AiGraphRelation(
+              sourceId: 'lily',
+              targetId: babyId,
+              source: '莉莉',
+              target: '哈利·波特',
+              type: '亲属',
+              kin: '母子',
+            ),
+          ],
+        );
+
+        final restored = AiBookGraph.fromJson(source.toJson())!;
+        expect(
+          restored.entities.where((entity) => entity.name == '哈利·波特'),
+          hasLength(1),
+        );
+        expect(
+          restored.entities.where((entity) => entity.name == '张伟'),
+          hasLength(2),
+        );
+        expect(restored.relations.single.targetId, mainId);
+      },
+    );
+
+    test('unsupported pre-v1 cache is rejected', () {
+      final old = {...AiBookGraph(contentHash: 'h1').toJson(), 'version': 0};
       expect(AiBookGraph.fromJson(old), isNull);
     });
 
@@ -183,10 +339,7 @@ void main() {
         viewOrder: ['family_tree', 'persons', 'events', 'graph'],
         wantMap: true,
       );
-      final source = AiBookGraph(
-        contentHash: 'h1',
-        narration: plan,
-      );
+      final source = AiBookGraph(contentHash: 'h1', narration: plan);
       final restored = AiBookGraph.fromJson(source.toJson());
       expect(restored, isNotNull);
       expect(restored!.narration, isNotNull);
@@ -197,7 +350,8 @@ void main() {
         'events',
         'graph',
         'locations',
-        'org_tree',
+        'organizations',
+        'things',
       ]);
       expect(restored.narration!.wantMap, isTrue);
       expect(restored.narration!.feature('characterEnsemble'), 0.9);
@@ -225,6 +379,87 @@ void main() {
       expect(restored!.narration, isNull);
     });
 
+    test(
+      'presentation projection gates aliases, descriptions and relations',
+      () {
+        final firstId = graphEntityIdFor(
+          type: AiGraphEntityType.person,
+          name: '张三',
+        );
+        final secondId = graphEntityIdFor(
+          type: AiGraphEntityType.person,
+          name: '李四',
+        );
+        final graph = AiBookGraph(
+          contentHash: 'h1',
+          includesUnread: true,
+          entities: [
+            AiGraphEntity(
+              entityId: firstId,
+              name: '张三',
+              type: AiGraphEntityType.person,
+              aliases: const ['幕后主使'],
+              aliasSections: const {'幕后主使': 2},
+              description: '第二章才揭示的身份',
+              descriptionSection: 2,
+              evidence: const [
+                AiGraphEvidence(
+                  sectionIndex: 1,
+                  quote: '张三出场',
+                  spanResolved: true,
+                ),
+              ],
+              firstSection: 1,
+              lastSection: 2,
+            ),
+            AiGraphEntity(
+              entityId: secondId,
+              name: '李四',
+              type: AiGraphEntityType.person,
+              evidence: const [
+                AiGraphEvidence(
+                  sectionIndex: 1,
+                  quote: '李四出场',
+                  spanResolved: true,
+                ),
+              ],
+              firstSection: 1,
+              lastSection: 1,
+            ),
+          ],
+          relations: [
+            AiGraphRelation(
+              source: '张三',
+              target: '李四',
+              sourceId: firstId,
+              targetId: secondId,
+              type: '敌对',
+              evidence: const [
+                AiGraphEvidence(
+                  sectionIndex: 2,
+                  quote: '二人原来敌对',
+                  spanResolved: true,
+                ),
+              ],
+            ),
+          ],
+        );
+
+        final visible = graph.readSafeThrough(1).verifiedForDisplay();
+        final first = visible.entityById(firstId)!;
+        expect(first.aliases, isEmpty);
+        expect(first.description, isEmpty);
+        expect(visible.relations, isEmpty);
+        expect(
+          graph
+              .copyWith(hiddenEntityIds: [firstId])
+              .verifiedForDisplay()
+              .entityById(firstId),
+          isNull,
+        );
+      },
+    );
+
     test('kin kinship label round-trips through the relation JSON', () {
       final relation = AiGraphRelation(
         source: '方老先生',
@@ -232,9 +467,7 @@ void main() {
         type: '亲属',
         kin: '父子',
         description: '方老先生是方鸿渐的父亲。',
-        evidence: [
-          AiGraphEvidence(sectionIndex: 1, quote: '父子'),
-        ],
+        evidence: [AiGraphEvidence(sectionIndex: 1, quote: '父子')],
         weight: 1,
       );
       final restored = AiGraphRelation.fromJson(relation.toJson());
@@ -260,7 +493,7 @@ void main() {
       expect(degraded.viewOrder.first, 'persons');
 
       // Unknown defaultView + empty viewOrder → derived from the strongest
-      // feature (organization → family_tree), order rebuilt around it.
+      // feature (organization → organizations), order rebuilt around it.
       final derived = AiNarrationPlan.fromJson({
         'features': {
           'eventDriven': 0.2,
@@ -273,16 +506,19 @@ void main() {
         'viewOrder': <dynamic>[],
       });
       expect(derived, isNotNull);
-      expect(derived!.defaultView, 'family_tree');
-      expect(derived.viewOrder.first, 'family_tree');
-      expect(derived.viewOrder.toSet(), containsAll(AiNarrationPlan.knownViews));
+      expect(derived!.defaultView, 'organizations');
+      expect(derived.viewOrder.first, 'organizations');
+      expect(
+        derived.viewOrder.toSet(),
+        containsAll(AiNarrationPlan.knownViews),
+      );
 
       // Only a structurally missing payload is rejected.
       expect(AiNarrationPlan.fromJson(null), isNull);
       expect(AiNarrationPlan.fromJson({'features': 'not-a-map'}), isNull);
 
-      // An essay book never gets lineage/faction views, even when the model
-      // guessed one (a collection judged as a whole scores organization).
+      // An essay book never gets a lineage view. A legacy org_tree value is
+      // migrated to the flat organization index, which remains meaningful.
       final essay = AiNarrationPlan.fromJson({
         'features': {
           'eventDriven': 0.1,
@@ -298,6 +534,7 @@ void main() {
       expect(essay!.defaultView, 'graph');
       expect(essay.viewOrder, isNot(contains('family_tree')));
       expect(essay.viewOrder, isNot(contains('org_tree')));
+      expect(essay.viewOrder, contains('organizations'));
       expect(essay.viewOrder.first, 'graph');
 
       // Out-of-range values clamp instead of invalidating the plan.
@@ -320,6 +557,36 @@ void main() {
   });
 
   group('AiBookGraphService extraction', () {
+    test(
+      'an empty read-gated working set fails instead of saving success',
+      () async {
+        final provider = _GraphProvider(responses: const {});
+
+        await expectLater(
+          serviceWith(provider).generate(
+            bookTitle: '测试书',
+            sections: const [
+              AiBookSectionSlice(
+                index: 1,
+                sourceSectionIndex: 5,
+                label: '第五章',
+                text: '正文',
+              ),
+            ],
+            includesUnread: false,
+            readThroughSection: 1,
+          ),
+          throwsA(
+            isA<AiGraphGenerationException>().having(
+              (error) => error.message,
+              'message',
+              contains('没有进入图谱抽取'),
+            ),
+          ),
+        );
+      },
+    );
+
     test('extracts entities and relations with quote back-fill', () async {
       final body = '张三与李四在城门口相见，互致问候。';
       final provider = _GraphProvider(
@@ -359,8 +626,7 @@ void main() {
       expect(graph.model, 'graph-test');
     });
 
-    test('similar person names merge across sections (慈圣太后/慈圣皇太后)',
-        () async {
+    test('similar person names merge across sections (慈圣太后/慈圣皇太后)', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -387,10 +653,7 @@ void main() {
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [
-          slice(1, '第一节', '慈圣太后。'),
-          slice(2, '第二节', '慈圣皇太后是万历皇帝生母。'),
-        ],
+        sections: [slice(1, '第一节', '慈圣太后。'), slice(2, '第二节', '慈圣皇太后是万历皇帝生母。')],
         includesUnread: true,
       );
 
@@ -405,17 +668,18 @@ void main() {
       expect(relation.target, '万历皇帝');
       // Audit trail records the name-structure merge (score 0.7, stem rule).
       expect(
-        graph.mergeLog.any((e) =>
-            e['reason'] == 'name' &&
-            e['from'] == '慈圣皇太后' &&
-            e['to'] == '慈圣太后' &&
-            e['score'] == 0.7),
+        graph.mergeLog.any(
+          (e) =>
+              e['reason'] == 'name' &&
+              e['from'] == '慈圣皇太后' &&
+              e['to'] == '慈圣太后' &&
+              e['score'] == 0.7,
+        ),
         isTrue,
       );
     });
 
-    test('unrelated person names never merge (正德皇帝 vs 万历皇帝)',
-        () async {
+    test('unrelated person names never merge (正德皇帝 vs 万历皇帝)', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -438,15 +702,15 @@ void main() {
       );
 
       expect(graph.entities.length, 2);
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'正德皇帝', '万历皇帝'});
+      expect(graph.entities.map((e) => e.name).toSet(), {'正德皇帝', '万历皇帝'});
     });
 
-    test('same relation across sections fuses into one edge with all evidence',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'same relation across sections fuses into one edge with all evidence',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"张三","type":"person","aliases":[],
               "description":"","evidence":[{"section":1,"quote":"张三与李四同在京城为官"}],
               "scope":"setting"},
@@ -457,37 +721,37 @@ void main() {
               "description":"同在京城。",
               "evidence":[{"section":1,"quote":"张三与李四同在京城为官"}]}]}
           ''',
-          2: '''
+            2: '''
             {"entities":[],
              "relations":[{"source":"张三","target":"李四","type":"同僚",
               "description":"同在京城。",
               "evidence":[{"section":2,"quote":"张三李四同僚多年"}]}]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [
-          slice(1, '第一节', '张三与李四同在京城为官。'),
-          slice(2, '第二节', '张三李四同僚多年。'),
-        ],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [
+            slice(1, '第一节', '张三与李四同在京城为官。'),
+            slice(2, '第二节', '张三李四同僚多年。'),
+          ],
+          includesUnread: true,
+        );
 
-      // Knowledge fusion: mergeKey (source|target|type) dedupes the edge and
-      // appends evidence; weight reflects the fused evidence count.
-      expect(graph.relations.length, 1);
-      final relation = graph.relations.single;
-      expect(relation.source, '张三');
-      expect(relation.target, '李四');
-      expect(relation.type, '同僚');
-      expect(relation.evidence.length, 2);
-      expect(relation.weight, 2);
-    });
+        // Knowledge fusion: mergeKey (source|target|type) dedupes the edge and
+        // appends evidence; weight reflects the fused evidence count.
+        expect(graph.relations.length, 1);
+        final relation = graph.relations.single;
+        expect(relation.source, '张三');
+        expect(relation.target, '李四');
+        expect(relation.type, '同僚');
+        expect(relation.evidence.length, 2);
+        expect(relation.weight, 2);
+      },
+    );
 
-    test('generic honorific never absorbs a named person (皇帝≠万历皇帝)',
-        () async {
+    test('generic honorific never absorbs a named person (皇帝≠万历皇帝)', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -513,13 +777,11 @@ void main() {
 
       // 皇帝 ⊂ 万历皇帝 is a suffix hit but 皇帝 is a role, not a name: the
       // emperor's entity must survive (regression: it used to fold away).
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'皇帝', '万历皇帝'});
+      expect(graph.entities.map((e) => e.name).toSet(), {'皇帝', '万历皇帝'});
       expect(graph.entities.length, 2);
     });
 
-    test('generic honorific never absorbs a titled person (太后≠慈圣太后)',
-        () async {
+    test('generic honorific never absorbs a titled person (太后≠慈圣太后)', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -543,13 +805,11 @@ void main() {
         includesUnread: true,
       );
 
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'太后', '慈圣太后'});
+      expect(graph.entities.map((e) => e.name).toSet(), {'太后', '慈圣太后'});
       expect(graph.entities.length, 2);
     });
 
-    test('real substring aliases still merge locally (万历 ⊂ 万历皇帝)',
-        () async {
+    test('real substring aliases still merge locally (万历 ⊂ 万历皇帝)', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -579,8 +839,7 @@ void main() {
       expect(graph.entities.length, 1);
     });
 
-    test('shared-relation review defaults to different (张居正≠冯保)',
-        () async {
+    test('shared-relation review defaults to different (张居正≠冯保)', () async {
       final provider = _GraphProvider(
         reviewVerdicts: '["different"]',
         responses: {
@@ -619,46 +878,49 @@ void main() {
 
       // Both serve 万历皇帝 (shared ascending relation → review) but are
       // clearly different people: the model says different, no merge.
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'万历皇帝', '张居正', '冯保'});
+      expect(graph.entities.map((e) => e.name).toSet(), {'万历皇帝', '张居正', '冯保'});
       expect(graph.relations.length, 2);
     });
 
-    test('protagonist mislabelled reference is restored to setting (张居正)',
-        () async {
-      final quotes = List.generate(6, (i) => '张居正主持新政第${i + 1}条。');
-      final body = quotes.join();
-      final evidence = [
-        for (var i = 0; i < 6; i++)
-          '{"section":1,"quote":"张居正主持新政第${i + 1}条"}',
-      ].join(',');
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'protagonist mislabelled reference is restored to setting (张居正)',
+      () async {
+        final quotes = List.generate(6, (i) => '张居正主持新政第${i + 1}条。');
+        final body = quotes.join();
+        final evidence = [
+          for (var i = 0; i < 6; i++)
+            '{"section":1,"quote":"张居正主持新政第${i + 1}条"}',
+        ].join(',');
+        final provider = _GraphProvider(
+          responses: {
+            1:
+                '''
             {"entities":[{"name":"张居正","type":"person","aliases":[],
               "description":"首辅。","evidence":[$evidence],
               "scope":"reference"}],"relations":[]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', body)],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', body)],
+          includesUnread: true,
+        );
 
-      // 6 quote-backed evidence quotes, zero citation templates: the model
-      // mislabelled the protagonist — restore to setting (family-tree scope).
-      final zjz = graph.entities.singleWhere((e) => e.name == '张居正');
-      expect(zjz.scope, AiGraphEntityScope.setting);
-    });
+        // 6 quote-backed evidence quotes, zero citation templates: the model
+        // mislabelled the protagonist — restore to setting (family-tree scope).
+        final zjz = graph.entities.singleWhere((e) => e.name == '张居正');
+        expect(zjz.scope, AiGraphEntityScope.setting);
+      },
+    );
 
-    test('flipped kin mirror dedupes to the stronger direction (万历母子)',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'flipped kin mirror dedupes to the stronger direction (万历母子)',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"慈圣皇太后","type":"person","aliases":[],
               "description":"万历生母。",
               "evidence":[{"section":1,"quote":"慈圣皇太后是万历皇帝生母"},
@@ -675,24 +937,104 @@ void main() {
               "type":"亲属","kin":"母子",
               "evidence":[{"section":1,"quote":"万历皇帝叩拜皇太后"}]}]}
           ''',
+          },
+        );
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '慈圣皇太后是万历皇帝生母。皇太后劝万历读书。万历皇帝叩拜皇太后。')],
+          includesUnread: true,
+        );
+
+        // The flipped mirror (万历→慈圣 母子, weaker) is dropped; only the
+        // stronger, correct direction survives — the junior is no longer a
+        // candidate parent in the family tree.
+        expect(graph.relations.length, 1);
+        final kin = graph.relations.single;
+        expect(kin.source, '慈圣皇太后');
+        expect(kin.target, '万历皇帝');
+        expect(kin.kin, '母子');
+      },
+    );
+
+    test('evidence review reverses a lone flipped lineage edge', () async {
+      final provider = _GraphProvider(
+        directionReviewBody:
+            '{"relations":[{"index":0,"action":"reverse","kin":"母子"}]}',
+        responses: {
+          1: '''
+            {"entities":[{"name":"慈圣皇太后","type":"person","aliases":[],
+              "description":"万历生母。",
+              "evidence":[{"section":1,"quote":"慈圣皇太后是万历皇帝生母"}],
+              "scope":"setting"},
+             {"name":"万历皇帝","type":"person","aliases":[],
+              "description":"","evidence":[{"section":1,"quote":"万历皇帝"}],
+              "scope":"setting"}],
+             "relations":[{"source":"万历皇帝","target":"慈圣皇太后",
+              "type":"亲属","kin":"母子",
+              "evidence":[{"section":1,"quote":"慈圣皇太后是万历皇帝生母"}]}]}
+          ''',
         },
       );
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [slice(1, '第一回', '慈圣皇太后是万历皇帝生母。皇太后劝万历读书。万历皇帝叩拜皇太后。')],
+        sections: [slice(1, '第一回', '慈圣皇太后是万历皇帝生母。')],
         includesUnread: true,
       );
 
-      // The flipped mirror (万历→慈圣 母子, weaker) is dropped; only the
-      // stronger, correct direction survives — the junior is no longer a
-      // candidate parent in the family tree.
-      expect(graph.relations.length, 1);
-      final kin = graph.relations.single;
-      expect(kin.source, '慈圣皇太后');
-      expect(kin.target, '万历皇帝');
-      expect(kin.kin, '母子');
+      expect(graph.relations, hasLength(1));
+      expect(graph.relations.single.source, '慈圣皇太后');
+      expect(graph.relations.single.target, '万历皇帝');
+      expect(graph.relations.single.kin, '母子');
+      expect(
+        provider.requests.where(
+          (request) => request.messages.any(
+            (message) => message.content.contains('亲属关系方向核验器'),
+          ),
+        ),
+        hasLength(1),
+      );
     });
+
+    test(
+      'whole-range gleaning recovers a category missed by every chunk',
+      () async {
+        final provider = _GraphProvider(
+          gleaningBody: '''
+          {"entities":[{"name":"霍格沃茨魔法学校","type":"organization",
+            "scope":"setting","identityHint":"魔法学校","aliases":["霍格沃茨"],
+            "description":"培养巫师的学校组织。",
+            "evidence":[{"section":1,"quote":"霍格沃茨魔法学校录取了哈利"}]}],
+           "relations":[{"source":"霍格沃茨魔法学校","target":"哈利",
+             "type":"隶属","description":"哈利是该校学生。",
+             "evidence":[{"section":1,"quote":"霍格沃茨魔法学校录取了哈利"}]}]}
+        ''',
+          responses: {
+            1: '''
+            {"entities":[{"name":"哈利","type":"person","scope":"setting",
+              "aliases":[],"description":"新生。",
+              "evidence":[{"section":1,"quote":"哈利"}]}],"relations":[]}
+          ''',
+          },
+        );
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一章', '霍格沃茨魔法学校录取了哈利。')],
+          includesUnread: true,
+        );
+
+        expect(
+          graph.entities
+              .singleWhere((entity) => entity.name == '霍格沃茨魔法学校')
+              .type,
+          AiGraphEntityType.organization,
+        );
+        expect(graph.relations.single.source, '霍格沃茨魔法学校');
+        expect(graph.relations.single.target, '哈利');
+      },
+    );
 
     test('kin-less 亲属 relation is dropped at merge time (恭妃非子)', () async {
       final provider = _GraphProvider(
@@ -728,11 +1070,12 @@ void main() {
       expect(relation.kin, '妃嫔'); // 恭妃王氏 → rank term, not informal 夫妻
     });
 
-    test('hallucinated entity with no verbatim mention is grounded out',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'hallucinated entity with no verbatim mention is grounded out',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"张三","type":"person","aliases":[],
               "description":"主角。",
               "evidence":[{"section":1,"quote":"张三登场"}],
@@ -744,78 +1087,82 @@ void main() {
              "relations":[{"source":"张三","target":"八爪星人","type":"敌对",
               "evidence":[{"section":1,"quote":"张三与八爪星人交战"}]}]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', '张三登场。')],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '张三登场。')],
+          includesUnread: true,
+        );
 
-      // 八爪星人 never appears in the book body — the model invented it
-      // (pre-training leakage); the entity and its edge are grounded out.
-      expect(graph.entities.map((e) => e.name), ['张三']);
-      expect(graph.relations, isEmpty);
-      // A real alias keeps the entity grounded (今上 = 万历皇帝 in body).
-      expect(graph.coveredSections, [1]);
-    });
+        // 八爪星人 never appears in the book body — the model invented it
+        // (pre-training leakage); the entity and its edge are grounded out.
+        expect(graph.entities.map((e) => e.name), ['张三']);
+        expect(graph.relations, isEmpty);
+        // A real alias keeps the entity grounded (今上 = 万历皇帝 in body).
+        expect(graph.coveredSections, [1]);
+      },
+    );
 
-    test('aliases keep an entity grounded when the canonical name is absent',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'aliases keep an entity grounded when the canonical name is absent',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"万历皇帝","type":"person","aliases":["今上"],
               "description":"天子。",
               "evidence":[{"section":1,"quote":"今上"}],
               "scope":"setting"}],"relations":[]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', '今上临朝。')],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '今上临朝。')],
+          includesUnread: true,
+        );
 
-      // Canonical 万历皇帝 never appears verbatim, but alias 今上 does — the
-      // entity stays (grounding checks name AND aliases).
-      expect(graph.entities.map((e) => e.name), ['万历皇帝']);
-    });
+        // Canonical 万历皇帝 never appears verbatim, but alias 今上 does — the
+        // entity stays (grounding checks name AND aliases).
+        expect(graph.entities.map((e) => e.name), ['万历皇帝']);
+      },
+    );
 
-    test('contextual kinship terms never absorb named people (哥哥≠刘哥哥)',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'contextual kinship terms never absorb named people (哥哥≠刘哥哥)',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"刘哥哥","type":"person","aliases":[],
               "description":"结义大哥。",
               "evidence":[{"section":1,"quote":"刘哥哥"}],
               "scope":"setting"}],"relations":[]}
           ''',
-          2: '''
+            2: '''
             {"entities":[{"name":"哥哥","type":"person","aliases":[],
               "description":"家中长兄。",
               "evidence":[{"section":2,"quote":"哥哥"}],
               "scope":"setting"}],"relations":[]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '一', '刘哥哥。'), slice(2, '二', '哥哥。')],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '一', '刘哥哥。'), slice(2, '二', '哥哥。')],
+          includesUnread: true,
+        );
 
-      // 哥哥 ⊂ 刘哥哥 is a suffix hit, but 哥哥 is a contextual kinship term
-      // that refers to different people in different chapters — never a merge
-      // key (AI-Reader-V2 dangerous-alias table).
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'刘哥哥', '哥哥'});
-    });
+        // 哥哥 ⊂ 刘哥哥 is a suffix hit, but 哥哥 is a contextual kinship term
+        // that refers to different people in different chapters — never a merge
+        // key (AI-Reader-V2 dangerous-alias table).
+        expect(graph.entities.map((e) => e.name).toSet(), {'刘哥哥', '哥哥'});
+      },
+    );
 
     test('先生 never absorbs a titled person (先生≠陈先生)', () async {
       final provider = _GraphProvider(
@@ -841,12 +1188,10 @@ void main() {
         includesUnread: true,
       );
 
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'陈先生', '先生'});
+      expect(graph.entities.map((e) => e.name).toSet(), {'陈先生', '先生'});
     });
 
-    test('依据X/按照X narration does not trigger the citation rule',
-        () async {
+    test('依据X/按照X narration does not trigger the citation rule', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -870,8 +1215,7 @@ void main() {
       expect(graph.entities.single.scope, AiGraphEntityScope.setting);
     });
 
-    test('relation endpoint without an entity is dropped (先生 泛称端点)',
-        () async {
+    test('relation endpoint without an entity is dropped (先生 泛称端点)', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -897,11 +1241,12 @@ void main() {
       expect(graph.entities.map((e) => e.name), ['陈先生']);
     });
 
-    test('cross-kin reversed mirrors dedupe to the stronger direction',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'cross-kin reversed mirrors dedupe to the stronger direction',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"慈圣皇太后","type":"person","aliases":[],
               "description":"万历生母。",
               "evidence":[{"section":1,"quote":"慈圣皇太后"}],
@@ -917,22 +1262,23 @@ void main() {
               "type":"亲属","kin":"母子",
               "evidence":[{"section":1,"quote":"万历皇帝拜见皇太后"}]}]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', '慈圣皇太后教导万历。皇太后训子。万历皇帝拜见皇太后。')],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '慈圣皇太后教导万历。皇太后训子。万历皇帝拜见皇太后。')],
+          includesUnread: true,
+        );
 
-      // A→B 父子 vs B→A 母子 — different kin, same conflict: only the
-      // stronger direction survives (S4 regression).
-      expect(graph.relations.length, 1);
-      final kin = graph.relations.single;
-      expect(kin.source, '慈圣皇太后');
-      expect(kin.target, '万历皇帝');
-    });
+        // A→B 父子 vs B→A 母子 — different kin, same conflict: only the
+        // stronger direction survives (S4 regression).
+        expect(graph.relations.length, 1);
+        final kin = graph.relations.single;
+        expect(kin.source, '慈圣皇太后');
+        expect(kin.target, '万历皇帝');
+      },
+    );
 
     test('equal-strength mirror keeps the earlier-appearing source', () async {
       final provider = _GraphProvider(
@@ -969,104 +1315,102 @@ void main() {
       expect(graph.relations.single.target, '万历皇帝');
     });
 
-    test('re-run with an excluded section does not ground out its entities',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      're-run with an excluded section does not ground out its entities',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"甲","type":"person","aliases":[],
               "description":"","evidence":[{"section":1,"quote":"甲"}],
               "scope":"setting"}],"relations":[]}
           ''',
-          2: '''
+            2: '''
             {"entities":[{"name":"乙","type":"person","aliases":[],
               "description":"序言人物。",
               "evidence":[{"section":2,"quote":"乙"}],
               "scope":"setting"}],"relations":[]}
           ''',
-          4: '{"entities":[],"relations":[]}',
-        },
-      );
-      final service = serviceWith(provider);
+            4: '{"entities":[],"relations":[]}',
+          },
+        );
+        final service = serviceWith(provider);
 
-      final first = await service.generate(
-        bookTitle: '测试书',
-        sections: [
-          slice(1, '一', '甲。'),
-          slice(2, '二', '乙。'),
-        ],
-        includesUnread: true,
-      );
-      expect(first.entities.map((e) => e.name), contains('乙'));
+        final first = await service.generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '一', '甲。'), slice(2, '二', '乙。')],
+          includesUnread: true,
+        );
+        expect(first.entities.map((e) => e.name), contains('乙'));
 
-      // Re-run excluding section 2, adding section 4: 乙's evidence lives in
-      // a section that is no longer in the body — grounding must skip it,
-      // not treat the exclusion as a hallucination (S1 regression).
-      final second = await service.generate(
-        bookTitle: '测试书',
-        sections: [
-          slice(1, '一', '甲。'),
-          slice(4, '四', '新内容。'),
-        ],
-        existing: first,
-        includesUnread: true,
-      );
-      expect(second.entities.map((e) => e.name), contains('乙'));
-      expect(second.coveredSections, containsAll([1, 2, 4]));
-    });
+        // Re-run excluding section 2, adding section 4: 乙's evidence lives in
+        // a section that is no longer in the body — grounding must skip it,
+        // not treat the exclusion as a hallucination (S1 regression).
+        final second = await service.generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '一', '甲。'), slice(4, '四', '新内容。')],
+          existing: first,
+          includesUnread: true,
+        );
+        expect(second.entities.map((e) => e.name), contains('乙'));
+        expect(second.coveredSections, containsAll([1, 2, 4]));
+      },
+    );
 
-    test('configured generic terms drive the merge (config library, not code)',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'configured generic terms drive the merge (config library, not code)',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"刘爷爷","type":"person","aliases":[],
               "description":"","evidence":[{"section":1,"quote":"刘爷爷"}],
               "scope":"setting"}],"relations":[]}
           ''',
-          2: '''
+            2: '''
             {"entities":[{"name":"老爷子","type":"person","aliases":[],
               "description":"尊称。",
               "evidence":[{"section":2,"quote":"老爷子"}],
               "scope":"setting"}],"relations":[]}
           ''',
-        },
-      );
-      // 老爷子 is a book-specific 称谓: configured via AiGraphRuleWords —
-      // the pipeline itself has no hardcoded book vocabulary.
-      final service = AiBookGraphService(
-        isAvailable: () => true,
-        openProvider: () => provider,
-        settings: () => const AiSettings(
-          model: 'graph-test',
-          graphRuleWords: AiGraphRuleWords(genericPersonTerms: ['老爷子']),
-        ),
-      );
+          },
+        );
+        // 老爷子 is a book-specific 称谓: configured via AiGraphRuleWords —
+        // the pipeline itself has no hardcoded book vocabulary.
+        final service = AiBookGraphService(
+          isAvailable: () => true,
+          openProvider: () => provider,
+          settings: () => const AiSettings(
+            model: 'graph-test',
+            graphRuleWords: AiGraphRuleWords(genericPersonTerms: ['老爷子']),
+          ),
+        );
 
-      final graph = await service.generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '一', '刘爷爷。'), slice(2, '二', '老爷子。')],
-        includesUnread: true,
-      );
+        final graph = await service.generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '一', '刘爷爷。'), slice(2, '二', '老爷子。')],
+          includesUnread: true,
+        );
 
-      // 老爷子 ⊂ 刘爷爷 is a suffix hit, but the configured term excludes it
-      // from merging — book vocabulary lives in settings, not in the pipeline.
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'刘爷爷', '老爷子'});
-    });
+        // 老爷子 ⊂ 刘爷爷 is a suffix hit, but the configured term excludes it
+        // from merging — book vocabulary lives in settings, not in the pipeline.
+        expect(graph.entities.map((e) => e.name).toSet(), {'刘爷爷', '老爷子'});
+      },
+    );
 
-    test('book priors resolve classics aliases before generic rules (行者→孙悟空)',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'book priors resolve classics aliases before generic rules (行者→孙悟空)',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"行者","type":"person","aliases":[],
               "description":"取经人。",
               "evidence":[{"section":1,"quote":"行者"}],
               "scope":"setting"}],
              "relations":[]}
           ''',
-          2: '''
+            2: '''
             {"entities":[{"name":"孙悟空","type":"person","aliases":[],
               "description":"","evidence":[{"section":2,"quote":"孙悟空"}],
               "scope":"setting"},
@@ -1077,26 +1421,27 @@ void main() {
               "kin":"师徒",
               "evidence":[{"section":2,"quote":"行者拜唐僧为师"}]}]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '西游记',
-        sections: [slice(1, '一', '行者。'), slice(2, '二', '孙悟空。唐僧。行者拜唐僧为师。')],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '西游记',
+          sections: [slice(1, '一', '行者。'), slice(2, '二', '孙悟空。唐僧。行者拜唐僧为师。')],
+          includesUnread: true,
+        );
 
-      // 行者 is a prior alias of 孙悟空 (config library, matched by title):
-      // the entity canonicalizes immediately, later mentions merge into it,
-      // and the relation endpoint follows the prior.
-      final names = graph.entities.map((e) => e.name).toSet();
-      expect(names, isNot(contains('行者')));
-      expect(names, contains('孙悟空'));
-      expect(graph.entities.length, 2); // 孙悟空 + 唐僧
-      final relation = graph.relations.single;
-      expect(relation.source, '孙悟空');
-      expect(relation.target, '唐僧');
-    });
+        // 行者 is a prior alias of 孙悟空 (config library, matched by title):
+        // the entity canonicalizes immediately, later mentions merge into it,
+        // and the relation endpoint follows the prior.
+        final names = graph.entities.map((e) => e.name).toSet();
+        expect(names, isNot(contains('行者')));
+        expect(names, contains('孙悟空'));
+        expect(graph.entities.length, 2); // 孙悟空 + 唐僧
+        final relation = graph.relations.single;
+        expect(relation.source, '孙悟空');
+        expect(relation.target, '唐僧');
+      },
+    );
 
     test('book priors are inert for unmatched titles', () async {
       final provider = _GraphProvider(
@@ -1119,39 +1464,42 @@ void main() {
       expect(graph.entities.map((e) => e.name), ['行者']);
     });
 
-    test('configured book priors take effect (config library, not code)',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'configured book priors take effect (config library, not code)',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"师太","type":"person","aliases":[],
               "description":"","evidence":[{"section":1,"quote":"师太"}],
               "scope":"setting"}],"relations":[]}
           ''',
-        },
-      );
-      final service = AiBookGraphService(
-        isAvailable: () => true,
-        openProvider: () => provider,
-        settings: () => const AiSettings(
-          model: 'graph-test',
-          graphRuleWords: AiGraphRuleWords(
-            bookNamePriors: {'江湖志': {'师太': '静玄师太'}},
+          },
+        );
+        final service = AiBookGraphService(
+          isAvailable: () => true,
+          openProvider: () => provider,
+          settings: () => const AiSettings(
+            model: 'graph-test',
+            graphRuleWords: AiGraphRuleWords(
+              bookNamePriors: {
+                '江湖志': {'师太': '静玄师太'},
+              },
+            ),
           ),
-        ),
-      );
+        );
 
-      final graph = await service.generate(
-        bookTitle: '江湖志',
-        sections: [slice(1, '一', '师太。')],
-        includesUnread: true,
-      );
+        final graph = await service.generate(
+          bookTitle: '江湖志',
+          sections: [slice(1, '一', '师太。')],
+          includesUnread: true,
+        );
 
-      expect(graph.entities.single.name, '静玄师太');
-    });
+        expect(graph.entities.single.name, '静玄师太');
+      },
+    );
 
-    test('marital kin refines to rank terms for imperial consorts',
-        () async {
+    test('marital kin refines to rank terms for imperial consorts', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -1183,7 +1531,9 @@ void main() {
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [slice(1, '第一回', '万历皇帝与王皇后成婚。万历皇帝与恭妃王氏成婚。万历皇帝与郑氏成婚。张三与李四结为夫妻。')],
+        sections: [
+          slice(1, '第一回', '万历皇帝与王皇后成婚。万历皇帝与恭妃王氏成婚。万历皇帝与郑氏成婚。张三与李四结为夫妻。'),
+        ],
         includesUnread: true,
       );
 
@@ -1197,12 +1547,13 @@ void main() {
       expect(kinByTarget['李四'], '夫妻', reason: '平民夫妻保持原词');
     });
 
-    test('relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
-        () async {
-      final provider = _GraphProvider(
-        reviewVerdicts: '["same"]',
-        responses: {
-          1: '''
+    test(
+      'relation-evidence co-reference resolves via LLM review (孝定=慈圣)',
+      () async {
+        final provider = _GraphProvider(
+          reviewVerdicts: '["same"]',
+          responses: {
+            1: '''
             {"entities":[{"name":"慈圣太后","type":"person","aliases":[],
               "description":"万历生母。",
               "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}],
@@ -1214,7 +1565,7 @@ void main() {
               "type":"亲属","kin":"母子",
               "evidence":[{"section":1,"quote":"慈圣太后是万历皇帝生母"}]}]}
           ''',
-          2: '''
+            2: '''
             {"entities":[{"name":"孝定皇太后","type":"person","aliases":[],
               "description":"万历生母。",
               "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}],
@@ -1223,36 +1574,39 @@ void main() {
               "type":"亲属","kin":"母子",
               "evidence":[{"section":2,"quote":"孝定皇太后是万历皇帝生母"}]}]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [
-          slice(1, '第一节', '慈圣太后是万历皇帝生母。'),
-          slice(2, '第二节', '孝定皇太后是万历皇帝生母。'),
-        ],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [
+            slice(1, '第一节', '慈圣太后是万历皇帝生母。'),
+            slice(2, '第二节', '孝定皇太后是万历皇帝生母。'),
+          ],
+          includesUnread: true,
+        );
 
-      // Same person despite unrelated names: the shared 母子 relation triggers
-      // the review and the model confirms → one entity, both aliases kept.
-      final merged = graph.entities.where((e) =>
-          e.name.contains('慈圣') || e.name.contains('孝定'));
-      expect(merged.length, 1);
-      expect(merged.single.name, '慈圣太后');
-      expect(merged.single.aliases, contains('孝定皇太后'));
-      expect(graph.entities.length, 2);
-      // Relation endpoints rewired to the surviving canonical.
-      expect(graph.relations.single.source, '慈圣太后');
-      expect(graph.relations.single.target, '万历皇帝');
-      // Audit trail records the reviewed merge.
-      expect(
-        graph.mergeLog.any((e) =>
-            e['reason'] == 'review' && e['from'] == '孝定皇太后'),
-        isTrue,
-      );
-    });
+        // Same person despite unrelated names: the shared 母子 relation triggers
+        // the review and the model confirms → one entity, both aliases kept.
+        final merged = graph.entities.where(
+          (e) => e.name.contains('慈圣') || e.name.contains('孝定'),
+        );
+        expect(merged.length, 1);
+        expect(merged.single.name, '慈圣太后');
+        expect(merged.single.aliases, contains('孝定皇太后'));
+        expect(graph.entities.length, 2);
+        // Relation endpoints rewired to the surviving canonical.
+        expect(graph.relations.single.source, '慈圣太后');
+        expect(graph.relations.single.target, '万历皇帝');
+        // Audit trail records the reviewed merge.
+        expect(
+          graph.mergeLog.any(
+            (e) => e['reason'] == 'review' && e['from'] == '孝定皇太后',
+          ),
+          isTrue,
+        );
+      },
+    );
 
     test('shared father never merges siblings (下溯证据不误合)', () async {
       final provider = _GraphProvider(
@@ -1292,8 +1646,7 @@ void main() {
 
       // Both sons share the father but are different people: no merge, no
       // review call (descending relation evidence is intentionally weak).
-      expect(graph.entities.map((e) => e.name).toSet(),
-          {'万历皇帝', '朱常洛', '朱常洵'});
+      expect(graph.entities.map((e) => e.name).toSet(), {'万历皇帝', '朱常洛', '朱常洵'});
       expect(graph.relations.length, 2);
       expect(graph.mergeLog.where((e) => e['reason'] == 'review'), isEmpty);
     });
@@ -1363,7 +1716,131 @@ void main() {
       expect(evidence.spanResolved, isFalse);
       expect(evidence.progressInSection, isNull);
       expect(evidence.sectionIndex, 1);
+      expect(graph.verifiedForDisplay().entities, isEmpty);
+      expect(graph.qualityIssues, isNotEmpty);
     });
+
+    test(
+      'same-name same-type entities remain distinct with identity hints',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
+            {"entities":[
+              {"name":"张伟","type":"person","identityHint":"记者",
+               "evidence":[{"quote":"记者张伟到场"}]},
+              {"name":"张伟","type":"person","identityHint":"医生",
+               "evidence":[{"quote":"医生张伟随后到场"}]},
+              {"name":"编辑","type":"person","identityHint":"报社编辑",
+               "evidence":[{"quote":"编辑向记者张伟提问"}]}],
+             "relations":[{"source":"张伟","sourceIdentityHint":"记者",
+               "target":"编辑","targetIdentityHint":"报社编辑","type":"同事",
+               "evidence":[{"quote":"编辑向记者张伟提问"}]}]}
+          ''',
+          },
+        );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一节', '记者张伟到场。医生张伟随后到场。编辑向记者张伟提问。')],
+          includesUnread: true,
+        );
+
+        expect(graph.entities, hasLength(3));
+        expect(graph.entities.map((entity) => entity.id).toSet(), hasLength(3));
+        expect(
+          graph.entities
+              .where((entity) => entity.name == '张伟')
+              .map((entity) => entity.identityHint)
+              .toSet(),
+          {'记者', '医生'},
+        );
+        expect(graph.relations, hasLength(1));
+        final reporter = graph.entities.singleWhere(
+          (entity) => entity.identityHint == '记者',
+        );
+        expect(graph.relations.single.sourceId, reporter.id);
+      },
+    );
+
+    test(
+      'same character repeated in one chunk with life-stage hints is fused',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
+              {"entities":[
+                {"name":"哈利·波特","type":"person","identityHint":"婴儿",
+                 "aliases":["哈利"],"evidence":[{"quote":"男婴哈利睡得正香"}]},
+                {"name":"哈利·波特","type":"person","identityHint":"巫师男孩",
+                 "aliases":["哈利","波特"],"evidence":[{"quote":"哈利是一名巫师"}]},
+                {"name":"莉莉·波特","type":"person","identityHint":"母亲",
+                 "aliases":["莉莉"],"evidence":[{"quote":"莉莉是哈利的母亲"}]}],
+               "relations":[{"source":"莉莉·波特","target":"哈利·波特",
+                 "targetIdentityHint":"巫师男孩","type":"亲属","kin":"母子",
+                 "evidence":[{"quote":"莉莉是哈利的母亲"}]}]}
+            ''',
+          },
+        );
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一节', '男婴哈利睡得正香。哈利是一名巫师。莉莉是哈利的母亲。')],
+          includesUnread: true,
+        );
+
+        final harrys = graph.entities
+            .where((entity) => entity.name == '哈利·波特')
+            .toList();
+        expect(harrys, hasLength(1));
+        expect(harrys.single.evidence, hasLength(2));
+        expect(harrys.single.aliases, containsAll(['哈利', '波特']));
+        expect(graph.relations.single.targetId, harrys.single.id);
+      },
+    );
+
+    test(
+      'identity-hint wording drift does not split one exact-name character',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
+              {"entities":[{"name":"海格","type":"person",
+                "identityHint":"猎场看守",
+                "evidence":[{"quote":"猎场看守海格推门进来"}]}],
+               "relations":[]}
+            ''',
+            2: '''
+              {"entities":[{"name":"海格","type":"person",
+                "identityHint":"钥匙保管员",
+                "evidence":[{"quote":"钥匙保管员海格站在门口"}]}],
+               "relations":[]}
+            ''',
+            3: '''
+              {"entities":[{"name":"海格","type":"person",
+                "identityHint":"猎场看守",
+                "evidence":[{"quote":"猎场看守海格带他们离开"}]}],
+               "relations":[]}
+            ''',
+          },
+        );
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [
+            slice(1, '第一节', '猎场看守海格推门进来。'),
+            slice(2, '第二节', '钥匙保管员海格站在门口。'),
+            slice(3, '第三节', '猎场看守海格带他们离开。'),
+          ],
+          includesUnread: true,
+        );
+
+        expect(graph.entities, hasLength(1));
+        final hagrid = graph.entities.single;
+        expect(hagrid.identityHint, '猎场看守');
+        expect(hagrid.evidence, hasLength(3));
+        expect(hagrid.chapterFreq, {1: 1, 2: 1, 3: 1});
+      },
+    );
 
     test('model scope survives extraction', () async {
       final provider = _GraphProvider(
@@ -1387,9 +1864,7 @@ void main() {
       );
 
       expect(
-        graph.entities
-            .firstWhere((e) => e.name == '张三')
-            .scope,
+        graph.entities.firstWhere((e) => e.name == '张三').scope,
         AiGraphEntityScope.setting,
       );
       expect(
@@ -1416,14 +1891,10 @@ void main() {
         includesUnread: true,
       );
 
-      expect(
-        graph.entities.single.scope,
-        AiGraphEntityScope.reference,
-      );
+      expect(graph.entities.single.scope, AiGraphEntityScope.reference);
     });
 
-    test('根据X narration does not trigger the citation rule (张居正安排)',
-        () async {
+    test('根据X narration does not trigger the citation rule (张居正安排)', () async {
       final provider = _GraphProvider(
         responses: {
           1: '''
@@ -1443,14 +1914,10 @@ void main() {
 
       // 根据X is narration (X arranged something), not a citation of X: the
       // 据X template must not fire here — the entity stays setting.
-      expect(
-        graph.entities.single.scope,
-        AiGraphEntityScope.setting,
-      );
+      expect(graph.entities.single.scope, AiGraphEntityScope.setting);
     });
 
-    test('single-chapter appearance does not demote an essay person',
-        () async {
+    test('single-chapter appearance does not demote an essay person', () async {
       // Essay collections: every chapter is standalone, so a person who
       // appears in exactly one chapter is still book content, not a
       // citation. The demotion must come from the model or quote patterns.
@@ -1473,10 +1940,7 @@ void main() {
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [
-          slice(1, '第一回', '张三登场。过客匆匆路过。'),
-          slice(2, '第二回', '张三继续。'),
-        ],
+        sections: [slice(1, '第一回', '张三登场。过客匆匆路过。'), slice(2, '第二回', '张三继续。')],
         includesUnread: true,
       );
 
@@ -1510,10 +1974,7 @@ void main() {
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [
-          slice(1, '第一回', '张三出场。'),
-          slice(2, '第二回', '三哥离开。'),
-        ],
+        sections: [slice(1, '第一回', '张三出场。'), slice(2, '第二回', '三哥离开。')],
         includesUnread: true,
       );
 
@@ -1550,102 +2011,199 @@ void main() {
       expect(graph.entities.single.evidence.length, 1);
     });
 
-    test('step-0 narration plan lands in the graph; extraction is untouched',
-        () async {
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'step-0 narration plan lands in the graph; extraction is untouched',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"张三","type":"person","aliases":[],
               "description":"主角。",
               "evidence":[{"section":1,"quote":"张三出场"}]}],
              "relations":[]}
           ''',
-        },
-      );
+          },
+        );
 
-      final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', '张三出场。')],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '张三出场。')],
+          includesUnread: true,
+        );
 
-      expect(graph.narration, isNotNull);
-      expect(graph.narration!.defaultView, 'events');
-      expect(graph.narration!.viewOrder.first, 'events');
-      expect(graph.entities.single.name, '张三');
-      // One plan call + one extraction call.
-      expect(provider.requests.length, 2);
-      expect(provider.extractionRequests.length, 1);
-      // Direction convention is baked into the extraction prompt (system
-      // message: fixed rules live there for DeepSeek context-cache hits).
-      final prompt = provider.extractionRequests.single.messages
-          .map((m) => m.content)
-          .join('\n');
-      expect(prompt, contains('方向性关系（亲属/师徒/隶属/效力/追随）必须固定方向'));
-      expect(prompt, contains('quote 必须逐字来自正文，单条不超过 30 字'));
-    });
+        expect(graph.narration, isNotNull);
+        expect(graph.narration!.defaultView, 'events');
+        expect(graph.narration!.viewOrder.first, 'events');
+        expect(graph.entities.single.name, '张三');
+        // Plan + extraction + bounded missing-type gleaning + description polish.
+        expect(provider.requests.length, 4);
+        expect(provider.extractionRequests.length, 1);
+        // Direction convention is baked into the extraction prompt (system
+        // message: fixed rules live there for DeepSeek context-cache hits).
+        final prompt = provider.extractionRequests.single.messages
+            .map((m) => m.content)
+            .join('\n');
+        expect(prompt, contains('方向性关系（亲属/师徒/隶属/效力/追随）必须固定方向'));
+        expect(prompt, contains('quote 必须逐字来自正文，单条不超过 30 字'));
+      },
+    );
 
-    test('organization-driven plan feeds back into the extraction prompt',
-        () async {
-      final provider = _GraphProvider(
-        narrationBody: '{'
-            '"features":{"eventDriven":0.3,"characterEnsemble":0.4,'
-            '"organization":0.9,"geography":0.2,"essay":0.0},'
-            '"defaultView":"family_tree","viewOrder":["family_tree","persons"],'
-            '"wantMap":false}',
-        responses: {
-          1: '''
+    test(
+      'organization-driven plan feeds back into the extraction prompt',
+      () async {
+        final provider = _GraphProvider(
+          narrationBody:
+              '{'
+              '"features":{"eventDriven":0.3,"characterEnsemble":0.4,'
+              '"organization":0.9,"geography":0.2,"essay":0.0},'
+              '"defaultView":"organizations","viewOrder":["organizations","persons"],'
+              '"wantMap":false}',
+          responses: {
+            1: '''
             {"entities":[{"name":"史塔克家族","type":"organization","aliases":[],
               "description":"北境守护家族。",
               "evidence":[{"section":1,"quote":"史塔克家族坐镇临冬城"}]}],
              "relations":[]}
           ''',
+          },
+        );
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '史塔克家族坐镇临冬城。')],
+          includesUnread: true,
+        );
+
+        expect(graph.narration!.feature('organization'), 0.9);
+        final prompt = provider.extractionRequests.single.messages.last.content;
+        expect(prompt, contains('person|location|event|organization'));
+        expect(graph.entities.single.type, AiGraphEntityType.organization);
+      },
+    );
+
+    test(
+      'organization remains extractable when it is not the main narrative axis',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
+            {"entities":[{"name":"校学生会","type":"organization","aliases":[],
+              "description":"学生自治组织。",
+              "evidence":[{"section":1,"quote":"校学生会发布通知"}]}],
+             "relations":[]}
+          ''',
+          },
+        );
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '校学生会发布通知。')],
+          includesUnread: true,
+        );
+
+        expect(graph.narration!.feature('organization'), lessThan(0.5));
+        final prompt = provider.extractionRequests.single.messages
+            .map((message) => message.content)
+            .join('\n');
+        expect(prompt, contains('person|location|event|organization'));
+        expect(prompt, contains('群体绝不能标为 person'));
+        expect(prompt, contains('亲属只表示真实血缘或法律亲属'));
+        expect(graph.entities.single.type, AiGraphEntityType.organization);
+      },
+    );
+
+    test('cross-genre entity schema keeps all seven types distinct', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[
+              {"name":"王明","type":"person","scope":"setting","aliases":[],
+               "evidence":[{"section":1,"quote":"王明在上海创办新文学社"}]},
+              {"name":"上海","type":"location","scope":"setting","aliases":[],
+               "evidence":[{"section":1,"quote":"王明在上海"}]},
+              {"name":"新文学社","type":"organization","scope":"setting","aliases":[],
+               "evidence":[{"section":1,"quote":"创办新文学社"}]},
+              {"name":"创刊","type":"event","eventType":"组织变动","importance":2,
+               "scope":"setting","aliases":[],
+               "evidence":[{"section":1,"quote":"新文学社创刊"}]}],"relations":[]}
+          ''',
+          2: '''
+            {"entities":[
+              {"name":"自由","type":"concept","scope":"setting","aliases":[],
+               "evidence":[{"section":2,"quote":"自由不是任性"}]},
+              {"name":"旅行日记","type":"item","scope":"setting","aliases":[],
+               "evidence":[{"section":2,"quote":"翻开旅行日记"}]}],"relations":[]}
+          ''',
+          3: '''
+            {"entities":[
+              {"name":"白鹿","type":"creature","scope":"setting","aliases":[],
+               "evidence":[{"section":3,"quote":"白鹿独自穿过森林"}]}],"relations":[]}
+          ''',
         },
       );
 
       final graph = await serviceWith(provider).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', '史塔克家族坐镇临冬城。')],
+        bookTitle: '跨体裁样本',
+        sections: [
+          slice(1, '传记', '王明在上海创办新文学社。后来新文学社创刊。'),
+          slice(2, '随笔', '自由不是任性。作者翻开旅行日记。'),
+          slice(3, '幻想小说', '白鹿独自穿过森林。'),
+        ],
         includesUnread: true,
       );
 
-      expect(graph.narration!.feature('organization'), 0.9);
-      final prompt =
-          provider.extractionRequests.single.messages.last.content;
-      expect(prompt, contains('person|location|event|organization'));
-      expect(graph.entities.single.type, AiGraphEntityType.organization);
+      expect(graph.entities.map((entity) => entity.type).toSet(), {
+        AiGraphEntityType.person,
+        AiGraphEntityType.location,
+        AiGraphEntityType.event,
+        AiGraphEntityType.organization,
+        AiGraphEntityType.item,
+        AiGraphEntityType.concept,
+        AiGraphEntityType.creature,
+      });
+      expect(
+        graph.entities.singleWhere((entity) => entity.name == '白鹿').type,
+        AiGraphEntityType.creature,
+      );
+      expect(
+        graph.entities.singleWhere((entity) => entity.name == '自由').type,
+        AiGraphEntityType.concept,
+      );
     });
 
-    test('failed narration call silently degrades and does not block', () async {
-      // Force the narration call to fail while keeping extraction valid:
-      // reuse _GraphProvider with a narration body that is not valid JSON.
-      final provider = _GraphProvider(
-        responses: {
-          1: '''
+    test(
+      'failed narration call silently degrades and does not block',
+      () async {
+        // Force the narration call to fail while keeping extraction valid:
+        // reuse _GraphProvider with a narration body that is not valid JSON.
+        final provider = _GraphProvider(
+          responses: {
+            1: '''
             {"entities":[{"name":"张三","type":"person","aliases":[],
               "description":"主角。",
               "evidence":[{"section":1,"quote":"张三出场"}]}],
              "relations":[]}
           ''',
-        },
-      );
-      // Force the narration call to fail while keeping extraction valid:
-      // reuse _GraphProvider with a narration body that is not valid JSON.
-      final failing = _GraphProvider(
-        narrationBody: 'not json at all',
-        responses: provider.responses,
-      );
+          },
+        );
+        // Force the narration call to fail while keeping extraction valid:
+        // reuse _GraphProvider with a narration body that is not valid JSON.
+        final failing = _GraphProvider(
+          narrationBody: 'not json at all',
+          responses: provider.responses,
+        );
 
-      final graph = await serviceWith(failing).generate(
-        bookTitle: '测试书',
-        sections: [slice(1, '第一回', '张三出场。')],
-        includesUnread: true,
-      );
+        final graph = await serviceWith(failing).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一回', '张三出场。')],
+          includesUnread: true,
+        );
 
-      expect(graph.narration, isNull);
-      expect(graph.entities.single.name, '张三');
-      expect(graph.coveredSections, [1]);
-    });
+        expect(graph.narration, isNull);
+        expect(graph.entities.single.name, '张三');
+        expect(graph.coveredSections, [1]);
+      },
+    );
   });
 
   group('incremental and read-range gating', () {
@@ -1667,9 +2225,7 @@ void main() {
           AiGraphEntity(
             name: '张三',
             type: AiGraphEntityType.person,
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '张三出场'),
-            ],
+            evidence: [AiGraphEvidence(sectionIndex: 1, quote: '张三出场')],
             firstSection: 1,
             lastSection: 1,
           ),
@@ -1678,10 +2234,7 @@ void main() {
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [
-          slice(1, '第一回', '张三出场。'),
-          slice(2, '第二回', '李四出场。'),
-        ],
+        sections: [slice(1, '第一回', '张三出场。'), slice(2, '第二回', '李四出场。')],
         includesUnread: true,
         existing: existing,
       );
@@ -1706,10 +2259,7 @@ void main() {
 
       final graph = await serviceWith(provider).generate(
         bookTitle: '测试书',
-        sections: [
-          slice(1, '第一回', '张三出场。'),
-          slice(2, '第二回', '李四出场。'),
-        ],
+        sections: [slice(1, '第一回', '张三出场。'), slice(2, '第二回', '李四出场。')],
         includesUnread: false,
         readThroughSection: 1,
       );
@@ -1721,6 +2271,62 @@ void main() {
   });
 
   group('failure and cancellation', () {
+    test('one failed section does not discard successful siblings', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person",
+              "evidence":[{"quote":"张三出场"}]}],"relations":[]}
+          ''',
+        },
+        throwSections: const {2},
+      );
+      final checkpoints = <AiBookGraph>[];
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一节', '张三出场。'), slice(2, '第二节', '本节触发失败。')],
+        includesUnread: true,
+        narrationMode: AiNarrationPlanMode.skip,
+        onCheckpoint: (graph) async => checkpoints.add(graph),
+      );
+
+      expect(checkpoints, isNotEmpty);
+      expect(checkpoints.last.coveredSections, [1]);
+      expect(checkpoints.last.entities.single.name, '张三');
+      expect(graph.coveredSections, [1]);
+      expect(graph.qualityIssues, contains(contains('1 节抽取失败')));
+      // Initial parallel attempt + one lower-concurrency deferred retry.
+      expect(
+        provider.extractionRequests
+            .where(
+              (request) => request.messages.any(
+                (message) => message.content.contains('章节编号：2'),
+              ),
+            )
+            .length,
+        2,
+      );
+    });
+
+    test(
+      'a completely failed batch still stops the provider circuit',
+      () async {
+        final provider = _GraphProvider(throwSections: const {1, 2});
+
+        await expectLater(
+          serviceWith(provider).generate(
+            bookTitle: '测试书',
+            sections: [slice(1, '第一节', '正文一。'), slice(2, '第二节', '正文二。')],
+            includesUnread: true,
+            narrationMode: AiNarrationPlanMode.skip,
+          ),
+          throwsA(isA<AiGraphGenerationException>()),
+        );
+        expect(provider.extractionRequests.length, 2);
+      },
+    );
+
     test('cancel before the run throws a stopped error with partial', () async {
       final token = CancelToken()..cancel();
       final existing = AiBookGraph(contentHash: 'h1');
@@ -1815,8 +2421,7 @@ void main() {
       expect(graph.coveredSections, [1]);
     });
 
-    test('review batch is consumed once (no starvation, no re-submit)',
-        () async {
+    test('review batch is consumed once (no starvation, no re-submit)', () async {
       // 12 mentions sharing the same ascending relation, spread over 3
       // batches (5/5/2 sections): batch 1 reviews 4 pairs, batch 2 five,
       // batch 3 the remaining two — later batches must never re-submit
@@ -1825,10 +2430,12 @@ void main() {
       final sections = <int, Map<String, Object?>>{};
       for (var i = 1; i <= 12; i++) {
         sections[i] = {
-          '母$i': '{"name":"母$i","type":"person","aliases":[],'
+          '母$i':
+              '{"name":"母$i","type":"person","aliases":[],'
               '"description":"万历之母。","evidence":[{"section":$i,"quote":"母$i"}],'
               '"scope":"setting"}',
-          '皇$i': '{"name":"皇太后$i","type":"person","aliases":[],'
+          '皇$i':
+              '{"name":"皇太后$i","type":"person","aliases":[],'
               '"description":"万历之母。","evidence":[{"section":$i,"quote":"皇太后$i"}],'
               '"scope":"setting"}',
         };
@@ -1836,16 +2443,13 @@ void main() {
       // Six sections per 母/皇 half; the 5/5/2 batch boundaries (1-5, 6-10,
       // 11-12) fall between and inside the two halves, exercising both
       // cross-half and within-half pending accumulation.
-      final motherSections = [
-        for (var i = 1; i <= 6; i++) i,
-      ];
-      final queenSections = [
-        for (var i = 7; i <= 12; i++) i,
-      ];
+      final motherSections = [for (var i = 1; i <= 6; i++) i];
+      final queenSections = [for (var i = 7; i <= 12; i++) i];
       final responses = <int, String>{};
       // Section 1 also establishes the shared relation object as a real
       // entity (endpoint grounding drops relations to non-entities).
-      const emperor = '{"name":"万历皇帝","type":"person","aliases":[],'
+      const emperor =
+          '{"name":"万历皇帝","type":"person","aliases":[],'
           '"description":"天子。","evidence":[{"section":1,"quote":"万历皇帝"}],'
           '"scope":"setting"}';
       for (final i in motherSections) {
@@ -1862,7 +2466,8 @@ void main() {
             '"kin":"母子","evidence":[{"section":$i,"quote":"皇太后$i是万历之母"}]}]}';
       }
       final provider = _GraphProvider(
-        reviewVerdicts: '["different","different","different","different",'
+        reviewVerdicts:
+            '["different","different","different","different",'
             '"different","different","different","different","different","different"]',
         responses: responses,
       );
@@ -1884,8 +2489,9 @@ void main() {
       // (12 total, cap 10). Without consumption (the old bug) the last batch
       // would re-submit the first 10 at full cap.
       expect(reviewRequests.length, greaterThanOrEqualTo(2));
-      final lastPairCount =
-          '称谓A'.allMatches(reviewRequests.last.messages.last.content).length;
+      final lastPairCount = '称谓A'
+          .allMatches(reviewRequests.last.messages.last.content)
+          .length;
       expect(lastPairCount, lessThan(10));
       // And each review call submitted a different set of pairs.
       final pairSets = [
@@ -1990,10 +2596,11 @@ void main() {
         plannedNarration: confirmed,
       );
 
-      // The confirmed plan lands as-is; only the extraction call ran (no
-      // step-0 request because the caller already decided the plan).
+      // The confirmed plan lands as-is; no step-0 request because the caller
+      // already decided the plan. Extraction, missing-type gleaning and
+      // description polish still run.
       expect(graph.narration, same(confirmed));
-      expect(provider.requests.length, 1);
+      expect(provider.requests.length, 3);
       expect(provider.extractionRequests.length, 1);
     });
 
@@ -2013,7 +2620,13 @@ void main() {
 
       final changed = plan.withDefaultView('family_tree');
       expect(changed.defaultView, 'family_tree');
-      expect(changed.viewOrder, ['family_tree', 'persons', 'events', 'locations', 'graph']);
+      expect(changed.viewOrder, [
+        'family_tree',
+        'persons',
+        'events',
+        'locations',
+        'graph',
+      ]);
       // Unchanged view returns the same instance.
       expect(plan.withDefaultView('persons'), same(plan));
     });
@@ -2056,6 +2669,93 @@ void main() {
     });
   });
 
+  group('description polish (post-extraction refresh)', () {
+    test('rewrites first-mention blurbs and drops foreign aliases', () async {
+      // Mirrors the stored 哈利·波特 case: Harry is established first with a
+      // stale first-mention blurb; a LATER chunk re-emits him with another
+      // entity's names among his aliases (prophecy confusion with 纳威).
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[
+              {"name":"哈利·波特","type":"person",
+               "aliases":["哈利"],
+               "description":"波特夫妇的儿子，尚未登场，被提及。",
+               "evidence":[{"section":1,"quote":"波特夫妇的儿子哈利"}]},
+              {"name":"纳威·隆巴顿","type":"person","aliases":["纳威"],
+               "description":"圆脸男孩。",
+               "evidence":[{"section":1,"quote":"纳威·隆巴顿是圆脸男孩"}]}],
+             "relations":[]}
+          ''',
+          2: '''
+            {"entities":[
+              {"name":"哈利·波特","type":"person",
+               "aliases":["纳威·隆巴顿","纳威"],
+               "description":"",
+               "evidence":[{"section":2,"quote":"哈利·波特与纳威·隆巴顿同窗"}]}],
+             "relations":[]}
+          ''',
+        },
+        refreshBody: '''
+          {"entities":[
+            {"name":"哈利·波特",
+             "description":"大难不死的男孩，霍格沃茨学生",
+             "dropAliases":["纳威·隆巴顿","纳威"]}]}
+        ''',
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一章', '波特夫妇的儿子哈利，纳威·隆巴顿是圆脸男孩。'),
+          slice(2, '第二章', '哈利·波特与纳威·隆巴顿同窗。'),
+        ],
+        includesUnread: true,
+      );
+
+      final harry = graph.entities.firstWhere((e) => e.name == '哈利·波特');
+      // Stale first-mention blurb replaced from accumulated evidence.
+      expect(harry.description, '大难不死的男孩，霍格沃茨学生');
+      // Both foreign aliases belong to the Neville entity → dropped.
+      expect(harry.aliases, ['哈利']);
+      // The polish never merges/splits entities: Neville stays separate.
+      expect(graph.entities.any((e) => e.name == '纳威·隆巴顿'), isTrue);
+    });
+
+    test('keeps flagged aliases that belong to no other entity', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[
+              {"name":"哈利·波特","type":"person",
+               "aliases":["哈利","大难不死的男孩"],
+               "description":"波特夫妇的儿子。",
+               "evidence":[{"section":1,"quote":"波特夫妇的儿子哈利"}]}],
+             "relations":[]}
+          ''',
+        },
+        refreshBody: '''
+          {"entities":[
+            {"name":"哈利·波特",
+             "description":"霍格沃茨学生",
+             "dropAliases":["大难不死的男孩"]}]}
+        ''',
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一章', '波特夫妇的儿子哈利。')],
+        includesUnread: true,
+      );
+
+      final harry = graph.entities.firstWhere((e) => e.name == '哈利·波特');
+      expect(harry.description, '霍格沃茨学生');
+      // 大难不死的男孩 is nobody else's name/alias → the model's dropAlias
+      // flag is ignored (hallucinated drops can't strip legitimate aliases).
+      expect(harry.aliases, contains('大难不死的男孩'));
+    });
+  });
+
   group('AiGraphStore per-work graphs', () {
     late Directory tempDir;
     late AiGraphStore store;
@@ -2083,9 +2783,7 @@ void main() {
           type: AiGraphEntityType.person,
           aliases: const [],
           description: '',
-          evidence: [
-            AiGraphEvidence(sectionIndex: 1, quote: work),
-          ],
+          evidence: [AiGraphEvidence(sectionIndex: 1, quote: work)],
         ),
       ],
       relations: const [],
@@ -2097,8 +2795,10 @@ void main() {
       await store.write(graphFor('s95'), workKey: 's95');
 
       expect((await store.read('h1'))?.entities.single.name, '整本');
-      expect((await store.read('h1', workKey: 's51'))?.entities.single.name,
-          's51');
+      expect(
+        (await store.read('h1', workKey: 's51'))?.entities.single.name,
+        's51',
+      );
       final all = await store.readAllFor('h1');
       expect(all.keys.toSet(), {'s51', 's95'});
     });
@@ -2110,6 +2810,35 @@ void main() {
       expect(await store.read('h1', workKey: 's51'), isNull);
       expect((await store.readAllFor('h1')).keys.toSet(), {'s95'});
     });
+
+    test('one corrupt work file does not hide valid siblings', () async {
+      await store.write(graphFor('s51'), workKey: 's51');
+      await store.write(graphFor('s95'), workKey: 's95');
+      final corrupt = File(
+        '${tempDir.path}${Platform.pathSeparator}'
+        '${AiGraphStore.fileNameFor('h1', workKey: 'broken')}',
+      );
+      await corrupt.writeAsString('{not-json');
+
+      final all = await store.readAllFor('h1');
+      expect(all.keys.toSet(), {'s51', 's95'});
+    });
+
+    test(
+      'read recovers the previous snapshot when the primary is corrupt',
+      () async {
+        await store.write(graphFor('旧快照'), workKey: 's51');
+        final primary = File(
+          '${tempDir.path}${Platform.pathSeparator}'
+          '${AiGraphStore.fileNameFor('h1', workKey: 's51')}',
+        );
+        await primary.copy('${primary.path}.previous');
+        await primary.writeAsString('{broken');
+
+        final recovered = await store.read('h1', workKey: 's51');
+        expect(recovered?.entities.single.name, '旧快照');
+      },
+    );
   });
 }
 
@@ -2119,7 +2848,11 @@ class _GraphProvider implements AiProvider {
     this.invalidJson = false,
     this.narrationBody = defaultNarrationBody,
     this.reviewVerdicts = '[]',
+    this.directionReviewBody = '{"relations":[]}',
+    this.gleaningBody = '{"entities":[],"relations":[]}',
+    this.refreshBody = '{"entities":[]}',
     this.throwOnReview = false,
+    this.throwSections = const {},
   });
 
   /// sectionIndex -> raw JSON body (may be wrapped in ```json fences).
@@ -2129,11 +2862,19 @@ class _GraphProvider implements AiProvider {
   /// Step-0 display plan body (default: event-driven, organization low).
   final String narrationBody;
 
+  /// Body of the post-extraction description-polish call (the 书籍编辑
+  /// prompt); default is a no-op empty list.
+  final String refreshBody;
+
   /// JSON array returned by the merge-review call (the 人物身份判定引擎 prompt).
   final String reviewVerdicts;
+  final String directionReviewBody;
+  final String gleaningBody;
   final bool throwOnReview;
+  final Set<int> throwSections;
 
-  static const String defaultNarrationBody = '{'
+  static const String defaultNarrationBody =
+      '{'
       '"features":{"eventDriven":0.8,"characterEnsemble":0.2,'
       '"organization":0.1,"geography":0.1,"essay":0.0},'
       '"defaultView":"events","viewOrder":["events","persons","locations","graph"],'
@@ -2162,15 +2903,25 @@ class _GraphProvider implements AiProvider {
       if (throwOnReview) throw Exception('review failed');
       return AiCompletionResult(text: reviewVerdicts);
     }
+    if (request.messages.any((m) => m.content.contains('亲属关系方向核验器'))) {
+      return AiCompletionResult(text: directionReviewBody);
+    }
+    if (request.messages.any((m) => m.content.contains('知识图谱漏项复核器'))) {
+      return AiCompletionResult(text: gleaningBody);
+    }
+    if (request.messages.any((m) => m.content.contains('书籍编辑'))) {
+      return AiCompletionResult(text: refreshBody);
+    }
     final match = RegExp(r'章节编号：(\d+)').firstMatch(prompt);
     if (match == null) {
       // Step-0 display plan call: return a valid plan so generation walks
       // the real path (the plan itself is asserted in narration tests).
-      return AiCompletionResult(
-        text: '```json\n$narrationBody\n```',
-      );
+      return AiCompletionResult(text: '```json\n$narrationBody\n```');
     }
     final section = int.parse(match.group(1)!);
+    if (throwSections.contains(section)) {
+      throw AiProviderException('section failed');
+    }
     final body = responses[section] ?? '{"entities":[],"relations":[]}';
     return AiCompletionResult(text: '```json\n$body\n```');
   }

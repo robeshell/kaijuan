@@ -14,22 +14,50 @@ class JsonBackupTargetSettingsStore {
   final File file;
 
   Future<BackupTargetSettings> read() async {
-    if (!await file.exists()) return const BackupTargetSettings();
-    try {
-      return BackupTargetSettings.fromJson(
-        jsonDecode(await file.readAsString()),
-      );
-    } catch (_) {
-      return const BackupTargetSettings();
+    for (final candidate in [file, File('${file.path}.previous')]) {
+      try {
+        if (!await candidate.exists()) continue;
+        return BackupTargetSettings.fromJson(
+          jsonDecode(await candidate.readAsString()),
+        );
+      } catch (_) {
+        // A crash during replacement may leave the current generation
+        // unreadable while the previous one is still recoverable.
+      }
     }
+    return const BackupTargetSettings();
   }
 
   Future<void> write(BackupTargetSettings settings) async {
     await file.parent.create(recursive: true);
-    final temporary = File('${file.path}.partial');
-    await temporary.writeAsString(jsonEncode(settings.toJson()), flush: true);
-    if (await file.exists()) await file.delete();
-    await temporary.rename(file.path);
+    final temporary = File(
+      '${file.path}.partial.$pid.${DateTime.now().microsecondsSinceEpoch}',
+    );
+    final previous = File('${file.path}.previous');
+    try {
+      await temporary.writeAsString(jsonEncode(settings.toJson()), flush: true);
+      if (await file.exists()) {
+        if (await previous.exists()) await previous.delete();
+        await file.rename(previous.path);
+      }
+      try {
+        await temporary.rename(file.path);
+      } catch (_) {
+        if (!await file.exists() && await previous.exists()) {
+          await previous.rename(file.path);
+        }
+        rethrow;
+      }
+      if (await previous.exists()) {
+        try {
+          await previous.delete();
+        } catch (_) {
+          // The new settings generation is already committed.
+        }
+      }
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
   }
 }
 
@@ -65,6 +93,7 @@ class WebDavBackupStore {
     String remotePath,
     Future<T> Function(WebDavSession session, Uri root) action,
   ) async {
+    _requireSecureConnection();
     final root = _join(sanitizeRelativePath(remotePath));
     final session = _client.openSession(
       credentials: credentials,
@@ -79,22 +108,35 @@ class WebDavBackupStore {
   }
 
   Future<List<BackupSnapshotManifest>> listSnapshots(String remotePath) async {
+    _requireSecureConnection();
     final snapshotsRoot = _append(
       _join(sanitizeRelativePath(remotePath)),
       'snapshots',
     );
-    final devices = await _client.list(
-      snapshotsRoot.toString(),
-      credentials: credentials,
-      allowBadCertificate: connection.allowBadCertificate,
-    );
-    final manifests = <BackupSnapshotManifest>[];
-    for (final device in devices.where((entry) => entry.isDirectory)) {
-      final snapshots = await _client.list(
-        device.effectiveNavigationUri,
+    final List<RemoteEntry> devices;
+    try {
+      devices = await _client.list(
+        snapshotsRoot.toString(),
         credentials: credentials,
         allowBadCertificate: connection.allowBadCertificate,
       );
+    } on RemoteProtocolException catch (error) {
+      if (error.statusCode == 404 || error.statusCode == 410) return const [];
+      rethrow;
+    }
+    final manifests = <BackupSnapshotManifest>[];
+    for (final device in devices.where((entry) => entry.isDirectory)) {
+      final List<RemoteEntry> snapshots;
+      try {
+        snapshots = await _client.list(
+          device.effectiveNavigationUri,
+          credentials: credentials,
+          allowBadCertificate: connection.allowBadCertificate,
+        );
+      } on RemoteProtocolException catch (error) {
+        if (error.statusCode == 404 || error.statusCode == 410) continue;
+        rethrow;
+      }
       for (final snapshot in snapshots.where((entry) => entry.isDirectory)) {
         final manifestUri = _append(
           Uri.parse(snapshot.effectiveNavigationUri),
@@ -105,10 +147,21 @@ class WebDavBackupStore {
           final manifest = BackupSnapshotManifest.fromJson(
             jsonDecode(utf8.decode(bytes)),
           );
-          if (manifest != null) manifests.add(manifest);
+          if (manifest == null) {
+            throw const BackupStoreException('发现无法识别的备份快照清单');
+          }
+          manifests.add(manifest);
+        } on RemoteProtocolException catch (error) {
+          if (error.statusCode == 404 || error.statusCode == 410) {
+            // Incomplete uploads have no published manifest and remain
+            // invisible until a later successful publish.
+            continue;
+          }
+          rethrow;
+        } on BackupStoreException {
+          rethrow;
         } catch (_) {
-          // An incomplete upload has no published manifest and is invisible
-          // to restore; leave it for the next backup/cleanup pass.
+          throw const BackupStoreException('备份快照清单已损坏，无法列出备份');
         }
       }
     }
@@ -121,15 +174,27 @@ class WebDavBackupStore {
     String deviceId,
     String snapshotId,
   ) async {
+    _requireSecureConnection();
     final uri = _append(
       _join(sanitizeRelativePath(remotePath)),
       'snapshots/$deviceId/$snapshotId/manifest.json',
     );
     try {
       final bytes = await _readBytes(uri);
-      return BackupSnapshotManifest.fromJson(jsonDecode(utf8.decode(bytes)));
+      final manifest = BackupSnapshotManifest.fromJson(
+        jsonDecode(utf8.decode(bytes)),
+      );
+      if (manifest == null) {
+        throw const BackupStoreException('备份快照清单格式不受支持');
+      }
+      return manifest;
+    } on RemoteProtocolException catch (error) {
+      if (error.statusCode == 404 || error.statusCode == 410) return null;
+      rethrow;
+    } on BackupStoreException {
+      rethrow;
     } catch (_) {
-      return null;
+      throw const BackupStoreException('备份快照清单已损坏，无法读取');
     }
   }
 
@@ -145,14 +210,19 @@ class WebDavBackupStore {
     final compressed = await _readBytesWithSession(
       session,
       uri,
-      maxBytes: 64 * 1024 * 1024,
+      maxBytes: KaijuanBackupFormat.maxCompressedRecordsBytes,
     );
     if (compressed.length != manifest.recordsBytes ||
         sha256.convert(compressed).toString() != manifest.recordsSha256) {
       throw const BackupStoreException('备份记录校验失败');
     }
     try {
-      final decoded = jsonDecode(utf8.decode(gzip.decode(compressed)));
+      final inflated = await _readLimitedStream(
+        gzip.decoder.bind(Stream<List<int>>.value(compressed)),
+        maxBytes: KaijuanBackupFormat.maxUncompressedRecordsBytes,
+        tooLargeMessage: '备份记录解压后超过大小限制',
+      );
+      final decoded = jsonDecode(utf8.decode(inflated));
       final records = BackupRecords.fromJson(decoded);
       if (records == null) throw const BackupStoreException('备份记录格式不受支持');
       return records;
@@ -183,7 +253,21 @@ class WebDavBackupStore {
           '${chunk.index.toString().padLeft(6, '0')}-${chunk.hash}.bin',
         );
         final existing = await session.stat(target);
-        if (existing?.contentLength == chunk.size) continue;
+        if (existing?.contentLength == chunk.size) {
+          try {
+            final remoteBytes = await _readBytesWithSession(
+              session,
+              target,
+              maxBytes: chunk.size,
+            );
+            if (remoteBytes.length == chunk.size &&
+                sha256.convert(remoteBytes).toString() == chunk.hash) {
+              continue;
+            }
+          } on RemoteProtocolException catch (error) {
+            if (error.statusCode != 404 && error.statusCode != 410) rethrow;
+          }
+        }
 
         final temporary = _append(
           chunksRoot,
@@ -217,7 +301,14 @@ class WebDavBackupStore {
       'snapshots/${manifest.deviceId}/${manifest.snapshotId}',
     );
     await _ensureDirectory(session, snapshotRoot);
-    final compressed = gzip.encode(utf8.encode(records.encode()));
+    final encoded = utf8.encode(records.encode());
+    if (encoded.length > KaijuanBackupFormat.maxUncompressedRecordsBytes) {
+      throw const BackupStoreException('备份记录超过大小限制');
+    }
+    final compressed = gzip.encode(encoded);
+    if (compressed.length > KaijuanBackupFormat.maxCompressedRecordsBytes) {
+      throw const BackupStoreException('备份记录压缩后超过大小限制');
+    }
     final part = _append(snapshotRoot, '.data.json.gz.partial');
     await session.putBytes(part, compressed);
     await session.move(
@@ -239,11 +330,6 @@ class WebDavBackupStore {
     await _ensureDirectory(session, snapshotRoot);
     final part = _append(snapshotRoot, '.manifest.json.partial');
     await session.putBytes(part, utf8.encode(manifest.encode()));
-    await session.move(
-      part,
-      _append(snapshotRoot, 'manifest.json'),
-      overwrite: true,
-    );
 
     final deviceRoot = _append(root, 'devices/${manifest.deviceId}');
     await _ensureDirectory(session, deviceRoot);
@@ -260,6 +346,14 @@ class WebDavBackupStore {
     await session.move(
       latestPart,
       _append(deviceRoot, 'latest.json'),
+      overwrite: true,
+    );
+
+    // manifest.json is the only visibility/commit point. Keep it last so a
+    // failure above cannot produce a usable snapshot reported as failed.
+    await session.move(
+      part,
+      _append(snapshotRoot, 'manifest.json'),
       overwrite: true,
     );
   }
@@ -340,7 +434,7 @@ class WebDavBackupStore {
       return await _readBytesWithSession(
         session,
         uri,
-        maxBytes: 64 * 1024 * 1024,
+        maxBytes: 4 * 1024 * 1024,
       );
     } finally {
       await session.close();
@@ -352,14 +446,33 @@ class WebDavBackupStore {
     Uri uri, {
     required int maxBytes,
   }) async {
+    return _readLimitedStream(
+      session.download(uri),
+      maxBytes: maxBytes,
+      tooLargeMessage: '备份文件超过大小限制',
+    );
+  }
+
+  static Future<Uint8List> _readLimitedStream(
+    Stream<List<int>> stream, {
+    required int maxBytes,
+    required String tooLargeMessage,
+  }) async {
     final bytes = BytesBuilder(copy: false);
-    await for (final chunk in session.download(uri)) {
+    await for (final chunk in stream) {
       if (bytes.length + chunk.length > maxBytes) {
-        throw const BackupStoreException('备份文件超过大小限制');
+        throw BackupStoreException(tooLargeMessage);
       }
       bytes.add(chunk);
     }
     return bytes.takeBytes();
+  }
+
+  void _requireSecureConnection() {
+    final uri = Uri.parse(connection.url);
+    if (uri.scheme.toLowerCase() != 'https') {
+      throw const BackupStoreException('备份位置需要使用 HTTPS。请编辑 WebDAV 连接地址后重试');
+    }
   }
 }
 

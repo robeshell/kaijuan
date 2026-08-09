@@ -10,6 +10,7 @@ import '../presentation/app_shell.dart';
 import '../presentation/controllers/library_controller.dart';
 import '../presentation/controllers/backup_controller.dart';
 import '../presentation/controllers/ai_settings_controller.dart';
+import '../presentation/navigation/app_route_observer.dart';
 import '../presentation/widgets/ai_settings_scope.dart';
 import 'book_reading_preferences.dart';
 import 'comic_reading_preferences.dart';
@@ -62,6 +63,7 @@ class App extends StatelessWidget {
               GlobalWidgetsLocalizations.delegate,
               GlobalCupertinoLocalizations.delegate,
             ],
+            navigatorObservers: [appRouteObserver],
             theme: AppTheme.forSkin(skin, accent),
             darkTheme: AppTheme.forSkin(
               followSystem ? AppSkins.deepNight : skin,

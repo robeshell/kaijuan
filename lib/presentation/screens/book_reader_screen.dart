@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../ai/ai_chat_store.dart';
+import '../../ai/ai_graph_store.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
 import '../../core/text_editing_focus.dart';
@@ -15,6 +17,7 @@ import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
 import '../controllers/ai_settings_controller.dart';
 import '../controllers/book_reader_controller.dart';
+import '../navigation/app_route_observer.dart';
 import '../widgets/ai_settings_scope.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/reader/book_annotation_note_sheet.dart';
@@ -80,7 +83,7 @@ class BookReaderScreen extends StatefulWidget {
 }
 
 class _BookReaderScreenState extends State<BookReaderScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   late final BookReaderController _controller;
   late final FoliateJsBookEngineAdapter _engine;
@@ -90,6 +93,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
   bool _showReveal = true;
   bool _revealStarted = false;
   bool _lastTtsPlaying = false;
+  ModalRoute<dynamic>? _route;
 
   @override
   void initState() {
@@ -103,6 +107,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       aiSettings: widget.aiSettings ?? AiSettingsScope.maybeOf(context),
       scrollModeEnabled: scrollModeEnabled,
     );
+    unawaited(_attachAiStores());
     if (!scrollModeEnabled &&
         widget.readingPreferences?.readingMode == BookReadingMode.scroll) {
       unawaited(
@@ -110,6 +115,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       );
     }
     _engine = FoliateJsBookEngineAdapter(readerController: _controller);
+    _engine.addListener(_onBookEngineTick);
     _controller.attachPlatformFocusClearer(_engine.clearPlatformFocus);
     _controller.onOpenNoteEditor = _presentNoteEditor;
     _controller.addListener(_onBookControllerTick);
@@ -118,6 +124,8 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       itemId: widget.item.id,
       kind: ReaderKind.book,
     )..attach();
+    _onBookControllerTick();
+    _onBookEngineTick();
     _focusNode = FocusNode();
     // Phase A (~first half): cover dissolves into reading backdrop.
     // Phase B (~second half): backdrop eases away into the text.
@@ -139,6 +147,19 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     unawaited(_openBookFile());
   }
 
+  Future<void> _attachAiStores() async {
+    try {
+      final paths = await LibraryPaths.forApp();
+      if (!mounted) return;
+      _controller.attachChatHistoryStore(
+        JsonAiChatHistoryStore(paths.aiChatDirectory),
+      );
+      _controller.attachAiGraphStore(AiGraphStore(paths.aiGraphDirectory));
+    } catch (error) {
+      debugPrint('[AI] failed to attach reader stores: $error');
+    }
+  }
+
   void _onGlobalFocusChange() {
     if (!mounted) return;
     if (!primaryFocusIsTextEditing()) return;
@@ -148,14 +169,31 @@ class _BookReaderScreenState extends State<BookReaderScreen>
   /// TTS playback must not accumulate reading time (PRODUCT §4.8).
   void _onBookControllerTick() {
     final playing = _controller.ttsPlaying;
-    if (playing == _lastTtsPlaying) return;
-    _lastTtsPlaying = playing;
-    _timeTracker.setCountingEnabled(!playing);
+    if (playing != _lastTtsPlaying) {
+      _lastTtsPlaying = playing;
+      _timeTracker.setCountingEnabled(!playing);
+    }
+    if (_controller.openError != null) {
+      _timeTracker.setContentReady(false);
+    }
+  }
+
+  void _onBookEngineTick() {
+    _timeTracker.setContentReady(
+      _engine.rendererReady && _controller.openError == null,
+    );
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != _route) {
+      if (_route != null) appRouteObserver.unsubscribe(this);
+      _route = route;
+      if (route != null) appRouteObserver.subscribe(this, route);
+      _timeTracker.setRouteVisible(route?.isCurrent ?? true);
+    }
     // Re-bind if initState missed the scope (route edge cases).
     _controller.bindAiSettings(
       widget.aiSettings ?? AiSettingsScope.maybeOf(context),
@@ -312,11 +350,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
             if (_controller.openError != null) {
               return Scaffold(
                 backgroundColor: bg,
-                body: _ErrorBody(
-                  error: _controller.openError.toString(),
-                  onBack: _exit,
-                  theme: theme,
-                ),
+                body: _ErrorBody(onBack: _exit, theme: theme),
               );
             }
 
@@ -434,8 +468,10 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   @override
   void dispose() {
+    appRouteObserver.unsubscribe(this);
     FocusManager.instance.removeListener(_onGlobalFocusChange);
     _controller.removeListener(_onBookControllerTick);
+    _engine.removeListener(_onBookEngineTick);
     unawaited(_timeTracker.detach());
     _controller.onOpenNoteEditor = null;
     _controller.detachPlatformFocusClearer();
@@ -445,16 +481,23 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     _controller.dispose();
     super.dispose();
   }
+
+  @override
+  void didPush() => _timeTracker.setRouteVisible(true);
+
+  @override
+  void didPopNext() => _timeTracker.setRouteVisible(true);
+
+  @override
+  void didPushNext() => _timeTracker.setRouteVisible(false);
+
+  @override
+  void didPop() => _timeTracker.setRouteVisible(false);
 }
 
 class _ErrorBody extends StatelessWidget {
-  const _ErrorBody({
-    required this.error,
-    required this.onBack,
-    required this.theme,
-  });
+  const _ErrorBody({required this.onBack, required this.theme});
 
-  final String error;
   final VoidCallback onBack;
   final BookReadingTheme theme;
 
@@ -464,8 +507,6 @@ class _ErrorBody extends StatelessWidget {
     final fgMuted = theme.isDark
         ? const Color(0x99F2F2F4)
         : const Color(0x991C1C1E);
-    final detail = error.trim();
-
     return SafeArea(
       child: Center(
         child: Padding(
@@ -488,20 +529,6 @@ class _ErrorBody extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: fgMuted, height: 1.4),
               ),
-              if (detail.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  detail,
-                  textAlign: TextAlign.center,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: fgMuted.withValues(alpha: 0.75),
-                    fontSize: 12,
-                    height: 1.35,
-                  ),
-                ),
-              ],
               const SizedBox(height: 16),
               FilledButton(onPressed: onBack, child: const Text('返回')),
             ],

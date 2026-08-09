@@ -13,6 +13,7 @@ import '../../library/persistence/app_database.dart';
 import '../../library/stats/reading_time_tracker.dart';
 import '../../readers/comic/comic_models.dart';
 import '../controllers/comic_reader_controller.dart';
+import '../navigation/app_route_observer.dart';
 import '../widgets/reader/comic_reader_body.dart';
 import '../widgets/reader/comic_reader_chrome.dart';
 import '../widgets/reader/reader_waiting_cover.dart';
@@ -62,13 +63,14 @@ class ComicReaderScreen extends StatefulWidget {
 }
 
 class _ComicReaderScreenState extends State<ComicReaderScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {
   late final ComicReaderController _controller;
   late final ReadingTimeTracker _timeTracker;
   final _focusNode = FocusNode();
   late final AnimationController _reveal;
   bool _showReveal = true;
   bool _revealStarted = false;
+  ModalRoute<dynamic>? _route;
 
   @override
   void initState() {
@@ -83,6 +85,8 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
       itemId: widget.item.id,
       kind: ReaderKind.comic,
     )..attach();
+    _controller.addListener(_syncTimeTracker);
+    _syncTimeTracker();
     // Phase A (~first half): cover dissolves into reading backdrop.
     // Phase B (~second half): backdrop eases away into the pages.
     _reveal = AnimationController(
@@ -100,19 +104,47 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != _route) {
+      if (_route != null) appRouteObserver.unsubscribe(this);
+      _route = route;
+      if (route != null) appRouteObserver.subscribe(this, route);
+      _timeTracker.setRouteVisible(route?.isCurrent ?? true);
+    }
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    _reveal.duration =
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 420);
+    _reveal.duration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 420);
   }
 
   @override
   void dispose() {
+    appRouteObserver.unsubscribe(this);
+    _controller.removeListener(_syncTimeTracker);
     unawaited(_timeTracker.detach());
     _reveal.dispose();
     _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
+
+  void _syncTimeTracker() {
+    _timeTracker.setContentReady(
+      _controller.isReady && _controller.openError == null,
+    );
+  }
+
+  @override
+  void didPush() => _timeTracker.setRouteVisible(true);
+
+  @override
+  void didPopNext() => _timeTracker.setRouteVisible(true);
+
+  @override
+  void didPushNext() => _timeTracker.setRouteVisible(false);
+
+  @override
+  void didPop() => _timeTracker.setRouteVisible(false);
 
   void _maybeStartReveal() {
     if (!_controller.isReady || _revealStarted || !_showReveal) return;
@@ -151,9 +183,7 @@ class _ComicReaderScreenState extends State<ComicReaderScreen>
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     final primary = FocusManager.instance.primaryFocus;
-    if (primary != null &&
-        primary != node &&
-        focusIsTextEditing(primary)) {
+    if (primary != null && primary != node && focusIsTextEditing(primary)) {
       return KeyEventResult.ignored;
     }
 

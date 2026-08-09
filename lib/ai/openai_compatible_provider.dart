@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'ai_log.dart';
 import 'ai_models.dart';
 import 'ai_provider.dart';
+import 'ai_user_error.dart';
 
 /// OpenAI Chat Completions API (also DeepSeek, xAI, many local proxies).
 class OpenAiCompatibleAiProvider implements AiProvider {
@@ -69,10 +70,14 @@ class OpenAiCompatibleAiProvider implements AiProvider {
   /// this field.
   bool get _isDeepSeekHost {
     final host = Uri.tryParse(baseUrl)?.host.toLowerCase() ?? '';
-    return host.contains('deepseek') || model.toLowerCase().startsWith('deepseek');
+    return host.contains('deepseek') ||
+        model.toLowerCase().startsWith('deepseek');
   }
 
-  Map<String, Object?> _body(AiCompletionRequest request, {required bool stream}) {
+  Map<String, Object?> _body(
+    AiCompletionRequest request, {
+    required bool stream,
+  }) {
     // Send both token caps: classic OpenAI + newer o-series / xAI aliases.
     return {
       'model': model,
@@ -94,11 +99,7 @@ class OpenAiCompatibleAiProvider implements AiProvider {
   static String extractMessageText(Map message) {
     final fromContent = _coerceText(message['content']);
     if (fromContent.isNotEmpty) return fromContent;
-    for (final key in const [
-      'reasoning_content',
-      'reasoning',
-      'refusal',
-    ]) {
+    for (final key in const ['reasoning_content', 'reasoning', 'refusal']) {
       final text = _coerceText(message[key]);
       if (text.isNotEmpty && key != 'refusal') return text;
     }
@@ -227,6 +228,8 @@ class OpenAiCompatibleAiProvider implements AiProvider {
     AiLog.d('openai POST $url model=$model stream=false');
     final sw = Stopwatch()..start();
     late final http.Response response;
+    void abortRequest() => _client.close();
+    cancelToken?.addCancelListener(abortRequest);
     try {
       response = await _client
           .post(
@@ -236,8 +239,12 @@ class OpenAiCompatibleAiProvider implements AiProvider {
           )
           .timeout(request.timeout ?? const Duration(seconds: 45));
     } catch (error) {
-      AiLog.d('openai POST complete network error after ${sw.elapsedMilliseconds}ms: $error');
+      AiLog.d(
+        'openai POST complete network error after ${sw.elapsedMilliseconds}ms: $error',
+      );
       rethrow;
+    } finally {
+      cancelToken?.removeCancelListener(abortRequest);
     }
     cancelToken?.throwIfCancelled();
     AiLog.d(
@@ -260,7 +267,9 @@ class OpenAiCompatibleAiProvider implements AiProvider {
     }
     final choices = decoded['choices'];
     if (choices is! List || choices.isEmpty) {
-      AiLog.d('openai POST complete no choices body=${AiLog.bodyPreview(rawBody)}');
+      AiLog.d(
+        'openai POST complete no choices body=${AiLog.bodyPreview(rawBody)}',
+      );
       throw AiProviderException('接口未返回内容');
     }
     final first = choices.first;
@@ -298,71 +307,91 @@ class OpenAiCompatibleAiProvider implements AiProvider {
     CancelToken? cancelToken,
   }) async* {
     cancelToken?.throwIfCancelled();
-    final url = _chatUrl;
-    AiLog.d('openai POST $url model=$model stream=true');
-    final sw = Stopwatch()..start();
-    final httpRequest = http.Request('POST', url)
-      ..headers.addAll(_headers)
-      ..body = jsonEncode(_body(request, stream: true));
-    late final http.StreamedResponse streamed;
+    void abortRequest() => _client.close();
+    cancelToken?.addCancelListener(abortRequest);
     try {
-      streamed = await _client.send(httpRequest).timeout(
-        const Duration(seconds: 45),
-      );
-    } catch (error) {
-      AiLog.d('openai POST stream network error after ${sw.elapsedMilliseconds}ms: $error');
-      rethrow;
-    }
-    cancelToken?.throwIfCancelled();
-    AiLog.d(
-      'openai POST stream status=${streamed.statusCode} '
-      'in ${sw.elapsedMilliseconds}ms',
-    );
-    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-      final body = await streamed.stream.bytesToString();
-      AiLog.d('openai POST stream error body=${AiLog.bodyPreview(body)}');
-      throw AiProviderException(
-        _errorMessageFromBody(streamed.statusCode, body),
-        statusCode: streamed.statusCode,
-      );
-    }
-
-    final lines = streamed.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter());
-    await for (final line in lines) {
-      cancelToken?.throwIfCancelled();
-      if (line.isEmpty || line.startsWith(':')) continue;
-      if (!line.startsWith('data:')) continue;
-      final payload = line.substring(5).trim();
-      if (payload == '[DONE]') {
-        yield const AiStreamChunk(text: '', isFinal: true);
-        return;
-      }
+      final url = _chatUrl;
+      AiLog.d('openai POST $url model=$model stream=true');
+      final sw = Stopwatch()..start();
+      final httpRequest = http.Request('POST', url)
+        ..headers.addAll(_headers)
+        ..body = jsonEncode(_body(request, stream: true));
+      late final http.StreamedResponse streamed;
       try {
-        final decoded = jsonDecode(payload);
-        if (decoded is! Map) continue;
-        final choices = decoded['choices'];
-        if (choices is! List || choices.isEmpty) continue;
-        final first = choices.first;
-        if (first is! Map) continue;
-        final delta = first['delta'];
-        if (delta is Map) {
-          final piece = extractDeltaText(delta);
-          if (piece.isNotEmpty) {
-            yield AiStreamChunk(text: piece);
-          }
-        }
-        final finish = first['finish_reason'];
-        if (finish is String && finish.isNotEmpty && finish != 'null') {
+        streamed = await _client
+            .send(httpRequest)
+            .timeout(const Duration(seconds: 45));
+      } catch (error) {
+        AiLog.d(
+          'openai POST stream network error after ${sw.elapsedMilliseconds}ms: $error',
+        );
+        rethrow;
+      }
+      cancelToken?.throwIfCancelled();
+      AiLog.d(
+        'openai POST stream status=${streamed.statusCode} '
+        'in ${sw.elapsedMilliseconds}ms',
+      );
+      if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+        final body = await streamed.stream.bytesToString();
+        AiLog.d('openai POST stream error body=${AiLog.bodyPreview(body)}');
+        throw AiProviderException(
+          _errorMessageFromBody(streamed.statusCode, body),
+          statusCode: streamed.statusCode,
+        );
+      }
+
+      final lines = streamed.stream
+          .timeout(
+            request.timeout ?? const Duration(seconds: 45),
+            onTimeout: (sink) {
+              sink.addError(AiProviderException('流式响应等待超时，请重试'));
+              sink.close();
+            },
+          )
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+      await for (final line in lines) {
+        cancelToken?.throwIfCancelled();
+        if (line.isEmpty || line.startsWith(':')) continue;
+        if (!line.startsWith('data:')) continue;
+        final payload = line.substring(5).trim();
+        if (payload == '[DONE]') {
           yield const AiStreamChunk(text: '', isFinal: true);
           return;
         }
-      } catch (_) {
-        // Skip malformed SSE frames.
+        try {
+          final decoded = jsonDecode(payload);
+          if (decoded is! Map) continue;
+          final choices = decoded['choices'];
+          if (choices is! List || choices.isEmpty) continue;
+          final first = choices.first;
+          if (first is! Map) continue;
+          final delta = first['delta'];
+          if (delta is Map) {
+            final piece = extractDeltaText(delta);
+            if (piece.isNotEmpty) {
+              yield AiStreamChunk(text: piece);
+            }
+          }
+          final finish = first['finish_reason'];
+          if (finish is String && finish.isNotEmpty && finish != 'null') {
+            AiLog.d('openai POST stream finish=$finish');
+            yield AiStreamChunk(
+              text: '',
+              isFinal: true,
+              truncated: finish == 'length',
+            );
+            return;
+          }
+        } catch (_) {
+          // Skip malformed SSE frames.
+        }
       }
+      throw AiProviderException('流式响应意外中断，请重试');
+    } finally {
+      cancelToken?.removeCancelListener(abortRequest);
     }
-    yield const AiStreamChunk(text: '', isFinal: true);
   }
 
   String _errorMessage(http.Response response) {
@@ -371,14 +400,7 @@ class OpenAiCompatibleAiProvider implements AiProvider {
 
   String _errorMessageFromBody(int statusCode, String body) {
     final parsed = _tryParseError(body);
-    if (parsed != null) return parsed;
-    return switch (statusCode) {
-      401 || 403 => '密钥无效或没有权限，请检查 API Key',
-      404 => '接口地址不正确，请检查 Base URL',
-      429 => '请求过于频繁或额度不足，请稍后再试',
-      >= 500 => '服务暂时不可用（$statusCode），请稍后再试',
-      _ => '请求失败（$statusCode）',
-    };
+    return aiProviderHttpErrorMessage(statusCode, providerMessage: parsed);
   }
 
   String? _tryParseError(String body) {

@@ -27,11 +27,11 @@ enum ComicReaderMode {
   }
 
   String get label => switch (this) {
-        ComicReaderMode.slide => '滑动',
-        ComicReaderMode.staticView => '静态',
-        ComicReaderMode.vertical => '纵向',
-        ComicReaderMode.spread => '双页',
-      };
+    ComicReaderMode.slide => '滑动',
+    ComicReaderMode.staticView => '静态',
+    ComicReaderMode.vertical => '纵向',
+    ComicReaderMode.spread => '双页',
+  };
 }
 
 /// Reading direction for horizontal modes (slide / static / spread).
@@ -52,9 +52,9 @@ enum ComicReadDirection {
   }
 
   String get label => switch (this) {
-        ComicReadDirection.ltr => '从左到右',
-        ComicReadDirection.rtl => '从右到左',
-      };
+    ComicReadDirection.ltr => '从左到右',
+    ComicReadDirection.rtl => '从右到左',
+  };
 }
 
 /// Content-area theme, independent of App chrome theme.
@@ -78,11 +78,11 @@ enum ComicReadingTheme {
 
   /// Background behind page images.
   int get backgroundArgb => switch (this) {
-        ComicReadingTheme.paper => 0xFFFAFAF8,
-        ComicReadingTheme.sepia => 0xFFF5F0E6,
-        ComicReadingTheme.dark => 0xFF1C1C1E,
-        ComicReadingTheme.pureBlack => 0xFF000000,
-      };
+    ComicReadingTheme.paper => 0xFFFAFAF8,
+    ComicReadingTheme.sepia => 0xFFF5F0E6,
+    ComicReadingTheme.dark => 0xFF1C1C1E,
+    ComicReadingTheme.pureBlack => 0xFF000000,
+  };
 
   bool get isDark =>
       this == ComicReadingTheme.dark || this == ComicReadingTheme.pureBlack;
@@ -93,18 +93,18 @@ enum ComicReadingTheme {
   /// Secondary chrome text (page label, captions).
   /// Opaque solids so contrast stays stable on each theme background (~≥4.5:1).
   int get metaColorArgb => switch (this) {
-        ComicReadingTheme.paper => 0xFF707070,
-        ComicReadingTheme.sepia => 0xFF6E675C,
-        ComicReadingTheme.dark => 0xFFA1A1A6,
-        ComicReadingTheme.pureBlack => 0xFF8A8A8A,
-      };
+    ComicReadingTheme.paper => 0xFF707070,
+    ComicReadingTheme.sepia => 0xFF6E675C,
+    ComicReadingTheme.dark => 0xFFA1A1A6,
+    ComicReadingTheme.pureBlack => 0xFF8A8A8A,
+  };
 
   String get label => switch (this) {
-        ComicReadingTheme.paper => '纸白',
-        ComicReadingTheme.sepia => '米色',
-        ComicReadingTheme.dark => '深灰',
-        ComicReadingTheme.pureBlack => '纯黑',
-      };
+    ComicReadingTheme.paper => '纸白',
+    ComicReadingTheme.sepia => '米色',
+    ComicReadingTheme.dark => '深灰',
+    ComicReadingTheme.pureBlack => '纯黑',
+  };
 }
 
 /// Format-owned comic locator payload. Database stores [toJson] as opaque text.
@@ -118,9 +118,9 @@ class ComicLocator {
   final int pageOrderVersion;
 
   Map<String, Object?> toJson() => {
-        'pageIndex': pageIndex,
-        'pageOrderVersion': pageOrderVersion,
-      };
+    'pageIndex': pageIndex,
+    'pageOrderVersion': pageOrderVersion,
+  };
 
   String encode() => jsonEncode(toJson());
 
@@ -158,8 +158,8 @@ class ComicLocator {
 /// A single page or a two-page spread, always anchored on [primaryPage].
 class PageSpread {
   const PageSpread.single(this.primaryPage)
-      : secondaryPage = null,
-        usesSpreadLayout = false;
+    : secondaryPage = null,
+      usesSpreadLayout = false;
 
   const PageSpread.double({
     required this.primaryPage,

@@ -31,7 +31,6 @@ dependencies:
   http: ^1.6.0
   xml: ^6.5.0
   flutter_secure_storage: ^10.3.1
-  open_filex: ^4.7.0
 
   # Book reader
   image: ^4.1.7
@@ -47,6 +46,14 @@ dependencies:
   qr_flutter: ^4.1.0
   thinking_orbs: ^0.1.0
   flutter_graph_view: ^2.1.0
+  flutter_markdown_plus: ^1.0.12
+  flutter_markdown_plus_latex: ^1.0.5
+  flutter_math_fork: ^0.7.4
+  flutter_highlighting: ^0.9.0+11.8.0
+  flutter_svg: ^2.3.0
+  highlighting: ^0.9.0+11.8.0
+  markdown: ^7.3.1
+  merman: ^0.7.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -81,6 +88,12 @@ dependency_overrides:
     path: third_party/flutter_inappwebview_ios
 
 flutter:
+  # merman 0.7.0 places its Apple binary target outside the Swift package
+  # directory, which Flutter's generated package symlink cannot resolve.
+  # Keep Apple plugins on their supported CocoaPods path until upstream moves
+  # the XCFramework inside the Swift package.
+  config:
+    enable-swift-package-manager: false
   uses-material-design: true
   assets:
     - brands/launch/launch_mark.png
