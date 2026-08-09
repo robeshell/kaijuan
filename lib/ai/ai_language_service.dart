@@ -1,23 +1,24 @@
+import 'ai_cancel.dart';
 import 'ai_models.dart';
-import 'ai_provider.dart';
+import 'ai_model_adapter.dart';
 import 'ai_run.dart';
-import 'ai_run_provider.dart';
 import 'ai_settings.dart';
 import 'ai_translation.dart';
+import 'ai_workflow_model_session.dart';
 import '../readers/book/book_language_actions.dart';
 
 /// Builds prompts and streams dictionary / translation answers.
 class AiLanguageService {
   AiLanguageService({
     required bool Function() isAvailable,
-    required AiProvider? Function() openProvider,
+    required AiModelAdapter? Function() openModelAdapter,
     required AiSettings Function() settings,
   }) : isAvailableFn = isAvailable,
-       openProviderFn = openProvider,
+       openModelAdapterFn = openModelAdapter,
        settingsFn = settings;
 
   final bool Function() isAvailableFn;
-  final AiProvider? Function() openProviderFn;
+  final AiModelAdapter? Function() openModelAdapterFn;
   final AiSettings Function() settingsFn;
 
   static const maxInputChars = 4000;
@@ -33,6 +34,7 @@ class AiLanguageService {
     CancelToken? cancelToken,
     AiTranslationRequestOptions? translationOptions,
     void Function(AiRunModelPurpose purpose)? onModelStarted,
+    AiModelUsageReporter? onUsage,
   }) async* {
     final trimmed = text.trim();
     if (trimmed.isEmpty) {
@@ -56,60 +58,69 @@ class AiLanguageService {
       }
     }
 
-    final openedProvider = openProviderFn();
-    if (openedProvider == null || !isAvailable) {
+    final adapter = openModelAdapterFn();
+    if (adapter == null || !isAvailable) {
       throw AiProviderException('AI 未启用或未配置');
     }
-    final provider = onModelStarted == null
-        ? openedProvider
-        : AiRunTrackingProvider(
-            delegate: openedProvider,
-            onModelStarted: onModelStarted,
-          );
+    final session = AiWorkflowModelSession(
+      adapter,
+      onModelStarted ?? (_) {},
+      onUsage,
+    );
 
     final messages = _messagesFor(
       operation,
       input,
       translationOptions: translationOptions,
     );
-    final request = AiCompletionRequest(
-      messages: messages,
+    final request = AiModelTurnRequest(
+      messages: [
+        for (final message in messages)
+          AiModelMessage(
+            role: switch (message.role) {
+              AiMessageRole.system => AiModelRole.system,
+              AiMessageRole.user => AiModelRole.user,
+              AiMessageRole.assistant => AiModelRole.assistant,
+            },
+            text: message.content,
+          ),
+      ],
       maxTokens: operation == BookLanguageOperation.dictionary ? 900 : 1400,
       temperature: 0.2,
     );
 
-    final buffer = StringBuffer();
-    var sawChunk = false;
-    await for (final chunk in provider.stream(
-      request,
-      cancelToken: cancelToken,
-    )) {
-      if (chunk.text.isNotEmpty) {
-        sawChunk = true;
-        buffer.write(chunk.text);
-        yield buffer.toString();
-      }
-      if (chunk.isFinal) {
-        if (chunk.truncated) {
-          throw AiProviderException('生成内容达到长度上限，结果可能不完整，请重试');
-        }
-        break;
-      }
-    }
-    if (!sawChunk || buffer.toString().trim().isEmpty) {
-      final once = await completeWithRetry(
-        provider,
+    try {
+      final buffer = StringBuffer();
+      AiModelTurnCompleted? terminal;
+      await for (final event in session.streamTurn(
         request,
         cancelToken: cancelToken,
-      );
-      if (once.truncated) {
+      )) {
+        switch (event) {
+          case AiModelTextDelta(:final text) when text.isNotEmpty:
+            buffer.write(text);
+            yield buffer.toString();
+          case AiModelTurnCompleted():
+            terminal = event;
+          default:
+            break;
+        }
+      }
+      if (terminal == null) throw AiProviderException('模型响应缺少完成终态');
+      if (terminal.toolCalls.isNotEmpty) {
+        throw AiProviderException('语言任务不允许调用工具');
+      }
+      if (terminal.truncated) {
         throw AiProviderException('生成内容达到长度上限，结果可能不完整，请重试');
       }
-      final textOut = once.text.trim();
-      if (textOut.isEmpty) {
-        throw AiProviderException('没有生成内容');
+      final streamedText = buffer.toString().trim();
+      if (streamedText.isEmpty) {
+        final terminalText = terminal.text.trim();
+        if (terminalText.isEmpty) throw AiProviderException('没有生成内容');
+        yield terminalText;
       }
-      yield textOut;
+    } finally {
+      await session.close();
     }
   }
 

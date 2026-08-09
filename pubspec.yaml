@@ -64,6 +64,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   build_runner: ^2.15.1
+  schemantic_builder: 0.1.2
   drift_dev: ^2.34.2+1
   flutter_lints: ^6.0.0
   msix: ^3.16.12

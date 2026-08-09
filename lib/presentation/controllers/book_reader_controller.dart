@@ -132,7 +132,7 @@ class BookReaderController extends ChangeNotifier {
         ? null
         : AiLanguageService(
             isAvailable: () => aiSettings.isReadyForRequests,
-            openProvider: () => aiSettings.openProvider(),
+            openModelAdapter: () => aiSettings.openModelAdapter(),
             // Always read live settings so translation prefs pick up changes
             // made while the reader is already open.
             settings: () => aiSettings.settings,
@@ -147,7 +147,7 @@ class BookReaderController extends ChangeNotifier {
         ? null
         : AiBookOutlineService(
             isAvailable: () => aiSettings.isReadyForRequests,
-            openProvider: () => aiSettings.openProvider(),
+            openModelAdapter: () => aiSettings.openModelAdapter(),
             settings: () => aiSettings.settings,
           );
     _aiGraph = aiSettings == null
@@ -1020,6 +1020,10 @@ class BookReaderController extends ChangeNotifier {
           sections: outlineSections,
           cancelToken: execution.cancelToken,
           onModelStarted: execution.modelStarted,
+          onUsage: ({inputTokens, outputTokens}) => execution.reportTokens(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+          ),
           onProgress: (progress) {
             execution.progress(progress.label);
             _bookOutlineProgress = progress;
@@ -2607,6 +2611,10 @@ class BookReaderController extends ChangeNotifier {
           cancelToken: execution.cancelToken,
           translationOptions: translationOptions,
           onModelStarted: execution.modelStarted,
+          onUsage: ({inputTokens, outputTokens}) => execution.reportTokens(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+          ),
         )) {
           execution.textSnapshot(snapshot);
         }

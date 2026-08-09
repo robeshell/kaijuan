@@ -104,6 +104,7 @@ class GenkitAnthropicModelAdapter
     final tools = [for (final tool in request.tools) _resolveTool(tool)];
     final messages = request.messages.map(_toGenkitMessage).toList();
     var timedOut = false;
+    final timeout = request.timeout ?? requestTimeout;
     final plugin = _plugin;
     void cancelTransport() => plugin.close();
 
@@ -121,11 +122,11 @@ class GenkitAnthropicModelAdapter
         ),
       );
       final chunks = stream.timeout(
-        requestTimeout,
+        timeout,
         onTimeout: (sink) {
           timedOut = true;
           _resetTransport();
-          sink.addError(TimeoutException('流式响应等待超时', requestTimeout));
+          sink.addError(TimeoutException('流式响应等待超时', timeout));
           sink.close();
         },
       );
@@ -136,10 +137,10 @@ class GenkitAnthropicModelAdapter
       if (timedOut) return;
       cancelToken?.throwIfCancelled();
       final response = await stream.onResult.timeout(
-        requestTimeout,
+        timeout,
         onTimeout: () {
           _resetTransport();
-          throw TimeoutException('流式响应终态等待超时', requestTimeout);
+          throw TimeoutException('流式响应终态等待超时', timeout);
         },
       );
       cancelToken?.throwIfCancelled();
@@ -219,6 +220,7 @@ class GenkitAnthropicModelAdapter
     AiModelJsonRequest request, {
     CancelToken? cancelToken,
   }) async {
+    final timeout = request.timeout ?? requestTimeout;
     final plugin = _plugin;
     void cancelTransport() => plugin.close();
 
@@ -244,17 +246,17 @@ class GenkitAnthropicModelAdapter
             ),
           )
           .timeout(
-            requestTimeout,
+            timeout,
             onTimeout: () {
               _resetTransport();
-              throw TimeoutException(
-                'Genkit Anthropic 结构化输出等待超时',
-                requestTimeout,
-              );
+              throw TimeoutException('Genkit Anthropic 结构化输出等待超时', timeout);
             },
           );
       cancelToken?.throwIfCancelled();
       if (response.finishReason != genkit.FinishReason.stop) {
+        if (response.finishReason == genkit.FinishReason.length) {
+          throw AiModelOutputTruncatedException();
+        }
         throw AiProviderException('结构化输出未以可验证的成功终态结束');
       }
       final value = response.output;

@@ -78,14 +78,16 @@ class GenkitOpenAiModelAdapter
 
   void _resetOwnedTransport() {
     if (!_ownsClient || _closed) return;
+    final oldAi = _ai;
     _client.close();
+    unawaited(oldAi.shutdown());
     _client = http.Client();
     _ai = _createGenkit(_client);
     _tools.clear();
   }
 
   @override
-  String get runtimeName => 'genkit-openai/0.15.1';
+  String get runtimeName => 'genkit-openai/0.3.7';
 
   @override
   Stream<AiModelTurnEvent> streamTurn(
@@ -128,6 +130,7 @@ class GenkitOpenAiModelAdapter
     final tools = [for (final tool in request.tools) _resolveTool(tool)];
     final messages = request.messages.map(_toGenkitMessage).toList();
     var timedOut = false;
+    final timeout = request.timeout ?? requestTimeout;
     void cancelTransport() => _client.close();
 
     cancelToken?.addCancelListener(cancelTransport);
@@ -139,16 +142,16 @@ class GenkitOpenAiModelAdapter
         returnToolRequests: true,
         maxTurns: 1,
         config: OpenAIChatOptions(
-          maxTokens: request.maxTokens,
-          temperature: request.temperature,
+          maxTokens: request.maxTokens < 1 ? 1 : request.maxTokens,
+          temperature: request.temperature.clamp(0.0, 2.0),
         ),
       );
       final chunks = stream.timeout(
-        requestTimeout,
+        timeout,
         onTimeout: (sink) {
           timedOut = true;
           if (_ownsClient) _resetOwnedTransport();
-          sink.addError(TimeoutException('流式响应等待超时', requestTimeout));
+          sink.addError(TimeoutException('流式响应等待超时', timeout));
           sink.close();
         },
       );
@@ -159,10 +162,10 @@ class GenkitOpenAiModelAdapter
       if (timedOut) return;
       cancelToken?.throwIfCancelled();
       final response = await stream.onResult.timeout(
-        requestTimeout,
+        timeout,
         onTimeout: () {
           if (_ownsClient) _resetOwnedTransport();
-          throw TimeoutException('流式响应终态等待超时', requestTimeout);
+          throw TimeoutException('流式响应终态等待超时', timeout);
         },
       );
       cancelToken?.throwIfCancelled();
@@ -178,13 +181,14 @@ class GenkitOpenAiModelAdapter
         if (!callIds.add(callId)) {
           throw AiProviderException('模型返回了重复的工具调用 ID');
         }
+        if (call.name.trim().isEmpty || raw is! Map) {
+          throw AiProviderException('模型返回了无效的工具调用');
+        }
         calls.add(
           AiModelToolCall(
             id: callId,
             name: call.name,
-            arguments: raw is Map
-                ? raw.map((key, value) => MapEntry('$key', value))
-                : const {},
+            arguments: raw.map((key, value) => MapEntry('$key', value)),
           ),
         );
       }
@@ -300,6 +304,7 @@ class GenkitOpenAiModelAdapter
     AiModelJsonRequest request, {
     CancelToken? cancelToken,
   }) async {
+    final timeout = request.timeout ?? requestTimeout;
     void cancelTransport() => _client.close();
 
     cancelToken?.addCancelListener(cancelTransport);
@@ -319,18 +324,24 @@ class GenkitOpenAiModelAdapter
             outputSchema: schema,
             outputConstrained: true,
             config: OpenAIChatOptions(
-              maxTokens: request.maxTokens,
-              temperature: request.temperature,
+              maxTokens: request.maxTokens < 1 ? 1 : request.maxTokens,
+              temperature: request.temperature.clamp(0.0, 2.0),
             ),
           )
           .timeout(
-            requestTimeout,
+            timeout,
             onTimeout: () {
               if (_ownsClient) _resetOwnedTransport();
-              throw TimeoutException('Genkit 结构化输出等待超时', requestTimeout);
+              throw TimeoutException('Genkit 结构化输出等待超时', timeout);
             },
           );
       cancelToken?.throwIfCancelled();
+      if (response.finishReason != genkit.FinishReason.stop) {
+        if (response.finishReason == genkit.FinishReason.length) {
+          throw AiModelOutputTruncatedException();
+        }
+        throw AiProviderException('结构化输出未以可验证的成功终态结束');
+      }
       final value = response.output;
       if (value == null) throw AiProviderException('模型未返回结构化结果');
       return AiModelJsonResult(
@@ -390,5 +401,6 @@ class GenkitOpenAiModelAdapter
     if (_closed) return;
     _closed = true;
     if (_ownsClient) _client.close();
+    await _ai.shutdown();
   }
 }

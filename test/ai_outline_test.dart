@@ -2,17 +2,18 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_structure.dart';
+import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
+import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
-import 'package:kaijuan/ai/ai_provider.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
 
 void main() {
   AiBookOutlineService serviceWith(_OutlineProvider provider) {
     return AiBookOutlineService(
       isAvailable: () => true,
-      openProvider: () => provider,
+      openModelAdapter: () => provider,
       settings: () => const AiSettings(model: 'outline-test'),
     );
   }
@@ -113,7 +114,7 @@ void main() {
 
     expect(outline.units, isNotEmpty);
     expect(provider.batchPayloads, hasLength(2));
-    expect(provider.requests[1].messages.first.content, contains('上一次输出未通过'));
+    expect(provider.requests[1].schema, isNotEmpty);
   });
 
   test(
@@ -128,10 +129,7 @@ void main() {
 
       expect(outline.units, isNotEmpty);
       expect(provider.reduceAttempts, 2);
-      expect(
-        provider.requests.last.messages.first.content,
-        contains('上一次汇总未通过'),
-      );
+      expect(provider.requests.last.schema, isNotEmpty);
     },
   );
 
@@ -182,7 +180,7 @@ void main() {
       ];
       expect(covered, List<int>.generate(60, (index) => index + 1));
       expect(covered.toSet(), hasLength(60));
-      expect(provider.requests.last.messages.first.content, contains('最多 10'));
+      expect(provider.requests.last.messages.first.text, contains('最多 10'));
     },
   );
 
@@ -204,7 +202,7 @@ void main() {
         ],
       );
 
-      final reduceSystem = provider.requests.last.messages.first.content;
+      final reduceSystem = provider.requests.last.messages.first.text;
       expect(reduceSystem, contains('segmentedSingleWork'));
       expect(reduceSystem, contains('约 4 个'));
     },
@@ -267,10 +265,10 @@ void main() {
       );
 
       final first = provider.requests.first;
-      expect(first.messages.first.content, contains('不可信数据'));
-      expect(first.messages.first.content, isNot(contains(injected)));
-      expect(first.messages.last.content, contains('<book_content>'));
-      expect(first.messages.last.content, contains(injected));
+      expect(first.messages.first.text, contains('不可信数据'));
+      expect(first.messages.first.text, isNot(contains(injected)));
+      expect(first.messages.last.text, contains('<book_content>'));
+      expect(first.messages.last.text, contains(injected));
     },
   );
 
@@ -285,10 +283,10 @@ void main() {
     );
 
     final reduce = provider.requests.last;
-    expect(reduce.messages.first.content, contains('<book_metadata>'));
-    expect(reduce.messages.first.content, isNot(contains(injectedTitle)));
-    expect(reduce.messages.last.content, contains('<book_metadata>'));
-    expect(reduce.messages.last.content, contains(injectedTitle));
+    expect(reduce.messages.first.text, contains('<book_metadata>'));
+    expect(reduce.messages.first.text, isNot(contains(injectedTitle)));
+    expect(reduce.messages.last.text, contains('<book_metadata>'));
+    expect(reduce.messages.last.text, contains(injectedTitle));
   });
 
   test('generate honors cancellation before the call', () async {
@@ -307,7 +305,7 @@ void main() {
   });
 }
 
-class _OutlineProvider implements AiProvider {
+class _OutlineProvider implements AiModelAdapter, AiStructuredOutputAdapter {
   _OutlineProvider({
     this.invalidOutput = false,
     this.invalidFirstBatchOnce = false,
@@ -321,7 +319,7 @@ class _OutlineProvider implements AiProvider {
   final bool invalidFirstReduceOnce;
   final bool omitFinalBatch;
   final bool truncateFirstBatch;
-  final List<AiCompletionRequest> requests = [];
+  final List<AiModelJsonRequest> requests = [];
   final List<Map<String, dynamic>> batchPayloads = [];
   List<dynamic> reducePayload = const [];
   var _didTruncate = false;
@@ -330,42 +328,42 @@ class _OutlineProvider implements AiProvider {
   var reduceAttempts = 0;
 
   @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
+  Future<AiModelJsonResult> completeJson(
+    AiModelJsonRequest request, {
     CancelToken? cancelToken,
   }) async {
     requests.add(request);
     if (invalidOutput) {
-      return const AiCompletionResult(text: 'not json');
+      return const AiModelJsonResult(value: {});
     }
-    final user = request.messages.last.content;
+    final user = request.messages.last.text;
     if (user.contains('<book_content>')) {
       final payload = _taggedJson(user, 'book_content');
       batchPayloads.add(payload);
       if (invalidFirstBatchOnce && !_didInvalidateBatch) {
         _didInvalidateBatch = true;
-        return const AiCompletionResult(text: '{"batchId":');
+        return const AiModelJsonResult(value: {});
       }
       if (truncateFirstBatch && !_didTruncate) {
         _didTruncate = true;
-        return const AiCompletionResult(text: '{', truncated: true);
+        throw AiModelOutputTruncatedException();
       }
       final sections = payload['sections'] as List;
-      return AiCompletionResult(
-        text: jsonEncode({
+      return AiModelJsonResult(
+        value: {
           'batchId': payload['batchId'],
           'coveredSections': [
             for (final section in sections) (section as Map)['sectionId'],
           ],
           'summary': '当前批次的内容推进摘要。',
           'points': ['关键推进'],
-        }),
+        },
       );
     }
     reduceAttempts++;
     if (invalidFirstReduceOnce && !_didInvalidateReduce) {
       _didInvalidateReduce = true;
-      return const AiCompletionResult(text: '{"overview":');
+      return const AiModelJsonResult(value: {});
     }
     reducePayload = _taggedJsonList(user, 'batch_summaries');
     final sourceIds = [
@@ -376,8 +374,8 @@ class _OutlineProvider implements AiProvider {
         ? sourceIds.sublist(0, sourceIds.length - 1)
         : sourceIds;
     final groupCount = included.length.clamp(1, 10);
-    return AiCompletionResult(
-      text: jsonEncode({
+    return AiModelJsonResult(
+      value: {
         'overview': '一本关于测试的书。',
         'units': [
           for (var i = 0; i < groupCount; i++)
@@ -390,7 +388,7 @@ class _OutlineProvider implements AiProvider {
               ],
             },
         ],
-      }),
+      },
     );
   }
 
@@ -405,12 +403,14 @@ class _OutlineProvider implements AiProvider {
   }
 
   @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
-      const [];
-
-  @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
+  Stream<AiModelTurnEvent> streamTurn(
+    AiModelTurnRequest request, {
     CancelToken? cancelToken,
   }) async* {}
+
+  @override
+  String get runtimeName => 'fake-outline';
+
+  @override
+  Future<void> close() async {}
 }

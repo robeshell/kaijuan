@@ -81,6 +81,14 @@ class AiProviderException implements Exception {
   String toString() => message;
 }
 
+/// The model reached its output budget before a complete structured result.
+/// Deterministic workflows may shrink their input, but must never accept the
+/// partial value as valid JSON.
+class AiModelOutputTruncatedException extends AiProviderException {
+  AiModelOutputTruncatedException([String? message])
+    : super(message ?? '模型输出达到长度上限');
+}
+
 /// One model id returned by a provider's list-models API.
 class AiModelInfo {
   const AiModelInfo({required this.id, this.displayName});

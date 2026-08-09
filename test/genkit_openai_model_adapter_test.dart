@@ -128,11 +128,62 @@ data: [DONE]
       expect(result.outputTokens, isNull);
       expect(requestJson!['stream'], isNot(true));
       expect(requestJson!['response_format'], isA<Map>());
+      expect(adapter.runtimeName, 'genkit-openai/0.3.7');
 
       await adapter.close();
       client.close();
     },
   );
+
+  test('rejects structured output with a length terminal', () async {
+    final client = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'id': 'chatcmpl-json-length',
+          'object': 'chat.completion',
+          'created': 1,
+          'model': 'gpt-compatible',
+          'choices': [
+            {
+              'index': 0,
+              'message': {'role': 'assistant', 'content': '{"summary":"不完整"}'},
+              'finish_reason': 'length',
+            },
+          ],
+        }),
+        200,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      );
+    });
+    final adapter = GenkitOpenAiModelAdapter(
+      baseUrl: 'https://compatible.example/v1',
+      apiKey: 'test-key',
+      model: 'gpt-compatible',
+      httpClient: client,
+      maxAttempts: 1,
+    );
+
+    try {
+      await expectLater(
+        adapter.completeJson(
+          const AiModelJsonRequest(
+            messages: [AiModelMessage(role: AiModelRole.user, text: '总结')],
+            schema: {
+              'type': 'object',
+              'properties': {
+                'summary': {'type': 'string'},
+              },
+              'required': ['summary'],
+            },
+          ),
+        ),
+        throwsA(isA<AiModelOutputTruncatedException>()),
+      );
+    } finally {
+      await adapter.close();
+      client.close();
+    }
+  });
 
   test(
     'rejects a stream that closes without a terminal finish reason',

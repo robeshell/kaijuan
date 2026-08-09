@@ -59,12 +59,14 @@ class AiModelTurnRequest {
     this.tools = const [],
     this.maxTokens = 1024,
     this.temperature = 0.3,
+    this.timeout,
   });
 
   final List<AiModelMessage> messages;
   final List<AiModelToolDefinition> tools;
   final int maxTokens;
   final double temperature;
+  final Duration? timeout;
 }
 
 class AiModelJsonRequest {
@@ -73,12 +75,14 @@ class AiModelJsonRequest {
     required this.schema,
     this.maxTokens = 1024,
     this.temperature = 0.1,
+    this.timeout,
   });
 
   final List<AiModelMessage> messages;
   final Map<String, Object?> schema;
   final int maxTokens;
   final double temperature;
+  final Duration? timeout;
 }
 
 class AiModelJsonResult {
