@@ -2,24 +2,19 @@
 
 > 日期：2026-08-10
 > 基线提交：`41d35817cae`（统一 `AiRun`、本书对话原生工具调用、OpenAI Compatible / Anthropic Genkit adapter）
-> 目标：让词典、选区翻译、结构化大纲、知识图谱和连接测试全部依赖同一套 App 自有模型契约，删除旧 `AiProvider` 完成链路。
+> 状态：已实施。词典、选区翻译、结构化大纲、知识图谱和连接测试全部依赖同一套 App 自有模型契约，旧 `AiProvider` 完成链路已删除。
 
-## 1. 当前事实
+## 1. 完成事实
 
-已经完成：
+完成后的事实：
 
 - 本书对话只依赖 `AiModelAdapter`，工具调用使用 OpenAI Compatible Function Calling 或 Anthropic Tool Use。
 - `AiRunOrchestrator`、`AiRunEvent`、`AiRunState` 已覆盖对话、语言、大纲与图谱的状态、取消、预算、进度和 checkpoint。
 - 两个 Genkit adapter 已隔离 SDK 类型并锁定版本；旧 `kaijuan_tools`、手写 Anthropic 对话 adapter 和 Provider 对话回退已删除。
-
-尚未完成：
-
-- 词典与翻译仍通过 `AiProvider.stream/complete` 生成普通文本。
-- 结构化大纲与知识图谱仍通过提示词约定 JSON，再手工去 fence、`jsonDecode`、正则恢复或格式重试。
-- 设置页同时暴露 `openProvider()` 与 `openModelAdapter()`；连接测试、模型列表和确定性 Workflow 仍维持第二套模型 transport。
-- `OpenAiCompatibleAiProvider`、`AnthropicAiProvider`、`AiProviderFactory` 与 `AiRunTrackingProvider` 因上述调用仍无法删除。
-
-这意味着运行状态已经统一，但模型 I/O 尚未统一。全量测试通过只证明当前行为稳定，不代表迁移结束。
+- 词典与翻译使用无工具 `streamTurn`；大纲与图谱使用集中的 Schemantic schema 与 `completeJson`。
+- 设置页只暴露 `openModelAdapter()`；连接测试走 adapter，模型列表走独立只读 `AiModelCatalog`。
+- `OpenAiCompatibleAiProvider`、`AnthropicAiProvider`、`AiProviderFactory`、`AiRunTrackingProvider` 和旧 completion/stream 契约已删除。
+- 确定性 Workflow 的 adapter 生命周期、模型调用计数和 token usage 由 `AiWorkflowModelSession` 统一管理。
 
 ## 2. 目标架构
 
@@ -190,3 +185,10 @@ Genkit trace smoke（可选真实 Key，不进入默认测试，不记录 Key）
 - 不存在旧 Provider 完成链路、fenced 工具协议、提示词伪结构化输出或跨协议回退。
 - 现有产品范围、缓存、WebDAV、安全边界和人工测试矩阵通过。
 - 完整 `flutter test` 通过后，再从干净安装开始端到端人工测试。
+
+## 6. 执行结果
+
+- P1–P5 已完成：语言、大纲、图谱、连接测试与模型目录已收口到目标边界，旧 Provider 生成双栈已删除。
+- OpenAI Compatible / Anthropic 的流式、原生工具、结构化输出、重试、取消和异常终态由本地伪服务协议测试覆盖。
+- `tool/ai_genkit_smoke.dart` 已通过 `genkit-cli 1.40.1 flow:run`。无凭据的 `"local"` 模式产生 flow / generate / model spans，trace 同时包含纯文本成功终态和受 JSON Schema 约束的 `{ "ok": true }` 结构化输出。`.genkit/` 只是本地调试产物，已忽略且不进入代码库。
+- P6 的最终 `flutter analyze` / 完整 `flutter test` 结果以本分支最后验证为准；通过后再进入用户的干净安装人工测试。

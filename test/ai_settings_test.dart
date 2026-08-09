@@ -7,17 +7,16 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:kaijuan/ai/adapters/genkit_anthropic_model_adapter.dart';
 import 'package:kaijuan/ai/adapters/genkit_openai_model_adapter.dart';
+import 'package:kaijuan/ai/ai_cancel.dart';
+import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_model_adapter_factory.dart';
+import 'package:kaijuan/ai/ai_model_catalog.dart';
 import 'package:kaijuan/ai/ai_models.dart';
-import 'package:kaijuan/ai/ai_provider.dart';
-import 'package:kaijuan/ai/ai_provider_factory.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
 import 'package:kaijuan/ai/ai_settings_store.dart';
 import 'package:kaijuan/ai/ai_translation.dart';
-import 'package:kaijuan/ai/anthropic_provider.dart';
-import 'package:kaijuan/ai/openai_compatible_provider.dart';
 import 'package:kaijuan/presentation/controllers/ai_settings_controller.dart';
 
 void main() {
@@ -39,35 +38,6 @@ void main() {
       expect(AiProviderKind.ollama.defaultBaseUrl, contains('localhost:11434'));
       expect(AiProviderKind.fromStorage('ollama'), AiProviderKind.ollama);
       expect(AiProviderKind.openai.isLocalBackend, isFalse);
-    });
-  });
-
-  group('DefaultAiProviderFactory', () {
-    test('local backend may create without api key', () {
-      const factory = DefaultAiProviderFactory();
-      final provider = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.ollama,
-          baseUrl: 'http://localhost:11434/v1',
-          model: 'llama3.2',
-        ),
-        apiKey: '',
-      );
-      expect(provider, isNotNull);
-      expect(provider, isA<OpenAiCompatibleAiProvider>());
-    });
-
-    test('cloud backend without key returns null', () {
-      const factory = DefaultAiProviderFactory();
-      final provider = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.openai,
-          baseUrl: 'https://api.openai.com/v1',
-          model: 'gpt-5.4-mini',
-        ),
-        apiKey: '',
-      );
-      expect(provider, isNull);
     });
   });
 
@@ -322,271 +292,6 @@ void main() {
     );
   });
 
-  group('OpenAiCompatibleAiProvider', () {
-    test('cancel aborts an in-flight completion immediately', () async {
-      final client = _AbortableClient();
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'test-key',
-        model: 'gpt-4o-mini',
-        client: client,
-      );
-      final cancel = CancelToken();
-      final pending = provider.complete(
-        const AiCompletionRequest(
-          messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-          timeout: Duration(seconds: 120),
-        ),
-        cancelToken: cancel,
-      );
-      await client.started.future;
-
-      cancel.cancel();
-
-      await expectLater(
-        pending.timeout(const Duration(seconds: 1)),
-        throwsA(isA<StateError>()),
-      );
-      expect(client.closed, isTrue);
-    });
-
-    test('cancel aborts an in-flight stream immediately', () async {
-      final client = _AbortableClient();
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'test-key',
-        model: 'gpt-4o-mini',
-        client: client,
-      );
-      final cancel = CancelToken();
-      final pending = provider
-          .stream(
-            const AiCompletionRequest(
-              messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-            ),
-            cancelToken: cancel,
-          )
-          .drain<void>();
-      await client.started.future;
-
-      cancel.cancel();
-
-      await expectLater(
-        pending.timeout(const Duration(seconds: 1)),
-        throwsA(isA<StateError>()),
-      );
-      expect(client.closed, isTrue);
-    });
-
-    test('complete parses chat completions payload', () async {
-      final client = MockClient((request) async {
-        expect(
-          request.url.toString(),
-          'https://api.openai.com/v1/chat/completions',
-        );
-        expect(request.headers['Authorization'], 'Bearer test-key');
-        final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['stream'], isFalse);
-        expect(body['model'], 'gpt-4o-mini');
-        expect(body.containsKey('thinking'), isFalse);
-        return http.Response(
-          jsonEncode({
-            'choices': [
-              {
-                'message': {'role': 'assistant', 'content': 'ok'},
-              },
-            ],
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      });
-
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'test-key',
-        model: 'gpt-4o-mini',
-        client: client,
-      );
-      final result = await provider.complete(
-        const AiCompletionRequest(
-          messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-        ),
-      );
-      expect(result.text, 'ok');
-    });
-
-    test('stream reports a length-truncated terminal chunk', () async {
-      final client = MockClient((request) async {
-        return http.Response(
-          'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n'
-          'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
-          200,
-          headers: {'content-type': 'text/event-stream'},
-        );
-      });
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'test-key',
-        model: 'gpt-4o-mini',
-        client: client,
-      );
-
-      final chunks = await provider
-          .stream(
-            const AiCompletionRequest(
-              messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-            ),
-          )
-          .toList();
-
-      expect(chunks.first.text, 'partial');
-      expect(chunks.last.isFinal, isTrue);
-      expect(chunks.last.truncated, isTrue);
-    });
-
-    test('stream rejects EOF without a protocol completion event', () async {
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'test-key',
-        model: 'gpt-4o-mini',
-        client: MockClient(
-          (_) async => http.Response(
-            'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n',
-            200,
-            headers: {'content-type': 'text/event-stream'},
-          ),
-        ),
-      );
-
-      await expectLater(
-        provider
-            .stream(
-              const AiCompletionRequest(
-                messages: [
-                  AiMessage(role: AiMessageRole.user, content: 'ping'),
-                ],
-              ),
-            )
-            .drain<void>(),
-        throwsA(
-          isA<AiProviderException>().having(
-            (error) => error.message,
-            'message',
-            contains('意外中断'),
-          ),
-        ),
-      );
-    });
-
-    test('openai multipart text parses', () {
-      expect(
-        OpenAiCompatibleAiProvider.extractMessageText({
-          'content': [
-            {'type': 'text', 'text': 'hello '},
-            {'type': 'text', 'text': 'world'},
-          ],
-        }),
-        'hello world',
-      );
-    });
-
-    test(
-      'deepseek disables thinking and reads reasoning_content fallback',
-      () async {
-        final client = MockClient((request) async {
-          final body = jsonDecode(request.body) as Map<String, dynamic>;
-          expect(body['thinking'], {'type': 'disabled'});
-          return http.Response(
-            jsonEncode({
-              'choices': [
-                {
-                  'finish_reason': 'stop',
-                  'message': {
-                    'role': 'assistant',
-                    'content': null,
-                    'reasoning_content': 'ok from reasoning',
-                  },
-                },
-              ],
-            }),
-            200,
-            headers: {'content-type': 'application/json'},
-          );
-        });
-        final provider = OpenAiCompatibleAiProvider(
-          baseUrl: 'https://api.deepseek.com/v1',
-          apiKey: 'k',
-          model: 'deepseek-v4-flash',
-          client: client,
-        );
-        final result = await provider.complete(
-          const AiCompletionRequest(
-            messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-          ),
-        );
-        expect(result.text, 'ok from reasoning');
-      },
-    );
-
-    test('listModels filters non-chat ids', () async {
-      final client = MockClient((request) async {
-        expect(request.url.path, endsWith('/models'));
-        return http.Response(
-          jsonEncode({
-            'data': [
-              {'id': 'gpt-4o-mini'},
-              {'id': 'text-embedding-3-small'},
-              {'id': 'whisper-1'},
-              {'id': 'deepseek-chat'},
-            ],
-          }),
-          200,
-        );
-      });
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.deepseek.com/v1',
-        apiKey: 'k',
-        model: '',
-        client: client,
-      );
-      final models = await provider.listModels();
-      expect(models.map((m) => m.id), ['deepseek-chat', 'gpt-4o-mini']);
-    });
-
-    test('maps 401 to readable Chinese error', () async {
-      final client = MockClient((request) async {
-        return http.Response(
-          jsonEncode({
-            'error': {'message': 'Incorrect API key provided'},
-          }),
-          401,
-          headers: {'content-type': 'application/json'},
-        );
-      });
-      final provider = OpenAiCompatibleAiProvider(
-        baseUrl: 'https://api.deepseek.com/v1',
-        apiKey: 'bad',
-        model: 'deepseek-chat',
-        client: client,
-      );
-      expect(
-        () => provider.complete(
-          const AiCompletionRequest(
-            messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-          ),
-        ),
-        throwsA(
-          isA<AiProviderException>().having(
-            (e) => e.message,
-            'message',
-            'API Key 无效或没有访问权限，请检查设置',
-          ),
-        ),
-      );
-    });
-  });
-
   group('AiSettingsController', () {
     test('ready flag requires enable + key + resolvable model', () async {
       final controller = AiSettingsController(
@@ -721,29 +426,12 @@ void main() {
       expect(await credentials.readApiKey(AiProviderKind.xai), isNull);
     });
 
-    test('testConnection succeeds via factory mock', () async {
+    test('testConnection succeeds through the model adapter', () async {
+      final adapter = _ConnectionAdapter();
       final controller = AiSettingsController(
         settingsStore: MemoryAiSettingsStore(),
         credentialStore: MemoryAiCredentialStore(),
-        providerFactory: _FakeProviderFactory(
-          OpenAiCompatibleAiProvider(
-            baseUrl: 'https://api.openai.com/v1',
-            apiKey: 'k',
-            model: 'm',
-            client: MockClient((request) async {
-              return http.Response(
-                jsonEncode({
-                  'choices': [
-                    {
-                      'message': {'content': 'ok'},
-                    },
-                  ],
-                }),
-                200,
-              );
-            }),
-          ),
-        ),
+        modelAdapterFactory: _FakeModelAdapterFactory(adapter),
       );
       await controller.load();
       await controller.setEnabled(true);
@@ -752,31 +440,36 @@ void main() {
       final result = await controller.testConnection();
       expect(result.ok, isTrue);
       expect(controller.testOk, isTrue);
+      expect(adapter.closed, isTrue);
     });
+
+    test(
+      'testConnection rejects an empty terminal and still closes adapter',
+      () async {
+        final adapter = _ConnectionAdapter(text: '');
+        final controller = AiSettingsController(
+          settingsStore: MemoryAiSettingsStore(),
+          credentialStore: MemoryAiCredentialStore(),
+          modelAdapterFactory: _FakeModelAdapterFactory(adapter),
+        );
+        await controller.load();
+        await controller.setEnabled(true);
+        await controller.setApiKey('k');
+        final result = await controller.testConnection();
+
+        expect(result.ok, isFalse);
+        expect(adapter.closed, isTrue);
+      },
+    );
 
     test('fetchModels stores available models', () async {
       final controller = AiSettingsController(
         settingsStore: MemoryAiSettingsStore(),
         credentialStore: MemoryAiCredentialStore(),
-        providerFactory: _FakeProviderFactory(
-          OpenAiCompatibleAiProvider(
-            baseUrl: 'https://api.openai.com/v1',
-            apiKey: 'k',
-            model: '',
-            client: MockClient((request) async {
-              expect(request.method, 'GET');
-              return http.Response(
-                jsonEncode({
-                  'data': [
-                    {'id': 'gpt-4o-mini'},
-                    {'id': 'gpt-4o'},
-                  ],
-                }),
-                200,
-              );
-            }),
-          ),
-        ),
+        modelCatalog: const _FakeModelCatalog([
+          AiModelInfo(id: 'gpt-4o-mini'),
+          AiModelInfo(id: 'gpt-4o'),
+        ]),
       );
       await controller.load();
       await controller.setApiKey('k');
@@ -787,66 +480,19 @@ void main() {
       expect(controller.availableModels, hasLength(2));
     });
 
-    test('openProvider is null when disabled', () async {
+    test('openModelAdapter is null when disabled', () async {
+      final adapter = _ConnectionAdapter();
       final controller = AiSettingsController(
         settingsStore: MemoryAiSettingsStore(),
         credentialStore: MemoryAiCredentialStore(),
+        modelAdapterFactory: _FakeModelAdapterFactory(adapter),
       );
       await controller.load();
       await controller.setApiKey('k');
-      expect(controller.openProvider(), isNull);
+      expect(controller.openModelAdapter(), isNull);
       await controller.setEnabled(true);
       // Default openai model resolves even when model field empty.
-      expect(controller.openProvider(), isNotNull);
-    });
-  });
-
-  group('DefaultAiProviderFactory', () {
-    test('routes each selectable endpoint through its native protocol', () {
-      const factory = DefaultAiProviderFactory();
-      final openai = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.openai,
-          model: 'gpt-4o-mini',
-        ),
-        apiKey: 'k',
-      );
-      final deepseek = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.deepseek,
-          model: 'deepseek-v4-flash',
-        ),
-        apiKey: 'k',
-      );
-      final anthropic = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.anthropic,
-          model: 'claude-sonnet-4-6',
-        ),
-        apiKey: 'k',
-      );
-      final xai = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.xai,
-          model: 'grok-4.5',
-        ),
-        apiKey: 'k',
-      );
-      final customOpenai = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.custom,
-          baseUrl: 'https://proxy.example/v1',
-          model: 'm',
-        ),
-        apiKey: 'k',
-      );
-      expect(openai, isA<OpenAiCompatibleAiProvider>());
-      expect(anthropic, isA<AnthropicAiProvider>());
-      expect(deepseek, isA<OpenAiCompatibleAiProvider>());
-      expect(xai, isA<OpenAiCompatibleAiProvider>());
-      expect(customOpenai, isA<OpenAiCompatibleAiProvider>());
-      expect(AiProviderKind.xai.defaultBaseUrl, 'https://api.x.ai/v1');
-      expect(AiProviderKind.xai.defaultModel, 'grok-4.5');
+      expect(controller.openModelAdapter(), same(adapter));
     });
   });
 
@@ -885,32 +531,57 @@ void main() {
   });
 }
 
-class _AbortableClient extends http.BaseClient {
-  final started = Completer<void>();
-  final _response = Completer<http.StreamedResponse>();
+final class _FakeModelAdapterFactory implements AiModelAdapterFactory {
+  const _FakeModelAdapterFactory(this.adapter);
+
+  final AiModelAdapter adapter;
+
+  @override
+  AiModelAdapter? create({
+    required AiProviderKind providerKind,
+    required String baseUrl,
+    required String apiKey,
+    required String model,
+  }) => adapter;
+}
+
+final class _ConnectionAdapter implements AiModelAdapter {
+  _ConnectionAdapter({this.text = 'ok'});
+
+  final String text;
   bool closed = false;
 
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) {
-    if (!started.isCompleted) started.complete();
-    return _response.future;
+  String get runtimeName => 'connection-test';
+
+  @override
+  Stream<AiModelTurnEvent> streamTurn(
+    AiModelTurnRequest request, {
+    CancelToken? cancelToken,
+  }) async* {
+    yield AiModelTurnCompleted(
+      text: text,
+      toolCalls: const [],
+      truncated: false,
+    );
   }
 
   @override
-  void close() {
+  Future<void> close() async {
     closed = true;
-    if (!_response.isCompleted) {
-      _response.completeError(StateError('request aborted'));
-    }
   }
 }
 
-class _FakeProviderFactory implements AiProviderFactory {
-  _FakeProviderFactory(this.provider);
+final class _FakeModelCatalog implements AiModelCatalog {
+  const _FakeModelCatalog(this.models);
 
-  final AiProvider provider;
+  final List<AiModelInfo> models;
 
   @override
-  AiProvider? create({required AiSettings settings, required String apiKey}) =>
-      provider;
+  Future<List<AiModelInfo>> listModels({
+    required AiProviderKind providerKind,
+    required String baseUrl,
+    required String apiKey,
+    CancelToken? cancelToken,
+  }) async => models;
 }

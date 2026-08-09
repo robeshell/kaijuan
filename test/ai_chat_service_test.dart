@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_store.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
@@ -8,7 +9,6 @@ import 'package:kaijuan/ai/ai_chat_service.dart';
 import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
-import 'package:kaijuan/ai/ai_provider.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 
@@ -203,79 +203,6 @@ void main() {
       );
       expect(messages.last.content, contains('<untrusted_context>'));
       expect(messages.last.content, contains(injected));
-    });
-  });
-
-  group('completeWithRetry', () {
-    test('retries once on 429, then succeeds', () async {
-      final provider = _RetryThenOkProvider();
-      final result = await completeWithRetry(
-        provider,
-        const AiCompletionRequest(messages: []),
-      );
-      expect(result.text, 'ok');
-      expect(provider.completeCalls, 2);
-    });
-
-    test('does not retry on non-429 errors', () async {
-      final provider = _FailProvider();
-      await expectLater(
-        completeWithRetry(provider, const AiCompletionRequest(messages: [])),
-        throwsA(isA<AiProviderException>()),
-      );
-      expect(provider.completeCalls, 1);
-    });
-
-    test(
-      'retries once on network errors (HandshakeException), then succeeds',
-      () async {
-        final provider = _NetworkFailThenOkProvider();
-        final result = await completeWithRetry(
-          provider,
-          const AiCompletionRequest(messages: []),
-        );
-        expect(result.text, 'ok');
-        expect(provider.completeCalls, 2);
-      },
-    );
-
-    test('rethrows network errors after exhausting attempts', () async {
-      final provider = _AlwaysNetworkFailProvider();
-      await expectLater(
-        completeWithRetry(provider, const AiCompletionRequest(messages: [])),
-        throwsA(isA<IOException>()),
-      );
-      expect(provider.completeCalls, 2);
-    });
-  });
-
-  group('streamWithRetryBeforeFirstText', () {
-    test('retries a transient failure before visible text', () async {
-      final provider = _StreamRetryThenOkProvider();
-      final chunks = await streamWithRetryBeforeFirstText(
-        provider,
-        const AiCompletionRequest(messages: []),
-      ).toList();
-
-      expect(provider.streamCalls, 2);
-      expect(chunks.map((chunk) => chunk.text).join(), '恢复成功');
-    });
-
-    test('never restarts after visible text', () async {
-      final provider = _StreamFailsAfterTextProvider();
-      final chunks = <AiStreamChunk>[];
-
-      await expectLater(() async {
-        await for (final chunk in streamWithRetryBeforeFirstText(
-          provider,
-          const AiCompletionRequest(messages: []),
-        )) {
-          chunks.add(chunk);
-        }
-      }(), throwsA(isA<AiProviderException>()));
-
-      expect(provider.streamCalls, 1);
-      expect(chunks.single.text, '已经显示');
     });
   });
 
@@ -822,164 +749,6 @@ void main() {
       );
     });
   });
-}
-
-class _RetryThenOkProvider implements AiProvider {
-  int completeCalls = 0;
-
-  @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async {
-    completeCalls++;
-    if (completeCalls == 1) {
-      throw AiProviderException('rate limited', statusCode: 429);
-    }
-    return const AiCompletionResult(text: 'ok');
-  }
-
-  @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async* {}
-
-  @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async {
-    return const [];
-  }
-}
-
-/// Always fails with a non-retryable error.
-class _FailProvider implements AiProvider {
-  int completeCalls = 0;
-
-  @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async {
-    completeCalls++;
-    throw AiProviderException('bad key', statusCode: 401);
-  }
-
-  @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async* {}
-
-  @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async {
-    return const [];
-  }
-}
-
-/// Fails once with a transient TLS/socket error, then succeeds.
-class _NetworkFailThenOkProvider implements AiProvider {
-  int completeCalls = 0;
-
-  @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async {
-    completeCalls++;
-    if (completeCalls == 1) {
-      throw const HandshakeException('Connection terminated during handshake');
-    }
-    return const AiCompletionResult(text: 'ok');
-  }
-
-  @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async* {}
-
-  @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async {
-    return const [];
-  }
-}
-
-/// Always throws a network error — retry exhausts and rethrows.
-class _AlwaysNetworkFailProvider implements AiProvider {
-  int completeCalls = 0;
-
-  @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async {
-    completeCalls++;
-    throw const SocketException('Connection reset by peer');
-  }
-
-  @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async* {}
-
-  @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async {
-    return const [];
-  }
-}
-
-/// Provider whose streamed turn always answers in prose. `complete` is
-/// tracked to prove the answer never goes through a non-streaming probe.
-class _StreamRetryThenOkProvider implements AiProvider {
-  int streamCalls = 0;
-
-  @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async => const AiCompletionResult(text: 'unused');
-
-  @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async* {
-    streamCalls++;
-    if (streamCalls == 1) {
-      throw AiProviderException('temporary', statusCode: 503);
-    }
-    yield const AiStreamChunk(text: '恢复成功');
-    yield const AiStreamChunk(text: '', isFinal: true);
-  }
-
-  @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
-      const [];
-}
-
-class _StreamFailsAfterTextProvider implements AiProvider {
-  int streamCalls = 0;
-
-  @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async => const AiCompletionResult(text: 'unused');
-
-  @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
-    CancelToken? cancelToken,
-  }) async* {
-    streamCalls++;
-    yield const AiStreamChunk(text: '已经显示');
-    throw AiProviderException('temporary', statusCode: 503);
-  }
-
-  @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
-      const [];
 }
 
 class _FakeHost implements AiChatToolHost {

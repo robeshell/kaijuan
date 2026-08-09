@@ -11,7 +11,7 @@ import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_graph_scope.dart';
 import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
-import 'package:kaijuan/ai/ai_provider.dart';
+import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 import 'package:kaijuan/domain/reader_models.dart';

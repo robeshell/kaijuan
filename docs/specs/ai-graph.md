@@ -2,8 +2,8 @@
 
 | | |
 |--|--|
-| **状态** | 已实现（M5；v3 范围与任务链路重构中） |
-| **日期** | 2026-08-06 |
+| **状态** | 已实现（M5；v3 范围与 Genkit 结构化运行时已收口） |
+| **日期** | 2026-08-10 |
 | **PRODUCT** | [§6](../PRODUCT.md) · [§10.2](../PRODUCT.md) |
 | **相关** | [ai.md](./ai.md)、[webdav-backup.md](./webdav-backup.md)、[reader-chrome.md](./reader-chrome.md)、[book-reader.md](./book-reader.md) |
 | **引擎** | 图书 reflow only（v1）；漫画页图 AI 另案 |
@@ -21,7 +21,7 @@
 |------|------|------|
 | 范围 | **用户显式确认**：多作品文件先选作品，再选内容单元；程序只提供默认勾选建议。`allowUnreadContext` 继续限制未读内容是否可进入任务 | 出版结构与内容清洗都不可能仅靠标题规则百分之百可靠，最终决定权必须在用户 |
 | 生成 | **章级增量**：按章节对比已处理集合，只抽新章；断点续跑 | 数十万字一次吞全书成本高、易超时；随读随抽体验好 |
-| 协议 | **fenced JSON**（复用对话的 robust 解析），不引 LangChain / 原生 tool-call | 与 ai.md 既定取舍一致；跨 OpenAI / Anthropic / DeepSeek 可移植 |
+| 协议 | **Schemantic schema + Genkit structured output**，不引 LangChain / 自由 Agent | OpenAI Compatible / Anthropic 分别由精确锁版 adapter 处理；App 仅消费统一结构化结果 |
 | 存储 | 按 **contentHash** 的本地文件 `ai_graph/$hash.json`；随用户主动 WebDAV 快照备份；**Key 永不备份** | 与 `ai_chat/` 同构，备份合并逻辑可扩展复用 |
 | 数据库 | **不用图数据库**（Neo4j 等） | 单书数百～数千实体、数千关系，JSON + 内存过滤绰绰有余；图库只在多书/图算法时才值得引入 |
 | 可视化 | **列表优先，力导向图可简**（v1 允许只上列表） | ai.md §9 M5 已定；图渲染库决策见 §7 |
@@ -81,7 +81,7 @@
 - 正式实体/关系至少携带一条 `spanResolved=true` 的原文证据；只有章节级线索的候选进入 `needsReview`，不进入默认列表、关系图或家族树。
 - 每章顺序合并后产生一次 graph checkpoint，由 controller/repository 原子落盘；停止、网络失败和应用重启均从最后 checkpoint 续跑。
 - description、aliases、关系和证据保留来源范围；生成阶段按当时的已读边界裁剪输入，展示阶段不再按设备当前位置重复裁剪。
-- 正文、标题、证据摘录和已知实体表统一放在 `<untrusted_context>` 中；只接受完整 JSON（允许包一层完整 fenced JSON），回复前后夹带普通文本一律拒绝。
+- 正文、标题、证据摘录和已知实体表统一放在 `<untrusted_context>` 中；Genkit 按当前步骤的 JSON Schema 约束输出，App 再执行证据、稳定 ID、关系端点和范围校验；不接受普通文本包装、fence 或正则恢复结果。
 
 ### 3.1 实体（`AiGraphEntity`）
 
@@ -153,7 +153,7 @@ class AiGraphEvidence {
 
 ## 4. 抽取管线（`AiBookGraphService`）
 
-复用 `AiBookStructureResolver` 的文件结构结果、`AiBookOutlineService` 的章节切分与 `AiChatService` 的 fenced JSON robust 解析，**不引 LangChain**。
+复用 `AiBookStructureResolver` 的文件结构结果与 `AiBookOutlineService` 的章节切分；模型 I/O 统一经 `AiWorkflowModelSession` / `AiStructuredOutputAdapter`，**不引 LangChain 或多 Agent**。
 
 ### 4.1 流程
 
@@ -162,8 +162,8 @@ class AiGraphEvidence {
   → 范围裁剪：只消费已确认单元；确认窗中的勾选结果是最终输入，确认后不得再按 renderer 当前进度暗中移除单元
   → 已处理集合 = coveredSections ∩ 范围内；只对新 section 走抽取
   → 每 section 切成 800–2000 token 的 chunk（相邻 5–10% 重叠）
-  → 每 chunk 一次 fenced JSON 抽取调用（温度 0；带 chunk_id + sectionIndex）
-  → robust 解析 → 校验（schema + 枚举 + 引文存在性）→ 失败分类重试（≤2 次）
+  → 每 chunk 一次 Genkit 结构化抽取调用（温度 0；带 sectionIndex）
+  → JSON Schema 校验 → 业务校验（枚举 + 关系端点 + 引文存在性）→ 截断时有界分片，章节失败按原 checkpoint 策略隔离
   → 程序回填 quote → progressInSection
   → 顺序增量合并（见 4.2）→ 落盘 ai_graph/$hash.json
   → onProgress（completed/total = 章节数）
@@ -185,7 +185,7 @@ class AiGraphEvidence {
 5. **canonical 名只增不删**；重抽不重命名（保证旧数据可追溯）。
 6. 全部完成后可选执行一次 **幻觉过滤**：实体/关系若无任何证据（`evidence` 为空或全部 `spanResolved=false`）标记，UI 不默认展示。
 
-### 4.3 抽取 schema（fenced JSON 契约）
+### 4.3 抽取 schema（Schemantic 结构化契约）
 
 ```jsonc
 {
@@ -373,8 +373,8 @@ lib/presentation/widgets/reader/book_ai_graph_view.dart / book_ai_graph_fullscre
 ```
 
 - 表现层只经 controller；Widget **不得**持有 `http.Client`、不得读写安全存储、不得拼装抽取 prompt。
-- 抽取 / 合并复用 `AiProvider`（`AiSettings` + 安全存储 + 总开关；关时 `openProvider()` 返回 null，业务层不得绕过）。
-- 防提示词注入：沿用 ai.md §7.4——正文与网页摘要作为 `<untrusted_context>` 引用材料；只接受整条回复为 fenced JSON block 的抽取结果，普通回答不触发合并。
+- 抽取 / 复核 / 润色全部复用 `AiWorkflowModelSession` + `AiStructuredOutputAdapter`（`AiSettings` + 安全存储 + 总开关；关时 `openModelAdapter()` 返回 null，业务层不得绕过）。
+- 防提示词注入：沿用 ai.md §7.4——正文与网页摘要作为 `<untrusted_context>` 引用材料；每类模型输出由独立 Schemantic schema 校验，随后仍必须通过证据定位、稳定 ID、端点与范围等业务校验；不再解析 fenced JSON 或正则恢复包装回答。
 
 ---
 
@@ -382,7 +382,7 @@ lib/presentation/widgets/reader/book_ai_graph_view.dart / book_ai_graph_fullscre
 
 ### G1 — 数据模型 + 抽取管线 ✅
 
-- 模型、fenced JSON 契约、单章抽取 + quote 回填 + 校验重试。
+- 模型、Schemantic 结构化契约、单章抽取 + quote 回填 + 业务校验与截断分片。
 - 验收：5 章 golden set，`schema 校验率` 与 `语义准确率` 达标（指标见 §5.7）；quote 定位成功率高；失败可重试不重复计费。
 
 ### G2 — 增量合并 + 缓存 + 备份 ✅

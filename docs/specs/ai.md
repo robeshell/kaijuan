@@ -361,7 +361,8 @@ presentation/
   → AiSettingsController / BookReaderController（或 AiBookController）
 lib/ai/   （ENGINEERING 落地时挂树）
   settings/     # 开关、endpoint、model；Key 只经 SecureStore
-  provider/     # AiProvider：chat / stream / testConnection
+  adapters/     # Genkit OpenAI Compatible / Anthropic，只实现 App 自有 AiModelAdapter
+  model_catalog # 独立只读 /models 控制面
   context/      # 从书抽选区、章、已读范围；截断与 token 预算
   features/
     language/   # AiBookLanguageProvider implements BookLanguageProvider
@@ -465,7 +466,7 @@ AiBookLanguageProvider（或 Composite）
 
 注意：当前 `BookLanguageActionResult.content` 为一次性字符串；流式需要在 controller 层增加 **stream 会话**（例如 `Stream<String>` / chunk 回调），不硬塞进同步 `execute` 返回值。可选：
 
-- A：`execute` 仍用于系统路径；AI 路径 controller 调 `AiProvider.stream` 另开。  
+- A：`execute` 仍用于系统路径；AI 路径 controller 通过 `AiModelAdapter.streamTurn` 运行。
 - B：扩展 Provider 接口增加 `streamExecute`。  
 
 **推荐 A**（少改菜单协议）：菜单仍调 controller 方法；controller 内分流。
@@ -477,7 +478,7 @@ AiBookLanguageProvider（或 Composite）
 
 ### 8.3 听书
 
-本 spec 不修改 TTS 路径；禁止为听书复用 AI Provider。
+本 spec 不修改 TTS 路径；禁止为听书复用 AI 模型生成运行时。
 
 ---
 
@@ -488,15 +489,15 @@ AiBookLanguageProvider（或 Composite）
 **做**
 
 - 设置页 AI 分组/子页；安全存 Key；总开关；测试连接。  
-- `AiProvider` 抽象 + OpenAI Compatible / Anthropic Messages 两个确定性工作流 transport。
+- App 自有 `AiModelAdapter` + 隔离的 Genkit OpenAI Compatible / Anthropic adapter；模型列表使用独立只读 catalog。
 - 通用流式结果容器（可先挂在设置「测试」或 debug）。  
 
 **验收**
 
-- [x] 关 AI 时 `openProvider()` 为 null（控制器测）。  
+- [x] 关 AI 时 `openModelAdapter()` 为 null（控制器测）。
 - [x] Key 走安全存储；`ai_settings.json` 仅非机密字段。  
-- [x] 错误 Key 测试连接失败文案可读（Provider 测）。  
-- [x] 表现层经 `AiSettingsController`；OpenAI / Anthropic / DeepSeek / Grok / 自定义 OpenAI Compatible 工厂路由。
+- [x] 错误 Key 测试连接失败文案可读（adapter 协议测）。
+- [x] 表现层经 `AiSettingsController`；OpenAI / Anthropic / DeepSeek / Grok / 自定义 OpenAI Compatible / Ollama 工厂路由。
 
 ### M1 — 语言
 
@@ -535,10 +536,10 @@ AiBookLanguageProvider（或 Composite）
 - [x] Genkit Anthropic adapter 精确锁版并隔离；原生 Tool Use、结构化输出、流式终态、usage、重试与取消通过伪服务协议测试。
 - [x] 对话只走所选服务商的原生工具协议；已删除 fenced 与旧 Provider 对话回退。
 - [x] 词典/选区翻译、大纲、图谱接入统一 run；图谱 checkpoint 保持既有存储格式。
-- [ ] 词典/选区翻译改走无工具 `AiModelAdapter` 单回合，并删除对 `AiProvider.stream/complete` 的依赖。
-- [ ] 结构化大纲与知识图谱全部模型步骤使用 Schemantic schema + Genkit structured output；删除 fence 截取、正则恢复和“只输出 JSON”式协议补丁。
-- [ ] 模型列表拆为只读 catalog transport，连接测试改走 adapter；随后删除 `AiProvider`、`AiProviderFactory`、两套旧 completion transport 与 tracking provider。
-- [ ] 两类 Genkit adapter 通过本地伪服务协议测试，并提供不含 Key 的可选 Genkit CLI trace smoke；完整验收见 [执行计划](../research/ai-runtime-genkit-completion-plan.md)。
+- [x] 词典/选区翻译改走无工具 `AiModelAdapter` 单回合，无第二套生成 transport。
+- [x] 结构化大纲与知识图谱全部模型步骤使用独立 Schemantic schema + Genkit structured output；已删除 fence 截取、正则恢复和格式修补请求。
+- [x] 模型列表拆为只读 catalog，连接测试改走 adapter；`AiProvider`、`AiProviderFactory`、两套旧 completion transport 与 tracking provider 已删除。
+- [x] 两类 Genkit adapter 通过本地伪服务协议测试；`tool/ai_genkit_smoke.dart` 提供不含 Key 的本地 OpenAI Compatible CLI trace，也可用用户环境变量选测 Anthropic；完整验收见 [执行记录](../research/ai-runtime-genkit-completion-plan.md)。
 
 
 
@@ -575,7 +576,7 @@ AiBookLanguageProvider（或 Composite）
 - Anthropic SSE 的解析与累积由锁版插件承担；adapter 仍须检查 Genkit 完成终态、重复 tool ID、工具参数对象及长度截断，任何不完整工具调用均不得执行。结构化输出使用 Genkit constrained output，不使用提示词伪 JSON；取消必须关闭本次插件 transport，不能只停止 UI 消费。
 - 超时与重试：短请求 1 次重试；长任务按章重试，不整本重来。  
 - 模型名用户自填；App 可提供「常用占位」但不锁死。  
-- 本地（Ollama）：OpenAI 兼容端点 `http://localhost:11434/v1`；`AiProviderKind.ollama` 标记 `isLocalBackend`，Provider 工厂与 controller 在本地服务商下**跳过 API Key 校验**；模型经 `GET /v1/models` 列出本地已安装模型。
+- 本地（Ollama）：OpenAI 兼容端点 `http://localhost:11434/v1`；`AiProviderKind.ollama` 标记 `isLocalBackend`，adapter 工厂与 controller 在本地服务商下**跳过 API Key 校验**；模型经独立 catalog 的 `GET /v1/models` 列出本地已安装模型。
 
 默认文档示例可用 xAI 兼容端点（`https://api.x.ai/v1`），**不**在 UI 写死为唯一选项。
 

@@ -1,4 +1,5 @@
 import 'ai_cancel.dart';
+import 'ai_log.dart';
 import 'ai_model_adapter.dart';
 import 'ai_models.dart';
 import 'ai_run.dart';
@@ -12,11 +13,7 @@ typedef AiModelUsageReporter =
 /// of individual language/outline/graph algorithms. Genkit types remain below
 /// [AiModelAdapter].
 final class AiWorkflowModelSession {
-  AiWorkflowModelSession(
-    this._adapter,
-    this._onModelStarted,
-    this._onUsage,
-  );
+  AiWorkflowModelSession(this._adapter, this._onModelStarted, this._onUsage);
 
   final AiModelAdapter _adapter;
   final void Function(AiRunModelPurpose purpose) _onModelStarted;
@@ -74,6 +71,12 @@ final class AiWorkflowModelSession {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    await _adapter.close();
+    try {
+      await _adapter.close();
+    } catch (error) {
+      // Shutdown is cleanup, not a model result. Never replace a successful
+      // workflow or its original failure with a Preview SDK teardown error.
+      AiLog.d('workflow model adapter close failed: $error');
+    }
   }
 }

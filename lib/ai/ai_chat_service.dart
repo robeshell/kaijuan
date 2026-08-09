@@ -4,9 +4,10 @@ import 'dart:math' as math;
 import 'ai_chat.dart';
 import 'ai_chat_retrieve.dart';
 import 'ai_chat_tools.dart';
+import 'ai_cancel.dart';
+import 'ai_log.dart';
 import 'ai_model_adapter.dart';
 import 'ai_models.dart';
-import 'ai_provider.dart';
 import 'ai_run.dart';
 import 'ai_run_orchestrator.dart';
 import 'ai_search.dart';
@@ -77,7 +78,7 @@ class AiChatService {
     final adapter = openModelAdapterFn();
     if (adapter == null) return const [];
     if (adapter is! AiStructuredOutputAdapter) {
-      await adapter.close();
+      await _closeAdapter(adapter);
       return const [];
     }
     final structured = adapter as AiStructuredOutputAdapter;
@@ -154,7 +155,7 @@ class AiChatService {
     } catch (_) {
       return const [];
     } finally {
-      await adapter.close();
+      await _closeAdapter(adapter);
     }
   }
 
@@ -243,7 +244,7 @@ class AiChatService {
         yield snapshot;
       }
     } finally {
-      await adapter.close();
+      await _closeAdapter(adapter);
     }
   }
 
@@ -753,4 +754,12 @@ class AiChatService {
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
+
+  static Future<void> _closeAdapter(AiModelAdapter adapter) async {
+    try {
+      await adapter.close();
+    } catch (error) {
+      AiLog.d('chat model adapter close failed: $error');
+    }
+  }
 }

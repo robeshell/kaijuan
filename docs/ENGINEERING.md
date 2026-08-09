@@ -102,20 +102,20 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - `AiBookChatToolHost` 只依赖正文缓存、本轮冻结上下文和作品范围，不得依赖表现层 controller；即使阅读引擎忽略范围参数，也必须再次本地收窄，防止相邻作品正文泄漏。
 - `AiChatService` 把供应商的单次输出限制视为传输分段而非回答失败：收到 `length` / `max_tokens` 后以同一冻结上下文自动续写、去重拼接到同一回答，并设置有界保护。流式传输只允许在首个可见文字前重试瞬时故障；首字后失败保留部分正文，不得从头静默重跑。表现层按节流频率保存 pending 回答检查点，终态写入必须排在检查点之后并覆盖它。
 - AI 运行时采用“开卷确定性编排器 + 可替换模型适配层”。`AiRunState` / `AiRunEvent` 是 App 自有的纯 Dart 契约；事件文本采用**回答快照**而非不可回退 delta，支持自动续写去重拼接和消费者幂等重放。本书对话只暴露事件流，UI 不得自行推测运行阶段。
-- 对话、图谱与设置的模型和文件存储分别放置；JSON 原子写入、备份恢复与安全凭据不得混入模型类。`AiProvider` 只定义协议，默认工厂单独依赖具体 transport，具体 transport 不反向依赖工厂实现。
+- 对话、图谱与设置的模型和文件存储分别放置；JSON 原子写入、备份恢复与安全凭据不得混入模型类。生成数据面只经 `AiModelAdapter`，模型目录是独立只读 `AiModelCatalog`；旧 Provider 双栈不得重建。
 - 下一阶段再把对话发送状态和大纲/图谱任务状态迁入独立 workspace/conversation controller；迁移前先补 Widget 流程测试，不以 `part` 或跨文件私有字段制造形式拆分。
 - 图谱模型、文件存储、抽取、合并消歧、质量门和描述润色是独立职责。管线 orchestrator 只编排这些组件，拆分不得改变提示词、算法阈值、缓存 schema 或 checkpoint 时机。
 
 - 产品范围见 [PRODUCT.md §6](./PRODUCT.md) 与 [specs/ai.md](./specs/ai.md)。
-- `lib/ai/`：`AiModelAdapter`（本书对话单回合、原生工具调用与结构化输出边界）、`AiProvider`（确定性批处理工作流 transport）、`AiSettings`（非机密、原子 JSON）、`SecureAiCredentialStore`（模型 Key + 搜索 Key 分槽）、`AiBookStructureResolver`（纯 Dart；把 TOC/spine/heading 事实归一为单本、分段单本、多作品出版物或不确定结构，供对话/大纲/图谱共享）、`AiGraphScopePlanner`（纯 Dart；把识别结果和完整内容单元变成用户可确认的范围计划）、选区语言 `AiLanguageService`、本书对话 `AiChatService`（最多四轮的原生 tool loop，非 LangChain；`get_toc` / `get_current_chapter` / `get_chapter` / `search_book` / `sample_book`）、`AiBookOutlineService`、`AiBookGraphService` + `AiGraphStore`、可选联网 `AiWebSearchService`（Tavily / Brave）+ `ai_chat/` 会话文件。
+- `lib/ai/`：`AiModelAdapter`（所有生成的单回合、原生工具调用与结构化输出边界）、`AiModelCatalog`（只读模型目录）、`AiSettings`（非机密、原子 JSON）、`SecureAiCredentialStore`（模型 Key + 搜索 Key 分槽）、`AiBookStructureResolver`（纯 Dart；把 TOC/spine/heading 事实归一为单本、分段单本、多作品出版物或不确定结构，供对话/大纲/图谱共享）、`AiGraphScopePlanner`（纯 Dart；把识别结果和完整内容单元变成用户可确认的范围计划）、选区语言 `AiLanguageService`、本书对话 `AiChatService`（最多四轮的原生 tool loop，非 LangChain；`get_toc` / `get_current_chapter` / `get_chapter` / `search_book` / `sample_book`）、`AiBookOutlineService`、`AiBookGraphService` + `AiGraphStore`、可选联网 `AiWebSearchService`（Tavily / Brave）+ `ai_chat/` 会话文件。
 - AI 回复的富内容渲染保持在 `presentation/widgets/reader/`：`AiResultBody` 负责 Markdown AST 与扩展块分发，代码、图形、媒体分别由独立 Widget 承担；Mermaid 通过随包原生 headless 引擎离线生成 `resvg-safe` SVG，声明式 chart 先转为受限 Mermaid 语法。Mermaid 的屏幕显示使用禁用 JavaScript、以 CSP 禁止网络且由 Flutter 吸收交互的浏览器级 SVG 表面，以保留 CSS/marker/文字回退；不得给 `loadHTMLString` 注册无条件取消导航的回调。清洗后的 SVG 直接内联，禁止再嵌套为 Apple WebKit 可能空白的 `data:` 图片，也不得用 `flutter_svg` 直接解释 Mermaid 产物。图形主题由 Widget 把当前语义 `ColorScheme` 编译为 Merman options，缓存键必须包含主题，皮肤或强调色变化时重新生成；不得让渲染引擎直接依赖 `BuildContext`，也不得写死默认暖橙。渲染器不得进入 Provider/Service，也不得执行模型提供的 HTML 或脚本；未知语言和解析失败统一降级为可复制源码块。
 - Apple 端暂用 CocoaPods 集成原生插件（`flutter.config.enable-swift-package-manager: false`）：`merman 0.7.0` 的 SwiftPM 二进制目标位于 package 目录外，Flutter 生成插件软链接后 Xcode 无法解析；其 macOS dylib 还携带上游 CI 的绝对 install name，因此 Runner 在 Pods 嵌入完成后通过 `patch_merman_install_names.sh` 把 App、插件 Framework 和 dylib 的引用统一改成 `@rpath/libmerman_ffi.dylib`，并用本次 Xcode 构建身份重新签署被修改的嵌套代码。待上游同时修复二进制布局与 install name 后再移除兼容层并恢复 SwiftPM；不得修改 Pub 缓存或用开发机全局 `flutter config` 掩盖约束。
 - 预设服务商：OpenAI、Anthropic、DeepSeek、Grok；另支持「自定义（OpenAI 兼容）」端点和本地 Ollama。OpenAI Compatible 与 Anthropic 分别使用官方 Genkit Dart 插件；两者不共享 wire adapter，也不做跨协议回退。
 - 表现层只经 `AiSettingsController`；Widget **不得**持有 `http.Client`、不得读写安全存储、不得拼装供应商请求体。
 - AI 异常在进入 Widget 前必须经过统一的用户错误映射；供应商原文、HTTP 状态码、JSON/SSE/schema、异常类名与堆栈仅写调试日志。Widget 不得把 `error.toString()` 或未经映射的 `AiProviderException.message` 直接展示。
 - API Key（模型与搜索）**不得**写入 `ai_settings.json`、WebDAV 备份清单或调试导出。
-- 携带 Key 的远程模型端点必须使用 HTTPS；明文 HTTP 只允许无 Key 的 loopback 本地后端。Provider 的流式成功终态必须来自协议完成事件，异常 EOF/空闲超时不得伪装成成功。
-- 总开关关闭时 `openProvider()` 返回 null，业务层不得绕过开关发请求。
+- 携带 Key 的远程模型端点必须使用 HTTPS；明文 HTTP 只允许无 Key 的 loopback 本地后端。Adapter 的流式成功终态必须来自协议完成事件，异常 EOF/空闲超时不得伪装成成功。
+- 总开关关闭时 `openModelAdapter()` 返回 null，业务层不得绕过开关发生成请求。
 - 本书 AI「联网」默认关；仅开关开且已配搜索 Key 时才调用搜索 API，结果注入 chat system prompt 的补充区。
 
 #### AI 运行时实现与边界
@@ -126,7 +126,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 | 开卷编排器 | `AiRunOrchestrator` 统一预算、取消、超时、模型/工具/续写计数、checkpoint hook 与错误分类；对话为最多四轮的受控 Tool Agent | 不把作品定位、权限、持久化或 UI 状态交给模型框架；不做多 Agent |
 | 模型适配层 | `lib/ai/adapters/` 隔离 `GenkitOpenAiModelAdapter` 与 `GenkitAnthropicModelAdapter`；精确固定 `genkit 0.15.1`、`genkit_openai 0.3.7`、`genkit_anthropic 0.2.11`。App 自有 `AiModelAdapter` 只表达单次回合、原生工具请求和结构化 JSON；Anthropic 模型列表仍走只读 `GET /v1/models` transport；可重试 transport/HTTP 错误只允许在首个可见文本前自动重试一次 | Genkit、插件 SDK 与供应商协议类型不得进入 UI、controller、数据库和备份 schema；插件升级必须重新跑对应适配器协议、取消和异常终态测试 |
 | 协议选择 | OpenAI / DeepSeek / Grok / 自定义 / Ollama 使用 Genkit OpenAI Compatible adapter；Anthropic 使用 Genkit Anthropic adapter；适配器缺失或端点不支持时本轮明确失败 | 不做跨协议隐式回退、手写 Messages 对话 adapter、fenced JSON 或旧 Provider 对话回退；不放宽五个只读工具、冻结作品范围和本地参数预算 |
-| 确定性工作流 | 词典/选区翻译、大纲、图谱已接入同一 run 状态；当前模型调用仍经 tracking provider 纳入预算，图谱逐节快照由 orchestrator checkpoint writer 落盘 | 按 [完整收口计划](./research/ai-runtime-genkit-completion-plan.md) 迁到 `AiModelAdapter` / Schemantic 结构化输出并删除 `AiProvider.complete/stream`；不把批处理改造成自由 Agent，不改抽取/合并算法、缓存格式或 checkpoint 语义 |
+| 确定性工作流 | 词典/选区翻译使用无工具 `streamTurn`；大纲和图谱的每类输出使用独立 Schemantic schema + `completeJson`；所有模型调用由 `AiWorkflowModelSession` 报告调用次数/usage 并统一关闭 adapter，图谱 checkpoint 保持原存储格式 | 不把批处理改造成自由 Agent，不改抽取/合并算法、缓存格式或 checkpoint 语义；Workflow 不得自行解 fence、正则恢复 JSON 或引入第二套生成 transport |
 
 `AiRunEvent` 只表达运行事实，不是持久化 schema。`AiRunCheckpoint` 自身带版本，但 payload 仍由既有工作流存储负责；当前图谱继续写原有 `AiBookGraph` 快照，不把临时事件写入 `ai_chat` / Drift / WebDAV。Genkit 内部 trace 只允许留在 adapter 边界，产品运行事实以 `AiRunEvent` 为准。
 

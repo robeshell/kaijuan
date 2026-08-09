@@ -1,8 +1,8 @@
 import 'ai_book_corpus.dart';
 import 'ai_book_structure.dart';
+import 'ai_cancel.dart';
 import 'ai_chat_retrieve.dart';
 import 'ai_log.dart';
-import 'ai_provider.dart';
 
 /// Resolves and caches the logical-work structure of one opened publication.
 ///

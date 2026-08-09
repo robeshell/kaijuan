@@ -8,53 +8,6 @@ class AiMessage {
   final String content;
 }
 
-/// One streamed text delta from the model.
-class AiStreamChunk {
-  const AiStreamChunk({
-    required this.text,
-    this.isFinal = false,
-    this.truncated = false,
-  }) : assert(!truncated || isFinal);
-
-  final String text;
-  final bool isFinal;
-
-  /// The provider stopped because the output reached its token limit. A
-  /// truncated terminal chunk is not a successful completion: callers should
-  /// retain any visible partial text but surface a retry/continue state.
-  final bool truncated;
-}
-
-class AiCompletionRequest {
-  const AiCompletionRequest({
-    required this.messages,
-    this.maxTokens = 1024,
-    this.temperature = 0.3,
-    this.timeout,
-  });
-
-  final List<AiMessage> messages;
-  final int maxTokens;
-  final double temperature;
-
-  /// Per-call network timeout; null uses the provider default (45s). Graph
-  /// extraction passes a longer budget (long prompts + big JSON output).
-  final Duration? timeout;
-}
-
-/// Result of a non-streaming completion (used by test connection and short tools).
-class AiCompletionResult {
-  const AiCompletionResult({required this.text, this.truncated = false});
-
-  final String text;
-
-  /// True when the provider stopped because the output hit the token budget
-  /// (`finish_reason == length` / `stop_reason == max_tokens`). A truncated
-  /// reply cannot contain a complete JSON object; retrying the same request
-  /// is pointless, so callers should shrink the input instead.
-  final bool truncated;
-}
-
 /// Outcome of "测试连接".
 class AiConnectionTestResult {
   const AiConnectionTestResult.success({this.detail})

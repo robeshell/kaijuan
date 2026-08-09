@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../ai/ai_cancel.dart';
 import '../../../ai/ai_language_service.dart';
-import '../../../ai/ai_provider.dart';
 import '../../../ai/ai_translation.dart';
 import '../../../ai/ai_user_error.dart';
 import '../../../core/kaijuan_icons.dart';

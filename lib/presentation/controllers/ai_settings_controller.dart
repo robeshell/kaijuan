@@ -4,8 +4,8 @@ import '../../ai/ai_log.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_model_adapter.dart';
 import '../../ai/ai_model_adapter_factory.dart';
-import '../../ai/ai_provider.dart';
-import '../../ai/ai_provider_factory.dart';
+import '../../ai/ai_model_catalog.dart';
+import '../../ai/ai_cancel.dart';
 import '../../ai/ai_provider_kind.dart';
 import '../../ai/ai_search.dart';
 import '../../ai/ai_settings.dart';
@@ -19,15 +19,15 @@ class AiSettingsController extends ChangeNotifier {
   AiSettingsController({
     required this.settingsStore,
     required this.credentialStore,
-    this.providerFactory = const DefaultAiProviderFactory(),
     this.modelAdapterFactory = const DefaultAiModelAdapterFactory(),
+    this.modelCatalog = const DefaultAiModelCatalog(),
     AiWebSearchService? searchService,
   }) : searchService = searchService ?? AiWebSearchService();
 
   final AiSettingsStore settingsStore;
   final AiCredentialStore credentialStore;
-  final AiProviderFactory providerFactory;
   final AiModelAdapterFactory modelAdapterFactory;
+  final AiModelCatalog modelCatalog;
   final AiWebSearchService searchService;
 
   AiSettings _settings = const AiSettings();
@@ -307,13 +307,6 @@ class AiSettingsController extends ChangeNotifier {
     return true;
   }
 
-  /// Builds a live provider when settings + key are complete. Null otherwise.
-  AiProvider? openProvider() {
-    if (!_settings.enabled) return null;
-    if (_settings.resolvedModel.isEmpty) return null;
-    return providerFactory.create(settings: _settings, apiKey: _apiKey);
-  }
-
   /// Opens the isolated native tool-calling adapter for the selected protocol.
   AiModelAdapter? openModelAdapter() {
     if (!_settings.enabled) return null;
@@ -412,8 +405,13 @@ class AiSettingsController extends ChangeNotifier {
       return result;
     }
 
-    final provider = providerFactory.create(settings: _settings, apiKey: key);
-    if (provider == null) {
+    final adapter = modelAdapterFactory.create(
+      providerKind: _settings.providerKind,
+      baseUrl: _settings.resolvedBaseUrl,
+      apiKey: key,
+      model: _settings.resolvedModel,
+    );
+    if (adapter == null) {
       final result = const AiConnectionTestResult.failure('无法创建连接，请检查配置');
       AiLog.d('testConnection fail: factory returned null');
       _applyTest(result);
@@ -430,21 +428,31 @@ class AiSettingsController extends ChangeNotifier {
     try {
       // maxTokens must leave room beyond any residual reasoning; DeepSeek
       // thinking is disabled in the OpenAI-compatible body for deepseek hosts.
-      final completion = await provider.complete(
-        const AiCompletionRequest(
+      AiModelTurnCompleted? completion;
+      await for (final event in adapter.streamTurn(
+        const AiModelTurnRequest(
           messages: [
-            AiMessage(
-              role: AiMessageRole.user,
-              content: 'Reply with exactly: ok',
+            AiModelMessage(
+              role: AiModelRole.user,
+              text: 'Reply with exactly: ok',
             ),
           ],
           maxTokens: 64,
           temperature: 0,
         ),
-      );
-      final detail = completion.text.length > 80
-          ? '${completion.text.substring(0, 80)}…'
-          : completion.text;
+      )) {
+        if (event is AiModelTurnCompleted) completion = event;
+      }
+      final completed = completion;
+      if (completed == null || completed.truncated) {
+        throw AiProviderException('模型未返回完整终态');
+      }
+      if (completed.toolCalls.isNotEmpty) {
+        throw AiProviderException('连接测试收到了意外工具调用');
+      }
+      final text = completed.text.trim();
+      if (text.isEmpty) throw AiProviderException('模型返回了空内容');
+      final detail = text.length > 80 ? '${text.substring(0, 80)}…' : text;
       final result = AiConnectionTestResult.success(detail: detail);
       AiLog.d(
         'testConnection ok in ${sw.elapsedMilliseconds}ms '
@@ -470,6 +478,11 @@ class AiSettingsController extends ChangeNotifier {
       _applyTest(result);
       return result;
     } finally {
+      try {
+        await adapter.close();
+      } catch (error) {
+        AiLog.d('testConnection adapter close failed: $error');
+      }
       _testing = false;
       notifyListeners();
     }
@@ -517,22 +530,17 @@ class AiSettingsController extends ChangeNotifier {
       throw AiProviderException(endpointError);
     }
 
-    final provider = providerFactory.create(settings: _settings, apiKey: key);
-    if (provider == null) {
-      _modelsError = '无法创建连接，请检查配置';
-      _availableModels = const [];
-      notifyListeners();
-      AiLog.d('fetchModels fail: factory returned null');
-      throw AiProviderException(_modelsError!);
-    }
-
     _listingModels = true;
     _modelsError = null;
     notifyListeners();
 
     final sw = Stopwatch()..start();
     try {
-      final models = await provider.listModels();
+      final models = await modelCatalog.listModels(
+        providerKind: _settings.providerKind,
+        baseUrl: _settings.resolvedBaseUrl,
+        apiKey: key,
+      );
       _availableModels = models;
       _modelsError = null;
       AiLog.d(
