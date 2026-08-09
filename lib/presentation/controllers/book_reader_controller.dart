@@ -24,6 +24,8 @@ import '../../ai/ai_language_service.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_outline.dart';
 import '../../ai/ai_provider.dart';
+import '../../ai/ai_run.dart';
+import '../../ai/ai_run_orchestrator.dart';
 import '../../ai/ai_search.dart';
 import '../../ai/ai_settings.dart';
 import '../../ai/ai_translation.dart';
@@ -139,8 +141,7 @@ class BookReaderController extends ChangeNotifier {
         ? null
         : AiChatService(
             isAvailable: () => aiSettings.isReadyForRequests,
-            openProvider: () => aiSettings.openProvider(),
-            settings: () => aiSettings.settings,
+            openModelAdapter: () => aiSettings.openModelAdapter(),
           );
     _aiOutline = aiSettings == null
         ? null
@@ -302,6 +303,8 @@ class BookReaderController extends ChangeNotifier {
   AiBookGraphService? _aiGraph;
   AiChatHistoryStore? _chatHistoryStore;
   AiGraphStore? _aiGraphStore;
+  final Map<String, AiRunState> _aiRunStates = {};
+  String? _latestAiRunId;
   AiBookOutline? _bookOutline;
 
   /// Work key of [_bookOutline] for collections (null = plain book / whole
@@ -328,6 +331,68 @@ class BookReaderController extends ChangeNotifier {
   CancelToken? _bookGraphCancel;
   Future<void>? _bookGraphGeneration;
   Future<void> _chatSessionWriteQueue = Future<void>.value();
+
+  Map<String, AiRunState> get aiRunStates => Map.unmodifiable(_aiRunStates);
+
+  AiRunState? get activeAiRunState =>
+      _latestAiRunId == null ? null : _aiRunStates[_latestAiRunId];
+
+  void _recordAiRunEvent(AiRunEvent event) {
+    if (event case AiRunStarted(:final descriptor)) {
+      _latestAiRunId = descriptor.runId;
+      _aiRunStates[descriptor.runId] = AiRunState.initial(descriptor);
+      while (_aiRunStates.length > 20) {
+        _aiRunStates.remove(_aiRunStates.keys.first);
+      }
+    }
+    final current = _aiRunStates[event.runId];
+    if (current == null) return;
+    final next = current.apply(event);
+    _aiRunStates[event.runId] = next;
+    if (!_disposed && (event is AiRunStarted || next.isTerminal)) {
+      notifyListeners();
+    }
+  }
+
+  Future<T> _executeAiWorkflow<T>({
+    required AiRunDescriptor descriptor,
+    required AiRunBudget budget,
+    required CancelToken cancelToken,
+    required Future<T> Function(AiRunExecution execution) body,
+    AiRunCheckpointWriter? checkpointWriter,
+  }) async {
+    late T result;
+    var hasResult = false;
+    Object? failure;
+    StackTrace? failureStack;
+    await for (final event in const AiRunOrchestrator().run(
+      descriptor: descriptor,
+      budget: budget,
+      cancelToken: cancelToken,
+      checkpointWriter: checkpointWriter,
+      body: (execution) async {
+        result = await body(execution);
+        hasResult = true;
+      },
+    )) {
+      _recordAiRunEvent(event);
+      switch (event) {
+        case AiRunFailed():
+          failure = event.error;
+          failureStack = event.stackTrace;
+        case AiRunCancelled():
+          failure = AiProviderException('已取消');
+          failureStack = StackTrace.current;
+        default:
+          break;
+      }
+    }
+    if (failure != null) {
+      Error.throwWithStackTrace(failure, failureStack ?? StackTrace.current);
+    }
+    if (!hasResult) throw StateError('AI workflow ended without a result');
+    return result;
+  }
 
   late final AiBookCorpusCache _aiCorpus = AiBookCorpusCache(
     loadBookBody:
@@ -931,19 +996,36 @@ class BookReaderController extends ChangeNotifier {
         'outline sections=${outlineSections.length} '
         'range=${work == null ? 'whole-book' : '${work.startSection}..${work.endSectionExclusive}'}',
       );
-      final generated = await service.generate(
-        bookTitle: work?.title ?? item.title,
-        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        collectionTitle: work == null ? null : item.title,
-        structureKind: work == null
-            ? (_bookStructureManifest?.kind ?? AiBookStructureKind.singleWork)
-            : AiBookStructureKind.singleWork,
-        sections: outlineSections,
+      final generated = await _executeAiWorkflow<AiBookOutline>(
+        descriptor: AiRunDescriptor(
+          runId: AiRunIds.next(),
+          task: AiRunTask.bookOutline,
+          scope: AiRunScope(
+            contentHash: item.contentHash,
+            workKey: startWorkKey,
+            label: work?.title,
+          ),
+        ),
+        budget: AiRunBudget(
+          maxModelCalls: (outlineSections.length * 3 + 8).clamp(16, 256),
+        ),
         cancelToken: cancel,
-        onProgress: (progress) {
-          _bookOutlineProgress = progress;
-          if (!_disposed) notifyListeners();
-        },
+        body: (execution) => service.generate(
+          bookTitle: work?.title ?? item.title,
+          bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+          collectionTitle: work == null ? null : item.title,
+          structureKind: work == null
+              ? (_bookStructureManifest?.kind ?? AiBookStructureKind.singleWork)
+              : AiBookStructureKind.singleWork,
+          sections: outlineSections,
+          cancelToken: execution.cancelToken,
+          onModelStarted: execution.modelStarted,
+          onProgress: (progress) {
+            execution.progress(progress.label);
+            _bookOutlineProgress = progress;
+            if (!_disposed) notifyListeners();
+          },
+        ),
       );
       // The user explicitly asked for this outline — show it. A page flip
       // during generation must not hide the result: the saved data is keyed
@@ -1496,31 +1578,52 @@ class BookReaderController extends ChangeNotifier {
       carryExcluded = (effectiveExcluded.toList()..sort()).toList(
         growable: false,
       );
-      final graph = await service.generate(
-        bookTitle: work?.title ?? item.title,
-        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        sections: sections,
-        sectionScheme: 'spine',
-        includesUnread: includesUnread,
-        readThroughSection: effectiveReadThrough,
-        existing: existing,
-        plannedNarration: narrationOverride,
-        narrationMode: narrationMode,
-        cancelToken: cancel,
-        onProgress: (progress) {
-          _bookGraphProgress = progress;
-          if (!_disposed) notifyListeners();
-        },
-        onCheckpoint: (partial) async {
-          final savedPartial = partial.copyWith(
+      final graph = await _executeAiWorkflow<AiBookGraph>(
+        descriptor: AiRunDescriptor(
+          runId: AiRunIds.next(),
+          task: AiRunTask.bookGraph,
+          scope: AiRunScope(
             contentHash: item.contentHash,
-            excludedGraphSections: carryExcluded,
-            hiddenEntityIds: hiddenEntityIds,
-          );
-          _bookGraph = savedPartial;
+            workKey: workKey,
+            label: work?.title,
+          ),
+        ),
+        budget: AiRunBudget(
+          maxModelCalls: (sections.length * 12 + 64).clamp(128, 4096),
+        ),
+        cancelToken: cancel,
+        checkpointWriter: (checkpoint) async {
+          final partial = checkpoint.payload;
+          if (partial is! AiBookGraph) return;
+          _bookGraph = partial;
           if (work != null) _activeGraphWork = work;
-          await _saveBookGraph(savedPartial, workKey: workKey);
+          await _saveBookGraph(partial, workKey: workKey);
         },
+        body: (execution) => service.generate(
+          bookTitle: work?.title ?? item.title,
+          bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+          sections: sections,
+          sectionScheme: 'spine',
+          includesUnread: includesUnread,
+          readThroughSection: effectiveReadThrough,
+          existing: existing,
+          plannedNarration: narrationOverride,
+          narrationMode: narrationMode,
+          cancelToken: execution.cancelToken,
+          onModelStarted: execution.modelStarted,
+          onProgress: (progress) {
+            execution.progress(progress.label);
+            _bookGraphProgress = progress;
+            if (!_disposed) notifyListeners();
+          },
+          onCheckpoint: (partial) => execution.checkpoint(
+            partial.copyWith(
+              contentHash: item.contentHash,
+              excludedGraphSections: carryExcluded,
+              hiddenEntityIds: hiddenEntityIds,
+            ),
+          ),
+        ),
       );
       final saved = graph.copyWith(
         excludedGraphSections: carryExcluded,
@@ -1816,14 +1919,14 @@ class BookReaderController extends ChangeNotifier {
   }
 
   /// Stream an assistant reply for book chat. Null when AI is unavailable.
-  Stream<String>? streamBookChat({
+  Stream<AiRunEvent>? streamBookChat({
     required String userText,
     required List<AiChatMessage> history,
     required AiChatContextBundle context,
     required AiGraphWorkCandidate? workScope,
     List<AiWebSearchHit>? webHits,
     CancelToken? cancelToken,
-    void Function(String? status)? onToolStatus,
+    String? runId,
   }) {
     final service = _aiChat;
     if (service == null || !service.isAvailable) return null;
@@ -1835,11 +1938,11 @@ class BookReaderController extends ChangeNotifier {
       workScope: workScope,
       webHits: webHits,
       cancelToken: cancelToken,
-      onToolStatus: onToolStatus,
+      runId: runId,
     );
   }
 
-  Stream<String> _streamResolvedBookChat({
+  Stream<AiRunEvent> _streamResolvedBookChat({
     required AiChatService service,
     required String userText,
     required List<AiChatMessage> history,
@@ -1847,10 +1950,19 @@ class BookReaderController extends ChangeNotifier {
     required AiGraphWorkCandidate? workScope,
     List<AiWebSearchHit>? webHits,
     CancelToken? cancelToken,
-    void Function(String? status)? onToolStatus,
+    String? runId,
   }) async* {
     await resolveGraphWorkCandidates(cancel: cancelToken);
-    yield* service.streamReply(
+    await for (final event in service.streamRun(
+      run: AiRunDescriptor(
+        runId: runId ?? AiRunIds.next(),
+        task: AiRunTask.bookChat,
+        scope: AiRunScope(
+          contentHash: item.contentHash,
+          workKey: workScope == null ? null : workKeyFor(workScope),
+          label: context.scopeLabel,
+        ),
+      ),
       userText: userText,
       history: history,
       context: context,
@@ -1863,8 +1975,10 @@ class BookReaderController extends ChangeNotifier {
         turnContext: context,
       ),
       cancelToken: cancelToken,
-      onToolStatus: onToolStatus,
-    );
+    )) {
+      _recordAiRunEvent(event);
+      yield event;
+    }
   }
 
   /// A short, answer-specific follow-up prompt. Failure is intentionally an
@@ -2458,12 +2572,58 @@ class BookReaderController extends ChangeNotifier {
           ? translationOptions!.chapterTitle
           : (chapter.isEmpty ? null : chapter),
     );
-    return service.streamAssist(
+    return _streamLanguageAssistRun(
+      service: service,
       operation: operation,
       text: text,
       cancelToken: cancelToken,
       translationOptions: merged,
     );
+  }
+
+  Stream<String> _streamLanguageAssistRun({
+    required AiLanguageService service,
+    required BookLanguageOperation operation,
+    required String text,
+    CancelToken? cancelToken,
+    AiTranslationRequestOptions? translationOptions,
+  }) async* {
+    final effectiveCancel = cancelToken ?? CancelToken();
+    await for (final event in const AiRunOrchestrator().run(
+      descriptor: AiRunDescriptor(
+        runId: AiRunIds.next(),
+        task: AiRunTask.language,
+        scope: AiRunScope(
+          contentHash: item.contentHash,
+          label: currentChapterTitle,
+        ),
+      ),
+      budget: const AiRunBudget(maxModelCalls: 2),
+      cancelToken: effectiveCancel,
+      body: (execution) async {
+        await for (final snapshot in service.streamAssist(
+          operation: operation,
+          text: text,
+          cancelToken: execution.cancelToken,
+          translationOptions: translationOptions,
+          onModelStarted: execution.modelStarted,
+        )) {
+          execution.textSnapshot(snapshot);
+        }
+      },
+    )) {
+      _recordAiRunEvent(event);
+      switch (event) {
+        case AiRunTextSnapshot():
+          yield event.text;
+        case AiRunFailed():
+          Error.throwWithStackTrace(event.error, event.stackTrace);
+        case AiRunCancelled():
+          throw AiProviderException('已取消');
+        default:
+          break;
+      }
+    }
   }
 
   /// Legacy clipboard excerpt helper (金句卡走 [showBookExcerptSheet]).

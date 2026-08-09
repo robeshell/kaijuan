@@ -205,8 +205,62 @@ class AiResultBody extends StatelessWidget {
   static String _prepareRichMarkdown(String raw, {required bool streaming}) {
     var value = _normalizeLegacySections(raw);
     value = _normalizeAsciiTrees(value);
+    value = _normalizeLooseStrong(value);
     if (streaming) value = _guardIncompleteRichFence(value);
     return value;
+  }
+
+  /// Models sometimes put spaces just inside `**` or leave the final marker
+  /// open while streaming. CommonMark intentionally treats those markers as
+  /// literal text, but the reader should see stable prose rather than syntax.
+  /// Fenced source is never rewritten.
+  static String _normalizeLooseStrong(String raw) {
+    final output = <String>[];
+    var inFence = false;
+    String? fence;
+    final marker = RegExp(r'(?<!\*)\*\*(?!\*)');
+    final loose = RegExp(r'\*\*[ \t]+(.+?)[ \t]+\*\*');
+
+    for (final original in raw.split('\n')) {
+      final fenceMatch = RegExp(r'^\s*(`{3,}|~{3,})').firstMatch(original);
+      if (fenceMatch != null) {
+        final nextFence = fenceMatch.group(1)![0];
+        if (!inFence) {
+          inFence = true;
+          fence = nextFence;
+        } else if (nextFence == fence) {
+          inFence = false;
+          fence = null;
+        }
+        output.add(original);
+        continue;
+      }
+      if (inFence) {
+        output.add(original);
+        continue;
+      }
+
+      final inlineCode = <String>[];
+      var line = original.replaceAllMapped(RegExp(r'(`+)(.*?)\1'), (match) {
+        inlineCode.add(match.group(0)!);
+        return '\uE000${inlineCode.length - 1}\uE001';
+      });
+      line = line.replaceAllMapped(
+        loose,
+        (match) => '**${match.group(1)!.trim()}**',
+      );
+      final markers = marker.allMatches(line).toList(growable: false);
+      if (markers.length.isOdd) {
+        final dangling = markers.last;
+        line = line.replaceRange(dangling.start, dangling.end, '');
+      }
+      line = line.replaceAllMapped(RegExp(r'\uE000(\d+)\uE001'), (match) {
+        final index = int.parse(match.group(1)!);
+        return inlineCode[index];
+      });
+      output.add(line);
+    }
+    return output.join('\n');
   }
 
   /// Converts model-authored box-drawing trees into a preformatted block.

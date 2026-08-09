@@ -488,6 +488,40 @@ void main() {
     expect(find.text('•'), findsNWidgets(2));
   });
 
+  testWidgets('AiResultBody repairs loose and dangling bold markers', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: AiResultBody(
+            streaming: true,
+            text: '结论：** 重点 **\n\n仍在生成：**未闭合内容',
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('重点'), findsOneWidget);
+    expect(find.textContaining('未闭合内容'), findsOneWidget);
+    expect(find.textContaining('**'), findsNothing);
+  });
+
+  testWidgets('AiResultBody leaves literal bold markers inside inline code', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: AiResultBody(text: '标题：** 重点 **；代码：`**literal**`'),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('重点'), findsOneWidget);
+    expect(find.textContaining('**literal**'), findsOneWidget);
+  });
+
   testWidgets('AiResultBody preserves ordered-list markers', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(

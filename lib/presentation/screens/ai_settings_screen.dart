@@ -440,35 +440,6 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                                 ),
                           ],
                         ),
-                        if (settings.providerKind == AiProviderKind.custom) ...[
-                          const SizedBox(height: 14),
-                          Text(
-                            '接口格式',
-                            style: TextStyle(
-                              fontSize: context.appCaptionSize,
-                              fontWeight: FontWeight.w600,
-                              color: context.settingsSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          AppChoiceStrip<AiApiProtocol>(
-                            wrap: true,
-                            selected: settings.customProtocol,
-                            onSelected: fieldsEnabled
-                                ? (protocol) => unawaited(
-                                    controller.setCustomProtocol(protocol),
-                                  )
-                                : (_) {},
-                            options: [
-                              for (final protocol in AiApiProtocol.values)
-                                AppChoiceOption(
-                                  value: protocol,
-                                  label: protocol.displayName,
-                                  enabled: fieldsEnabled,
-                                ),
-                            ],
-                          ),
-                        ],
                       ],
                     ),
                   ],

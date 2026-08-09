@@ -6,7 +6,7 @@
 | **参考基线** | [`Anxcye/anx-reader`](https://github.com/Anxcye/anx-reader) commit `107f4fa74db0e7247c846c49d6211df3edf9887c`（2026-05-29），MIT。本地浅克隆于 `/tmp/anx-reader`。 |
 | **相关** | [ai.md](../specs/ai.md)、[PRODUCT §6](../PRODUCT.md)、[foliate-architecture.md](./foliate-architecture.md) |
 
-> 只写对话（M2）的对照；翻译/词典/大纲不在本文范围。开卷产品结论以 [ai.md](../specs/ai.md) 为准，本页是研究基线 + 差距清单。
+> 只写对话（M2）的对照；翻译/词典/大纲不在本文范围。开卷产品结论以 [ai.md](../specs/ai.md) 为准，本页是研究基线 + 差距清单。文中的开卷 fenced-JSON 架构是历史对比基线；当前实现已经迁移到 App 自有编排器、隔离 Genkit adapter 与原生 Function Calling。
 
 ---
 

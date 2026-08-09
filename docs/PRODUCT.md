@@ -266,6 +266,7 @@
 | **默认可关** | 关闭 AI = 零相关网络请求；语言能力回落系统词典/翻译 |
 | **范围与防剧透** | 本书对话优先使用当前作品；无法定位时回退整个文件而不封锁。全书大纲始终基于整本书；知识图谱的未读开关限制生成输入，已保存图谱跨设备完整展示 |
 | **工具先于自主** | 词典/翻译多为单步调用；整本译/大纲为任务队列；图谱等再上多步编排 |
+| **确定性编排** | 开卷拥有书籍/作品作用域、权限、取消、预算、续写、checkpoint、存储与 UI 状态；模型运行框架只能作为可替换适配层，不接管产品边界 |
 | **范围** | v1 仅 **图书 reflow**；漫画 OCR/气泡译 **远** 或另案 |
 | **与 TTS 解耦** | 听书继续用系统 TTS；不做云端 AI 音色（见 book-tts） |
 
@@ -273,12 +274,13 @@
 
 | 能力 | 状态 | 说明 |
 |------|------|------|
-| AI 设置（云端 / 本地、Key / 端点 / 模型 / 总开关） | **已有** | 设置 → AI 助手；**云端**（OpenAI / Anthropic / DeepSeek / Grok / 自定义）+ **本地 Ollama**（无需 Key，默认 `localhost:11434/v1`）；测试连接；见 [ai.md](./specs/ai.md) |
+| AI 设置（云端 / 本地、Key / 端点 / 模型 / 总开关） | **已有** | 设置 → AI 助手；**云端**（OpenAI / Anthropic / DeepSeek / Grok / OpenAI Compatible 自定义）+ **本地 Ollama**（无需 Key，默认 `localhost:11434/v1`）；测试连接；见 [ai.md](./specs/ai.md) |
 | 联网搜索 BYOK | **已有（MVP）** | 设置 → 联网搜索（Tavily / Brave + 独立 Key）；本书 AI 面板「联网」开关；见 [ai.md](./specs/ai.md) |
 | AI 词典（应用内结果） | **已有（MVP）** | 选区菜单；AI 就绪时应用内流式结果，否则系统词典；可复制/写入笔记 |
 | AI 选区翻译 | **已有（MVP）** | 应用内流式；可回落系统翻译；深化见 [ai-translation.md](./specs/ai-translation.md) |
 | 翻译偏好设置 | **已有（MVP）** | 目标语言默认简中、固定译到目标、通顺意译；结果卡可临时改目标语言；见 [ai-translation.md](./specs/ai-translation.md) |
 | 本书对话 | **已有（MVP）** | 顶栏「本书 AI」；**按需 tool 取文**（目录/当前章/按节/书内搜/全书取样），不默认灌全书；可选联网补充；会话按 **contentHash** 存盘；见 [ai.md](./specs/ai.md) |
+| 统一 AI 运行时 | **已有（MVP）** | `AiRunOrchestrator` 统一 run 状态/事件、冻结作用域、预算、取消、usage 与 checkpoint；OpenAI Compatible 与 Anthropic 都通过精确锁版、相互隔离的 Genkit adapter 暴露原生工具调用和结构化输出，不保留 fenced JSON、手写 Messages 对话 adapter 或旧协议回退；词典/翻译、大纲、图谱继续是确定性 Workflow |
 | AI 大纲 | **已有（对话快捷操作）** | 本书 AI「对话」中的「生成本书大纲」快捷操作，直接复用对话的书内上下文、检索工具与流式回答，不再提供独立 Tab、范围选择或分批汇总任务；回答作为普通对话消息保存。旧结构化大纲缓存继续兼容读取、备份与恢复，避免历史数据丢失，但不再作为主入口展示 |
 | 整本 / 按章翻译任务 | **中** | 后台队列、进度、可取消；**复用翻译偏好**；契约 `fullBookTranslation` 已预留 |
 | 知识图谱 | **已有（v3 收口中）** | 保留本书 AI 入口与单本/分段单本/文件内多作品识别；识别后由用户先选作品、再选该作品的具体内容单元。程序可以把前言、目录、附言、索引等标为“建议排除”并默认取消，但必须完整展示并允许重新选择，不能把范围绑定到当前阅读位置。确认范围后逐节抽取、逐节原子快照；实体覆盖人物、地点、事件、组织、物件、概念与非人角色，关系和可定位出处以稳定 ID 相连；家族树只接收证据复核后的代际亲属边并全程按 ID 构建。展示采用固定索引 + 关系图/家族树探索层。见 [ai-graph.md](./specs/ai-graph.md)、[ai-graph-pipeline.md](./specs/ai-graph-pipeline.md)、[ai-graph-narration.md](./specs/ai-graph-narration.md)。 |
@@ -293,7 +295,9 @@ M0  BYOK 设置 + Provider 抽象 + 流式结果 UI 基元          ← 已有
 M1  AI 词典 + 选区翻译（系统能力 fallback）                ← 已有 MVP
 M1b 翻译偏好 T0–T3（设置 + 选区接偏好 + 结果卡目标语言）  ← 已有
 M2  本书对话（轻量 tool 取文 + 可选联网）               ← 已有 MVP
-M2b 不引入 LangChain；自研 tool 协议，为 M3/M5 铺路
+M2b 不引入 LangChain；五个只读书内工具由 App 执行
+M2c 统一 AiRun 状态 / 事件                               ← 已有 MVP
+M2d AiRunOrchestrator + 隔离 Genkit 适配层 + 原生工具调用 ← 已有 MVP
 M3  AI 大纲（结构化任务 + 本地缓存 + 可跳转）                 ← 已有 MVP
 M4  按章 / 整本翻译任务（复用翻译偏好）
 M5  知识图谱 v2（稳定 ID/关系/出处/断点） ← 已有（[ai-graph.md](./specs/ai-graph.md)）

@@ -9,6 +9,8 @@ import 'ai_graph_response.dart';
 import 'ai_log.dart';
 import 'ai_models.dart';
 import 'ai_provider.dart';
+import 'ai_run.dart';
+import 'ai_run_provider.dart';
 import 'ai_settings.dart';
 
 /// Progress of one incremental graph run (per section).
@@ -145,12 +147,19 @@ class AiBookGraphService {
     String? bookAuthor,
     required List<AiBookSectionSlice> sections,
     CancelToken? cancelToken,
+    void Function(AiRunModelPurpose purpose)? onModelStarted,
   }) async {
     try {
       cancelToken?.throwIfCancelled();
       if (!_isAvailable()) return null;
-      final provider = _openProvider();
-      if (provider == null) return null;
+      final openedProvider = _openProvider();
+      if (openedProvider == null) return null;
+      final provider = onModelStarted == null
+          ? openedProvider
+          : AiRunTrackingProvider(
+              delegate: openedProvider,
+              onModelStarted: onModelStarted,
+            );
       final outline = [
         for (final s in sections.take(200))
           if (s.label.trim().isNotEmpty) s.label.trim(),
@@ -251,14 +260,21 @@ class AiBookGraphService {
     CancelToken? cancelToken,
     void Function(AiGraphProgress progress)? onProgress,
     AiGraphCheckpoint? onCheckpoint,
+    void Function(AiRunModelPurpose purpose)? onModelStarted,
   }) async {
     if (!_isAvailable()) {
       throw const AiGraphGenerationException('AI 未启用或未配置');
     }
-    final provider = _openProvider();
-    if (provider == null) {
+    final openedProvider = _openProvider();
+    if (openedProvider == null) {
       throw const AiGraphGenerationException('AI 未启用或未配置');
     }
+    final provider = onModelStarted == null
+        ? openedProvider
+        : AiRunTrackingProvider(
+            delegate: openedProvider,
+            onModelStarted: onModelStarted,
+          );
     final sw = Stopwatch()..start();
 
     // Old caches may contain repeated rows for one stable ID. Repair them at
@@ -381,6 +397,7 @@ class AiBookGraphService {
         bookAuthor: bookAuthor,
         sections: sections,
         cancelToken: cancelToken,
+        onModelStarted: onModelStarted,
       );
     }
 

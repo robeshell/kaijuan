@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../ai/ai_log.dart';
 import '../../ai/ai_models.dart';
+import '../../ai/ai_model_adapter.dart';
+import '../../ai/ai_model_adapter_factory.dart';
 import '../../ai/ai_provider.dart';
 import '../../ai/ai_provider_factory.dart';
 import '../../ai/ai_provider_kind.dart';
@@ -18,12 +20,14 @@ class AiSettingsController extends ChangeNotifier {
     required this.settingsStore,
     required this.credentialStore,
     this.providerFactory = const DefaultAiProviderFactory(),
+    this.modelAdapterFactory = const DefaultAiModelAdapterFactory(),
     AiWebSearchService? searchService,
   }) : searchService = searchService ?? AiWebSearchService();
 
   final AiSettingsStore settingsStore;
   final AiCredentialStore credentialStore;
   final AiProviderFactory providerFactory;
+  final AiModelAdapterFactory modelAdapterFactory;
   final AiWebSearchService searchService;
 
   AiSettings _settings = const AiSettings();
@@ -123,16 +127,6 @@ class AiSettingsController extends ChangeNotifier {
     await settingsStore.write(_settings);
     // Load the destination provider's own key — never reuse the previous one.
     _apiKey = await credentialStore.readApiKey(kind) ?? '';
-    _availableModels = const [];
-    _modelsError = null;
-    _clearTest();
-    notifyListeners();
-  }
-
-  Future<void> setCustomProtocol(AiApiProtocol protocol) async {
-    if (_settings.customProtocol == protocol) return;
-    _settings = _settings.copyWith(customProtocol: protocol);
-    await settingsStore.write(_settings);
     _availableModels = const [];
     _modelsError = null;
     _clearTest();
@@ -320,6 +314,18 @@ class AiSettingsController extends ChangeNotifier {
     return providerFactory.create(settings: _settings, apiKey: _apiKey);
   }
 
+  /// Opens the isolated native tool-calling adapter for the selected protocol.
+  AiModelAdapter? openModelAdapter() {
+    if (!_settings.enabled) return null;
+    if (_settings.resolvedModel.isEmpty) return null;
+    return modelAdapterFactory.create(
+      providerKind: _settings.providerKind,
+      baseUrl: _settings.resolvedBaseUrl,
+      apiKey: _apiKey,
+      model: _settings.resolvedModel,
+    );
+  }
+
   /// Probes the configured search provider with one trivial query.
   Future<void> testSearch() async {
     if (_testingSearch) return;
@@ -373,7 +379,7 @@ class AiSettingsController extends ChangeNotifier {
     final key = _apiKey.trim();
     AiLog.d(
       'testConnection start provider=${_settings.providerKind.displayName} '
-      'protocol=${_settings.resolvedProtocol.displayName} '
+      'protocol=${_settings.providerKind == AiProviderKind.anthropic ? 'Anthropic Messages' : 'OpenAI Compatible'} '
       'base=${_settings.resolvedBaseUrl} model=${_settings.resolvedModel} '
       'key=${AiLog.maskKey(key)}',
     );
@@ -486,7 +492,7 @@ class AiSettingsController extends ChangeNotifier {
     final key = _apiKey.trim();
     AiLog.d(
       'fetchModels start provider=${_settings.providerKind.displayName} '
-      'protocol=${_settings.resolvedProtocol.displayName} '
+      'protocol=${_settings.providerKind == AiProviderKind.anthropic ? 'Anthropic Messages' : 'OpenAI Compatible'} '
       'base=${_settings.resolvedBaseUrl} key=${AiLog.maskKey(key)}',
     );
     if (_settings.requiresApiKey && key.isEmpty) {

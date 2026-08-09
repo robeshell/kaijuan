@@ -2,13 +2,15 @@
 
 | | |
 |---|---|
-| **状态** | 当前实现基线（2026-08-09） |
+| **状态** | 历史实现基线（2026-08-09）；后续落地见下方说明 |
 | **代码基线** | `ba745865587` |
 | **研究对象** | 本书 AI 对话的输入、上下文、流式输出、工具调用、多轮循环、持久化与下一代编排 |
 | **产品规范** | [ai.md](../specs/ai.md) |
 | **横向对照** | [ai-chat-anxreader-comparison.md](./ai-chat-anxreader-comparison.md) |
 
 > 本文不是未来方案的需求清单，而是一份实现复盘。它记录开卷如何从“调用一次模型”逐步走到“手写工具 Agent”，每一步解决了什么问题、又产生了什么新问题。后续可以在此基础上改写为技术文章。
+
+> **落地更新：** 本文记录的 `ba745865587` fenced-JSON 架构现已被确定性 `AiRunOrchestrator`、App 自有 `AiRunEvent` / `AiRunState`，以及隔离的 Genkit OpenAI Compatible / Anthropic adapter 取代。旧 fenced、手写 Messages 对话 adapter 和对话 Provider 回退已按开发期迁移决策删除；当前权威行为以 [ai.md](../specs/ai.md) 为准。下文的“当前实现”均指本文代码基线，不代表仓库最新实现。
 
 ---
 

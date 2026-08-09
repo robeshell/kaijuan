@@ -3,7 +3,7 @@
 | | |
 |--|--|
 | **状态** | M0–M3 已完成；**M5 知识图谱已实现**（见 [ai-graph.md](./ai-graph.md)）；M4 整本译 / M6 导出未做 |
-| **日期** | 2026-08-05 |
+| **日期** | 2026-08-09 |
 | **PRODUCT** | [§6](../PRODUCT.md) · [§10.2](../PRODUCT.md) |
 | **视觉** | [../DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md) |
 | **相关** | [book-reader.md](./book-reader.md)、[reader-chrome.md](./reader-chrome.md)、[subpages.md](./subpages.md)、[webdav-backup.md](./webdav-backup.md)、[book-tts.md](./book-tts.md) |
@@ -33,10 +33,10 @@
 
 已完成：
 
-- BYOK 设置、总开关、OpenAI 兼容协议、Anthropic、DeepSeek 和连接测试。
+- BYOK 设置、总开关、OpenAI Compatible 与 Anthropic Messages API 端点、模型列表和连接测试。
 - 选区 AI 词典与翻译，支持系统能力 fallback、流式输出、停止、复制和上下文前后文。
 - 本书对话，按 `contentHash` 持久化，支持当前章节、选区、目录、全文取样和书内检索工具。
-- 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。
+- 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。停止与关闭必须在第一次点击时立即更新界面并撤销请求，不等待 transport / stream 的异步清理完成。
 - AI 对话纳入用户主动执行的 WebDAV 备份；恢复时按书籍 `contentHash` 合并并去重。
 - 本书 AI 工作区提供对话 / 知识图谱两个 Tab；「生成本书大纲」是对话快捷操作，直接走正常书内对话，不弹范围选择，也不启动独立分批任务。
 - 大纲回答作为普通对话消息按 `contentHash` 缓存。历史结构化大纲数据继续随手动 WebDAV 快照备份和恢复，以兼容旧版本；Key 仍不备份。
@@ -54,7 +54,8 @@
 
 明确取舍：
 
-- 本书对话继续使用 fenced JSON 工具协议，不引入原生 API tool-call、LangChain 或其他 Agent 框架。
+- 不引入多 Agent。运行时采用开卷自有的确定性 `AiRunOrchestrator`；任务路由、书籍/作品范围、权限、预算、取消、续写、checkpoint、存储与 UI 状态均由 App 持有。
+- Genkit Dart 及官方 OpenAI / Anthropic 插件精确固定版本并分别隔离在 adapter；两类 adapter 都只执行单次模型回合，映射原生工具请求、流式输出、usage 与结构化结果。本书对话不保留手写 Messages 对话 adapter、旧 Provider、fenced JSON 或跨协议回退。
 
 ---
 
@@ -62,7 +63,7 @@
 
 ### 做
 
-- 用户自备 Key；内置预设 **OpenAI / Anthropic / DeepSeek**，另支持自定义 OpenAI 兼容端点。  
+- 用户自备 Key；内置预设 **OpenAI / Anthropic / DeepSeek / Grok**，另支持自定义 OpenAI Compatible 端点与本地 Ollama。
 - 总开关：关 = 零 AI 网络请求。  
 
 - 选区 **AI 词典**、**AI 翻译**（应用内结果，可流式）。  
@@ -123,7 +124,7 @@
    - 副文案：「使用你自己的 API Key；密钥只保存在本机。」  
 
 2. **服务商（云端 / 本地）**  
-   - **云端**：OpenAI / Anthropic / DeepSeek / Grok / 自定义（现有行为，需 API Key）。  
+   - **云端**：OpenAI / Anthropic / DeepSeek / Grok / OpenAI Compatible 自定义端点（需 API Key）。Anthropic 默认地址为 `https://api.anthropic.com`，使用 Messages API 而非 OpenAI Compatible 协议。
    - **本地**：Ollama。默认端点 `http://localhost:11434/v1`（OpenAI 兼容），**无需 API Key**——选中后隐藏 Key 字段，接口地址可改，模型经「获取模型」拉取本地已安装模型（`GET /v1/models`）；数据不出本机。  
 
 3. **连接**  
@@ -232,16 +233,7 @@
 | **Tools**（模型按需调用） | `get_current_chapter` / `get_chapter` / `search_book` / `sample_book` | 取其它章、关键词、全书均匀取样 |
 | 网页摘要 | 面板「联网」开时 | 书外通识；回答【书中】+【补充说明】 |
 
-协议：模型需要更多正文时，只输出 fenced JSON：
-
-```kaijuan_tools
-[{"name":"sample_book"},{"name":"search_book","query":"张居正"}]
-```
-
-App 执行 tool → 把结果塞回对话 → 最多约 4 轮 → 再流式正文回答。  
-**不引入 LangChain**；自研协议，便于以后接大纲/图谱任务。
-
-- 流式输出必须暂存并隐藏可能的 `kaijuan_tools` 协议前缀。若模型在工具块前夹带正文，或流在协议头 / JSON 中途结束，App 不得把残缺围栏保存成已完成回答，也不得直接执行这份非独立工具块；仅允许做一次受控纠正，纠正为独立且合法的工具块后才执行，纠正为纯正文则直接显示，否则本轮明确失败并允许重试。
+协议：模型通过适配层的原生 Function Calling 请求工具。App 校验并执行 tool，把带稳定 call ID 的结构化结果送回下一模型回合，最多 4 轮，再流式生成正文。Genkit 只执行单次模型回合，不拥有工具循环。端点不支持原生工具调用时本轮明确失败，不改写为文本协议，也不静默重跑。
 - 五个书内工具共享本轮冻结的作品作用域与同一份章级语料：`get_toc` 返回的 `§n` 是 `get_chapter(sectionIndex:n)` 唯一合法的章节 ID，`search_book` / `sample_book` 也只能检索、取样该语料；不得混用全文件 spine 序号、作品级 TOC 切片序号和章级逻辑序号。合集正文必须先按作品的物理 section 范围提取、再应用字符预算，不能先截断整个文件后再裁作品，否则位于文件后部的作品会永久不可检索。`get_current_chapter` 使用提问发出时冻结的章节标题与正文，读者在生成期间翻页不得改变该轮工具结果。
 - 工具参数由 App 钳制，模型不能扩大单工具正文预算；每轮去重重复调用，并受单轮聚合正文预算约束，避免多工具、多轮累计撑爆上下文。
 - `sample_book` 的正文样本必须覆盖全书跨度；章节多于单轮可承载数量时按均匀位置抽样，不得从书首顺序读取到预算耗尽。
@@ -267,12 +259,15 @@ App 执行 tool → 把结果塞回对话 → 最多约 4 轮 → 再流式正�
 - 会话按 **本书 contentHash** 持久化；v1 不做跨书列表。  
 - 一轮对话以稳定 `turnId` 标识，并区分 pending / completed / failed / cancelled。失败或关闭面板不能留下会被当作正常历史发送给模型的悬空 user 消息；已展示的部分回答若保留，必须同步落盘并标记未完成。
 - 流式终态区分正常完成、需要自动续写、取消与服务端错误。输出长度截断先进入自动续写；只有达到续写保护上限或续写失败才进入未完成态，且不得触发回答后追问。
-- Provider 只有收到协议规定的完成事件（OpenAI 兼容的 `[DONE]` / `finish_reason`，Anthropic 的 `message_stop`）才可发出成功终态；响应体 EOF、空闲超时和无法解析的终止帧都按失败处理。该契约同样适用于选区词典与翻译，部分文本可保留但不可复制/写笔记为“完整结果”。
+- 模型适配器只有收到 OpenAI Compatible 协议规定的完成事件（`[DONE]` / `finish_reason`）才可发出成功终态；响应体 EOF、空闲超时和无法解析的终止帧都按失败处理。该契约同样适用于选区词典与翻译，部分文本可保留但不可复制/写笔记为“完整结果”。
+- 模型尚未输出任何可见正文时，适配器可对 408 / 409 / 422 / 425 / 429、5xx、超时和连接错误自动重试一次；一旦已有正文可见，不得静默重启整轮。部分 OpenAI Compatible 端点会用 422 表达可重试的首轮工具/schema 处理失败，第二次仍失败时按正常错误展示。
 - 选区结果的「复制」与「写入笔记」只在正常完成后启用；生成中、用户停止、长度截断或失败时均禁用。原文折叠必须提供可见的展开/收起提示，并具备按钮语义、展开状态和键盘操作。
 - AI 正文由统一的富内容管线解析，不把模型返回的标记语法直接显示给读者：
   - **GFM**：六级标题、段落、粗体、斜体、删除线、有序/无序/任务列表、引用、分隔线、行内代码、围栏代码块、链接、表格、脚注；有序列表必须保留原编号。
+  - **模型容错**：对围栏外常见的松散粗体（如 `** 标题 **`）规范化为合法 GFM；流式阶段或最终回答中的孤立 `**` 不直接暴露给读者。代码块内容保持原样。
   - **扩展块**：`mermaid`（完整离线 Mermaid 图形家族，含 mindmap / flowchart / sequence / state / class / ER / timeline / gantt / journey / pie / XY / radar / quadrant / sankey / kanban / treemap / architecture 等）、`latex` / `$…$` / `$$…$$`、带语言名代码块、`diff`、`text` / `tree` / `ascii`、GitHub callout（NOTE / TIP / IMPORTANT / WARNING / CAUTION）、`chart` / `vega-lite` 的安全声明式子集。
   - **流式契约**：尚未闭合的 Mermaid / chart 围栏只显示稳定的“正在生成图表…”状态，闭合后才解析；不得随每个 token 反复呈现技术错误。渲染失败降级为“暂时无法显示”+ 查看/复制源码，不影响同一回答的其他正文。
+  - **图表性能**：Merman 输出使用 `resvg-safe` 管线并在 Flutter 原生 SVG surface 中展示；列表滚动和全屏缩放不得为每张图常驻创建 WebView 平台视图。相同源码与主题复用渲染缓存。
   - **图形交互**：图形与已加载图片支持放大、平移、全屏和源码复制；所有图标操作具备可读名称，手机触控区不小于 44px。SVG、图表脚本和语法包随应用离线提供，不经 CDN，也不执行模型输出的 HTML、iframe 或任意 JavaScript。Mermaid 屏幕预览必须使用能完整保留其 CSS、marker 与文字回退的受限浏览器级 SVG 表面；该表面只内联原生引擎 `resvg-safe` 产物，关闭 JavaScript，以 CSP 禁止网络，并由 Flutter 层吸收交互及排除 WebView 语义。不得为阻止导航而注册无条件 `CANCEL` 回调——Apple WebKit 的初始 `loadHTMLString` 同样经过导航决策，会造成白屏。不得把 SVG 再包装为嵌套 `data:` 图片（Apple WebKit 可能不绘制其内部样式），也不得直接交给会忽略类选择器或 `foreignObject` 的简化 SVG Widget。图形主题读取当前 `ColorScheme`：中心节点使用强调色与 `onPrimary`，分支使用 primary/secondary/tertiary container 形成低饱和层级，画布、边框、连线和正文随皮肤明暗切换；不得恢复 Mermaid 默认彩虹色或另建一套固定品牌色。
   - **媒体安全**：只允许 `http` / `https` 链接交由系统浏览器打开；远程 Markdown 图片默认不请求，读者明确选择“加载图片”后才下载，失败显示产品文案而非网络异常。
   - **显示**：助手回复使用阅读型正文层级：正文 15px、1.55–1.6 行高，标题逐级递减且不抢占面板标题；代码、图表、引用和表格使用独立表面与横向溢出策略。内容保持可选择，ASCII 树的空格和换行必须原样保留。
@@ -432,7 +427,21 @@ AI 对话备份规则：
 - 仅用户触发的动作发请求。  
 - 请求体含用户选段/章节文本时，设置页应用简短隐私说明：「正文片段将发送到你配置的接口地址」。  
 - 不写第三方分析 SDK 专打 AI 事件（若全局无，则 AI 也不例外加）。  
-- 防提示词注入：system message 仅包含应用固定规则、工具目录和联网回答格式；书名、目录、选区、正文、网页摘要及工具结果都作为带 `<untrusted_context>` 边界的引用材料传入，材料中要求改写规则、调用工具、泄露数据或改变角色的文本一律不可执行。工具调用只接受模型整条回复为 `kaijuan_tools` fenced JSON block；普通回答、书中文字或一般 `json` 代码块绝不触发工具。白名单、参数限制和最多四轮工具调用继续生效。
+- 防提示词注入：system message 仅包含应用固定规则、工具目录和联网回答格式；书名、目录、选区、正文、网页摘要及工具结果都作为带 `<untrusted_context>` 边界的引用材料传入，材料中要求改写规则、调用工具、泄露数据或改变角色的文本一律不可执行。只有适配器返回的原生 tool request 会进入执行器；普通回答、书中文字或代码块绝不触发工具。白名单、参数限制和最多四轮工具调用继续生效。
+
+### 7.5 统一运行状态与事件
+
+当前 App 自有运行契约：
+
+- 每次运行拥有稳定 `runId`、任务类型和冻结的 `contentHash` / `workKey` 作用域描述；同一事件流的序号必须单调递增。
+- `AiRunEvent` 至少表达 started、scope resolved、model started、tool started/completed、continuation started、text snapshot、completed、failed、cancelled；`AiRunState` 由事件 reducer 确定性投影，终态后忽略后续事件。
+- 文本事件携带“当前完整回答快照”。这是现有 UI 的权威语义：原生工具请求前若模型流出说明性前缀可撤回，自动续写可去重重组；消费者不得把它误当 token delta 追加。
+- 本书对话只暴露 `Stream<AiRunEvent>`；聊天面板消费结构化运行事件，会话 JSON、pending checkpoint 与 WebDAV 格式不依赖模型协议。
+- `RunFailed` / `RunCancelled` 保留最后回答快照供 UI 决定是否落为未完成消息；事件本身不直接写 Drift 或文件。
+- 编排器强制模型调用、工具轮数、续写轮数、工具结果字符数与可选运行时长预算；模型 token usage 只有 adapter 可靠返回时才记录，不作为唯一硬预算。
+- controller 用同一 reducer 跟踪本书对话、词典/选区翻译、大纲与图谱；图谱逐节 checkpoint 仍写原有快照格式。
+
+协议边界：本书对话按服务商选择 OpenAI Compatible 原生 Function Calling 或 Anthropic Messages API 原生 Tool Use；失败直接进入 `RunFailed`，不得跨协议重试，也不得回退 fenced JSON 或旧 Provider 对话 transport。五个工具仍由 App 白名单执行且全为只读。Anthropic assistant `tool_use` 与后续 user `tool_result` 必须保留 call ID 和内容块顺序；工具参数只在完整 `content_block_stop` 且 JSON 对象解析成功后交给 App。
 
 ---
 
@@ -479,7 +488,7 @@ AiBookLanguageProvider（或 Composite）
 **做**
 
 - 设置页 AI 分组/子页；安全存 Key；总开关；测试连接。  
-- `AiProvider` 抽象 + 一个 OpenAI 兼容实现。  
+- `AiProvider` 抽象 + OpenAI Compatible / Anthropic Messages 两个确定性工作流 transport。
 - 通用流式结果容器（可先挂在设置「测试」或 debug）。  
 
 **验收**
@@ -487,7 +496,7 @@ AiBookLanguageProvider（或 Composite）
 - [x] 关 AI 时 `openProvider()` 为 null（控制器测）。  
 - [x] Key 走安全存储；`ai_settings.json` 仅非机密字段。  
 - [x] 错误 Key 测试连接失败文案可读（Provider 测）。  
-- [x] 表现层经 `AiSettingsController`；OpenAI / Anthropic / DeepSeek 工厂路由。  
+- [x] 表现层经 `AiSettingsController`；OpenAI / Anthropic / DeepSeek / Grok / 自定义 OpenAI Compatible 工厂路由。
 
 ### M1 — 语言
 
@@ -521,6 +530,11 @@ AiBookLanguageProvider（或 Composite）
 - [x] 首字前瞬时故障安全重试；首字后不静默重跑，部分回答保留。
 - [x] 流式回答节流保存 pending 检查点；异常退出后保留正文但不进入正常模型历史。
 - [x] AI 对话随用户主动执行的 WebDAV 备份恢复，并按消息去重合并。
+- [x] 统一 `AiRunState` / `AiRunEvent` / `AiRunOrchestrator`，聊天 UI 直接消费结构化事件。
+- [x] Genkit OpenAI Compatible adapter 精确锁版并隔离；原生五工具 schema、结构化输出、流式与取消通过伪服务协议测试。
+- [x] Genkit Anthropic adapter 精确锁版并隔离；原生 Tool Use、结构化输出、流式终态、usage、重试与取消通过伪服务协议测试。
+- [x] 对话只走所选服务商的原生工具协议；已删除 fenced 与旧 Provider 对话回退。
+- [x] 词典/选区翻译、大纲、图谱接入统一 run；图谱 checkpoint 保持既有存储格式。
 
 
 
@@ -552,8 +566,9 @@ AiBookLanguageProvider（或 Composite）
 
 ## 10. Provider 约定（实现备忘）
 
-- 兼容 **OpenAI 风格** Base URL（`/chat/completions` 或文档当时推荐的 responses API；实现时以所接服务商文档为准）。  
+- OpenAI / DeepSeek / Grok / 自定义 / Ollama 兼容 **OpenAI 风格** Base URL（当前 `/chat/completions`）；Anthropic 使用 `POST /v1/messages` 与 `GET /v1/models`，system prompt 置于顶层，消息仅使用 user / assistant 角色。
 - 流式：SSE；可取消（关闭 panel / dispose）。  
+- Anthropic SSE 的解析与累积由锁版插件承担；adapter 仍须检查 Genkit 完成终态、重复 tool ID、工具参数对象及长度截断，任何不完整工具调用均不得执行。结构化输出使用 Genkit constrained output，不使用提示词伪 JSON；取消必须关闭本次插件 transport，不能只停止 UI 消费。
 - 超时与重试：短请求 1 次重试；长任务按章重试，不整本重来。  
 - 模型名用户自填；App 可提供「常用占位」但不锁死。  
 - 本地（Ollama）：OpenAI 兼容端点 `http://localhost:11434/v1`；`AiProviderKind.ollama` 标记 `isLocalBackend`，Provider 工厂与 controller 在本地服务商下**跳过 API Key 校验**；模型经 `GET /v1/models` 列出本地已安装模型。

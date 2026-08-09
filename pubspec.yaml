@@ -29,6 +29,12 @@ dependencies:
 
   package_info_plus: ^10.2.1
   http: ^1.6.0
+  # Genkit Dart is Preview: keep exact versions behind lib/ai/adapters/ so a
+  # breaking minor can be upgraded or removed without touching product state.
+  genkit: 0.15.1
+  genkit_anthropic: 0.2.11
+  genkit_openai: 0.3.7
+  schemantic: 0.2.2
   xml: ^6.5.0
   flutter_secure_storage: ^10.3.1
 

@@ -118,6 +118,26 @@ final answer = 42;
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('uses a native SVG surface for diagram previews', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: AiMermaidBlock(
+              source: 'mindmap\n  root((阅读))',
+              label: '思维导图',
+              renderer: _FakeMermaidRenderer(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(SvgPicture), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('a diagram failure degrades to friendly copyable source', (
       tester,
     ) async {
@@ -186,16 +206,6 @@ final answer = 42;
   });
 
   group('AiMermaidTheme', () {
-    test('inlines safe SVG instead of nesting a data image', () {
-      const svg = '<svg viewBox="0 0 10 10"><circle r="4"/></svg>';
-      final document = buildAiMermaidPreviewDocument(svg);
-
-      expect(document, contains('<div id="viewport">$svg</div>'));
-      expect(document, contains("default-src 'none'"));
-      expect(document, isNot(contains('data:image/svg+xml')));
-      expect(document, isNot(contains('<script')));
-    });
-
     test('maps the active light ColorScheme into Merman semantic colors', () {
       final colors = AppTheme.light(AppColors.defaultAccent).colorScheme;
       final options =

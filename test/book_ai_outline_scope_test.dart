@@ -12,6 +12,8 @@ import 'package:kaijuan/ai/ai_graph_scope.dart';
 import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/ai/ai_provider.dart';
+import 'package:kaijuan/ai/ai_run.dart';
+import 'package:kaijuan/ai/ai_search.dart';
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
 import 'package:kaijuan/presentation/controllers/book_reader_controller.dart';
@@ -59,8 +61,75 @@ class _AmbiguousOutlineController extends BookReaderController {
   }
 
   final graphGate = Completer<void>();
+  final chatCancelGates = <Completer<void>>[];
+  final chatStreams = <StreamController<AiRunEvent>>[];
   AiBookGraph? graphOverride;
   bool _generatingGraph = false;
+
+  @override
+  Stream<AiRunEvent>? streamBookChat({
+    required String userText,
+    required List<AiChatMessage> history,
+    required AiChatContextBundle context,
+    required AiGraphWorkCandidate? workScope,
+    List<AiWebSearchHit>? webHits,
+    CancelToken? cancelToken,
+    String? runId,
+  }) {
+    final gate = Completer<void>();
+    chatCancelGates.add(gate);
+    final descriptor = AiRunDescriptor(
+      runId: runId ?? 'test-chat-${chatCancelGates.length}',
+      task: AiRunTask.bookChat,
+      scope: AiRunScope(contentHash: item.contentHash),
+    );
+    late final StreamController<AiRunEvent> stream;
+    stream = StreamController<AiRunEvent>(
+      onListen: () {
+        scheduleMicrotask(() {
+          if (stream.isClosed) return;
+          final now = DateTime.now();
+          stream
+            ..add(
+              AiRunStarted(
+                descriptor: descriptor,
+                sequence: 0,
+                occurredAt: now,
+              ),
+            )
+            ..add(
+              AiRunModelStarted(
+                runId: descriptor.runId,
+                sequence: 1,
+                occurredAt: now,
+                purpose: AiRunModelPurpose.answer,
+                callIndex: 1,
+              ),
+            )
+            ..add(
+              AiRunTextSnapshot(
+                runId: descriptor.runId,
+                sequence: 2,
+                occurredAt: now,
+                text: '已经生成一部分',
+              ),
+            );
+        });
+      },
+      onCancel: () => gate.future,
+    );
+    chatStreams.add(stream);
+    return stream.stream;
+  }
+
+  void releaseChatCancellations() {
+    for (final gate in chatCancelGates) {
+      if (!gate.isCompleted) gate.complete();
+    }
+    for (final stream in chatStreams) {
+      if (!stream.isClosed) unawaited(stream.close());
+    }
+  }
 
   @override
   AiBookGraph? get bookGraph => graphOverride;
@@ -183,6 +252,79 @@ void main() {
     expect(find.text('生成本书大纲'), findsOneWidget);
     expect(find.text('选择范围生成大纲'), findsNothing);
     expect(find.text('选择范围并生成'), findsNothing);
+  });
+
+  testWidgets('chat stop and close react on the first tap', (tester) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = AppDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final now = DateTime.utc(2026, 8, 9);
+    await database.upsertReadingItem(
+      ReadingItemsCompanion.insert(
+        id: 'chat-one-tap-cancel',
+        kind: ReaderKind.book.storageValue,
+        format: ReaderFormat.epub.storageValue,
+        title: '停止测试',
+        filePath: '/tmp/chat-one-tap-cancel.epub',
+        contentHash: 'hash-chat-one-tap-cancel',
+        pageCount: const Value(2),
+        addedAt: now,
+        updatedAt: now,
+      ),
+    );
+    final item = (await database.readingItemById('chat-one-tap-cancel'))!;
+    final controller = _AmbiguousOutlineController(
+      database: database,
+      item: item,
+    );
+    addTearDown(() {
+      controller.releaseChatCancellations();
+      controller.dispose();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () =>
+                  showBookAiChatSheet(context, controller: controller),
+              child: const Text('打开 AI'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开 AI'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, '第一次问题');
+    await tester.tap(find.byTooltip('发送'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('已经生成一部分'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('停止'));
+    await tester.pump();
+    expect(find.byTooltip('发送'), findsOneWidget);
+    expect(find.text('回答已停止'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).last, '第二次问题');
+    await tester.tap(find.byTooltip('发送'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('停止'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('关闭'), findsNothing);
+    expect(find.text('打开 AI'), findsOneWidget);
+
+    controller.releaseChatCancellations();
   });
 
   testWidgets('phone graph generation keeps visible feedback across routes', (

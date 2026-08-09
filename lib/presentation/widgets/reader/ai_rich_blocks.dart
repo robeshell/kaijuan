@@ -6,8 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_highlighting/flutter_highlighting.dart';
 import 'package:flutter_highlighting/themes/github-dark.dart';
 import 'package:flutter_highlighting/themes/github.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:highlighting/languages/all.dart';
 import 'package:merman/merman.dart';
 
@@ -531,7 +531,7 @@ class _AiMermaidBlockState extends State<AiMermaidBlock> {
                     padding: const EdgeInsets.all(24),
                     child:
                         widget.surfaceBuilder?.call(svg) ??
-                        IgnorePointer(child: _MermaidBrowserSurface(svg: svg)),
+                        IgnorePointer(child: _MermaidNativeSurface(svg: svg)),
                   ),
                 ),
               ),
@@ -804,7 +804,7 @@ class _DiagramPreview extends StatelessWidget {
               child: IgnorePointer(
                 child:
                     surfaceBuilder?.call(svg) ??
-                    _MermaidBrowserSurface(svg: svg),
+                    _MermaidNativeSurface(svg: svg),
               ),
             ),
             PositionedDirectional(
@@ -829,54 +829,24 @@ class _DiagramPreview extends StatelessWidget {
   );
 }
 
-/// Displays the trusted SVG emitted by the bundled Merman engine in an image
-/// context. Mermaid SVG relies on CSS selectors, markers and text fallbacks
-/// that lightweight native SVG widgets do not fully implement.
-///
-/// The browser surface is intentionally inert: only Merman's `resvg-safe`
-/// output is inlined, JavaScript is disabled, CSP blocks network resources,
-/// and every navigation attempt is cancelled.
-class _MermaidBrowserSurface extends StatelessWidget {
-  const _MermaidBrowserSurface({required this.svg});
+/// Displays Merman's `resvg-safe` output without creating a platform WebView.
+/// Keeping diagrams in Flutter's render tree makes list scrolling and
+/// InteractiveViewer transforms substantially cheaper and interruptible.
+class _MermaidNativeSurface extends StatelessWidget {
+  const _MermaidNativeSurface({required this.svg});
 
   final String svg;
 
   @override
   Widget build(BuildContext context) => ExcludeSemantics(
-    child: InAppWebView(
+    child: SvgPicture.string(
+      svg,
       key: ValueKey<int>(Object.hashAll([svg.length, svg.hashCode])),
-      initialData: InAppWebViewInitialData(
-        data: buildAiMermaidPreviewDocument(svg),
-      ),
-      initialSettings: InAppWebViewSettings(
-        javaScriptEnabled: false,
-        transparentBackground: true,
-        supportZoom: false,
-        disableContextMenu: true,
-        verticalScrollBarEnabled: false,
-        horizontalScrollBarEnabled: false,
-        mediaPlaybackRequiresUserGesture: true,
-      ),
+      fit: BoxFit.contain,
+      placeholderBuilder: (_) => const _RichLoading(label: '正在绘制图表'),
     ),
   );
 }
-
-@visibleForTesting
-String buildAiMermaidPreviewDocument(String svg) =>
-    '''<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}
-#viewport{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-#viewport>svg{display:block;width:100%!important;height:100%!important;max-width:none!important;background:transparent!important}
-</style>
-</head>
-<body><div id="viewport">$svg</div></body>
-</html>''';
 
 class _BlockToolbar extends StatelessWidget {
   const _BlockToolbar({required this.label, required this.onCopy});

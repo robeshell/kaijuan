@@ -12,6 +12,7 @@ import '../../../ai/ai_graph_family_tree.dart';
 import '../../../ai/ai_graph_service.dart';
 import '../../../ai/ai_models.dart';
 import '../../../ai/ai_provider.dart';
+import '../../../ai/ai_run.dart';
 import '../../../ai/ai_search.dart';
 import '../../../ai/ai_user_error.dart';
 import '../../../core/kaijuan_icons.dart';
@@ -164,7 +165,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool _generatingFollowUp = false;
   CancelToken _cancel = CancelToken();
   CancelToken? _suggestionCancel;
-  StreamSubscription<String>? _sub;
+  StreamSubscription<AiRunEvent>? _sub;
+  AiRunState? _runState;
   String _streaming = '';
 
   /// Work key of the in-flight turn, captured at send time so a mid-stream
@@ -553,6 +555,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _retryTurnId = null;
       _streaming = '';
       _toolStatus = null;
+      _runState = null;
     });
     unawaited(_persist());
     _scrollToEnd();
@@ -629,10 +632,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       workScope: turnWork,
       webHits: webHits,
       cancelToken: turnCancel,
-      onToolStatus: (status) {
-        if (!mounted) return;
-        setState(() => _toolStatus = status);
-      },
+      runId: turnId,
     );
     if (stream == null) {
       setState(() {
@@ -645,47 +645,69 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _retryTurnId = turnId;
         _activeTurnId = null;
         _activeTurnWorkKey = null;
+        _runState = null;
       });
       _restorePendingDraft();
       unawaited(_persist());
       return;
     }
 
+    var endedWithFailure = false;
+    void handleFailure(Object error) {
+      if (!mounted || endedWithFailure) return;
+      endedWithFailure = true;
+      _cancelStreamingCheckpoint();
+      setState(() {
+        _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: turnWorkKey);
+        _sending = false;
+        _searchingWeb = false;
+        _toolStatus = null;
+        _error = aiUserErrorMessage(error, operation: AiUserOperation.chat);
+        _retryText = text;
+        _retryTurnId = turnId;
+        if (_streaming.trim().isNotEmpty) {
+          _commitAssistant(
+            _streaming,
+            workKey: turnWorkKey,
+            turnId: turnId,
+            status: AiChatTurnStatus.failed,
+          );
+        }
+        _streaming = '';
+        _activeTurnId = null;
+        _activeTurnWorkKey = null;
+        _runState = null;
+      });
+      _restorePendingDraft();
+      unawaited(_persist());
+    }
+
     _sub = stream.listen(
-      (value) {
+      (event) {
         if (!mounted) return;
-        setState(() => _streaming = value);
-        _scheduleStreamingCheckpoint();
-        _scrollToEnd();
-      },
-      onError: (Object error) {
-        if (!mounted) return;
-        _cancelStreamingCheckpoint();
+        final current = switch (event) {
+          AiRunStarted(:final descriptor) => AiRunState.initial(descriptor),
+          _ => _runState,
+        };
+        if (current == null) return;
+        final next = current.apply(event);
         setState(() {
-          _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: turnWorkKey);
-          _sending = false;
-          _searchingWeb = false;
-          _toolStatus = null;
-          _error = aiUserErrorMessage(error, operation: AiUserOperation.chat);
-          _retryText = text;
-          _retryTurnId = turnId;
-          if (_streaming.trim().isNotEmpty) {
-            _commitAssistant(
-              _streaming,
-              workKey: turnWorkKey,
-              turnId: turnId,
-              status: AiChatTurnStatus.failed,
-            );
-          }
-          _streaming = '';
-          _activeTurnId = null;
-          _activeTurnWorkKey = null;
+          _runState = next;
+          _streaming = next.text;
+          _toolStatus = next.status;
         });
-        _restorePendingDraft();
-        unawaited(_persist());
+        if (event is AiRunTextSnapshot) {
+          _scheduleStreamingCheckpoint();
+          _scrollToEnd();
+        } else if (event case AiRunFailed(:final error)) {
+          handleFailure(error);
+        } else if (event is AiRunCancelled) {
+          handleFailure(AiProviderException('已取消'));
+        }
       },
+      onError: handleFailure,
       onDone: () {
-        if (!mounted) return;
+        if (!mounted || endedWithFailure) return;
         _cancelStreamingCheckpoint();
         final body = _streaming.trim();
         int? assistantIndex;
@@ -718,6 +740,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           _streaming = '';
           _activeTurnId = null;
           _activeTurnWorkKey = null;
+          _runState = null;
         });
         _pendingDraft = null;
         unawaited(_persist());
@@ -843,13 +866,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _cancelStreamingCheckpoint();
     final sub = _sub;
     _sub = null;
-    await sub?.cancel();
+    final cancellation = sub?.cancel();
     if (!mounted) return;
     final body = _streaming.trim();
     setState(() {
       _sending = false;
       _searchingWeb = false;
       _toolStatus = null;
+      _runState = null;
       if (turnId != null) {
         _setTurnStatus(
           turnId,
@@ -872,12 +896,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     });
     _restorePendingDraft();
     if (persist) unawaited(_persist());
+    try {
+      await cancellation;
+    } catch (_) {
+      // The visible run is already stopped. Transport cleanup errors must not
+      // resurrect the turn or require a second tap.
+    }
   }
 
   Future<void> _closePanel() async {
-    if (_sending) await _stop();
+    if (_sending) unawaited(_stop());
     if (!mounted) return;
-    Navigator.of(context).maybePop();
+    await Navigator.of(context).maybePop();
   }
 
   void _finalizeActiveTurnForDisposal() {

@@ -510,7 +510,6 @@ class AiSettings {
   const AiSettings({
     this.enabled = false,
     this.providerKind = AiProviderKind.openai,
-    this.customProtocol = AiApiProtocol.openai,
     this.baseUrl = '',
     this.model = '',
     this.allowUnreadContext = false,
@@ -521,10 +520,6 @@ class AiSettings {
 
   final bool enabled;
   final AiProviderKind providerKind;
-
-  /// API wire format when [providerKind] is [AiProviderKind.custom].
-  /// Presets ignore this and use [AiProviderKind.fixedProtocol].
-  final AiApiProtocol customProtocol;
 
   /// Effective base URL. Empty means "use the preset default".
   final String baseUrl;
@@ -544,14 +539,6 @@ class AiSettings {
 
   /// Word lists driving the graph pipeline hard rules.
   final AiGraphRuleWords graphRuleWords;
-
-  /// Resolved protocol for the current provider selection.
-  AiApiProtocol get resolvedProtocol =>
-      providerKind.fixedProtocol ?? customProtocol;
-
-  bool get usesAnthropicProtocol => resolvedProtocol == AiApiProtocol.anthropic;
-
-  bool get usesOpenAiProtocol => resolvedProtocol == AiApiProtocol.openai;
 
   String get resolvedBaseUrl {
     final trimmed = baseUrl.trim();
@@ -596,7 +583,6 @@ class AiSettings {
   AiSettings copyWith({
     bool? enabled,
     AiProviderKind? providerKind,
-    AiApiProtocol? customProtocol,
     String? baseUrl,
     String? model,
     bool? allowUnreadContext,
@@ -607,7 +593,6 @@ class AiSettings {
     return AiSettings(
       enabled: enabled ?? this.enabled,
       providerKind: providerKind ?? this.providerKind,
-      customProtocol: customProtocol ?? this.customProtocol,
       baseUrl: baseUrl ?? this.baseUrl,
       model: model ?? this.model,
       allowUnreadContext: allowUnreadContext ?? this.allowUnreadContext,
@@ -620,7 +605,6 @@ class AiSettings {
   Map<String, Object?> toJson() => {
     'enabled': enabled,
     'providerKind': providerKind.storageValue,
-    'customProtocol': customProtocol.storageValue,
     'baseUrl': baseUrl,
     'model': model,
     'allowUnreadContext': allowUnreadContext,
@@ -634,9 +618,6 @@ class AiSettings {
     return AiSettings(
       enabled: json['enabled'] as bool? ?? false,
       providerKind: AiProviderKind.fromStorage(json['providerKind'] as String?),
-      customProtocol: AiApiProtocol.fromStorage(
-        json['customProtocol'] as String?,
-      ),
       baseUrl: json['baseUrl'] as String? ?? '',
       model: json['model'] as String? ?? '',
       allowUnreadContext: json['allowUnreadContext'] as bool? ?? false,

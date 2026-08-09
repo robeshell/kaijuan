@@ -1,5 +1,7 @@
 import 'ai_models.dart';
 import 'ai_provider.dart';
+import 'ai_run.dart';
+import 'ai_run_provider.dart';
 import 'ai_settings.dart';
 import 'ai_translation.dart';
 import '../readers/book/book_language_actions.dart';
@@ -30,6 +32,7 @@ class AiLanguageService {
     required String text,
     CancelToken? cancelToken,
     AiTranslationRequestOptions? translationOptions,
+    void Function(AiRunModelPurpose purpose)? onModelStarted,
   }) async* {
     final trimmed = text.trim();
     if (trimmed.isEmpty) {
@@ -53,10 +56,16 @@ class AiLanguageService {
       }
     }
 
-    final provider = openProviderFn();
-    if (provider == null || !isAvailable) {
+    final openedProvider = openProviderFn();
+    if (openedProvider == null || !isAvailable) {
       throw AiProviderException('AI 未启用或未配置');
     }
+    final provider = onModelStarted == null
+        ? openedProvider
+        : AiRunTrackingProvider(
+            delegate: openedProvider,
+            onModelStarted: onModelStarted,
+          );
 
     final messages = _messagesFor(
       operation,

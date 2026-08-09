@@ -5,6 +5,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:kaijuan/ai/adapters/genkit_anthropic_model_adapter.dart';
+import 'package:kaijuan/ai/adapters/genkit_openai_model_adapter.dart';
+import 'package:kaijuan/ai/ai_model_adapter_factory.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider.dart';
 import 'package:kaijuan/ai/ai_provider_factory.dart';
@@ -22,14 +25,17 @@ void main() {
     test('resolves storage and defaults', () {
       expect(AiProviderKind.fromStorage('deepseek'), AiProviderKind.deepseek);
       expect(AiProviderKind.openai.defaultBaseUrl, contains('openai.com'));
-      expect(AiProviderKind.anthropic.fixedProtocol, AiApiProtocol.anthropic);
-      expect(AiProviderKind.deepseek.fixedProtocol, AiApiProtocol.openai);
-      expect(AiProviderKind.custom.fixedProtocol, isNull);
+      expect(
+        AiProviderKind.anthropic.defaultBaseUrl,
+        'https://api.anthropic.com',
+      );
+      expect(AiProviderKind.anthropic.defaultModel, 'claude-sonnet-5');
+      expect(AiProviderKind.fromStorage('anthropic'), AiProviderKind.anthropic);
+      expect(AiProviderKind.deepseek.defaultBaseUrl, contains('deepseek.com'));
     });
 
     test('ollama is local and OpenAI-compatible', () {
       expect(AiProviderKind.ollama.isLocalBackend, isTrue);
-      expect(AiProviderKind.ollama.fixedProtocol, AiApiProtocol.openai);
       expect(AiProviderKind.ollama.defaultBaseUrl, contains('localhost:11434'));
       expect(AiProviderKind.fromStorage('ollama'), AiProviderKind.ollama);
       expect(AiProviderKind.openai.isLocalBackend, isFalse);
@@ -65,27 +71,7 @@ void main() {
     });
   });
 
-  group('AiSettings protocol', () {
-    test('custom protocol selects anthropic transport', () {
-      const settings = AiSettings(
-        providerKind: AiProviderKind.custom,
-        customProtocol: AiApiProtocol.anthropic,
-        baseUrl: 'https://proxy.example/v1',
-        model: 'claude-x',
-      );
-      expect(settings.usesAnthropicProtocol, isTrue);
-      expect(settings.resolvedProtocol, AiApiProtocol.anthropic);
-    });
-
-    test('preset ignores customProtocol field', () {
-      const settings = AiSettings(
-        providerKind: AiProviderKind.openai,
-        customProtocol: AiApiProtocol.anthropic,
-      );
-      expect(settings.usesOpenAiProtocol, isTrue);
-      expect(settings.resolvedProtocol, AiApiProtocol.openai);
-    });
-
+  group('AiSettings endpoint policy', () {
     test('local backend skips api key requirement', () {
       const local = AiSettings(providerKind: AiProviderKind.ollama);
       expect(local.requiresApiKey, isFalse);
@@ -132,9 +118,9 @@ void main() {
     test('json round-trip omits secrets', () {
       const settings = AiSettings(
         enabled: true,
-        providerKind: AiProviderKind.anthropic,
-        baseUrl: 'https://api.anthropic.com',
-        model: 'claude-sonnet-4-5',
+        providerKind: AiProviderKind.deepseek,
+        baseUrl: 'https://api.deepseek.com/v1',
+        model: 'deepseek-chat',
         allowUnreadContext: true,
       );
       final encoded = jsonEncode(settings.toJson());
@@ -143,7 +129,7 @@ void main() {
         jsonDecode(encoded) as Map<String, dynamic>,
       );
       expect(restored.enabled, isTrue);
-      expect(restored.providerKind, AiProviderKind.anthropic);
+      expect(restored.providerKind, AiProviderKind.deepseek);
       expect(restored.allowUnreadContext, isTrue);
     });
 
@@ -493,7 +479,7 @@ void main() {
       );
     });
 
-    test('openai multiparts and anthropic text blocks parse', () {
+    test('openai multipart text parses', () {
       expect(
         OpenAiCompatibleAiProvider.extractMessageText({
           'content': [
@@ -502,19 +488,6 @@ void main() {
           ],
         }),
         'hello world',
-      );
-      expect(
-        AnthropicAiProvider.extractContentText([
-          {'type': 'thinking', 'thinking': 'scratch'},
-          {'type': 'text', 'text': 'final'},
-        ]),
-        'final',
-      );
-      expect(
-        AnthropicAiProvider.extractContentText([
-          {'type': 'thinking', 'thinking': 'only thinking'},
-        ]),
-        'only thinking',
       );
     });
 
@@ -614,188 +587,6 @@ void main() {
     });
   });
 
-  group('AnthropicAiProvider', () {
-    test('cancel aborts an in-flight completion immediately', () async {
-      final client = _AbortableClient();
-      final provider = AnthropicAiProvider(
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: 'anth-key',
-        model: 'claude-sonnet-4-5',
-        client: client,
-      );
-      final cancel = CancelToken();
-      final pending = provider.complete(
-        const AiCompletionRequest(
-          messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-          timeout: Duration(seconds: 120),
-        ),
-        cancelToken: cancel,
-      );
-      await client.started.future;
-
-      cancel.cancel();
-
-      await expectLater(
-        pending.timeout(const Duration(seconds: 1)),
-        throwsA(isA<StateError>()),
-      );
-      expect(client.closed, isTrue);
-    });
-
-    test('cancel aborts an in-flight stream immediately', () async {
-      final client = _AbortableClient();
-      final provider = AnthropicAiProvider(
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: 'anth-key',
-        model: 'claude-sonnet-4-5',
-        client: client,
-      );
-      final cancel = CancelToken();
-      final pending = provider
-          .stream(
-            const AiCompletionRequest(
-              messages: [AiMessage(role: AiMessageRole.user, content: 'ping')],
-            ),
-            cancelToken: cancel,
-          )
-          .drain<void>();
-      await client.started.future;
-
-      cancel.cancel();
-
-      await expectLater(
-        pending.timeout(const Duration(seconds: 1)),
-        throwsA(isA<StateError>()),
-      );
-      expect(client.closed, isTrue);
-    });
-
-    test('complete uses messages endpoint and x-api-key', () async {
-      final client = MockClient((request) async {
-        expect(request.url.toString(), 'https://api.anthropic.com/v1/messages');
-        expect(request.headers['x-api-key'], 'anth-key');
-        expect(request.headers['anthropic-version'], '2023-06-01');
-        final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['system'], 'Be brief.');
-        expect(body['messages'], isA<List>());
-        return http.Response(
-          jsonEncode({
-            'content': [
-              {'type': 'text', 'text': 'hello'},
-            ],
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      });
-
-      final provider = AnthropicAiProvider(
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: 'anth-key',
-        model: 'claude-sonnet-4-5',
-        client: client,
-      );
-      final result = await provider.complete(
-        const AiCompletionRequest(
-          messages: [
-            AiMessage(role: AiMessageRole.system, content: 'Be brief.'),
-            AiMessage(role: AiMessageRole.user, content: 'Hi'),
-          ],
-        ),
-      );
-      expect(result.text, 'hello');
-    });
-
-    test(
-      'stream surfaces error events instead of completing normally',
-      () async {
-        final client = MockClient((request) async {
-          return http.Response(
-            'data: {"type":"error","error":{"message":"overloaded"}}\n\n',
-            200,
-            headers: {'content-type': 'text/event-stream'},
-          );
-        });
-        final provider = AnthropicAiProvider(
-          baseUrl: 'https://api.anthropic.com',
-          apiKey: 'anth-key',
-          model: 'claude-sonnet-4-5',
-          client: client,
-        );
-
-        expect(
-          provider
-              .stream(
-                const AiCompletionRequest(
-                  messages: [
-                    AiMessage(role: AiMessageRole.user, content: 'Hi'),
-                  ],
-                ),
-              )
-              .drain<void>(),
-          throwsA(
-            isA<AiProviderException>().having(
-              (error) => error.message,
-              'message',
-              'AI 服务返回错误，请稍后重试',
-            ),
-          ),
-        );
-      },
-    );
-
-    test('stream rejects EOF without message_stop', () async {
-      final provider = AnthropicAiProvider(
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: 'anth-key',
-        model: 'claude-sonnet-4-5',
-        client: MockClient(
-          (_) async => http.Response(
-            'data: {"type":"content_block_delta","delta":{"text":"partial"}}\n\n',
-            200,
-            headers: {'content-type': 'text/event-stream'},
-          ),
-        ),
-      );
-
-      await expectLater(
-        provider
-            .stream(
-              const AiCompletionRequest(
-                messages: [AiMessage(role: AiMessageRole.user, content: 'Hi')],
-              ),
-            )
-            .drain<void>(),
-        throwsA(isA<AiProviderException>()),
-      );
-    });
-
-    test('listModels parses Anthropic data', () async {
-      final client = MockClient((request) async {
-        expect(request.url.toString(), 'https://api.anthropic.com/v1/models');
-        expect(request.headers['x-api-key'], 'anth-key');
-        return http.Response(
-          jsonEncode({
-            'data': [
-              {'id': 'claude-sonnet-4-5', 'display_name': 'Claude Sonnet 4.5'},
-              {'id': 'claude-haiku-4-5', 'display_name': 'Claude Haiku 4.5'},
-            ],
-          }),
-          200,
-        );
-      });
-      final provider = AnthropicAiProvider(
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: 'anth-key',
-        model: '',
-        client: client,
-      );
-      final models = await provider.listModels();
-      expect(models.first.id, 'claude-sonnet-4-5');
-      expect(models.first.displayName, 'Claude Sonnet 4.5');
-    });
-  });
-
   group('AiSettingsController', () {
     test('ready flag requires enable + key + resolvable model', () async {
       final controller = AiSettingsController(
@@ -883,10 +674,6 @@ void main() {
       await controller.setProviderKind(AiProviderKind.deepseek);
       expect(controller.settings.baseUrl, contains('deepseek'));
       expect(controller.settings.model, 'deepseek-v4-flash');
-
-      await controller.setProviderKind(AiProviderKind.anthropic);
-      expect(controller.settings.baseUrl, contains('anthropic'));
-      expect(controller.settings.model, contains('claude'));
     });
 
     test('switching to local ollama resets url/model and skips key', () async {
@@ -931,7 +718,7 @@ void main() {
       expect(controller.apiKey, 'sk-openai');
       await controller.setProviderKind(AiProviderKind.deepseek);
       expect(controller.apiKey, 'sk-deepseek');
-      expect(await credentials.readApiKey(AiProviderKind.anthropic), isNull);
+      expect(await credentials.readApiKey(AiProviderKind.xai), isNull);
     });
 
     test('testConnection succeeds via factory mock', () async {
@@ -1015,19 +802,12 @@ void main() {
   });
 
   group('DefaultAiProviderFactory', () {
-    test('routes anthropic vs openai protocols', () {
+    test('routes each selectable endpoint through its native protocol', () {
       const factory = DefaultAiProviderFactory();
       final openai = factory.create(
         settings: const AiSettings(
           providerKind: AiProviderKind.openai,
           model: 'gpt-4o-mini',
-        ),
-        apiKey: 'k',
-      );
-      final anthropic = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.anthropic,
-          model: 'claude-sonnet-4-5',
         ),
         apiKey: 'k',
       );
@@ -1038,6 +818,13 @@ void main() {
         ),
         apiKey: 'k',
       );
+      final anthropic = factory.create(
+        settings: const AiSettings(
+          providerKind: AiProviderKind.anthropic,
+          model: 'claude-sonnet-4-6',
+        ),
+        apiKey: 'k',
+      );
       final xai = factory.create(
         settings: const AiSettings(
           providerKind: AiProviderKind.xai,
@@ -1045,19 +832,9 @@ void main() {
         ),
         apiKey: 'k',
       );
-      final customAnthropic = factory.create(
-        settings: const AiSettings(
-          providerKind: AiProviderKind.custom,
-          customProtocol: AiApiProtocol.anthropic,
-          baseUrl: 'https://proxy.example',
-          model: 'm',
-        ),
-        apiKey: 'k',
-      );
       final customOpenai = factory.create(
         settings: const AiSettings(
           providerKind: AiProviderKind.custom,
-          customProtocol: AiApiProtocol.openai,
           baseUrl: 'https://proxy.example/v1',
           model: 'm',
         ),
@@ -1067,11 +844,43 @@ void main() {
       expect(anthropic, isA<AnthropicAiProvider>());
       expect(deepseek, isA<OpenAiCompatibleAiProvider>());
       expect(xai, isA<OpenAiCompatibleAiProvider>());
-      expect(customAnthropic, isA<AnthropicAiProvider>());
       expect(customOpenai, isA<OpenAiCompatibleAiProvider>());
       expect(AiProviderKind.xai.defaultBaseUrl, 'https://api.x.ai/v1');
       expect(AiProviderKind.xai.defaultModel, 'grok-4.5');
-      expect(AiProviderKind.xai.fixedProtocol, AiApiProtocol.openai);
+    });
+  });
+
+  group('DefaultAiModelAdapterFactory', () {
+    test('uses Anthropic adapter only for Anthropic preset', () {
+      const factory = DefaultAiModelAdapterFactory();
+      final anthropic = factory.create(
+        providerKind: AiProviderKind.anthropic,
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'k',
+        model: 'claude-sonnet-4-6',
+      );
+      final deepseek = factory.create(
+        providerKind: AiProviderKind.deepseek,
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'k',
+        model: 'deepseek-v4-flash',
+      );
+
+      expect(anthropic, isA<GenkitAnthropicModelAdapter>());
+      expect(deepseek, isA<GenkitOpenAiModelAdapter>());
+    });
+
+    test('does not construct Anthropic adapter without a key', () {
+      const factory = DefaultAiModelAdapterFactory();
+      expect(
+        factory.create(
+          providerKind: AiProviderKind.anthropic,
+          baseUrl: 'https://api.anthropic.com',
+          apiKey: '',
+          model: 'claude-sonnet-4-6',
+        ),
+        isNull,
+      );
     });
   });
 }

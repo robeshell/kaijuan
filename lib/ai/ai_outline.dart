@@ -6,6 +6,8 @@ import 'ai_chat_retrieve.dart';
 import 'ai_log.dart';
 import 'ai_models.dart';
 import 'ai_provider.dart';
+import 'ai_run.dart';
+import 'ai_run_provider.dart';
 import 'ai_settings.dart';
 
 /// Outline batches emit sizeable JSON; the provider default (45s) is a
@@ -181,10 +183,17 @@ class AiBookOutlineService {
     required List<AiBookSectionSlice> sections,
     CancelToken? cancelToken,
     void Function(AiOutlineProgress progress)? onProgress,
+    void Function(AiRunModelPurpose purpose)? onModelStarted,
   }) async {
     if (!_isAvailable()) throw AiProviderException('AI 未启用或未配置');
-    final provider = _openProvider();
-    if (provider == null) throw AiProviderException('AI 未启用或未配置');
+    final openedProvider = _openProvider();
+    if (openedProvider == null) throw AiProviderException('AI 未启用或未配置');
+    final provider = onModelStarted == null
+        ? openedProvider
+        : AiRunTrackingProvider(
+            delegate: openedProvider,
+            onModelStarted: onModelStarted,
+          );
     if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
 
     cancelToken?.throwIfCancelled();

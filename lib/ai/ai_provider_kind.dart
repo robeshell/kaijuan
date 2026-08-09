@@ -1,36 +1,6 @@
-/// Wire format for chat / models HTTP APIs.
-enum AiApiProtocol {
-  /// OpenAI Chat Completions + GET /models (DeepSeek, xAI, many proxies).
-  openai,
-
-  /// Anthropic Messages API + GET /v1/models (`x-api-key`).
-  anthropic;
-
-  String get storageValue => name;
-
-  static AiApiProtocol fromStorage(String? value) {
-    for (final protocol in AiApiProtocol.values) {
-      if (protocol.storageValue == value) return protocol;
-    }
-    return AiApiProtocol.openai;
-  }
-
-  String get displayName => switch (this) {
-    AiApiProtocol.openai => 'OpenAI 兼容',
-    AiApiProtocol.anthropic => 'Anthropic',
-  };
-
-  String get shortHint => switch (this) {
-    AiApiProtocol.openai => 'Chat Completions',
-    AiApiProtocol.anthropic => 'Messages API',
-  };
-}
-
 /// Built-in LLM service presets shown in AI settings.
 ///
-/// OpenAI and DeepSeek share the OpenAI-compatible chat/completions wire
-/// format. Anthropic uses the Messages API with different headers.
-/// [custom] requires the user to pick [AiApiProtocol] separately.
+/// Anthropic uses Messages API; every other preset uses OpenAI Compatible.
 enum AiProviderKind {
   openai,
   anthropic,
@@ -39,7 +9,7 @@ enum AiProviderKind {
   /// xAI Grok — OpenAI-compatible Chat Completions at api.x.ai.
   xai,
 
-  /// User-supplied base URL; protocol is [AiSettings.customProtocol].
+  /// User-supplied OpenAI Compatible base URL.
   custom,
 
   /// Local Ollama — OpenAI-compatible endpoint on localhost, no API key.
@@ -83,7 +53,7 @@ enum AiProviderKind {
   String get defaultModel => switch (this) {
     // OpenAI API: GPT-5.4 mini — strong small model for everyday tasks.
     AiProviderKind.openai => 'gpt-5.4-mini',
-    // Anthropic API alias for current Sonnet generation.
+    // Current balanced Sonnet generation; the Models API remains authoritative.
     AiProviderKind.anthropic => 'claude-sonnet-5',
     // DeepSeek Chat Completions: V4 Flash (auto-tracks latest Flash revision).
     AiProviderKind.deepseek => 'deepseek-v4-flash',
@@ -93,15 +63,5 @@ enum AiProviderKind {
     AiProviderKind.custom => '',
     // Local models depend on what the user has pulled; resolve via 获取模型.
     AiProviderKind.ollama => '',
-  };
-
-  /// Fixed protocol for presets. [custom] is null — use settings field.
-  AiApiProtocol? get fixedProtocol => switch (this) {
-    AiProviderKind.openai ||
-    AiProviderKind.deepseek ||
-    AiProviderKind.xai ||
-    AiProviderKind.ollama => AiApiProtocol.openai,
-    AiProviderKind.anthropic => AiApiProtocol.anthropic,
-    AiProviderKind.custom => null,
   };
 }

@@ -1,4 +1,5 @@
 import 'ai_provider.dart';
+import 'ai_provider_kind.dart';
 import 'ai_settings.dart';
 import 'anthropic_provider.dart';
 import 'openai_compatible_provider.dart';
@@ -6,7 +7,7 @@ import 'openai_compatible_provider.dart';
 /// Default transport composition.
 ///
 /// The provider contract deliberately does not import concrete transports;
-/// composition belongs here so OpenAI/Anthropic implementations depend in a
+/// composition belongs here so concrete protocol implementations depend in a
 /// single direction on [AiProvider].
 class DefaultAiProviderFactory implements AiProviderFactory {
   const DefaultAiProviderFactory();
@@ -23,13 +24,17 @@ class DefaultAiProviderFactory implements AiProviderFactory {
     // a non-empty model set by the caller beforehand.
     final model = settings.resolvedModel;
 
-    if (settings.usesAnthropicProtocol) {
-      return AnthropicAiProvider(baseUrl: baseUrl, apiKey: key, model: model);
-    }
-    return OpenAiCompatibleAiProvider(
-      baseUrl: baseUrl,
-      apiKey: key,
-      model: model,
-    );
+    return switch (settings.providerKind) {
+      AiProviderKind.anthropic => AnthropicAiProvider(
+        baseUrl: baseUrl,
+        apiKey: key,
+        model: model,
+      ),
+      _ => OpenAiCompatibleAiProvider(
+        baseUrl: baseUrl,
+        apiKey: key,
+        model: model,
+      ),
+    };
   }
 }
