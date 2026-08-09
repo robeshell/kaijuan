@@ -13,6 +13,7 @@
 | Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | LLM 三元组抽取研究与学习路径 | [research/kg-llm-extraction.md](./research/kg-llm-extraction.md)（服务 ai-graph） |
 | 本书 AI 从普通对话到 Tool Agent 的实现演进 | [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)（当前全流程 + 后续文章主线） |
+| AI 运行时 Genkit 完整收口计划 | [research/ai-runtime-genkit-completion-plan.md](./research/ai-runtime-genkit-completion-plan.md)（词典/翻译/大纲/图谱迁移与旧 Provider 删除边界） |
 | 某屏交互 | [specs/](./specs/) |
 | 图书听书（TTS） | [specs/book-tts.md](./specs/book-tts.md)（T1 MVP 已有；不接云端 AI 音色） |
 | 本书 AI 智能体 | [specs/ai.md](./specs/ai.md)（BYOK / 词典译 / 对话…） |
@@ -30,6 +31,7 @@ docs/
   ENGINEERING.md             ← 工程骨架
   research/
     ai-chat-agent-evolution.md       ← 从模型对话到受控 Agent 的实现演进
+    ai-runtime-genkit-completion-plan.md ← 全 AI 工作流统一模型边界的执行计划
     foliate-architecture.md
     kg-llm-extraction.md             ← LLM 三元组抽取研究与学习路径（对照 ai-graph）
   specs/

@@ -126,9 +126,11 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 | 开卷编排器 | `AiRunOrchestrator` 统一预算、取消、超时、模型/工具/续写计数、checkpoint hook 与错误分类；对话为最多四轮的受控 Tool Agent | 不把作品定位、权限、持久化或 UI 状态交给模型框架；不做多 Agent |
 | 模型适配层 | `lib/ai/adapters/` 隔离 `GenkitOpenAiModelAdapter` 与 `GenkitAnthropicModelAdapter`；精确固定 `genkit 0.15.1`、`genkit_openai 0.3.7`、`genkit_anthropic 0.2.11`。App 自有 `AiModelAdapter` 只表达单次回合、原生工具请求和结构化 JSON；Anthropic 模型列表仍走只读 `GET /v1/models` transport；可重试 transport/HTTP 错误只允许在首个可见文本前自动重试一次 | Genkit、插件 SDK 与供应商协议类型不得进入 UI、controller、数据库和备份 schema；插件升级必须重新跑对应适配器协议、取消和异常终态测试 |
 | 协议选择 | OpenAI / DeepSeek / Grok / 自定义 / Ollama 使用 Genkit OpenAI Compatible adapter；Anthropic 使用 Genkit Anthropic adapter；适配器缺失或端点不支持时本轮明确失败 | 不做跨协议隐式回退、手写 Messages 对话 adapter、fenced JSON 或旧 Provider 对话回退；不放宽五个只读工具、冻结作品范围和本地参数预算 |
-| 确定性工作流 | 词典/选区翻译、大纲、图谱接入同一 run 状态；模型调用经 tracking provider 纳入预算；图谱原有逐节快照由 orchestrator checkpoint writer 落盘 | 不把批处理改造成自由 Agent；原提示词、抽取/合并算法、缓存格式与 WebDAV 兼容性保持不变 |
+| 确定性工作流 | 词典/选区翻译、大纲、图谱已接入同一 run 状态；当前模型调用仍经 tracking provider 纳入预算，图谱逐节快照由 orchestrator checkpoint writer 落盘 | 按 [完整收口计划](./research/ai-runtime-genkit-completion-plan.md) 迁到 `AiModelAdapter` / Schemantic 结构化输出并删除 `AiProvider.complete/stream`；不把批处理改造成自由 Agent，不改抽取/合并算法、缓存格式或 checkpoint 语义 |
 
 `AiRunEvent` 只表达运行事实，不是持久化 schema。`AiRunCheckpoint` 自身带版本，但 payload 仍由既有工作流存储负责；当前图谱继续写原有 `AiBookGraph` 快照，不把临时事件写入 `ai_chat` / Drift / WebDAV。Genkit 内部 trace 只允许留在 adapter 边界，产品运行事实以 `AiRunEvent` 为准。
+
+模型 I/O 收口完成后的唯一依赖方向为：业务 Workflow → App 自有 `AiModelAdapter` → 隔离的 Genkit Provider 插件。模型目录读取单独抽为只读 catalog transport；连接测试通过 adapter 发起无工具单回合。UI、controller 和业务 Workflow 不得再依赖 `AiProvider`、Genkit、Schemantic 生成类型或供应商 SDK。结构化 schema 定义集中在 AI 基础设施边界，使用 Schemantic 生成并由 adapter 消费；模型返回后仍执行既有业务语义校验，JSON Schema 不能代替来源覆盖、稳定 ID、证据定位等产品规则。
 
 ### 表现层导航边界
 

@@ -535,6 +535,10 @@ AiBookLanguageProvider（或 Composite）
 - [x] Genkit Anthropic adapter 精确锁版并隔离；原生 Tool Use、结构化输出、流式终态、usage、重试与取消通过伪服务协议测试。
 - [x] 对话只走所选服务商的原生工具协议；已删除 fenced 与旧 Provider 对话回退。
 - [x] 词典/选区翻译、大纲、图谱接入统一 run；图谱 checkpoint 保持既有存储格式。
+- [ ] 词典/选区翻译改走无工具 `AiModelAdapter` 单回合，并删除对 `AiProvider.stream/complete` 的依赖。
+- [ ] 结构化大纲与知识图谱全部模型步骤使用 Schemantic schema + Genkit structured output；删除 fence 截取、正则恢复和“只输出 JSON”式协议补丁。
+- [ ] 模型列表拆为只读 catalog transport，连接测试改走 adapter；随后删除 `AiProvider`、`AiProviderFactory`、两套旧 completion transport 与 tracking provider。
+- [ ] 两类 Genkit adapter 通过本地伪服务协议测试，并提供不含 Key 的可选 Genkit CLI trace smoke；完整验收见 [执行计划](../research/ai-runtime-genkit-completion-plan.md)。
 
 
 
