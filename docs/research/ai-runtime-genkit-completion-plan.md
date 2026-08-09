@@ -191,4 +191,4 @@ Genkit trace smoke（可选真实 Key，不进入默认测试，不记录 Key）
 - P1–P5 已完成：语言、大纲、图谱、连接测试与模型目录已收口到目标边界，旧 Provider 生成双栈已删除。
 - OpenAI Compatible / Anthropic 的流式、原生工具、结构化输出、重试、取消和异常终态由本地伪服务协议测试覆盖。
 - `tool/ai_genkit_smoke.dart` 已通过 `genkit-cli 1.40.1 flow:run`。无凭据的 `"local"` 模式产生 flow / generate / model spans，trace 同时包含纯文本成功终态和受 JSON Schema 约束的 `{ "ok": true }` 结构化输出。`.genkit/` 只是本地调试产物，已忽略且不进入代码库。
-- P6 的最终 `flutter analyze` / 完整 `flutter test` 结果以本分支最后验证为准；通过后再进入用户的干净安装人工测试。
+- P6 已完成：`dart run build_runner build`、`flutter analyze` 通过，完整 `flutter test` **559 / 559** 通过。下一步从干净安装开始端到端人工测试。
