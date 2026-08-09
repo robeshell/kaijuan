@@ -1,10 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_graph_store.dart';
+import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
-import 'package:kaijuan/ai/ai_provider.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -13,7 +14,7 @@ void main() {
   AiBookGraphService serviceWith(_GraphProvider provider) {
     return AiBookGraphService(
       isAvailable: () => true,
-      openProvider: () => provider,
+      openModelAdapter: () => provider,
       settings: () => const AiSettings(model: 'graph-test'),
     );
   }
@@ -990,7 +991,7 @@ void main() {
       expect(
         provider.requests.where(
           (request) => request.messages.any(
-            (message) => message.content.contains('亲属关系方向核验器'),
+            (message) => message.text.contains('亲属关系方向核验器'),
           ),
         ),
         hasLength(1),
@@ -1379,7 +1380,7 @@ void main() {
         // the pipeline itself has no hardcoded book vocabulary.
         final service = AiBookGraphService(
           isAvailable: () => true,
-          openProvider: () => provider,
+          openModelAdapter: () => provider,
           settings: () => const AiSettings(
             model: 'graph-test',
             graphRuleWords: AiGraphRuleWords(genericPersonTerms: ['老爷子']),
@@ -1478,7 +1479,7 @@ void main() {
         );
         final service = AiBookGraphService(
           isAvailable: () => true,
-          openProvider: () => provider,
+          openModelAdapter: () => provider,
           settings: () => const AiSettings(
             model: 'graph-test',
             graphRuleWords: AiGraphRuleWords(
@@ -2041,7 +2042,7 @@ void main() {
         // Direction convention is baked into the extraction prompt (system
         // message: fixed rules live there for DeepSeek context-cache hits).
         final prompt = provider.extractionRequests.single.messages
-            .map((m) => m.content)
+            .map((m) => m.text)
             .join('\n');
         expect(prompt, contains('方向性关系（亲属/师徒/隶属/效力/追随）必须固定方向'));
         expect(prompt, contains('quote 必须逐字来自正文，单条不超过 30 字'));
@@ -2075,7 +2076,7 @@ void main() {
         );
 
         expect(graph.narration!.feature('organization'), 0.9);
-        final prompt = provider.extractionRequests.single.messages.last.content;
+        final prompt = provider.extractionRequests.single.messages.last.text;
         expect(prompt, contains('person|location|event|organization'));
         expect(graph.entities.single.type, AiGraphEntityType.organization);
       },
@@ -2103,7 +2104,7 @@ void main() {
 
         expect(graph.narration!.feature('organization'), lessThan(0.5));
         final prompt = provider.extractionRequests.single.messages
-            .map((message) => message.content)
+            .map((message) => message.text)
             .join('\n');
         expect(prompt, contains('person|location|event|organization'));
         expect(prompt, contains('群体绝不能标为 person'));
@@ -2301,7 +2302,7 @@ void main() {
         provider.extractionRequests
             .where(
               (request) => request.messages.any(
-                (message) => message.content.contains('章节编号：2'),
+                (message) => message.text.contains('章节编号：2'),
               ),
             )
             .length,
@@ -2349,7 +2350,7 @@ void main() {
       );
     });
 
-    test('invalid JSON output is retried once then fails', () async {
+    test('invalid structured output fails without a text-format retry', () async {
       final provider = _GraphProvider(invalidJson: true);
 
       await expectLater(
@@ -2362,11 +2363,11 @@ void main() {
           isA<AiGraphGenerationException>().having(
             (e) => e.message,
             'message',
-            contains('无效'),
+            contains('校验失败'),
           ),
         ),
       );
-      expect(provider.extractionRequests.length, 2);
+      expect(provider.extractionRequests.length, 1);
     });
 
     test('entities without evidence are dropped', () async {
@@ -2482,7 +2483,7 @@ void main() {
       );
 
       final reviewRequests = provider.requests
-          .where((r) => r.messages.any((m) => m.content.contains('人物身份判定引擎')))
+          .where((r) => r.messages.any((m) => m.text.contains('人物身份判定引擎')))
           .toList();
       // With consumption: later batches carry only the leftover pairs and
       // never re-submit earlier ones — the last batch has 2 pending pairs
@@ -2490,14 +2491,14 @@ void main() {
       // would re-submit the first 10 at full cap.
       expect(reviewRequests.length, greaterThanOrEqualTo(2));
       final lastPairCount = '称谓A'
-          .allMatches(reviewRequests.last.messages.last.content)
+          .allMatches(reviewRequests.last.messages.last.text)
           .length;
       expect(lastPairCount, lessThan(10));
       // And each review call submitted a different set of pairs.
       final pairSets = [
         for (final r in reviewRequests)
           '称谓A「([^」]+)」'
-              .allMatches(r.messages.last.content)
+              .allMatches(r.messages.last.text)
               .map((m) => m.group(1)!)
               .toSet(),
       ];
@@ -2655,7 +2656,7 @@ void main() {
     test('uses per-settings relation words instead of the defaults', () {
       final s = AiBookGraphService(
         isAvailable: () => true,
-        openProvider: () => _GraphProvider(),
+        openModelAdapter: () => _GraphProvider(),
         settings: () => const AiSettings(
           graphRuleWords: AiGraphRuleWords(
             relationTypes: ['知己'],
@@ -2842,7 +2843,7 @@ void main() {
   });
 }
 
-class _GraphProvider implements AiProvider {
+class _GraphProvider implements AiModelAdapter, AiStructuredOutputAdapter {
   _GraphProvider({
     this.responses = const {},
     this.invalidJson = false,
@@ -2879,62 +2880,76 @@ class _GraphProvider implements AiProvider {
       '"organization":0.1,"geography":0.1,"essay":0.0},'
       '"defaultView":"events","viewOrder":["events","persons","locations","graph"],'
       '"wantMap":false}';
-  final List<AiCompletionRequest> requests = [];
+  final List<AiModelJsonRequest> requests = [];
 
   /// Requests that hit the per-chapter extraction prompt (any message carries
   /// a 章节编号 line — the retry nudge appends to the original messages);
   /// the step-0 narration call is a separate request type.
-  List<AiCompletionRequest> get extractionRequests => [
+  List<AiModelJsonRequest> get extractionRequests => [
     for (final r in requests)
-      if (r.messages.any((m) => m.content.contains('章节编号：'))) r,
+      if (r.messages.any((m) => m.text.contains('章节编号：'))) r,
   ];
 
   @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
+  Future<AiModelJsonResult> completeJson(
+    AiModelJsonRequest request, {
     CancelToken? cancelToken,
   }) async {
     requests.add(request);
     if (invalidJson) {
-      return const AiCompletionResult(text: '抱歉，我无法完成这个请求。');
+      throw AiProviderException('结构化输出校验失败');
     }
-    final prompt = request.messages.last.content;
-    if (request.messages.any((m) => m.content.contains('人物身份判定引擎'))) {
+    final prompt = request.messages.last.text;
+    if (request.messages.any((m) => m.text.contains('人物身份判定引擎'))) {
       if (throwOnReview) throw Exception('review failed');
-      return AiCompletionResult(text: reviewVerdicts);
+      return AiModelJsonResult(
+        value: {'verdicts': _decodeList(reviewVerdicts)},
+      );
     }
-    if (request.messages.any((m) => m.content.contains('亲属关系方向核验器'))) {
-      return AiCompletionResult(text: directionReviewBody);
+    if (request.messages.any((m) => m.text.contains('亲属关系方向核验器'))) {
+      return AiModelJsonResult(value: _decodeObject(directionReviewBody));
     }
-    if (request.messages.any((m) => m.content.contains('知识图谱漏项复核器'))) {
-      return AiCompletionResult(text: gleaningBody);
+    if (request.messages.any((m) => m.text.contains('知识图谱漏项复核器'))) {
+      return AiModelJsonResult(value: _decodeObject(gleaningBody));
     }
-    if (request.messages.any((m) => m.content.contains('书籍编辑'))) {
-      return AiCompletionResult(text: refreshBody);
+    if (request.messages.any((m) => m.text.contains('书籍编辑'))) {
+      return AiModelJsonResult(value: _decodeObject(refreshBody));
     }
     final match = RegExp(r'章节编号：(\d+)').firstMatch(prompt);
     if (match == null) {
       // Step-0 display plan call: return a valid plan so generation walks
       // the real path (the plan itself is asserted in narration tests).
-      return AiCompletionResult(text: '```json\n$narrationBody\n```');
+      return AiModelJsonResult(value: _decodeObject(narrationBody));
     }
     final section = int.parse(match.group(1)!);
     if (throwSections.contains(section)) {
       throw AiProviderException('section failed');
     }
     final body = responses[section] ?? '{"entities":[],"relations":[]}';
-    return AiCompletionResult(text: '```json\n$body\n```');
+    return AiModelJsonResult(value: _decodeObject(body));
   }
 
   @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
+  Stream<AiModelTurnEvent> streamTurn(
+    AiModelTurnRequest request, {
     CancelToken? cancelToken,
   }) {
     throw UnimplementedError();
   }
 
   @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
-      const [];
+  String get runtimeName => 'graph-test';
+
+  @override
+  Future<void> close() async {}
+
+  static Map<String, dynamic> _decodeObject(String source) {
+    final unfenced = source
+        .replaceFirst(RegExp(r'^```(?:json)?\s*'), '')
+        .replaceFirst(RegExp(r'\s*```$'), '');
+    return Map<String, dynamic>.from(jsonDecode(unfenced) as Map);
+  }
+
+  static List<dynamic> _decodeList(String source) =>
+      List<dynamic>.from(jsonDecode(source) as List);
 }

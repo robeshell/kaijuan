@@ -1,9 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_graph_service.dart';
-import 'package:kaijuan/ai/ai_models.dart';
-import 'package:kaijuan/ai/ai_provider.dart';
+import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
 
 /// Synthetic-book regression baseline (docs/specs/ai-graph-pipeline.md §5).
@@ -27,65 +29,107 @@ AiBookSectionSlice slice(int index, String label, String text) {
   return AiBookSectionSlice(index: index, label: label, text: text);
 }
 
-class _GraphProvider implements AiProvider {
+class _GraphProvider implements AiModelAdapter, AiStructuredOutputAdapter {
   _GraphProvider(this.responses);
 
   final Map<int, String> responses;
-  final List<AiCompletionRequest> requests = [];
+  final List<AiModelJsonRequest> requests = [];
 
-  static const String defaultNarrationBody = '{'
+  static const String defaultNarrationBody =
+      '{'
       '"features":{"eventDriven":0.8,"characterEnsemble":0.2,'
       '"organization":0.1,"geography":0.1,"essay":0.0},'
       '"defaultView":"events","viewOrder":["events","persons","locations","graph"],'
       '"wantMap":false}';
 
   @override
-  Future<AiCompletionResult> complete(
-    AiCompletionRequest request, {
+  Future<AiModelJsonResult> completeJson(
+    AiModelJsonRequest request, {
     CancelToken? cancelToken,
   }) async {
     requests.add(request);
-    final prompt = request.messages.last.content;
-    if (request.messages.any((m) => m.content.contains('人物身份判定引擎'))) {
-      return const AiCompletionResult(text: '[]');
+    final prompt = request.messages.last.text;
+    if (request.messages.any((m) => m.text.contains('人物身份判定引擎'))) {
+      return const AiModelJsonResult(value: {'verdicts': []});
+    }
+    if (request.messages.any((m) => m.text.contains('亲属关系方向核验器'))) {
+      return const AiModelJsonResult(value: {'relations': []});
+    }
+    if (request.messages.any((m) => m.text.contains('知识图谱漏项复核器'))) {
+      return const AiModelJsonResult(value: {'entities': [], 'relations': []});
+    }
+    if (request.messages.any((m) => m.text.contains('书籍编辑'))) {
+      return const AiModelJsonResult(value: {'entities': []});
     }
     final match = RegExp(r'章节编号：(\d+)').firstMatch(prompt);
     if (match == null) {
-      return AiCompletionResult(text: '```json\n$defaultNarrationBody\n```');
+      return AiModelJsonResult(
+        value: Map<String, dynamic>.from(
+          jsonDecode(defaultNarrationBody) as Map,
+        ),
+      );
     }
     final section = int.parse(match.group(1)!);
     final body = responses[section] ?? '{"entities":[],"relations":[]}';
-    return AiCompletionResult(text: '```json\n$body\n```');
+    return AiModelJsonResult(
+      value: Map<String, dynamic>.from(jsonDecode(body) as Map),
+    );
   }
 
   @override
-  Stream<AiStreamChunk> stream(
-    AiCompletionRequest request, {
+  Stream<AiModelTurnEvent> streamTurn(
+    AiModelTurnRequest request, {
     CancelToken? cancelToken,
   }) {
     throw UnimplementedError();
   }
 
   @override
-  Future<List<AiModelInfo>> listModels({CancelToken? cancelToken}) async =>
-      const [];
+  String get runtimeName => 'synthetic-graph-test';
+
+  @override
+  Future<void> close() async {}
 }
 
 void main() {
   // 南国纪事 — a fictional clan saga, six sections.
   final sections = [
-    slice(1, '立家', '沈老爷子膝下二子，长子沈文，次子沈武。'
-        '沈文字子安，乡里皆称沈先生。沈老爷子将家业托付沈文。'),
-    slice(2, '分家', '老太爷去世后，家业由沈文主持。'
-        '沈武性情豪迈，与沈文常起争执。沈文沈武终是兄弟阋墙。'),
-    slice(3, '添丁', '沈文娶沈夫人为妻，次年得子沈小文。'
-        '沈夫人教子甚严，常责沈小文读书。沈小文得母沈夫人教导。'),
-    slice(4, '延师', '沈小文拜陈先生为师。沈文与沈武兄弟失和，家业之争愈烈。'
-        '陈先生教沈小文经史。'),
-    slice(5, '外放', '如庄周所言，小知不及大知。沈武被外放南疆，'
-        '督粮饷、练乡勇、修水利、抚流民、整户籍，五年未归。'),
-    slice(6, '承业', '沈小文成年，承家业。沈夫人与沈文相守一生。'
-        '沈小文治家有方，乡里称善。沈小文常追念沈老爷教诲。'),
+    slice(
+      1,
+      '立家',
+      '沈老爷子膝下二子，长子沈文，次子沈武。'
+          '沈文字子安，乡里皆称沈先生。沈老爷子将家业托付沈文。',
+    ),
+    slice(
+      2,
+      '分家',
+      '老太爷去世后，家业由沈文主持。'
+          '沈武性情豪迈，与沈文常起争执。沈文沈武终是兄弟阋墙。',
+    ),
+    slice(
+      3,
+      '添丁',
+      '沈文娶沈夫人为妻，次年得子沈小文。'
+          '沈夫人教子甚严，常责沈小文读书。沈小文得母沈夫人教导。',
+    ),
+    slice(
+      4,
+      '延师',
+      '沈小文拜陈先生为师。沈文与沈武兄弟失和，家业之争愈烈。'
+          '陈先生教沈小文经史。',
+    ),
+    slice(
+      5,
+      '外放',
+      '如庄周所言，小知不及大知。沈武被外放南疆，'
+          '督粮饷、练乡勇、修水利、抚流民、整户籍，五年未归。',
+    ),
+    slice(
+      6,
+      '承业',
+      '沈小文成年，承家业。沈夫人与沈文相守一生。'
+          '沈小文治家有方，乡里称善。沈小文常追念沈老爷教诲。',
+    ),
   ];
 
   // Planted model output: each known failure mode appears exactly once.
@@ -173,7 +217,7 @@ void main() {
       final provider = _GraphProvider(responses);
       final service = AiBookGraphService(
         isAvailable: () => true,
-        openProvider: () => provider,
+        openModelAdapter: () => provider,
         settings: () => const AiSettings(model: 'synth-book'),
       );
 
@@ -183,7 +227,9 @@ void main() {
         includesUnread: true,
       );
 
-      final names = graph.entities.map((e) => e.name).toSet();      // Core cast exists and is distinct.
+      final names = graph.entities
+          .map((e) => e.name)
+          .toSet(); // Core cast exists and is distinct.
       for (final n in ['沈老爷子', '沈文', '沈武', '沈夫人', '沈小文', '陈先生', '庄周']) {
         expect(names, contains(n), reason: '$n 必须在图谱中');
       }
@@ -198,24 +244,29 @@ void main() {
       // substring merge must be in the audit log.
       final shenWen = graph.entities.firstWhere((e) => e.name == '沈文');
       expect(shenWen.aliases, containsAll(['沈先生', '子安']));
-      expect(names, isNot(contains('沈老爷')),
-          reason: '沈老爷 必须合并进 沈老爷子');
+      expect(names, isNot(contains('沈老爷')), reason: '沈老爷 必须合并进 沈老爷子');
       expect(
-        graph.mergeLog.any((m) =>
-            m['reason'] == 'name' &&
-            m['from'] == '沈老爷' &&
-            m['to'] == '沈老爷子'),
+        graph.mergeLog.any(
+          (m) =>
+              m['reason'] == 'name' && m['from'] == '沈老爷' && m['to'] == '沈老爷子',
+        ),
         isTrue,
         reason: '名称合并必须进入审计日志',
       );
 
       // Scope: protagonist 沈武 restored to setting; real citation stays.
       final shenWu = graph.entities.firstWhere((e) => e.name == '沈武');
-      expect(shenWu.scope, AiGraphEntityScope.setting,
-          reason: '沈武（主角）被误标 reference 必须恢复');
+      expect(
+        shenWu.scope,
+        AiGraphEntityScope.setting,
+        reason: '沈武（主角）被误标 reference 必须恢复',
+      );
       final zhuangZhou = graph.entities.firstWhere((e) => e.name == '庄周');
-      expect(zhuangZhou.scope, AiGraphEntityScope.reference,
-          reason: '庄周（引用）必须保持 reference');
+      expect(
+        zhuangZhou.scope,
+        AiGraphEntityScope.reference,
+        reason: '庄周（引用）必须保持 reference',
+      );
 
       // Relations: exact expected edge set.
       final edges = {
@@ -230,8 +281,7 @@ void main() {
       expect(edges, contains('沈文|兄弟|沈武'));
       expect(edges, contains('沈文|夫妻|沈夫人'));
       // Flipped mirror dropped: only the stronger 母子 direction survives.
-      expect(edges, isNot(contains('沈小文|母子|沈夫人')),
-          reason: '反向母子边必须被消解');
+      expect(edges, isNot(contains('沈小文|母子|沈夫人')), reason: '反向母子边必须被消解');
       // Kin-less 亲属 edge dropped at merge time.
       expect(
         graph.relations.where((r) => r.type == '亲属' && r.kin.isEmpty),
@@ -244,135 +294,137 @@ void main() {
           .where((r) => r.type == '婚配')
           .map((r) => ([r.source, r.target]..sort()).join('~'))
           .toSet();
-      expect(marriagePairs, hasLength(1),
-          reason: '婚配边不应出现镜像重复');
+      expect(marriagePairs, hasLength(1), reason: '婚配边不应出现镜像重复');
 
       // Quality gate: the fully-fixed pipeline reports a clean bill.
       final quality = service.assessGraphQuality(graph);
-      expect(quality.hasIssues, isFalse,
-          reason: '门禁应无问题：${quality.issues.join('; ')}');
+      expect(
+        quality.hasIssues,
+        isFalse,
+        reason: '门禁应无问题：${quality.issues.join('; ')}',
+      );
     });
 
-    test('quality gate flags flipped mirrors, kin-less edges, mislabelled refs',
-        () {
-      final service = AiBookGraphService(
-        isAvailable: () => true,
-        openProvider: () => throw UnimplementedError(),
-        settings: () => const AiSettings(model: 'synth-book'),
-      );
-      final dirty = AiBookGraph(
-        contentHash: 'dirty',
-        generatedAt: DateTime.utc(2026, 8, 7),
-        model: 'synth-book',
-        includesUnread: false,
-        coveredSections: const [1],
-        sectionTitles: const {1: '一'},
-        entities: [
-          AiGraphEntity(
-            name: '沈武',
-            type: AiGraphEntityType.person,
-            scope: AiGraphEntityScope.reference,
-            evidence: [
-              for (var i = 0; i < 6; i++)
-                AiGraphEvidence(sectionIndex: 1, quote: '沈武事迹$i'),
-            ],
-            chapterFreq: const {1: 6},
-            firstSection: 1,
-            lastSection: 1,
-          ),
-          AiGraphEntity(
-            name: '万历皇帝',
-            type: AiGraphEntityType.person,
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '万历'),
-            ],
-            chapterFreq: const {1: 1},
-            firstSection: 1,
-            lastSection: 1,
-          ),
-          AiGraphEntity(
-            name: '慈圣皇太后',
-            type: AiGraphEntityType.person,
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '慈圣'),
-            ],
-            chapterFreq: const {1: 1},
-            firstSection: 1,
-            lastSection: 1,
-          ),
-          AiGraphEntity(
-            name: '恭妃王氏',
-            type: AiGraphEntityType.person,
-            evidence: [
-              AiGraphEvidence(sectionIndex: 1, quote: '恭妃'),
-            ],
-            chapterFreq: const {1: 1},
-            firstSection: 1,
-            lastSection: 1,
-          ),
-        ],
-        relations: [
-          AiGraphRelation(
-            source: '万历皇帝',
-            target: '慈圣皇太后',
-            type: '亲属',
-            kin: '母子',
-            evidence: [AiGraphEvidence(sectionIndex: 1, quote: 'q1')],
-            weight: 1,
-          ),
-          AiGraphRelation(
-            source: '慈圣皇太后',
-            target: '万历皇帝',
-            type: '亲属',
-            kin: '母子',
-            evidence: [AiGraphEvidence(sectionIndex: 1, quote: 'q2')],
-            weight: 1,
-          ),
-          AiGraphRelation(
-            source: '万历皇帝',
-            target: '恭妃王氏',
-            type: '亲属',
-            kin: '',
-            evidence: [AiGraphEvidence(sectionIndex: 1, quote: 'q3')],
-            weight: 1,
-          ),
-        ],
-      );
+    test(
+      'quality gate flags flipped mirrors, kin-less edges, mislabelled refs',
+      () {
+        final service = AiBookGraphService(
+          isAvailable: () => true,
+          openModelAdapter: () => throw UnimplementedError(),
+          settings: () => const AiSettings(model: 'synth-book'),
+        );
+        final dirty = AiBookGraph(
+          contentHash: 'dirty',
+          generatedAt: DateTime.utc(2026, 8, 7),
+          model: 'synth-book',
+          includesUnread: false,
+          coveredSections: const [1],
+          sectionTitles: const {1: '一'},
+          entities: [
+            AiGraphEntity(
+              name: '沈武',
+              type: AiGraphEntityType.person,
+              scope: AiGraphEntityScope.reference,
+              evidence: [
+                for (var i = 0; i < 6; i++)
+                  AiGraphEvidence(sectionIndex: 1, quote: '沈武事迹$i'),
+              ],
+              chapterFreq: const {1: 6},
+              firstSection: 1,
+              lastSection: 1,
+            ),
+            AiGraphEntity(
+              name: '万历皇帝',
+              type: AiGraphEntityType.person,
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '万历')],
+              chapterFreq: const {1: 1},
+              firstSection: 1,
+              lastSection: 1,
+            ),
+            AiGraphEntity(
+              name: '慈圣皇太后',
+              type: AiGraphEntityType.person,
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '慈圣')],
+              chapterFreq: const {1: 1},
+              firstSection: 1,
+              lastSection: 1,
+            ),
+            AiGraphEntity(
+              name: '恭妃王氏',
+              type: AiGraphEntityType.person,
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: '恭妃')],
+              chapterFreq: const {1: 1},
+              firstSection: 1,
+              lastSection: 1,
+            ),
+          ],
+          relations: [
+            AiGraphRelation(
+              source: '万历皇帝',
+              target: '慈圣皇太后',
+              type: '亲属',
+              kin: '母子',
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: 'q1')],
+              weight: 1,
+            ),
+            AiGraphRelation(
+              source: '慈圣皇太后',
+              target: '万历皇帝',
+              type: '亲属',
+              kin: '母子',
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: 'q2')],
+              weight: 1,
+            ),
+            AiGraphRelation(
+              source: '万历皇帝',
+              target: '恭妃王氏',
+              type: '亲属',
+              kin: '',
+              evidence: [AiGraphEvidence(sectionIndex: 1, quote: 'q3')],
+              weight: 1,
+            ),
+          ],
+        );
 
-      final report = service.assessGraphQuality(dirty);
-      expect(report.reversedKinPairs, 1,
-          reason: '方向冲突的母子镜像必须被标记');
-      expect(report.kinlessKinEdges, 1);
-      expect(report.mislabelledReferences, 1,
-          reason: '高频 reference 人物（无引用句式）必须被标记');
-      expect(report.hasIssues, isTrue);
-      expect(report.issues.join('; '), contains('沈武'));
-    });
+        final report = service.assessGraphQuality(dirty);
+        expect(report.reversedKinPairs, 1, reason: '方向冲突的母子镜像必须被标记');
+        expect(report.kinlessKinEdges, 1);
+        expect(
+          report.mislabelledReferences,
+          1,
+          reason: '高频 reference 人物（无引用句式）必须被标记',
+        );
+        expect(report.hasIssues, isTrue);
+        expect(report.issues.join('; '), contains('沈武'));
+      },
+    );
 
-    test('generation is deterministic and idempotent on covered sections',
-        () async {
-      final provider = _GraphProvider(responses);
-      final service = AiBookGraphService(
-        isAvailable: () => true,
-        openProvider: () => provider,
-        settings: () => const AiSettings(model: 'synth-book'),
-      );
+    test(
+      'generation is deterministic and idempotent on covered sections',
+      () async {
+        final provider = _GraphProvider(responses);
+        final service = AiBookGraphService(
+          isAvailable: () => true,
+          openModelAdapter: () => provider,
+          settings: () => const AiSettings(model: 'synth-book'),
+        );
 
-      final first = await service.generate(
-        bookTitle: '南国纪事',
-        sections: sections,
-        includesUnread: true,
-      );
-      // Incremental run with all sections covered: nothing re-extracts, the
-      // graph is returned unchanged (no double-merge, no drift).
-      final again = await service.generate(
-        bookTitle: '南国纪事',
-        sections: sections,
-        includesUnread: true,
-      );
-      expect(again.entities.length, first.entities.length);
-      expect(again.relations.length, first.relations.length);
-      expect(again.coveredSections, first.coveredSections);
-    });
+        final first = await service.generate(
+          bookTitle: '南国纪事',
+          sections: sections,
+          includesUnread: true,
+        );
+        // Incremental run with all sections covered: nothing re-extracts, the
+        // graph is returned unchanged (no double-merge, no drift).
+        final again = await service.generate(
+          bookTitle: '南国纪事',
+          sections: sections,
+          includesUnread: true,
+        );
+        expect(again.entities.length, first.entities.length);
+        expect(again.relations.length, first.relations.length);
+        expect(again.coveredSections, first.coveredSections);
+      },
+    );
   });
 }

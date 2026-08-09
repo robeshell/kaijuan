@@ -154,7 +154,7 @@ class BookReaderController extends ChangeNotifier {
         ? null
         : AiBookGraphService(
             isAvailable: () => aiSettings.isReadyForRequests,
-            openProvider: () => aiSettings.openProvider(),
+            openModelAdapter: () => aiSettings.openModelAdapter(),
             settings: () => aiSettings.settings,
           );
     if (!_disposed) notifyListeners();
@@ -1615,6 +1615,10 @@ class BookReaderController extends ChangeNotifier {
           narrationMode: narrationMode,
           cancelToken: execution.cancelToken,
           onModelStarted: execution.modelStarted,
+          onUsage: ({inputTokens, outputTokens}) => execution.reportTokens(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+          ),
           onProgress: (progress) {
             execution.progress(progress.label);
             _bookGraphProgress = progress;

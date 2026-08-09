@@ -1,17 +1,17 @@
-import 'dart:convert';
-
 import 'ai_chat_retrieve.dart';
+import 'ai_cancel.dart';
 import 'ai_graph.dart';
 import 'ai_graph_evidence.dart';
 import 'ai_graph_family_tree.dart';
 import 'ai_graph_quality.dart';
 import 'ai_graph_response.dart';
 import 'ai_log.dart';
+import 'ai_model_adapter.dart';
 import 'ai_models.dart';
-import 'ai_provider.dart';
 import 'ai_run.dart';
-import 'ai_run_provider.dart';
 import 'ai_settings.dart';
+import 'ai_workflow_model_session.dart';
+import 'schemas/ai_workflow_schemas.dart';
 
 /// Progress of one incremental graph run (per section).
 class AiGraphProgress {
@@ -74,12 +74,12 @@ const Duration _graphCallTimeout = Duration(seconds: 120);
 class AiBookGraphService {
   AiBookGraphService({
     required this._isAvailable,
-    required this._openProvider,
+    required this._openModelAdapter,
     required this._settings,
   });
 
   final bool Function() _isAvailable;
-  final AiProvider? Function() _openProvider;
+  final AiModelAdapter? Function() _openModelAdapter;
   final AiSettings Function() _settings;
 
   /// Max characters of one chapter sent per extraction call. Smaller chunks
@@ -148,18 +148,38 @@ class AiBookGraphService {
     required List<AiBookSectionSlice> sections,
     CancelToken? cancelToken,
     void Function(AiRunModelPurpose purpose)? onModelStarted,
+    AiModelUsageReporter? onUsage,
+  }) async {
+    if (!_isAvailable()) return null;
+    final adapter = _openModelAdapter();
+    if (adapter == null) return null;
+    final model = AiWorkflowModelSession(
+      adapter,
+      onModelStarted ?? (_) {},
+      onUsage,
+    );
+    try {
+      return await _analyzeNarrationWithModel(
+        model,
+        bookTitle: bookTitle,
+        bookAuthor: bookAuthor,
+        sections: sections,
+        cancelToken: cancelToken,
+      );
+    } finally {
+      await model.close();
+    }
+  }
+
+  Future<AiNarrationPlan?> _analyzeNarrationWithModel(
+    AiWorkflowModelSession model, {
+    required String bookTitle,
+    String? bookAuthor,
+    required List<AiBookSectionSlice> sections,
+    CancelToken? cancelToken,
   }) async {
     try {
       cancelToken?.throwIfCancelled();
-      if (!_isAvailable()) return null;
-      final openedProvider = _openProvider();
-      if (openedProvider == null) return null;
-      final provider = onModelStarted == null
-          ? openedProvider
-          : AiRunTrackingProvider(
-              delegate: openedProvider,
-              onModelStarted: onModelStarted,
-            );
       final outline = [
         for (final s in sections.take(200))
           if (s.label.trim().isNotEmpty) s.label.trim(),
@@ -207,20 +227,18 @@ class AiBookGraphService {
               '能帮助读者时。',
         ),
       ];
-      final request = AiCompletionRequest(
-        messages: messages,
+      final request = AiModelJsonRequest(
+        messages: _modelMessages(messages),
+        schema: AiWorkflowSchemas.narrationPlan,
         maxTokens: narrationMaxTokens,
         temperature: 0,
         timeout: _graphCallTimeout,
       );
-      final result = await completeWithRetry(
-        provider,
+      final result = await model.completeJson(
         request,
         cancelToken: cancelToken,
       );
-      final decoded = AiGraphResponse.decodeObject(result.text);
-      if (decoded == null) return null;
-      final plan = AiNarrationPlan.fromJson(Map<String, dynamic>.from(decoded));
+      final plan = AiNarrationPlan.fromJson(result.value);
       if (plan != null) {
         AiLog.d(
           'graph narration plan: default=${plan.defaultView} '
@@ -261,182 +279,368 @@ class AiBookGraphService {
     void Function(AiGraphProgress progress)? onProgress,
     AiGraphCheckpoint? onCheckpoint,
     void Function(AiRunModelPurpose purpose)? onModelStarted,
+    AiModelUsageReporter? onUsage,
   }) async {
     if (!_isAvailable()) {
       throw const AiGraphGenerationException('AI 未启用或未配置');
     }
-    final openedProvider = _openProvider();
-    if (openedProvider == null) {
+    final adapter = _openModelAdapter();
+    if (adapter == null) {
       throw const AiGraphGenerationException('AI 未启用或未配置');
     }
-    final provider = onModelStarted == null
-        ? openedProvider
-        : AiRunTrackingProvider(
-            delegate: openedProvider,
-            onModelStarted: onModelStarted,
-          );
-    final sw = Stopwatch()..start();
-
-    // Old caches may contain repeated rows for one stable ID. Repair them at
-    // the service boundary as well as during JSON loading, because a graph
-    // already held by a live controller can be passed into an incremental
-    // run without being read from disk again.
-    existing = existing?.repairDuplicateEntityIds().repairEquivalentMentions();
-
-    try {
-      cancelToken?.throwIfCancelled();
-    } on AiProviderException {
-      throw AiGraphGenerationException('图谱生成已停止', partial: existing);
-    }
-
-    // Working set: sections inside the read range that are not yet covered.
-    final usable = sections
-        .where((s) => s.text.trim().isNotEmpty)
-        .toList(growable: false);
-    if (usable.isEmpty) {
-      throw const AiGraphGenerationException('无法读取本书正文');
-    }
-
-    final working = <AiBookSectionSlice>[];
-    final schemeMatches = existing?.sectionScheme == sectionScheme;
-    for (final s in usable) {
-      final origin = s.originSectionIndex;
-      if (!includesUnread &&
-          readThroughSection != null &&
-          origin > readThroughSection) {
-        continue;
-      }
-      // Per-work (spine) coverage keys are the logical-section index; whole-
-      // book (toc) coverage keys are the spine index. Only skip when the
-      // existing graph used the same scheme — otherwise every piece is
-      // re-extracted (indices of a different scheme are meaningless here).
-      if (schemeMatches &&
-          (existing?.coveredSections.contains(
-                _coveredKeyOf(s, sectionScheme),
-              ) ??
-              false)) {
-        continue;
-      }
-      working.add(s);
-    }
-
-    final existingDisplay = existing?.verifiedForDisplay();
-    final existingHasDisplayData =
-        existingDisplay != null &&
-        (existingDisplay.entities.isNotEmpty ||
-            existingDisplay.relations.isNotEmpty);
-    AiLog.d(
-      'graph working set: usable=${usable.length} working=${working.length} '
-      'includesUnread=$includesUnread readThrough=$readThroughSection '
-      'existingCovered=${existing?.coveredSections.length ?? 0} '
-      'existingDisplay=$existingHasDisplayData',
+    final model = AiWorkflowModelSession(
+      adapter,
+      onModelStarted ?? (_) {},
+      onUsage,
     );
-    if (working.isEmpty && !existingHasDisplayData) {
-      throw const AiGraphGenerationException('所选范围没有进入图谱抽取，请重新确认章节范围');
-    }
+    try {
+      final sw = Stopwatch()..start();
 
-    final covered = <int>[
-      // Only carry coverage keys forward when the scheme matches — a scheme
-      // switch invalidates every index (toc keys are spine, spine keys are
-      // logical sections), so the new run must re-extract everything instead
-      // of trusting a mixed list. (Entities/relations are content, not
-      // indices, and stay: re-extraction merges into them by name.)
-      if (schemeMatches) ...?existing?.coveredSections,
-    ];
-    final entities = <AiGraphEntity>[...?existing?.entities];
-    final relations = <AiGraphRelation>[...?existing?.relations];
+      // Old caches may contain repeated rows for one stable ID. Repair them at
+      // the service boundary as well as during JSON loading, because a graph
+      // already held by a live controller can be passed into an incremental
+      // run without being read from disk again.
+      existing = existing
+          ?.repairDuplicateEntityIds()
+          .repairEquivalentMentions();
 
-    // Book-name priors (config library, e.g. the four classics): certain
-    // alias→canonical mappings resolved before any probabilistic rule.
-    final priorAliases =
-        _settings().graphRuleWords.bookNamePriors[bookTitle.trim()] ??
-        const <String, String>{};
-
-    // ER pipeline state: fuzzy merges queued for LLM review + audit trail.
-    final pendingMerges = <_PendingMerge>[];
-    final mergeLog = <Map<String, Object?>>[...?existing?.mergeLog];
-
-    // Sequential incremental co-reference cache. One alias can deliberately
-    // point at multiple IDs; ambiguous aliases are never resolved silently.
-    final canonical = <AiGraphEntityType, Map<String, Set<String>>>{};
-    for (final e in entities) {
-      final bucket = canonical.putIfAbsent(e.type, () => {});
-      bucket.putIfAbsent(e.name, () => {}).add(e.id);
-      for (final alias in e.aliases) {
-        bucket.putIfAbsent(alias, () => {}).add(e.id);
+      try {
+        cancelToken?.throwIfCancelled();
+      } on AiProviderException {
+        throw AiGraphGenerationException('图谱生成已停止', partial: existing);
       }
-    }
 
-    final entityIndex = <String, AiGraphEntity>{
-      for (final e in entities) e.id: e,
-    };
-    final relationIndex = <String, AiGraphRelation>{
-      for (final r in relations) r.mergeKey: r,
-    };
+      // Working set: sections inside the read range that are not yet covered.
+      final usable = sections
+          .where((s) => s.text.trim().isNotEmpty)
+          .toList(growable: false);
+      if (usable.isEmpty) {
+        throw const AiGraphGenerationException('无法读取本书正文');
+      }
 
-    // Step 0: display plan (once per graph). A failure or a missing provider
-    // silently skips narration — generation proceeds with the default view.
-    AiNarrationPlan? narration = switch (narrationMode) {
-      AiNarrationPlanMode.confirmed => plannedNarration,
-      AiNarrationPlanMode.skip => null,
-      AiNarrationPlanMode.autoAnalyze =>
-        plannedNarration ?? existing?.narration,
-    };
-    if (narrationMode == AiNarrationPlanMode.autoAnalyze &&
-        narration == null &&
-        working.isNotEmpty) {
+      final working = <AiBookSectionSlice>[];
+      final schemeMatches = existing?.sectionScheme == sectionScheme;
+      for (final s in usable) {
+        final origin = s.originSectionIndex;
+        if (!includesUnread &&
+            readThroughSection != null &&
+            origin > readThroughSection) {
+          continue;
+        }
+        // Per-work (spine) coverage keys are the logical-section index; whole-
+        // book (toc) coverage keys are the spine index. Only skip when the
+        // existing graph used the same scheme — otherwise every piece is
+        // re-extracted (indices of a different scheme are meaningless here).
+        if (schemeMatches &&
+            (existing?.coveredSections.contains(
+                  _coveredKeyOf(s, sectionScheme),
+                ) ??
+                false)) {
+          continue;
+        }
+        working.add(s);
+      }
+
+      final existingDisplay = existing?.verifiedForDisplay();
+      final existingHasDisplayData =
+          existingDisplay != null &&
+          (existingDisplay.entities.isNotEmpty ||
+              existingDisplay.relations.isNotEmpty);
+      AiLog.d(
+        'graph working set: usable=${usable.length} working=${working.length} '
+        'includesUnread=$includesUnread readThrough=$readThroughSection '
+        'existingCovered=${existing?.coveredSections.length ?? 0} '
+        'existingDisplay=$existingHasDisplayData',
+      );
+      if (working.isEmpty && !existingHasDisplayData) {
+        throw const AiGraphGenerationException('所选范围没有进入图谱抽取，请重新确认章节范围');
+      }
+
+      final covered = <int>[
+        // Only carry coverage keys forward when the scheme matches — a scheme
+        // switch invalidates every index (toc keys are spine, spine keys are
+        // logical sections), so the new run must re-extract everything instead
+        // of trusting a mixed list. (Entities/relations are content, not
+        // indices, and stay: re-extraction merges into them by name.)
+        if (schemeMatches) ...?existing?.coveredSections,
+      ];
+      final entities = <AiGraphEntity>[...?existing?.entities];
+      final relations = <AiGraphRelation>[...?existing?.relations];
+
+      // Book-name priors (config library, e.g. the four classics): certain
+      // alias→canonical mappings resolved before any probabilistic rule.
+      final priorAliases =
+          _settings().graphRuleWords.bookNamePriors[bookTitle.trim()] ??
+          const <String, String>{};
+
+      // ER pipeline state: fuzzy merges queued for LLM review + audit trail.
+      final pendingMerges = <_PendingMerge>[];
+      final mergeLog = <Map<String, Object?>>[...?existing?.mergeLog];
+
+      // Sequential incremental co-reference cache. One alias can deliberately
+      // point at multiple IDs; ambiguous aliases are never resolved silently.
+      final canonical = <AiGraphEntityType, Map<String, Set<String>>>{};
+      for (final e in entities) {
+        final bucket = canonical.putIfAbsent(e.type, () => {});
+        bucket.putIfAbsent(e.name, () => {}).add(e.id);
+        for (final alias in e.aliases) {
+          bucket.putIfAbsent(alias, () => {}).add(e.id);
+        }
+      }
+
+      final entityIndex = <String, AiGraphEntity>{
+        for (final e in entities) e.id: e,
+      };
+      final relationIndex = <String, AiGraphRelation>{
+        for (final r in relations) r.mergeKey: r,
+      };
+
+      // Step 0: display plan (once per graph). A failure or a missing provider
+      // silently skips narration — generation proceeds with the default view.
+      AiNarrationPlan? narration = switch (narrationMode) {
+        AiNarrationPlanMode.confirmed => plannedNarration,
+        AiNarrationPlanMode.skip => null,
+        AiNarrationPlanMode.autoAnalyze =>
+          plannedNarration ?? existing?.narration,
+      };
+      if (narrationMode == AiNarrationPlanMode.autoAnalyze &&
+          narration == null &&
+          working.isNotEmpty) {
+        onProgress?.call(
+          AiGraphProgress(
+            completed: 0,
+            total: working.length,
+            label: '正在分析本书的展示方案…',
+          ),
+        );
+        narration = await _analyzeNarrationWithModel(
+          model,
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          sections: sections,
+          cancelToken: cancelToken,
+        );
+      }
+
       onProgress?.call(
         AiGraphProgress(
           completed: 0,
           total: working.length,
-          label: '正在分析本书的展示方案…',
+          label: '正在抽取实体与关系',
         ),
       );
-      narration = await analyzeNarration(
-        bookTitle: bookTitle,
-        bookAuthor: bookAuthor,
-        sections: sections,
-        cancelToken: cancelToken,
-        onModelStarted: onModelStarted,
-      );
-    }
 
-    onProgress?.call(
-      AiGraphProgress(completed: 0, total: working.length, label: '正在抽取实体与关系'),
-    );
+      final deferredSections = <AiBookSectionSlice>[];
+      final deferredErrors = <int, Object>{};
+      var successfulSectionsThisRun = 0;
 
-    final deferredSections = <AiBookSectionSlice>[];
-    final deferredErrors = <int, Object>{};
-    var successfulSectionsThisRun = 0;
-
-    Future<void> mergeSuccessfulSection(
-      AiBookSectionSlice section,
-      List<Map<String, Object?>> raws,
-    ) async {
-      final origin = section.originSectionIndex;
-      for (final raw in raws) {
-        _mergeChunk(
-          canonical: canonical,
-          entityIndex: entityIndex,
-          relationIndex: relationIndex,
-          entities: entities,
-          relations: relations,
-          sectionIndex: origin,
-          sectionText: section.text,
-          raw: raw,
-          pendingMerges: pendingMerges,
-          mergeLog: mergeLog,
-          priorAliases: priorAliases,
-        );
+      Future<void> mergeSuccessfulSection(
+        AiBookSectionSlice section,
+        List<Map<String, Object?>> raws,
+      ) async {
+        final origin = section.originSectionIndex;
+        for (final raw in raws) {
+          _mergeChunk(
+            canonical: canonical,
+            entityIndex: entityIndex,
+            relationIndex: relationIndex,
+            entities: entities,
+            relations: relations,
+            sectionIndex: origin,
+            sectionText: section.text,
+            raw: raw,
+            pendingMerges: pendingMerges,
+            mergeLog: mergeLog,
+            priorAliases: priorAliases,
+          );
+        }
+        if (!covered.contains(_coveredKeyOf(section, sectionScheme))) {
+          covered.add(_coveredKeyOf(section, sectionScheme));
+        }
+        covered.sort();
+        successfulSectionsThisRun++;
+        if (onCheckpoint != null) {
+          await onCheckpoint(
+            _partialGraph(
+              existing,
+              contentHash: existing?.contentHash ?? '',
+              includesUnread: includesUnread,
+              sectionScheme: sectionScheme,
+              covered: covered,
+              entities: entities,
+              relations: relations,
+              generationSeconds: sw.elapsed.inSeconds,
+              mergeLog: mergeLog,
+              narration: narration,
+              sectionTitles: {
+                for (final item in sections)
+                  item.originSectionIndex: item.label,
+              },
+            ),
+          );
+        }
       }
-      if (!covered.contains(_coveredKeyOf(section, sectionScheme))) {
-        covered.add(_coveredKeyOf(section, sectionScheme));
-      }
-      covered.sort();
-      successfulSectionsThisRun++;
-      if (onCheckpoint != null) {
-        await onCheckpoint(
-          _partialGraph(
+
+      try {
+        for (
+          var batchStart = 0;
+          batchStart < working.length;
+          batchStart += maxConcurrentSections
+        ) {
+          cancelToken?.throwIfCancelled();
+          final batchEnd = (batchStart + maxConcurrentSections) < working.length
+              ? batchStart + maxConcurrentSections
+              : working.length;
+          final batch = working.sublist(batchStart, batchEnd);
+          // Known-entity table from the merge cache so far: tells the model
+          // which entities already exist, so a chapter only emits new relations
+          // and evidence instead of re-describing known characters.
+          final knownEntities = _knownEntitiesText(entities);
+          // Extract every section of the batch in parallel (each section's
+          // chunks stay sequential inside); merge stays ordered afterwards.
+          final results = await Future.wait([
+            for (final section in batch)
+              (() async {
+                try {
+                  return (
+                    value: await _extractSection(
+                      model,
+                      section,
+                      bookTitle: bookTitle,
+                      bookAuthor: bookAuthor,
+                      knownEntities: knownEntities,
+                      narration: narration,
+                      cancelToken: cancelToken,
+                    ),
+                    error: null as Object?,
+                  );
+                } catch (error) {
+                  return (
+                    value: const <Map<String, Object?>>[],
+                    error: error as Object?,
+                  );
+                }
+              })(),
+          ]);
+          // Merge sequentially in chapter order so co-reference is stable.
+          for (var i = 0; i < batch.length; i++) {
+            cancelToken?.throwIfCancelled();
+            final section = batch[i];
+            if (results[i].error != null) {
+              deferredSections.add(section);
+              deferredErrors[section.index] = results[i].error!;
+              AiLog.d(
+                'graph section deferred: section=${section.index} '
+                'origin=${section.originSectionIndex} '
+                'error=${results[i].error}',
+              );
+            } else {
+              await mergeSuccessfulSection(section, results[i].value);
+            }
+            onProgress?.call(
+              AiGraphProgress(
+                completed: batchStart + i + 1,
+                total: working.length,
+                label: '正在分析第 ${batchStart + i + 1} / ${working.length} 节',
+              ),
+            );
+          }
+
+          // ER final step: LLM review of medium-confidence merge candidates
+          // (shared-relation evidence without name similarity). A failure here
+          // only skips those merges — the graph is still valid.
+          if (pendingMerges.isNotEmpty) {
+            await _reviewPendingMerges(
+              model,
+              pendingMerges,
+              canonical: canonical,
+              entityIndex: entityIndex,
+              relationIndex: relationIndex,
+              entities: entities,
+              relations: relations,
+              mergeLog: mergeLog,
+              cancelToken: cancelToken,
+            );
+          }
+
+          // A complete five-request failure is almost certainly a provider or
+          // connection outage, not five independent malformed chapters. Stop
+          // the circuit here instead of spending hundreds of calls on a long
+          // book. Sparse failures are isolated and retried after the first pass.
+          if (results.every((result) => result.error != null)) {
+            throw results.first.error!;
+          }
+        }
+
+        // Retry sparse failures sequentially with the now-richer canonical
+        // entity table. Lower concurrency avoids repeating a transient rate
+        // spike, while leaving successful chapters checkpointed and usable.
+        if (deferredSections.isNotEmpty) {
+          final retryFailures = <AiBookSectionSlice>[];
+          for (var i = 0; i < deferredSections.length; i++) {
+            cancelToken?.throwIfCancelled();
+            final section = deferredSections[i];
+            onProgress?.call(
+              AiGraphProgress(
+                completed: working.length,
+                total: working.length,
+                label: '正在重试第 ${i + 1} / ${deferredSections.length} 节',
+              ),
+            );
+            try {
+              final raws = await _extractSection(
+                model,
+                section,
+                bookTitle: bookTitle,
+                bookAuthor: bookAuthor,
+                knownEntities: _knownEntitiesText(entities),
+                narration: narration,
+                cancelToken: cancelToken,
+              );
+              await mergeSuccessfulSection(section, raws);
+              deferredErrors.remove(section.index);
+            } catch (error) {
+              retryFailures.add(section);
+              deferredErrors[section.index] = error;
+              AiLog.d(
+                'graph section retry failed: section=${section.index} '
+                'origin=${section.originSectionIndex} error=$error',
+              );
+            }
+          }
+          deferredSections
+            ..clear()
+            ..addAll(retryFailures);
+
+          if (pendingMerges.isNotEmpty) {
+            await _reviewPendingMerges(
+              model,
+              pendingMerges,
+              canonical: canonical,
+              entityIndex: entityIndex,
+              relationIndex: relationIndex,
+              entities: entities,
+              relations: relations,
+              mergeLog: mergeLog,
+              cancelToken: cancelToken,
+            );
+          }
+
+          // If nothing in this run could be extracted, there is no useful
+          // result to present. Otherwise finish with the partial graph; failed
+          // sections remain uncovered and the next incremental run retries only
+          // those sections instead of discarding hundreds of successful ones.
+          if (deferredSections.isNotEmpty && successfulSectionsThisRun == 0) {
+            throw deferredErrors.values.first;
+          }
+        }
+      } on AiProviderException catch (e) {
+        final message = e.message.contains('已取消')
+            ? '图谱生成已停止'
+            : '图谱抽取失败：${e.message}';
+        throw AiGraphGenerationException(
+          message,
+          partial: _partialGraph(
             existing,
             contentHash: existing?.contentHash ?? '',
             includesUnread: includesUnread,
@@ -446,356 +650,12 @@ class AiBookGraphService {
             relations: relations,
             generationSeconds: sw.elapsed.inSeconds,
             mergeLog: mergeLog,
-            narration: narration,
-            sectionTitles: {
-              for (final item in sections) item.originSectionIndex: item.label,
-            },
           ),
         );
-      }
-    }
-
-    try {
-      for (
-        var batchStart = 0;
-        batchStart < working.length;
-        batchStart += maxConcurrentSections
-      ) {
-        cancelToken?.throwIfCancelled();
-        final batchEnd = (batchStart + maxConcurrentSections) < working.length
-            ? batchStart + maxConcurrentSections
-            : working.length;
-        final batch = working.sublist(batchStart, batchEnd);
-        // Known-entity table from the merge cache so far: tells the model
-        // which entities already exist, so a chapter only emits new relations
-        // and evidence instead of re-describing known characters.
-        final knownEntities = _knownEntitiesText(entities);
-        // Extract every section of the batch in parallel (each section's
-        // chunks stay sequential inside); merge stays ordered afterwards.
-        final results = await Future.wait([
-          for (final section in batch)
-            (() async {
-              try {
-                return (
-                  value: await _extractSection(
-                    provider,
-                    section,
-                    bookTitle: bookTitle,
-                    bookAuthor: bookAuthor,
-                    knownEntities: knownEntities,
-                    narration: narration,
-                    cancelToken: cancelToken,
-                  ),
-                  error: null as Object?,
-                );
-              } catch (error) {
-                return (
-                  value: const <Map<String, Object?>>[],
-                  error: error as Object?,
-                );
-              }
-            })(),
-        ]);
-        // Merge sequentially in chapter order so co-reference is stable.
-        for (var i = 0; i < batch.length; i++) {
-          cancelToken?.throwIfCancelled();
-          final section = batch[i];
-          if (results[i].error != null) {
-            deferredSections.add(section);
-            deferredErrors[section.index] = results[i].error!;
-            AiLog.d(
-              'graph section deferred: section=${section.index} '
-              'origin=${section.originSectionIndex} '
-              'error=${results[i].error}',
-            );
-          } else {
-            await mergeSuccessfulSection(section, results[i].value);
-          }
-          onProgress?.call(
-            AiGraphProgress(
-              completed: batchStart + i + 1,
-              total: working.length,
-              label: '正在分析第 ${batchStart + i + 1} / ${working.length} 节',
-            ),
-          );
-        }
-
-        // ER final step: LLM review of medium-confidence merge candidates
-        // (shared-relation evidence without name similarity). A failure here
-        // only skips those merges — the graph is still valid.
-        if (pendingMerges.isNotEmpty) {
-          await _reviewPendingMerges(
-            provider,
-            pendingMerges,
-            canonical: canonical,
-            entityIndex: entityIndex,
-            relationIndex: relationIndex,
-            entities: entities,
-            relations: relations,
-            mergeLog: mergeLog,
-            cancelToken: cancelToken,
-          );
-        }
-
-        // A complete five-request failure is almost certainly a provider or
-        // connection outage, not five independent malformed chapters. Stop
-        // the circuit here instead of spending hundreds of calls on a long
-        // book. Sparse failures are isolated and retried after the first pass.
-        if (results.every((result) => result.error != null)) {
-          throw results.first.error!;
-        }
-      }
-
-      // Retry sparse failures sequentially with the now-richer canonical
-      // entity table. Lower concurrency avoids repeating a transient rate
-      // spike, while leaving successful chapters checkpointed and usable.
-      if (deferredSections.isNotEmpty) {
-        final retryFailures = <AiBookSectionSlice>[];
-        for (var i = 0; i < deferredSections.length; i++) {
-          cancelToken?.throwIfCancelled();
-          final section = deferredSections[i];
-          onProgress?.call(
-            AiGraphProgress(
-              completed: working.length,
-              total: working.length,
-              label: '正在重试第 ${i + 1} / ${deferredSections.length} 节',
-            ),
-          );
-          try {
-            final raws = await _extractSection(
-              provider,
-              section,
-              bookTitle: bookTitle,
-              bookAuthor: bookAuthor,
-              knownEntities: _knownEntitiesText(entities),
-              narration: narration,
-              cancelToken: cancelToken,
-            );
-            await mergeSuccessfulSection(section, raws);
-            deferredErrors.remove(section.index);
-          } catch (error) {
-            retryFailures.add(section);
-            deferredErrors[section.index] = error;
-            AiLog.d(
-              'graph section retry failed: section=${section.index} '
-              'origin=${section.originSectionIndex} error=$error',
-            );
-          }
-        }
-        deferredSections
-          ..clear()
-          ..addAll(retryFailures);
-
-        if (pendingMerges.isNotEmpty) {
-          await _reviewPendingMerges(
-            provider,
-            pendingMerges,
-            canonical: canonical,
-            entityIndex: entityIndex,
-            relationIndex: relationIndex,
-            entities: entities,
-            relations: relations,
-            mergeLog: mergeLog,
-            cancelToken: cancelToken,
-          );
-        }
-
-        // If nothing in this run could be extracted, there is no useful
-        // result to present. Otherwise finish with the partial graph; failed
-        // sections remain uncovered and the next incremental run retries only
-        // those sections instead of discarding hundreds of successful ones.
-        if (deferredSections.isNotEmpty && successfulSectionsThisRun == 0) {
-          throw deferredErrors.values.first;
-        }
-      }
-    } on AiProviderException catch (e) {
-      final message = e.message.contains('已取消')
-          ? '图谱生成已停止'
-          : '图谱抽取失败：${e.message}';
-      throw AiGraphGenerationException(
-        message,
-        partial: _partialGraph(
-          existing,
-          contentHash: existing?.contentHash ?? '',
-          includesUnread: includesUnread,
-          sectionScheme: sectionScheme,
-          covered: covered,
-          entities: entities,
-          relations: relations,
-          generationSeconds: sw.elapsed.inSeconds,
-          mergeLog: mergeLog,
-        ),
-      );
-    } on AiGraphGenerationException catch (error) {
-      if (error.partial != null) rethrow;
-      throw AiGraphGenerationException(
-        error.message,
-        partial: _partialGraph(
-          existing,
-          contentHash: existing?.contentHash ?? '',
-          includesUnread: includesUnread,
-          sectionScheme: sectionScheme,
-          covered: covered,
-          entities: entities,
-          relations: relations,
-          generationSeconds: sw.elapsed.inSeconds,
-          mergeLog: mergeLog,
-          narration: narration,
-        ),
-      );
-    } catch (e) {
-      AiLog.d('graph extraction failed: $e');
-      throw AiGraphGenerationException(
-        '图谱抽取失败，请重试',
-        partial: _partialGraph(
-          existing,
-          contentHash: existing?.contentHash ?? '',
-          includesUnread: includesUnread,
-          sectionScheme: sectionScheme,
-          covered: covered,
-          entities: entities,
-          relations: relations,
-          generationSeconds: sw.elapsed.inSeconds,
-          mergeLog: mergeLog,
-        ),
-      );
-    }
-
-    // One bounded whole-range gleaning pass recovers an entity category the
-    // local chunk passes missed entirely (the concrete regression was a
-    // long fantasy book producing zero organizations). This is deliberately
-    // not a second full extraction of every chapter: it samples every
-    // selected section once, asks only for currently absent types, and then
-    // feeds the result through the exact same evidence/merge pipeline.
-    if (working.isNotEmpty) {
-      final presentTypes = {for (final entity in entities) entity.type};
-      final missingTypes = AiGraphEntityType.values
-          .where((type) => !presentTypes.contains(type))
-          .toList(growable: false);
-      if (missingTypes.isNotEmpty) {
-        onProgress?.call(
-          AiGraphProgress(
-            completed: working.length,
-            total: working.length,
-            label: '正在复核遗漏的实体类型…',
-          ),
-        );
-        try {
-          final eligible = usable
-              .where(
-                (section) =>
-                    includesUnread ||
-                    readThroughSection == null ||
-                    section.originSectionIndex <= readThroughSection,
-              )
-              .toList(growable: false);
-          final gleaned = await _gleanMissingEntityTypes(
-            provider,
-            sections: eligible,
-            missingTypes: missingTypes,
-            bookTitle: bookTitle,
-            bookAuthor: bookAuthor,
-            knownEntities: _knownEntitiesText(entities),
-            cancelToken: cancelToken,
-          );
-          final sectionByIndex = {
-            for (final section in eligible) section.originSectionIndex: section,
-          };
-          for (final item in gleaned) {
-            final section = sectionByIndex[item.sectionIndex];
-            if (section == null) continue;
-            _mergeChunk(
-              canonical: canonical,
-              entityIndex: entityIndex,
-              relationIndex: relationIndex,
-              entities: entities,
-              relations: relations,
-              sectionIndex: item.sectionIndex,
-              sectionText: section.text,
-              raw: item.raw,
-              pendingMerges: pendingMerges,
-              mergeLog: mergeLog,
-              priorAliases: priorAliases,
-            );
-          }
-        } on AiProviderException catch (error) {
-          if (cancelToken?.isCancelled ?? false) {
-            throw AiGraphGenerationException(
-              '图谱生成已停止',
-              partial: _partialGraph(
-                existing,
-                contentHash: existing?.contentHash ?? '',
-                includesUnread: includesUnread,
-                sectionScheme: sectionScheme,
-                covered: covered,
-                entities: entities,
-                relations: relations,
-                generationSeconds: sw.elapsed.inSeconds,
-                mergeLog: mergeLog,
-                narration: narration,
-              ),
-            );
-          }
-          AiLog.d('graph missing-type gleaning skipped: ${error.message}');
-        } catch (error) {
-          AiLog.d('graph missing-type gleaning skipped: $error');
-        }
-      }
-    }
-
-    // Metadata entities (the book's author / preface writers) are not story
-    // entities: drop them and any edge that only touches them.
-    final metaNames = <String>{
-      bookTitle.trim(),
-      if (bookAuthor != null && bookAuthor.trim().isNotEmpty) bookAuthor.trim(),
-    };
-    if (metaNames.isNotEmpty) {
-      final storyNames = <String>{};
-      final storyIds = <String>{};
-      entities.removeWhere((e) {
-        final drop =
-            metaNames.contains(e.name) || e.aliases.any(metaNames.contains);
-        if (!drop) {
-          storyNames.add(e.name);
-          storyIds.add(e.id);
-        }
-        return drop;
-      });
-      relations.removeWhere(
-        (r) => r.sourceId.isNotEmpty
-            ? !storyIds.contains(r.sourceId) || !storyIds.contains(r.targetId)
-            : !storyNames.contains(r.source) || !storyNames.contains(r.target),
-      );
-    }
-
-    // Hard rules that only downgrade (never upgrade) the model's scope:
-    // a quote matching a citation pattern (据X / 如X所言 / X写道 ...) marks
-    // the entity as a reference — e.g. 罗素 in an essay collection.
-    // There is deliberately no single-chapter rule: in essay collections
-    // every chapter is a standalone piece, so single-chapter people are
-    // normal book content, not citations. Low-frequency entities are kept
-    // out of the graph by the top-N cut anyway.
-    _applyScopeHardRules(entities);
-    // Model-noise protection: the model occasionally mislabels the book's
-    // protagonist as reference (张居正 in 万历十五年 — 全书主角被视图隐藏).
-    // A high-evidence entity with zero citation-template hits is正文人物,
-    // not a citation; true citations (罗素 in essays) always carry a
-    // template hit, so this never resurrects them.
-    _protectCoreEntities(entities);
-    // Directional lineage review: extraction is intentionally recall-first,
-    // so one evidence-only pass verifies elder→younger direction before the
-    // deterministic mirror dedupe. Failure is non-fatal; it never invents a
-    // relation and can only keep/reverse/drop an extracted edge.
-    try {
-      await _reviewLineageDirections(
-        provider,
-        relations,
-        cancelToken: cancelToken,
-      );
-    } on AiProviderException catch (error) {
-      if (cancelToken?.isCancelled ?? false) {
+      } on AiGraphGenerationException catch (error) {
+        if (error.partial != null) rethrow;
         throw AiGraphGenerationException(
-          '图谱生成已停止',
+          error.message,
           partial: _partialGraph(
             existing,
             contentHash: existing?.contentHash ?? '',
@@ -809,152 +669,324 @@ class AiBookGraphService {
             narration: narration,
           ),
         );
+      } catch (e) {
+        AiLog.d('graph extraction failed: $e');
+        throw AiGraphGenerationException(
+          '图谱抽取失败，请重试',
+          partial: _partialGraph(
+            existing,
+            contentHash: existing?.contentHash ?? '',
+            includesUnread: includesUnread,
+            sectionScheme: sectionScheme,
+            covered: covered,
+            entities: entities,
+            relations: relations,
+            generationSeconds: sw.elapsed.inSeconds,
+            mergeLog: mergeLog,
+          ),
+        );
       }
-      AiLog.d('graph lineage direction review skipped: ${error.message}');
-    } catch (error) {
-      AiLog.d('graph lineage direction review skipped: $error');
-    }
 
-    // Directional-kin duplicate resolution: the model occasionally flips a
-    // 亲属 edge (万历→慈圣 母子 vs 慈圣→万历 母子) — sometimes even with
-    // different kin (A→B 父子 vs B→A 母子). Keeping a flipped mirror makes
-    // the junior a "candidate parent" and pollutes the family tree. Group by
-    // unordered pair + type (kin-insensitive), keep the strongest direction
-    // when both exist; ties pick the earlier-appearing source (长辈先出场).
-    final firstSections = <String, int>{
-      for (final e in entities) e.id: e.firstSection,
-      for (final e in entities) e.name: e.firstSection,
-    };
-    _dedupeReverseKinEdges(relations, firstSections);
-    // Marital kin refinement: 夫妻 is informal for imperial consorts. When an
-    // endpoint carries a rank term (皇后/贵妃/妃嫔), rewrite the kin label —
-    // 王皇后→皇后, 恭妃王氏→妃嫔, 郑氏(郑贵妃)→贵妃; commoners keep 夫妻.
-    _refineMaritalKin(relations, entities);
-    // Hallucination grounding (borrowed from AI-Reader-V2): an entity whose
-    // name and all aliases never appear verbatim in the book body was almost
-    // certainly invented by the model (leaked from pretraining) — drop it
-    // together with any edge touching it. Zero-cost pure substring evidence.
-    _dropUngroundedEntities(entities, relations, sections);
+      // One bounded whole-range gleaning pass recovers an entity category the
+      // local chunk passes missed entirely (the concrete regression was a
+      // long fantasy book producing zero organizations). This is deliberately
+      // not a second full extraction of every chapter: it samples every
+      // selected section once, asks only for currently absent types, and then
+      // feeds the result through the exact same evidence/merge pipeline.
+      if (working.isNotEmpty) {
+        final presentTypes = {for (final entity in entities) entity.type};
+        final missingTypes = AiGraphEntityType.values
+            .where((type) => !presentTypes.contains(type))
+            .toList(growable: false);
+        if (missingTypes.isNotEmpty) {
+          onProgress?.call(
+            AiGraphProgress(
+              completed: working.length,
+              total: working.length,
+              label: '正在复核遗漏的实体类型…',
+            ),
+          );
+          try {
+            final eligible = usable
+                .where(
+                  (section) =>
+                      includesUnread ||
+                      readThroughSection == null ||
+                      section.originSectionIndex <= readThroughSection,
+                )
+                .toList(growable: false);
+            final gleaned = await _gleanMissingEntityTypes(
+              model,
+              sections: eligible,
+              missingTypes: missingTypes,
+              bookTitle: bookTitle,
+              bookAuthor: bookAuthor,
+              knownEntities: _knownEntitiesText(entities),
+              cancelToken: cancelToken,
+            );
+            final sectionByIndex = {
+              for (final section in eligible)
+                section.originSectionIndex: section,
+            };
+            for (final item in gleaned) {
+              final section = sectionByIndex[item.sectionIndex];
+              if (section == null) continue;
+              _mergeChunk(
+                canonical: canonical,
+                entityIndex: entityIndex,
+                relationIndex: relationIndex,
+                entities: entities,
+                relations: relations,
+                sectionIndex: item.sectionIndex,
+                sectionText: section.text,
+                raw: item.raw,
+                pendingMerges: pendingMerges,
+                mergeLog: mergeLog,
+                priorAliases: priorAliases,
+              );
+            }
+          } on AiProviderException catch (error) {
+            if (cancelToken?.isCancelled ?? false) {
+              throw AiGraphGenerationException(
+                '图谱生成已停止',
+                partial: _partialGraph(
+                  existing,
+                  contentHash: existing?.contentHash ?? '',
+                  includesUnread: includesUnread,
+                  sectionScheme: sectionScheme,
+                  covered: covered,
+                  entities: entities,
+                  relations: relations,
+                  generationSeconds: sw.elapsed.inSeconds,
+                  mergeLog: mergeLog,
+                  narration: narration,
+                ),
+              );
+            }
+            AiLog.d('graph missing-type gleaning skipped: ${error.message}');
+          } catch (error) {
+            AiLog.d('graph missing-type gleaning skipped: $error');
+          }
+        }
+      }
 
-    // Collapse one character repeated with life-stage identity hints before
-    // quality assessment and description polish, then rewire every relation
-    // to the strongest surviving ID. This also makes the final result log
-    // reflect what the UI will actually receive.
-    final mentionRepair = AiBookGraph(
-      contentHash: '',
-      entities: [...entities],
-      relations: [...relations],
-    ).repairEquivalentMentions();
-    entities
-      ..clear()
-      ..addAll(mentionRepair.entities);
-    relations
-      ..clear()
-      ..addAll(mentionRepair.relations);
+      // Metadata entities (the book's author / preface writers) are not story
+      // entities: drop them and any edge that only touches them.
+      final metaNames = <String>{
+        bookTitle.trim(),
+        if (bookAuthor != null && bookAuthor.trim().isNotEmpty)
+          bookAuthor.trim(),
+      };
+      if (metaNames.isNotEmpty) {
+        final storyNames = <String>{};
+        final storyIds = <String>{};
+        entities.removeWhere((e) {
+          final drop =
+              metaNames.contains(e.name) || e.aliases.any(metaNames.contains);
+          if (!drop) {
+            storyNames.add(e.name);
+            storyIds.add(e.id);
+          }
+          return drop;
+        });
+        relations.removeWhere(
+          (r) => r.sourceId.isNotEmpty
+              ? !storyIds.contains(r.sourceId) || !storyIds.contains(r.targetId)
+              : !storyNames.contains(r.source) ||
+                    !storyNames.contains(r.target),
+        );
+      }
 
-    // Description/alias polish (best-effort, see _refreshEntityDescriptions):
-    // heals descriptions frozen at first mention (哈利·波特 labelled
-    // 「尚未登场」 for the whole series) and aliases stolen from another
-    // entity. Also runs when every section was already covered, so a
-    // force-regenerate repairs the stored graph with a single cheap call.
-    onProgress?.call(
-      AiGraphProgress(
-        completed: working.length,
-        total: working.length,
-        label: '正在润色实体描述…',
-      ),
-    );
-    final prePolish = _partialGraph(
-      existing,
-      contentHash: existing?.contentHash ?? '',
-      includesUnread: includesUnread,
-      sectionScheme: sectionScheme,
-      covered: covered,
-      entities: entities,
-      relations: relations,
-      generationSeconds: sw.elapsed.inSeconds,
-      mergeLog: mergeLog,
-      narration: narration,
-      sectionTitles: {
-        for (final section in sections)
-          section.originSectionIndex: section.label,
-      },
-    );
-    final quality = assessGraphQuality(prePolish);
-    final qualityIssues = <String>[
-      ...quality.issues,
-      if (deferredSections.isNotEmpty)
-        '${deferredSections.length} 节抽取失败，将在下次增量生成时重试',
-    ];
-    if (qualityIssues.isNotEmpty) {
-      AiLog.d('graph quality: ${qualityIssues.join(' | ')}');
-    }
-    final qualityDraft = prePolish.copyWith(qualityIssues: qualityIssues);
-    if (onCheckpoint != null) await onCheckpoint(qualityDraft);
+      // Hard rules that only downgrade (never upgrade) the model's scope:
+      // a quote matching a citation pattern (据X / 如X所言 / X写道 ...) marks
+      // the entity as a reference — e.g. 罗素 in an essay collection.
+      // There is deliberately no single-chapter rule: in essay collections
+      // every chapter is a standalone piece, so single-chapter people are
+      // normal book content, not citations. Low-frequency entities are kept
+      // out of the graph by the top-N cut anyway.
+      _applyScopeHardRules(entities);
+      // Model-noise protection: the model occasionally mislabels the book's
+      // protagonist as reference (张居正 in 万历十五年 — 全书主角被视图隐藏).
+      // A high-evidence entity with zero citation-template hits is正文人物,
+      // not a citation; true citations (罗素 in essays) always carry a
+      // template hit, so this never resurrects them.
+      _protectCoreEntities(entities);
+      // Directional lineage review: extraction is intentionally recall-first,
+      // so one evidence-only pass verifies elder→younger direction before the
+      // deterministic mirror dedupe. Failure is non-fatal; it never invents a
+      // relation and can only keep/reverse/drop an extracted edge.
+      try {
+        await _reviewLineageDirections(
+          model,
+          relations,
+          cancelToken: cancelToken,
+        );
+      } on AiProviderException catch (error) {
+        if (cancelToken?.isCancelled ?? false) {
+          throw AiGraphGenerationException(
+            '图谱生成已停止',
+            partial: _partialGraph(
+              existing,
+              contentHash: existing?.contentHash ?? '',
+              includesUnread: includesUnread,
+              sectionScheme: sectionScheme,
+              covered: covered,
+              entities: entities,
+              relations: relations,
+              generationSeconds: sw.elapsed.inSeconds,
+              mergeLog: mergeLog,
+              narration: narration,
+            ),
+          );
+        }
+        AiLog.d('graph lineage direction review skipped: ${error.message}');
+      } catch (error) {
+        AiLog.d('graph lineage direction review skipped: $error');
+      }
 
-    try {
-      await _refreshEntityDescriptions(
-        provider,
-        entities,
-        relations,
-        bookTitle: bookTitle,
-        bookAuthor: bookAuthor,
-        cancelToken: cancelToken,
+      // Directional-kin duplicate resolution: the model occasionally flips a
+      // 亲属 edge (万历→慈圣 母子 vs 慈圣→万历 母子) — sometimes even with
+      // different kin (A→B 父子 vs B→A 母子). Keeping a flipped mirror makes
+      // the junior a "candidate parent" and pollutes the family tree. Group by
+      // unordered pair + type (kin-insensitive), keep the strongest direction
+      // when both exist; ties pick the earlier-appearing source (长辈先出场).
+      final firstSections = <String, int>{
+        for (final e in entities) e.id: e.firstSection,
+        for (final e in entities) e.name: e.firstSection,
+      };
+      _dedupeReverseKinEdges(relations, firstSections);
+      // Marital kin refinement: 夫妻 is informal for imperial consorts. When an
+      // endpoint carries a rank term (皇后/贵妃/妃嫔), rewrite the kin label —
+      // 王皇后→皇后, 恭妃王氏→妃嫔, 郑氏(郑贵妃)→贵妃; commoners keep 夫妻.
+      _refineMaritalKin(relations, entities);
+      // Hallucination grounding (borrowed from AI-Reader-V2): an entity whose
+      // name and all aliases never appear verbatim in the book body was almost
+      // certainly invented by the model (leaked from pretraining) — drop it
+      // together with any edge touching it. Zero-cost pure substring evidence.
+      _dropUngroundedEntities(entities, relations, sections);
+
+      // Collapse one character repeated with life-stage identity hints before
+      // quality assessment and description polish, then rewire every relation
+      // to the strongest surviving ID. This also makes the final result log
+      // reflect what the UI will actually receive.
+      final mentionRepair = AiBookGraph(
+        contentHash: '',
+        entities: [...entities],
+        relations: [...relations],
+      ).repairEquivalentMentions();
+      entities
+        ..clear()
+        ..addAll(mentionRepair.entities);
+      relations
+        ..clear()
+        ..addAll(mentionRepair.relations);
+
+      // Description/alias polish (best-effort, see _refreshEntityDescriptions):
+      // heals descriptions frozen at first mention (哈利·波特 labelled
+      // 「尚未登场」 for the whole series) and aliases stolen from another
+      // entity. Also runs when every section was already covered, so a
+      // force-regenerate repairs the stored graph with a single cheap call.
+      onProgress?.call(
+        AiGraphProgress(
+          completed: working.length,
+          total: working.length,
+          label: '正在润色实体描述…',
+        ),
       );
-    } on AiProviderException catch (error) {
-      if (cancelToken?.isCancelled ?? false) {
-        throw AiGraphGenerationException('图谱生成已停止', partial: qualityDraft);
+      final prePolish = _partialGraph(
+        existing,
+        contentHash: existing?.contentHash ?? '',
+        includesUnread: includesUnread,
+        sectionScheme: sectionScheme,
+        covered: covered,
+        entities: entities,
+        relations: relations,
+        generationSeconds: sw.elapsed.inSeconds,
+        mergeLog: mergeLog,
+        narration: narration,
+        sectionTitles: {
+          for (final section in sections)
+            section.originSectionIndex: section.label,
+        },
+      );
+      final quality = assessGraphQuality(prePolish);
+      final qualityIssues = <String>[
+        ...quality.issues,
+        if (deferredSections.isNotEmpty)
+          '${deferredSections.length} 节抽取失败，将在下次增量生成时重试',
+      ];
+      if (qualityIssues.isNotEmpty) {
+        AiLog.d('graph quality: ${qualityIssues.join(' | ')}');
       }
-      AiLog.d('graph description refresh skipped: ${error.message}');
-    } catch (e) {
-      AiLog.d('graph description refresh skipped: $e');
-    }
+      final qualityDraft = prePolish.copyWith(qualityIssues: qualityIssues);
+      if (onCheckpoint != null) await onCheckpoint(qualityDraft);
 
-    entities.sort(_byFrequencyThenName);
-    relations.sort((a, b) => b.evidence.length.compareTo(a.evidence.length));
-    final typeCounts = <AiGraphEntityType, int>{};
-    final exactNameCounts = <String, int>{};
-    for (final entity in entities) {
-      typeCounts[entity.type] = (typeCounts[entity.type] ?? 0) + 1;
-      final key = '${entity.type.wireName}\u0000${entity.name}';
-      exactNameCounts[key] = (exactNameCounts[key] ?? 0) + 1;
+      try {
+        await _refreshEntityDescriptions(
+          model,
+          entities,
+          relations,
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          cancelToken: cancelToken,
+        );
+      } on AiProviderException catch (error) {
+        if (cancelToken?.isCancelled ?? false) {
+          throw AiGraphGenerationException('图谱生成已停止', partial: qualityDraft);
+        }
+        AiLog.d('graph description refresh skipped: ${error.message}');
+      } catch (e) {
+        AiLog.d('graph description refresh skipped: $e');
+      }
+
+      entities.sort(_byFrequencyThenName);
+      relations.sort((a, b) => b.evidence.length.compareTo(a.evidence.length));
+      final typeCounts = <AiGraphEntityType, int>{};
+      final exactNameCounts = <String, int>{};
+      for (final entity in entities) {
+        typeCounts[entity.type] = (typeCounts[entity.type] ?? 0) + 1;
+        final key = '${entity.type.wireName}\u0000${entity.name}';
+        exactNameCounts[key] = (exactNameCounts[key] ?? 0) + 1;
+      }
+      final repeatedExactNames = exactNameCounts.values
+          .where((count) => count > 1)
+          .length;
+      final kinRelations = relations
+          .where((relation) => relation.type == '亲属')
+          .length;
+      AiLog.d(
+        'graph result: entities=${entities.length} '
+        'persons=${typeCounts[AiGraphEntityType.person] ?? 0} '
+        'locations=${typeCounts[AiGraphEntityType.location] ?? 0} '
+        'events=${typeCounts[AiGraphEntityType.event] ?? 0} '
+        'organizations=${typeCounts[AiGraphEntityType.organization] ?? 0} '
+        'items=${typeCounts[AiGraphEntityType.item] ?? 0} '
+        'concepts=${typeCounts[AiGraphEntityType.concept] ?? 0} '
+        'creatures=${typeCounts[AiGraphEntityType.creature] ?? 0} '
+        'relations=${relations.length} kin=$kinRelations '
+        'repeatedExactNames=$repeatedExactNames',
+      );
+      return AiBookGraph(
+        contentHash: existing?.contentHash ?? '',
+        generatedAt: DateTime.now().toUtc(),
+        generationSeconds: sw.elapsed.inSeconds,
+        model: _settings().resolvedModel,
+        includesUnread: includesUnread,
+        sectionScheme: sectionScheme,
+        coveredSections: covered,
+        sectionTitles: {
+          for (final section in sections)
+            section.originSectionIndex: section.label,
+        },
+        entities: entities,
+        relations: relations,
+        narration: narration,
+        mergeLog: mergeLog,
+        qualityIssues: qualityIssues,
+      );
+    } finally {
+      await model.close();
     }
-    final repeatedExactNames = exactNameCounts.values
-        .where((count) => count > 1)
-        .length;
-    final kinRelations = relations
-        .where((relation) => relation.type == '亲属')
-        .length;
-    AiLog.d(
-      'graph result: entities=${entities.length} '
-      'persons=${typeCounts[AiGraphEntityType.person] ?? 0} '
-      'locations=${typeCounts[AiGraphEntityType.location] ?? 0} '
-      'events=${typeCounts[AiGraphEntityType.event] ?? 0} '
-      'organizations=${typeCounts[AiGraphEntityType.organization] ?? 0} '
-      'items=${typeCounts[AiGraphEntityType.item] ?? 0} '
-      'concepts=${typeCounts[AiGraphEntityType.concept] ?? 0} '
-      'creatures=${typeCounts[AiGraphEntityType.creature] ?? 0} '
-      'relations=${relations.length} kin=$kinRelations '
-      'repeatedExactNames=$repeatedExactNames',
-    );
-    return AiBookGraph(
-      contentHash: existing?.contentHash ?? '',
-      generatedAt: DateTime.now().toUtc(),
-      generationSeconds: sw.elapsed.inSeconds,
-      model: _settings().resolvedModel,
-      includesUnread: includesUnread,
-      sectionScheme: sectionScheme,
-      coveredSections: covered,
-      sectionTitles: {
-        for (final section in sections)
-          section.originSectionIndex: section.label,
-      },
-      entities: entities,
-      relations: relations,
-      narration: narration,
-      mergeLog: mergeLog,
-      qualityIssues: qualityIssues,
-    );
   }
 
   /// Post-extraction polish for the entities the reader actually opens.
@@ -972,7 +1004,7 @@ class AiBookGraphService {
   static const int _refreshTopEntities = 40;
 
   Future<void> _refreshEntityDescriptions(
-    AiProvider provider,
+    AiWorkflowModelSession model,
     List<AiGraphEntity> entities,
     List<AiGraphRelation> relations, {
     required String bookTitle,
@@ -1030,10 +1062,9 @@ class AiBookGraphService {
       briefs.writeln('证据：${quotes.join('｜')}');
     }
 
-    final result = await completeWithRetry(
-      provider,
-      AiCompletionRequest(
-        messages: [
+    final result = await model.completeJson(
+      AiModelJsonRequest(
+        messages: _modelMessages([
           const AiMessage(
             role: AiMessageRole.system,
             content:
@@ -1055,15 +1086,15 @@ class AiBookGraphService {
                 '</untrusted_context>\n'
                 '只输出要求的 JSON 对象。',
           ),
-        ],
+        ]),
+        schema: AiWorkflowSchemas.graphEntityRefresh,
         maxTokens: 4000,
         temperature: 0,
         timeout: _graphCallTimeout,
       ),
       cancelToken: cancelToken,
     );
-    final decoded = AiGraphResponse.decodeObject(result.text);
-    final rows = decoded?['entities'];
+    final rows = result.value['entities'];
     if (rows is! List) return;
 
     final byName = {
@@ -1412,7 +1443,7 @@ class AiBookGraphService {
   /// commoner couples keep the model's label. Only 夫妻-labelled edges are
   /// touched; 翁婿/婆媳 etc. stay untouched.
   Future<void> _reviewLineageDirections(
-    AiProvider provider,
+    AiWorkflowModelSession model,
     List<AiGraphRelation> relations, {
     required CancelToken? cancelToken,
   }) async {
@@ -1447,10 +1478,9 @@ class AiBookGraphService {
           '-[${relation.kin}]-> ${relation.target}；证据：$quotes',
         );
       }
-      final result = await completeWithRetry(
-        provider,
-        AiCompletionRequest(
-          messages: [
+      final result = await model.completeJson(
+        AiModelJsonRequest(
+          messages: _modelMessages([
             const AiMessage(
               role: AiMessageRole.system,
               content:
@@ -1468,15 +1498,15 @@ class AiBookGraphService {
                   '输出：{"relations":[{"index":0,"action":"keep|reverse|drop",'
                   '"kin":"父子"}]}。只返回输入中的 index。',
             ),
-          ],
+          ]),
+          schema: AiWorkflowSchemas.graphLineageReview,
           maxTokens: 2400,
           temperature: 0,
           timeout: _graphCallTimeout,
         ),
         cancelToken: cancelToken,
       );
-      final decoded = AiGraphResponse.decodeObject(result.text);
-      final verdicts = decoded?['relations'];
+      final verdicts = result.value['relations'];
       if (verdicts is! List) continue;
       final allowed = {for (final item in batch) item.relationIndex};
       for (final raw in verdicts) {
@@ -1697,7 +1727,7 @@ class AiBookGraphService {
 
   Future<List<({int sectionIndex, Map<String, Object?> raw})>>
   _gleanMissingEntityTypes(
-    AiProvider provider, {
+    AiWorkflowModelSession model, {
     required List<AiBookSectionSlice> sections,
     required List<AiGraphEntityType> missingTypes,
     required String bookTitle,
@@ -1730,10 +1760,9 @@ class AiBookGraphService {
       corpus.writeln('</section>');
     }
     final typeNames = missingTypes.map((type) => type.wireName).join('|');
-    final result = await completeWithRetry(
-      provider,
-      AiCompletionRequest(
-        messages: [
+    final result = await model.completeJson(
+      AiModelJsonRequest(
+        messages: _modelMessages([
           const AiMessage(
             role: AiMessageRole.system,
             content:
@@ -1762,17 +1791,16 @@ class AiBookGraphService {
                 '"type":"关系类型","kin":"","description":"一句话",'
                 '"evidence":[{"section":1,"quote":"原文连续片段"}]}]}。',
           ),
-        ],
+        ]),
+        schema: AiWorkflowSchemas.graphExtraction,
         maxTokens: 5000,
         temperature: 0,
         timeout: _graphCallTimeout,
       ),
       cancelToken: cancelToken,
     );
-    final decoded = AiGraphResponse.decodeObject(result.text);
-    if (decoded == null) return const [];
-    final rawEntities = decoded['entities'];
-    final rawRelations = decoded['relations'];
+    final rawEntities = result.value['entities'];
+    final rawRelations = result.value['relations'];
     final allowedSections = {
       for (final section in sections) section.originSectionIndex,
     };
@@ -1836,7 +1864,7 @@ class AiBookGraphService {
   /// Extracts every chunk of one section sequentially; returns the raw
   /// per-chunk payloads in chunk order for the ordered merge phase.
   Future<List<Map<String, Object?>>> _extractSection(
-    AiProvider provider,
+    AiWorkflowModelSession model,
     AiBookSectionSlice section, {
     required String bookTitle,
     required String? bookAuthor,
@@ -1851,7 +1879,7 @@ class AiBookGraphService {
       cancelToken?.throwIfCancelled();
       raws.addAll(
         await _extractChunkWithFallback(
-          provider,
+          model,
           origin,
           chunk,
           bookTitle: bookTitle,
@@ -1869,7 +1897,7 @@ class AiBookGraphService {
   /// truncated (finish=length on dense sections), so the model always has
   /// room to close the JSON. Depth is bounded; a small chunk failure surfaces.
   Future<List<Map<String, Object?>>> _extractChunkWithFallback(
-    AiProvider provider,
+    AiWorkflowModelSession model,
     int sectionIndex,
     String chunk, {
     required String bookTitle,
@@ -1882,7 +1910,7 @@ class AiBookGraphService {
     try {
       return [
         await _extractChunk(
-          provider,
+          model,
           bookTitle: bookTitle,
           bookAuthor: bookAuthor,
           sectionIndex: sectionIndex,
@@ -1897,7 +1925,7 @@ class AiBookGraphService {
       cancelToken?.throwIfCancelled();
       final halves = _splitChunk(chunk);
       final first = await _extractChunkWithFallback(
-        provider,
+        model,
         sectionIndex,
         halves[0],
         bookTitle: bookTitle,
@@ -1908,7 +1936,7 @@ class AiBookGraphService {
         depth: depth + 1,
       );
       final second = await _extractChunkWithFallback(
-        provider,
+        model,
         sectionIndex,
         halves[1],
         bookTitle: bookTitle,
@@ -1951,7 +1979,7 @@ class AiBookGraphService {
   }
 
   Future<Map<String, Object?>> _extractChunk(
-    AiProvider provider, {
+    AiWorkflowModelSession model, {
     required String bookTitle,
     required String? bookAuthor,
     required int sectionIndex,
@@ -2072,49 +2100,24 @@ class AiBookGraphService {
       ),
     ];
 
-    final request = AiCompletionRequest(
-      messages: messages,
+    final request = AiModelJsonRequest(
+      messages: _modelMessages(messages),
+      schema: AiWorkflowSchemas.graphExtraction,
       maxTokens: extractionMaxTokens,
       temperature: 0,
       timeout: _graphCallTimeout,
     );
 
-    final firstResult = await completeWithRetry(
-      provider,
-      request,
-      cancelToken: cancelToken,
-    );
-    var decoded = AiGraphResponse.decodeObject(firstResult.text);
-    if (decoded == null && firstResult.truncated) {
-      // finish=length: the JSON is cut mid-object and the same request would
-      // truncate again. Halving (handled by the section loop) is cheaper
-      // than a wasted retry.
+    Map<String, dynamic> decoded;
+    try {
+      decoded = (await model.completeJson(
+        request,
+        cancelToken: cancelToken,
+      )).value;
+    } on AiModelOutputTruncatedException {
+      // Halving (handled by the section loop) gives the model enough output
+      // room to close the schema-valid JSON object.
       throw const AiGraphGenerationException('图谱抽取输出被截断');
-    }
-    if (decoded == null) {
-      // One re-probe with an explicit "only JSON" nudge before giving up.
-      final retryRequest = AiCompletionRequest(
-        messages: [
-          ...messages,
-          AiMessage(
-            role: AiMessageRole.user,
-            content: '你上一次的回复不是有效 JSON。请只输出一个 JSON 对象，不要代码块之外的文字。',
-          ),
-        ],
-        maxTokens: extractionMaxTokens,
-        temperature: 0,
-        timeout: _graphCallTimeout,
-      );
-      decoded = AiGraphResponse.decodeObject(
-        (await completeWithRetry(
-          provider,
-          retryRequest,
-          cancelToken: cancelToken,
-        )).text,
-      );
-    }
-    if (decoded == null) {
-      throw const AiGraphGenerationException('图谱抽取输出无效，请重试');
     }
 
     final rawEntities = decoded['entities'];
@@ -2690,7 +2693,7 @@ class AiBookGraphService {
   /// failure (network, parse, garbage) skips the whole review and the graph
   /// stays valid — review is best-effort by design.
   Future<void> _reviewPendingMerges(
-    AiProvider provider,
+    AiWorkflowModelSession model,
     List<_PendingMerge> pending, {
     required _AiAliasIndex canonical,
     required Map<String, AiGraphEntity> entityIndex,
@@ -2725,15 +2728,14 @@ class AiBookGraphService {
         );
       }
       if (lines.isEmpty) return;
-      final response = await completeWithRetry(
-        provider,
-        AiCompletionRequest(
-          messages: [
+      final response = await model.completeJson(
+        AiModelJsonRequest(
+          messages: _modelMessages([
             AiMessage(
               role: AiMessageRole.system,
               content:
                   '你是人物身份判定引擎。判断两串人物称谓是否指向同一人。'
-                  '只输出 JSON 数组，长度与输入对数量相同，每项只能是 "same"、'
+                  '只输出 JSON 对象，verdicts 长度与输入对数量相同，每项只能是 "same"、'
                   '"different" 或 "uncertain"。默认判 "different"：只有当描述'
                   '与原文摘录提供了同一人的明确证据（如称谓包含同一人名、身份'
                   '完全吻合且无矛盾）时才判 "same"；有任何不确定都判 "different"。'
@@ -2746,16 +2748,20 @@ class AiBookGraphService {
                   '<untrusted_context>\n'
                   '判断以下每对称谓是否指向同一人：\n'
                   '${lines.join('\n')}\n'
-                  '</untrusted_context>\n回答 JSON 数组：',
+                  '</untrusted_context>\n回答 {"verdicts":["same|different|uncertain"]}：',
             ),
-          ],
+          ]),
+          schema: AiWorkflowSchemas.graphMergeReview,
           maxTokens: 512,
           temperature: 0,
           timeout: _graphCallTimeout,
         ),
         cancelToken: cancelToken,
       );
-      final verdicts = _decodeReviewVerdicts(response.text);
+      final verdicts = <String>[
+        for (final item in response.value['verdicts'] as List? ?? const [])
+          if (item is String) item.trim().toLowerCase(),
+      ];
       for (var k = 0; k < indexed.length; k++) {
         if (k >= verdicts.length || verdicts[k] != 'same') continue;
         final p = pairs[indexed[k]];
@@ -2783,35 +2789,6 @@ class AiBookGraphService {
   }
 
   static const _maxReviewPairs = 10;
-
-  /// Parses the review JSON array defensively: exact `jsonDecode` first, then
-  /// a regex fallback for wrapped answers. Anything unparseable → empty
-  /// (nothing merges — safe).
-  static List<String> _decodeReviewVerdicts(String raw) {
-    final trimmed = raw.trim();
-    try {
-      final decoded = jsonDecode(trimmed);
-      if (decoded is List) {
-        return [
-          for (final item in decoded)
-            if (item is String) item.trim().toLowerCase(),
-        ];
-      }
-    } catch (_) {
-      // fall through to regex
-    }
-    // Restrict the regex fallback to JSON-array fragments so verdict words
-    // inside a description (e.g. a quote containing "same") are not caught.
-    final arrayPattern = RegExp(r'\[[^\[\]]*\]');
-    for (final match in arrayPattern.allMatches(trimmed)) {
-      final verdicts = RegExp(r'"(same|different|uncertain)"')
-          .allMatches(match.group(0)!)
-          .map((m) => m.group(1)!)
-          .toList(growable: false);
-      if (verdicts.isNotEmpty) return verdicts;
-    }
-    return const [];
-  }
 
   /// First connected entity name (any relation) used only as a hint to the
   /// review prompt.
@@ -3050,4 +3027,16 @@ class AiBookGraphService {
       weight: evidence.length.toDouble(),
     );
   }
+
+  static List<AiModelMessage> _modelMessages(List<AiMessage> messages) => [
+    for (final message in messages)
+      AiModelMessage(
+        role: switch (message.role) {
+          AiMessageRole.system => AiModelRole.system,
+          AiMessageRole.user => AiModelRole.user,
+          AiMessageRole.assistant => AiModelRole.assistant,
+        },
+        text: message.content,
+      ),
+  ];
 }

@@ -23,6 +23,89 @@ abstract class $AiOutlineOutput {
   List<$AiOutlineUnitOutput> get units;
 }
 
+@Schema()
+abstract class $AiNarrationFeaturesOutput {
+  double get eventDriven;
+  double get characterEnsemble;
+  double get organization;
+  double get geography;
+  double get essay;
+}
+
+@Schema()
+abstract class $AiNarrationPlanOutput {
+  $AiNarrationFeaturesOutput get features;
+  String get defaultView;
+  List<String> get viewOrder;
+  bool get wantMap;
+}
+
+@Schema()
+abstract class $AiGraphEvidenceOutput {
+  int get section;
+  String get quote;
+}
+
+@Schema()
+abstract class $AiGraphEntityOutput {
+  String get name;
+  String get type;
+  String get scope;
+  String? get identityHint;
+  List<String>? get aliases;
+  String? get description;
+  String? get eventType;
+  int? get importance;
+  List<$AiGraphEvidenceOutput> get evidence;
+}
+
+@Schema()
+abstract class $AiGraphRelationOutput {
+  String get source;
+  String get target;
+  String? get sourceIdentityHint;
+  String? get targetIdentityHint;
+  String get type;
+  String? get description;
+  String? get kin;
+  List<$AiGraphEvidenceOutput> get evidence;
+}
+
+@Schema()
+abstract class $AiGraphExtractionOutput {
+  List<$AiGraphEntityOutput> get entities;
+  List<$AiGraphRelationOutput> get relations;
+}
+
+@Schema()
+abstract class $AiGraphEntityRefreshItemOutput {
+  String get name;
+  String get description;
+  List<String> get dropAliases;
+}
+
+@Schema()
+abstract class $AiGraphEntityRefreshOutput {
+  List<$AiGraphEntityRefreshItemOutput> get entities;
+}
+
+@Schema()
+abstract class $AiGraphLineageVerdictOutput {
+  int get index;
+  String get action;
+  String get kin;
+}
+
+@Schema()
+abstract class $AiGraphLineageReviewOutput {
+  List<$AiGraphLineageVerdictOutput> get relations;
+}
+
+@Schema()
+abstract class $AiGraphMergeReviewOutput {
+  List<String> get verdicts;
+}
+
 /// Raw schemas exposed to App-owned adapter contracts. Generated Schemantic
 /// types remain isolated in this infrastructure file.
 abstract final class AiWorkflowSchemas {
@@ -33,4 +116,27 @@ abstract final class AiWorkflowSchemas {
   static final Map<String, Object?> outline = Map<String, Object?>.from(
     AiOutlineOutput.$schema.jsonSchema(useRefs: true),
   );
+
+  static final Map<String, Object?> narrationPlan = Map<String, Object?>.from(
+    AiNarrationPlanOutput.$schema.jsonSchema(useRefs: true),
+  );
+
+  static final Map<String, Object?> graphExtraction = Map<String, Object?>.from(
+    AiGraphExtractionOutput.$schema.jsonSchema(useRefs: true),
+  );
+
+  static final Map<String, Object?> graphEntityRefresh =
+      Map<String, Object?>.from(
+        AiGraphEntityRefreshOutput.$schema.jsonSchema(useRefs: true),
+      );
+
+  static final Map<String, Object?> graphLineageReview =
+      Map<String, Object?>.from(
+        AiGraphLineageReviewOutput.$schema.jsonSchema(useRefs: true),
+      );
+
+  static final Map<String, Object?> graphMergeReview =
+      Map<String, Object?>.from(
+        AiGraphMergeReviewOutput.$schema.jsonSchema(useRefs: true),
+      );
 }
