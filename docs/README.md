@@ -13,6 +13,7 @@
 | Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | LLM 三元组抽取研究与学习路径 | [research/kg-llm-extraction.md](./research/kg-llm-extraction.md)（服务 ai-graph） |
 | 本书 AI 从普通对话到 Tool Agent 的实现演进 | [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)（当前全流程 + 后续文章主线） |
+| 图书 AI 助手演进系列文章 | [articles/book-ai-assistant-evolution/](./articles/book-ai-assistant-evolution/)（第一篇：从模型调用到可靠对话） |
 | AI 运行时 Genkit 完整收口计划 | [research/ai-runtime-genkit-completion-plan.md](./research/ai-runtime-genkit-completion-plan.md)（词典/翻译/大纲/图谱迁移与旧 Provider 删除边界） |
 | 某屏交互 | [specs/](./specs/) |
 | 图书听书（TTS） | [specs/book-tts.md](./specs/book-tts.md)（T1 MVP 已有；不接云端 AI 音色） |
@@ -29,6 +30,9 @@ docs/
   PRODUCT.md                 ← 产品权威
   DESIGN_FOUNDATION.md       ← 视觉权威
   ENGINEERING.md             ← 工程骨架
+  articles/
+    book-ai-assistant-evolution/
+      01-reliable-conversation.md   ← 系列第一篇：把一句回答接稳
   research/
     ai-chat-agent-evolution.md       ← 从模型对话到受控 Agent 的实现演进
     ai-runtime-genkit-completion-plan.md ← 全 AI 工作流统一模型边界的执行计划
