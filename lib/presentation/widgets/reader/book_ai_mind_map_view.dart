@@ -213,6 +213,11 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                   boundaryMargin: const EdgeInsets.all(240),
                   minScale: 0.2,
                   maxScale: 3,
+                  // Flutter treats PointerDeviceKind.trackpad scroll as pan
+                  // unless this is explicit. Enabling it uses the framework's
+                  // focal-point-preserving zoom path for both the embedded
+                  // card and fullscreen explorer on desktop.
+                  trackpadScrollCausesScale: true,
                   child: SizedBox.fromSize(
                     size: layout.size,
                     child: Stack(

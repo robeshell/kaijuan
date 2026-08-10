@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
@@ -133,6 +134,50 @@ void main() {
       expect(savedLayout, AiMindMapLayout.bidirectional);
     },
   );
+
+  testWidgets('trackpad scroll zoom keeps the scene point under the pointer', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 600,
+            child: BookAiMindMapView(
+              map: map,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final viewerFinder = find.byType(InteractiveViewer);
+    final viewer = tester.widget<InteractiveViewer>(viewerFinder);
+    expect(viewer.trackpadScrollCausesScale, isTrue);
+    final controller = viewer.transformationController!;
+    final pointerLocal = const Offset(610, 250);
+    final pointerGlobal = tester.getTopLeft(viewerFinder) + pointerLocal;
+    final sceneBefore = controller.toScene(pointerLocal);
+    final scaleBefore = controller.value.getMaxScaleOnAxis();
+
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: pointerGlobal,
+        scrollDelta: const Offset(0, -20),
+        kind: PointerDeviceKind.trackpad,
+      ),
+    );
+    await tester.pump();
+
+    final sceneAfter = controller.toScene(pointerLocal);
+    expect(controller.value.getMaxScaleOnAxis(), greaterThan(scaleBefore));
+    expect((sceneAfter - sceneBefore).distance, lessThan(0.01));
+  });
 
   testWidgets('large maps start with deep branches collapsed', (tester) async {
     final nodes = <AiBookMindMapNode>[
