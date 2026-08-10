@@ -331,6 +331,7 @@ class BookMindMapWorkflow {
     required List<_MindMapInputSection> sections,
     CancelToken? cancelToken,
   }) async {
+    String? repairHint;
     for (var attempt = 0; attempt < 2; attempt++) {
       cancelToken?.throwIfCancelled();
       final compact = attempt > 0;
@@ -341,7 +342,7 @@ class BookMindMapWorkflow {
         final result = await model.completeJson(
           AiModelJsonRequest(
             messages: [
-              const AiModelMessage(
+              AiModelMessage(
                 role: AiModelRole.system,
                 text:
                     '你是图书思维导图编辑。根据全部批次提炼结果生成一棵主题层级树。'
@@ -350,8 +351,12 @@ class BookMindMapWorkflow {
                     '只返回符合 schema 的 JSON。contentKind 只能是 narrative、argumentative、reference、mixed。'
                     'nodes 使用临时 tempId/parentTempId 表达一棵树，恰好一个根节点 parentTempId=null。'
                     '根标题 2-12 字；其他标题 2-20 字；summary 20-140 字。'
-                    '层级 2-5 层，根分支 2-10 个，同父 order 从 0 连续；总节点 6-80。'
-                    '每个非根节点至少保留一条来自输入的原文 evidence，避免逐章流水账和长句节点。',
+                    '根节点 level=0；必须至少有 level=2 的孙节点，最大只能到 level=4。'
+                    '根分支 2-10 个，同父 order 从 0 连续；总节点 6-80。'
+                    '每个非根节点至少保留一条来自输入的原文 evidence。'
+                    'evidence 的 sectionId 和 quote 必须从 batch_summaries 中逐字复制，绝不改写或另造引文。'
+                    '避免逐章流水账和长句节点。'
+                    '${repairHint == null ? '' : '上一次输出未通过校验：$repairHint。请完整重建并修复这一项。'}',
               ),
               AiModelMessage(
                 role: AiModelRole.user,
@@ -367,6 +372,7 @@ class BookMindMapWorkflow {
           ),
           cancelToken: cancelToken,
         );
+        String? invalidReason;
         final parsed = _parseFinal(
           result.value,
           sections,
@@ -377,9 +383,13 @@ class BookMindMapWorkflow {
                   .map((value) => value.toInt())
                   .toSet(),
           ],
+          onInvalid: (reason) => invalidReason = reason,
         );
         if (parsed != null) return parsed;
-        AiLog.d('mind map reduce invalid attempt=${attempt + 1}');
+        repairHint = invalidReason ?? '输出结构不完整';
+        AiLog.d(
+          'mind map reduce invalid attempt=${attempt + 1} reason=$repairHint',
+        );
       } on AiModelOutputTruncatedException {
         // Compact summaries and retry once.
       }
@@ -392,13 +402,22 @@ class BookMindMapWorkflow {
     Map<String, dynamic> raw,
     List<_MindMapInputSection> sections, {
     required List<Set<int>> requiredCoverageGroups,
+    void Function(String reason)? onInvalid,
   }) {
+    ({AiMindMapContentKind contentKind, List<AiBookMindMapNode> nodes})?
+    invalid(String reason) {
+      onInvalid?.call(reason);
+      return null;
+    }
+
     final kind = AiMindMapContentKind.values
         .where((value) => value.name == raw['contentKind'])
         .firstOrNull;
     final rows = raw['nodes'];
-    if (kind == null || rows is! List || rows.length < 6 || rows.length > 80) {
-      return null;
+    if (kind == null) return invalid('contentKind 不在允许枚举内');
+    if (rows is! List) return invalid('nodes 不是数组');
+    if (rows.length < 6 || rows.length > 80) {
+      return invalid('节点总数必须在 6 到 80 之间');
     }
     final sectionById = {
       for (final section in sections) section.sectionId: section,
@@ -412,20 +431,24 @@ class BookMindMapWorkflow {
           !_bounded(row['summary'], 0, 180) ||
           row['order'] is! num ||
           row['evidence'] is! List) {
-        return null;
+        return invalid('节点字段类型或标题、摘要长度不符合约束');
       }
       final id = (row['tempId'] as String).trim();
-      if (id.isEmpty || temp.containsKey(id)) return null;
+      if (id.isEmpty || temp.containsKey(id)) {
+        return invalid('tempId 为空或重复');
+      }
       final evidence = <AiMindMapEvidence>[];
       for (final item in row['evidence'] as List) {
         if (item is! Map ||
             item['sectionId'] is! num ||
             item['quote'] is! String) {
-          return null;
+          return invalid('evidence 缺少合法 sectionId 或 quote');
         }
         final section = sectionById[(item['sectionId'] as num).toInt()];
         final quote = (item['quote'] as String).trim();
-        if (section == null || quote.isEmpty) return null;
+        if (section == null || quote.isEmpty) {
+          return invalid('evidence 引用了范围外章节或空引文');
+        }
         evidencedSectionIds.add(section.sectionId);
         evidence.add(_resolveEvidence(section, quote));
       }
@@ -441,27 +464,28 @@ class BookMindMapWorkflow {
       );
     }
     final roots = temp.values.where((node) => node.parentId == null).toList();
-    if (roots.length != 1 || roots.single.evidence.isNotEmpty) return null;
+    if (roots.length != 1) return invalid('必须恰好有一个根节点');
+    if (roots.single.evidence.isNotEmpty) return invalid('根节点 evidence 必须为空');
     if (requiredCoverageGroups.any(
       (group) => !group.any(evidencedSectionIds.contains),
     )) {
-      return null;
+      return invalid('每个输入批次至少要有一条 evidence 被最终节点使用');
     }
     if (!_bounded(roots.single.title, 2, 12) ||
         !_bounded(roots.single.summary, 0, 140)) {
-      return null;
+      return invalid('根节点标题或摘要长度不符合约束');
     }
     for (final node in temp.values) {
       if (node.parentId != null && !temp.containsKey(node.parentId)) {
-        return null;
+        return invalid('parentTempId 引用了不存在的节点');
       }
       if (node.parentId != null &&
           (!_bounded(node.title, 2, 20) || !_bounded(node.summary, 0, 140))) {
-        return null;
+        return invalid('非根节点标题或摘要长度不符合约束');
       }
       if (node.parentId != null &&
           !node.evidence.any((evidence) => evidence.spanResolved)) {
-        return null;
+        return invalid('非根节点必须逐字复用至少一条可定位 evidence 引文');
       }
     }
     final children = <String, List<_RawMindMapNode>>{};
@@ -474,7 +498,7 @@ class BookMindMapWorkflow {
             ? a.order.compareTo(b.order)
             : a.title.compareTo(b.title),
       );
-      if (siblings.length > 12) return null;
+      if (siblings.length > 12) return invalid('同一父节点的直接子节点不能超过 12 个');
     }
     final result = <AiBookMindMapNode>[];
     final visiting = <String>{};
@@ -502,7 +526,7 @@ class BookMindMapWorkflow {
     }
 
     if (!walk(roots.single, 0, null) || visited.length != temp.length) {
-      return null;
+      return invalid('树包含环、孤立节点或超过 level=4');
     }
     final rootId = result.first.nodeId;
     final rootChildren = result.where((node) => node.parentId == rootId).length;
@@ -510,9 +534,16 @@ class BookMindMapWorkflow {
       0,
       (value, node) => math.max(value, node.level),
     );
-    if (rootChildren < 2 || rootChildren > 10 || maxLevel < 2) return null;
-    if (!_hasBalancedRootBranches(result, rootId)) return null;
-    if (!validateAiBookMindMapNodes(result)) return null;
+    if (rootChildren < 2 || rootChildren > 10) {
+      return invalid('根节点必须有 2 到 10 个直接分支');
+    }
+    if (maxLevel < 2) return invalid('层级不足，必须包含 level=2 的孙节点');
+    if (!_hasBalancedRootBranches(result, rootId)) {
+      return invalid('根分支过度失衡，请重新分组');
+    }
+    if (!validateAiBookMindMapNodes(result)) {
+      return invalid('节点顺序、层级或父子关系不连续');
+    }
     return (contentKind: kind, nodes: List.unmodifiable(result));
   }
 

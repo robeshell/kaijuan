@@ -62,6 +62,7 @@ App 冻结书籍/作品/章节范围
 - 开卷拥有 `AiRunOrchestrator`、预算、取消、超时、范围、重试、checkpoint、存储和 UI 状态。暂不使用 Genkit `defineFlow` / Agent；Genkit 只负责 Provider 归一化、structured output、Schema 和 trace。
 - DeepSeek 只接受原生 `json_object`，隔离 adapter 把锁版 Genkit 插件生成的 `json_schema` 请求转换为该模式，并把同一 schema 注入消息；Genkit JSON parser 与本 Workflow 的结构/证据校验仍必须全部通过。该兼容分支不得变成 fenced JSON 或跨协议 transport 回退。
 - batch 失败不写完成标记。取消、网络失败和进程退出保留最后一个原子 checkpoint；同范围再次生成时恢复未完成 batch。
+- 最终归并校验失败后的重试必须携带 App 给出的具体、无正文内容的修复原因（例如层级不足、父引用无效或证据引文无法定位），不得用相同提示盲目重复。层级口径统一为根节点 `level=0`，至少包含 `level=2` 的孙节点，最多到 `level=4`；模型必须逐字复用批次 evidence 引文，不得改写。
 - 失败、取消和成功是互斥终态。服务端拒绝结构化格式、模型输出无效或网络失败时必须显示可重试错误；只有用户明确停止才显示取消，不得无声回到未生成空态。
 - 模型输出的临时 ID、布局建议和 HTML/SVG 都不可信；App 只消费结构化主题数据。
 

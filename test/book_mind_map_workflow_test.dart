@@ -205,12 +205,37 @@ void main() {
       expect(adapter.closed, isTrue);
     },
   );
+
+  test(
+    'final reduce retries with the deterministic validation reason',
+    () async {
+      final invalid = finalTree();
+      final rows = invalid['nodes']! as List<Map<String, Object?>>;
+      rows[1]['parentTempId'] = 'missing';
+      final adapter = _FakeMindMapAdapter([batch(), invalid, finalTree()]);
+
+      final result = await workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '测试书',
+        sections: sections,
+      );
+
+      expect(result.nodes, hasLength(6));
+      expect(adapter.requests, hasLength(3));
+      expect(
+        adapter.requests.last.messages.first.text,
+        contains('parentTempId 引用了不存在的节点'),
+      );
+    },
+  );
 }
 
 class _FakeMindMapAdapter implements AiModelAdapter, AiStructuredOutputAdapter {
   _FakeMindMapAdapter(this.outputs);
 
   final List<Map<String, dynamic>> outputs;
+  final List<AiModelJsonRequest> requests = [];
   var calls = 0;
   var closed = false;
 
@@ -223,6 +248,7 @@ class _FakeMindMapAdapter implements AiModelAdapter, AiStructuredOutputAdapter {
     CancelToken? cancelToken,
   }) async {
     cancelToken?.throwIfCancelled();
+    requests.add(request);
     return AiModelJsonResult(value: outputs[calls++]);
   }
 
