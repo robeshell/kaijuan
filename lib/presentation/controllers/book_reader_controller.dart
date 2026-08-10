@@ -1443,7 +1443,12 @@ class BookReaderController extends ChangeNotifier {
     }
   }
 
-  void cancelBookMindMapGeneration() => _bookMindMapCancel?.cancel();
+  void cancelBookMindMapGeneration() {
+    if (_bookMindMapGeneration == null) return;
+    _bookMindMapError = '已停止';
+    _bookMindMapCancel?.cancel();
+    if (!_disposed) notifyListeners();
+  }
 
   Future<void> setBookMindMapLayout(AiMindMapLayout layout) async {
     final map = _bookMindMap;

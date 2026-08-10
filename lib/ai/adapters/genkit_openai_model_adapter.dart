@@ -487,6 +487,7 @@ final class _OpenAiRequestDecorator extends http.BaseClient {
         throw const FormatException('OpenAI request body must be an object');
       }
       policy.decorateRequest(decoded);
+      _adaptStructuredOutput(decoded);
       final messages = decoded['messages'];
       if (policy.requiresReasoningContinuity &&
           messages is List &&
@@ -518,6 +519,59 @@ final class _OpenAiRequestDecorator extends http.BaseClient {
       persistentConnection: response.persistentConnection,
       reasonPhrase: response.reasonPhrase,
     );
+  }
+
+  void _adaptStructuredOutput(Map<String, dynamic> body) {
+    if (!policy.requiresJsonObjectStructuredOutput) return;
+    final responseFormat = body['response_format'];
+    if (responseFormat is! Map || responseFormat['type'] != 'json_schema') {
+      return;
+    }
+    final jsonSchema = responseFormat['json_schema'];
+    final schema = jsonSchema is Map ? jsonSchema['schema'] : null;
+    if (schema is! Map) {
+      throw const FormatException(
+        'DeepSeek structured output requires an object JSON schema',
+      );
+    }
+
+    // genkit_openai 0.3.7 maps every output schema to OpenAI's strict
+    // json_schema response format. DeepSeek supports native JSON mode but its
+    // protocol accepts only json_object. Keep the conversion isolated at the
+    // wire boundary: Genkit still parses the response and the workflow still
+    // validates the same schema and business invariants.
+    body['response_format'] = const {'type': 'json_object'};
+    final instruction =
+        'Return exactly one JSON object. It must conform to the following '
+        'JSON Schema. Do not include Markdown fences or any text outside the '
+        'JSON object.\nJSON Schema:\n${jsonEncode(schema)}';
+    final messages = body['messages'];
+    if (messages is! List) {
+      throw const FormatException(
+        'DeepSeek structured output requires a messages array',
+      );
+    }
+    final system = messages.whereType<Map>().firstWhere(
+      (message) => message['role'] == 'system',
+      orElse: () => <String, dynamic>{},
+    );
+    if (system.isEmpty) {
+      messages.insert(0, <String, dynamic>{
+        'role': 'system',
+        'content': instruction,
+      });
+      return;
+    }
+    final content = system['content'];
+    if (content is String) {
+      system['content'] = '$content\n\n$instruction';
+    } else if (content is List) {
+      content.add(<String, dynamic>{'type': 'text', 'text': instruction});
+    } else {
+      throw const FormatException(
+        'DeepSeek structured output requires text system content',
+      );
+    }
   }
 
   @override
@@ -647,6 +701,9 @@ final class _OpenAiReasoningPolicy {
       providerKind.reasoningCapabilities(model).supported;
 
   bool get requiresReasoningContinuity =>
+      providerKind == AiProviderKind.deepseek;
+
+  bool get requiresJsonObjectStructuredOutput =>
       providerKind == AiProviderKind.deepseek;
 
   void decorateRequest(Map<String, dynamic> body) {

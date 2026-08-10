@@ -132,7 +132,7 @@
    - 接口地址：默认占位如 `https://api.x.ai/v1` 或留空提示「兼容 OpenAI 的 Base URL」；本地服务商默认 Ollama 地址。  
    - 模型：文本框或近期列表；不内置付费套餐 UI。  
    - 所有预设服务商、自定义 OpenAI Compatible 与 Ollama 都显示「默认开启深度思考」，默认关闭。它是词典、翻译、大纲、图谱等确定性工作流的运行默认值，也是每次打开本书对话面板时「深度思考」临时开关的初值；面板内调整只影响该面板随后发送的轮次，不回写设置。App 不根据问题内容偷偷自动切换。
-   - 开关由 adapter 按当前服务商与模型能力映射，不假设所有协议都能彻底关闭推理：DeepSeek 为 enabled/disabled；Anthropic 为 adaptive/disabled；OpenAI 为 high 与 none/low；Grok 为 high/low；Ollama 为 high/none；自定义兼容端点只在开启时尽力发送 `reasoning_effort=high`，关闭时省略扩展字段。Anthropic 的 Genkit constrained output 依赖强制 `return_output` 工具，而官方协议不保证强制工具与 thinking 可组合，因此大纲、图谱等结构化调用固定关闭该次 thinking，优先保证 schema；普通对话、词典和翻译仍服从开关。模型不支持或端点拒绝扩展字段时，本轮明确失败并给出可读错误，不跨协议回退。
+   - 开关由 adapter 按当前服务商与模型能力映射，不假设所有协议都能彻底关闭推理：DeepSeek 为 enabled/disabled；Anthropic 为 adaptive/disabled；OpenAI 为 high 与 none/low；Grok 为 high/low；Ollama 为 high/none；自定义兼容端点只在开启时尽力发送 `reasoning_effort=high`，关闭时省略扩展字段。Anthropic 的 Genkit constrained output 依赖强制 `return_output` 工具，而官方协议不保证强制工具与 thinking 可组合，因此大纲、图谱等结构化调用固定关闭该次 thinking，优先保证 schema；普通对话、词典和翻译仍服从开关。DeepSeek 官方结构化能力是 `response_format: {"type":"json_object"}`，不是锁版 Genkit 插件默认发送的 `json_schema`；adapter 仅对 DeepSeek 在最终 HTTP JSON 内转换格式并注入同一 schema，返回值继续通过 Genkit JSON parser、Schemantic 类型边界与 Workflow 业务校验。模型不支持或端点拒绝扩展字段时，本轮明确失败并给出可读错误，不跨协议回退。
    - 「测试连接」：发最小 completion；成功 SnackBar「连接正常」；失败展示可读错误。  
 
 4. **联网搜索（可选，BYOK）**  
@@ -582,7 +582,7 @@ AiBookLanguageProvider（或 Composite）
 - 推理协议映射以当前供应商官方能力为准：DeepSeek 每次显式发送 `thinking.type`；Anthropic 现代 Claude 开启时发送 adaptive thinking + summarized display、关闭时 disabled，旧模型必要时才使用至少 1024 token 的 manual budget；OpenAI 识别出的推理模型发送 `reasoning_effort` high 与 none/low；Grok 发送 high/low；Ollama OpenAI Compatible 发送 high/none；自定义兼容端点仅在开启时发送 high，关闭时省略。Anthropic constrained output 的强制工具冲突由 adapter 对该次调用显式关闭 thinking，不能等首个 400 后重试。锁版插件未建模的字段只能在隔离 adapter 内装饰最终 HTTP JSON，不得扩散到 UI 或业务 Workflow。
 - OpenAI Compatible adapter 只读取供应商实际返回的 `reasoning_content`、`reasoning` 或 `thinking`；Anthropic adapter 读取 Genkit `ReasoningPart`。推理展示类型由 adapter 指明为过程或摘要。未返回可见推理内容时只保留普通回答，不补写、不推断。
 - 流式：SSE；可取消（关闭 panel / dispose）。  
-- Anthropic SSE 的解析与累积由锁版插件承担；adapter 仍须检查 Genkit 完成终态、重复 tool ID、工具参数对象及长度截断，任何不完整工具调用均不得执行。结构化输出使用 Genkit constrained output，不使用提示词伪 JSON；取消必须关闭本次插件 transport，不能只停止 UI 消费。
+- Anthropic SSE 的解析与累积由锁版插件承担；adapter 仍须检查 Genkit 完成终态、重复 tool ID、工具参数对象及长度截断，任何不完整工具调用均不得执行。支持 OpenAI JSON Schema 的端点使用 Genkit constrained output；DeepSeek 使用其原生 JSON Object mode，并由 adapter 注入 Genkit 收到的同一 schema，最终仍经 Genkit 解析与 Workflow 确定性校验。不得退回 fenced JSON、正则修补或第二套 transport。取消必须关闭本次插件 transport，不能只停止 UI 消费；普通失败不得因 transport 收尾触发的取消状态被 UI 吞掉。
 - 超时与重试：短请求 1 次重试；长任务按章重试，不整本重来。  
 - 模型名用户自填；App 可提供「常用占位」但不锁死。  
 - 本地（Ollama）：OpenAI 兼容端点 `http://localhost:11434/v1`；`AiProviderKind.ollama` 标记 `isLocalBackend`，adapter 工厂与 controller 在本地服务商下**跳过 API Key 校验**；模型经独立 catalog 的 `GET /v1/models` 列出本地已安装模型。

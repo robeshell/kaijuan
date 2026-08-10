@@ -83,6 +83,42 @@ void main() {
     expect(events.whereType<AiRunCompleted>(), isEmpty);
   });
 
+  test(
+    'terminal failure does not mark the caller token as cancelled',
+    () async {
+      final token = CancelToken();
+      final events = await const AiRunOrchestrator()
+          .run(
+            descriptor: descriptor,
+            budget: const AiRunBudget(maxModelCalls: 1),
+            cancelToken: token,
+            body: (_) async => throw StateError('provider failed'),
+          )
+          .toList();
+
+      expect(events.last, isA<AiRunFailed>());
+      expect(token.isCancelled, isFalse);
+    },
+  );
+
+  test(
+    'terminal completion does not mark the caller token as cancelled',
+    () async {
+      final token = CancelToken();
+      final events = await const AiRunOrchestrator()
+          .run(
+            descriptor: descriptor,
+            budget: const AiRunBudget(maxModelCalls: 1),
+            cancelToken: token,
+            body: (_) async {},
+          )
+          .toList();
+
+      expect(events.last, isA<AiRunCompleted>());
+      expect(token.isCancelled, isFalse);
+    },
+  );
+
   test('consumer cancellation propagates to the run token', () async {
     final entered = Completer<void>();
     final stopped = Completer<void>();

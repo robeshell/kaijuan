@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | 已实现（独立 `BookMindMapWorkflow`） |
+| **状态** | Workflow 已实现；产品入口待确认 |
 | **日期** | 2026-08-10 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **相关** | [ai.md](./ai.md)、[ai-graph.md](./ai-graph.md)、[webdav-backup.md](./webdav-backup.md) |
@@ -16,7 +16,7 @@
 
 ## 2. 产品入口与范围
 
-- 「本书 AI」增加独立「思维导图」页签；空对话中的「生成思维导图」快捷入口只切换到该页签，不向聊天 Agent 发送长期任务提示词。
+- 独立 Workflow 不等于独立页签。当前「本书 AI」内的独立页签只是尚未验收的实现，不作为已定产品结论；入口需另行确认。无论最终采用聊天结果卡片、阅读器动作或其他入口，「生成思维导图」都只路由到 `BookMindMapWorkflow`，不得向聊天 Agent 发送长期任务提示词。
 - 生成前由 App 冻结 `contentHash`、可选 `workKey`、作品标题和用户确认的章节范围。文件内多作品先选作品，再选该作品的内容单元；当前翻页不改变运行中的范围。
 - 范围确认列出全部可读内容单元。正文/辅文规则只给默认建议，用户最终勾选是权威输入；字符预算只能均衡抽样，不能让后部章节从选择器消失。
 - 首次生成、重新生成和恢复 checkpoint 都使用相同的范围指纹。范围变化后旧 checkpoint 不得混入新任务。
@@ -60,7 +60,9 @@ App 冻结书籍/作品/章节范围
 
 - `BookMindMapWorkflow` 自己不持有 Provider、Genkit 类型、UI 或 WebDAV 客户端。模型 I/O 只经 `AiWorkflowModelSession.completeJson`。
 - 开卷拥有 `AiRunOrchestrator`、预算、取消、超时、范围、重试、checkpoint、存储和 UI 状态。暂不使用 Genkit `defineFlow` / Agent；Genkit 只负责 Provider 归一化、structured output、Schema 和 trace。
+- DeepSeek 只接受原生 `json_object`，隔离 adapter 把锁版 Genkit 插件生成的 `json_schema` 请求转换为该模式，并把同一 schema 注入消息；Genkit JSON parser 与本 Workflow 的结构/证据校验仍必须全部通过。该兼容分支不得变成 fenced JSON 或跨协议 transport 回退。
 - batch 失败不写完成标记。取消、网络失败和进程退出保留最后一个原子 checkpoint；同范围再次生成时恢复未完成 batch。
+- 失败、取消和成功是互斥终态。服务端拒绝结构化格式、模型输出无效或网络失败时必须显示可重试错误；只有用户明确停止才显示取消，不得无声回到未生成空态。
 - 模型输出的临时 ID、布局建议和 HTML/SVG 都不可信；App 只消费结构化主题数据。
 
 ## 5. 布局与交互
@@ -84,7 +86,7 @@ App 冻结书籍/作品/章节范围
 1. 文档与业务模型：冻结边界、Schema、验证器、布局策略。
 2. Workflow 与存储：预算、取消、checkpoint、错误和恢复。
 3. Controller：独立状态机、范围解析、原子保存、WebDAV。
-4. UI：独立页签、快捷路由、原生画布、折叠/详情/跳转。
+4. UI：入口方案确认后实现快捷路由、原生画布、折叠/详情/跳转；独立页签不作为默认结论。
 5. 验证：模型/存储/恢复/取消/错误、布局算法、Widget 与大图边界测试；保留聊天 Mermaid 回归测试。
 
 ## 8. 验收
@@ -92,6 +94,7 @@ App 冻结书籍/作品/章节范围
 - 相同结构输入的节点 ID、父子关系和自动布局确定性一致。
 - 非法父引用、环、跨范围证据、过长标题和失衡根节点不会被静默保存。
 - 取消后保留 checkpoint；同范围恢复不重做已完成 batch；换范围不复用旧 checkpoint。
+- DeepSeek 请求使用 `json_object` 而非 `json_schema`，非法 JSON 或不符合业务约束的结果仍失败；普通失败不会被取消收尾吞掉。
 - UI 可切换三种布局、折叠、缩放、拖动、打开详情并跳回证据。
 - WebDAV 能导出/恢复已完成思维导图，旧快照仍可解析，Key 与 checkpoint 不进入快照。
 - 普通聊天 Mermaid mindmap 和其他图表继续渲染，且不读取 `AiBookMindMap`。

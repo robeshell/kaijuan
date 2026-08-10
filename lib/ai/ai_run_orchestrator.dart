@@ -74,6 +74,7 @@ class AiRunOrchestrator {
     late final StreamController<AiRunEvent> controller;
     late final AiRunExecution execution;
     var consumerCancelled = false;
+    var executionFinished = false;
     var timedOut = false;
     Timer? timer;
     Completer<void>? deadline;
@@ -136,6 +137,7 @@ class AiRunOrchestrator {
           execution._fail(error, stackTrace);
         }
       } finally {
+        executionFinished = true;
         timer?.cancel();
         effectiveCancel.removeCancelListener(cancelExecution);
         await controller.close();
@@ -146,7 +148,11 @@ class AiRunOrchestrator {
       onListen: () => unawaited(execute()),
       onCancel: () {
         consumerCancelled = true;
-        effectiveCancel.cancel();
+        // A single-subscription controller also invokes onCancel while a
+        // normally completed/failed stream is being torn down. Do not mutate
+        // the caller's token after a terminal event: controllers use that
+        // token to distinguish user cancellation from a provider failure.
+        if (!executionFinished) effectiveCancel.cancel();
       },
     );
     return controller.stream;

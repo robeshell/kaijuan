@@ -293,10 +293,79 @@ data: [DONE]
       expect(requestJson!['stream'], isNot(true));
       expect(requestJson!.containsKey('thinking'), isFalse);
       expect(requestJson!['response_format'], isA<Map>());
+      expect((requestJson!['response_format'] as Map)['type'], 'json_schema');
       expect(adapter.runtimeName, 'genkit-openai/0.3.7');
 
       await adapter.close();
       client.close();
+    },
+  );
+
+  test(
+    'DeepSeek structured output uses native json_object with schema guidance',
+    () async {
+      Map<String, dynamic>? requestJson;
+      final client = MockClient((request) async {
+        requestJson = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'id': 'deepseek-json',
+            'object': 'chat.completion',
+            'created': 1,
+            'model': 'deepseek-v4-flash',
+            'choices': [
+              {
+                'index': 0,
+                'message': {'role': 'assistant', 'content': '{"summary":"完成"}'},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+      final adapter = GenkitOpenAiModelAdapter(
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'test-key',
+        model: 'deepseek-v4-flash',
+        providerKind: AiProviderKind.deepseek,
+        reasoningEnabled: false,
+        httpClient: client,
+      );
+
+      try {
+        final result = await adapter.completeJson(
+          const AiModelJsonRequest(
+            messages: [
+              AiModelMessage(role: AiModelRole.system, text: '只返回结果。'),
+              AiModelMessage(role: AiModelRole.user, text: '总结'),
+            ],
+            schema: {
+              'type': 'object',
+              'properties': {
+                'summary': {'type': 'string'},
+              },
+              'required': ['summary'],
+              'additionalProperties': false,
+            },
+          ),
+        );
+
+        expect(result.value, {'summary': '完成'});
+        expect(requestJson!['response_format'], {'type': 'json_object'});
+        expect(requestJson!['thinking'], {'type': 'disabled'});
+        final messages = (requestJson!['messages'] as List).cast<Map>();
+        final system = messages.firstWhere(
+          (message) => message['role'] == 'system',
+        );
+        expect(system['content'], contains('JSON Schema'));
+        expect(system['content'], contains('"summary"'));
+        expect(system['content'], isNot(contains('```')));
+      } finally {
+        await adapter.close();
+        client.close();
+      }
     },
   );
 
