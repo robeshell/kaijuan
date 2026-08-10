@@ -1289,7 +1289,7 @@ class BookReaderController extends ChangeNotifier {
   String? get bookMindMapError => _bookMindMapError;
   bool get isGeneratingBookMindMap => _bookMindMapGeneration != null;
 
-  Future<AiBookMindMap?> loadBookMindMap({AiGraphWorkCandidate? work}) async {
+  Future<AiBookMindMap?> loadBookMindMap({AiBookWork? work}) async {
     final store = _aiMindMapStore;
     if (store == null) return null;
     final target = work ?? currentReadingWork;
@@ -1305,7 +1305,7 @@ class BookReaderController extends ChangeNotifier {
   /// The conversation scope is already confirmed by the user's wording, so
   /// this never exposes graph-style section choices to presentation.
   Future<List<AiBookSectionSlice>> bookMindMapSections({
-    AiGraphWorkCandidate? work,
+    AiBookWork? work,
     bool useFrozenWork = false,
   }) async {
     await resolveBookStructure();
@@ -1337,7 +1337,7 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<AiBookMindMap?> generateBookMindMap({
-    AiGraphWorkCandidate? work,
+    AiBookWork? work,
     AiBookSectionSlice? frozenCurrentChapter,
     bool useFrozenWork = false,
   }) {
@@ -1368,7 +1368,7 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<AiBookMindMap?> _generateBookMindMap({
-    AiGraphWorkCandidate? work,
+    AiBookWork? work,
     AiBookSectionSlice? frozenCurrentChapter,
     required bool useFrozenWork,
   }) async {
@@ -1564,28 +1564,29 @@ class BookReaderController extends ChangeNotifier {
 
   bool get hasActiveWorkGraph => _activeGraphWork != null;
 
-  static String workKeyFor(AiGraphWorkCandidate work) => work.id;
+  static String workKeyFor(AiBookWork work) => work.id;
 
   /// The internal work the reader is currently inside (current spine →
   /// work range), or null when the current section belongs to no work (plain
   /// book / front matter / whole-book view). Drives the「读到哪本跟哪本」
   /// behavior for a multi-work file.
-  AiGraphWorkCandidate? get currentReadingWork {
+  AiBookWork? get currentReadingWork {
     return _aiStructure.workAtSection(_sectionIndex + 1);
   }
 
   /// Public view of the cached structural-recognition result (null = not
   /// resolved yet or no works); the sheet uses it to decide the loading
   /// state without holding a duplicate cache.
-  List<AiGraphWorkCandidate>? get resolvedGraphWorks =>
-      _aiStructure.scopedWorks;
+  List<AiBookWork>? get resolvedBookWorks => _aiStructure.scopedWorks;
+
+  /// Compatibility projection retained for the knowledge-graph UI.
+  List<AiGraphWorkCandidate>? get resolvedGraphWorks => resolvedBookWorks;
 
   AiBookStructureManifest? get bookStructureManifest => _aiStructure.manifest;
 
   AiBookStructureManifest? get _bookStructureManifest => _aiStructure.manifest;
 
-  List<AiGraphWorkCandidate>? get _resolvedGraphWorks =>
-      _aiStructure.scopedWorks;
+  List<AiBookWork>? get _resolvedBookWorks => _aiStructure.scopedWorks;
 
   /// Whether this single file is a recognized multi-work omnibus.
   bool get hasCollectionWorks => _aiStructure.hasCollectionWorks;
@@ -1665,7 +1666,7 @@ class BookReaderController extends ChangeNotifier {
     final store = _aiGraphStore;
     if (store == null) return;
     try {
-      final works = _resolvedGraphWorks;
+      final works = _resolvedBookWorks;
       if (works == null || works.length < 2) return;
       final target = _matchingWorkForGraph(works, graph);
       if (target == null) return;
@@ -1743,10 +1744,8 @@ class BookReaderController extends ChangeNotifier {
 
   /// Resolves deterministic file structure once per reader. Compatibility
   /// return: independent work scopes for an omnibus, otherwise null.
-  Future<List<AiGraphWorkCandidate>?> resolveBookStructure({
-    CancelToken? cancel,
-  }) async {
-    if (_aiStructure.isResolved) return _resolvedGraphWorks;
+  Future<List<AiBookWork>?> resolveBookStructure({CancelToken? cancel}) async {
+    if (_aiStructure.isResolved) return _resolvedBookWorks;
     cancel?.throwIfCancelled();
     try {
       return await _resolveWorks(cancel);
@@ -1763,7 +1762,7 @@ class BookReaderController extends ChangeNotifier {
     CancelToken? cancel,
   }) => resolveBookStructure(cancel: cancel);
 
-  Future<List<AiGraphWorkCandidate>?> _resolveWorks(CancelToken? cancel) async {
+  Future<List<AiBookWork>?> _resolveWorks(CancelToken? cancel) async {
     final works = await _aiStructure.resolve(
       maxChars: AiBookOutlineService.maxBookBodyChars,
       cancel: cancel,
@@ -1993,7 +1992,7 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<List<AiBookSectionSlice>> _mindMapSectionsForWork(
-    AiGraphWorkCandidate? work,
+    AiBookWork? work,
   ) async {
     final body = await _aiCorpus.loadSpine(BookMindMapWorkflow.maxBodyChars);
     final sections = AiChatRetrieve.splitSections(body);
@@ -2224,7 +2223,7 @@ class BookReaderController extends ChangeNotifier {
   /// Lean chat seed: current chapter + selection + TOC titles (no whole-book dump).
   Future<AiChatContextBundle> loadAiChatContext({
     String? selectionOverride,
-    required AiGraphWorkCandidate? workScope,
+    required AiBookWork? workScope,
   }) async {
     try {
       var selection = selectionOverride?.trim() ?? '';
@@ -2266,7 +2265,7 @@ class BookReaderController extends ChangeNotifier {
     required String userText,
     required List<AiChatMessage> history,
     required AiChatContextBundle context,
-    required AiGraphWorkCandidate? workScope,
+    required AiBookWork? workScope,
     List<AiWebSearchHit>? webHits,
     bool? reasoningEnabled,
     CancelToken? cancelToken,
@@ -2292,7 +2291,7 @@ class BookReaderController extends ChangeNotifier {
     required String userText,
     required List<AiChatMessage> history,
     required AiChatContextBundle context,
-    required AiGraphWorkCandidate? workScope,
+    required AiBookWork? workScope,
     List<AiWebSearchHit>? webHits,
     bool? reasoningEnabled,
     CancelToken? cancelToken,
@@ -2351,7 +2350,7 @@ class BookReaderController extends ChangeNotifier {
   /// BYOK web search for chat 联网. Empty list if not configured.
   Future<List<AiWebSearchHit>> searchWebForChat(
     String query, {
-    required AiGraphWorkCandidate? workScope,
+    required AiBookWork? workScope,
     CancelToken? cancelToken,
   }) async {
     final ai = _aiSettings;
@@ -3912,7 +3911,7 @@ class BookReaderController extends ChangeNotifier {
 AiChatToolHost createBookChatToolHostForTesting({
   required BookReaderController controller,
   required AiChatContextBundle context,
-  AiGraphWorkCandidate? work,
+  AiBookWork? work,
 }) => AiBookChatToolHost(
   corpus: controller._aiCorpus,
   work: work,
@@ -3927,6 +3926,6 @@ AiChatToolHost createBookChatToolHostForTesting({
 /// work. Exact work-title matching remains only as compatibility fallback for
 /// older/navigation-mode bodies that contain one slice per work.
 @visibleForTesting
-String scopeChatBodyToWork(String body, AiGraphWorkCandidate? work) {
+String scopeChatBodyToWork(String body, AiBookWork? work) {
   return scopeAiChatBodyToWork(body, work);
 }
