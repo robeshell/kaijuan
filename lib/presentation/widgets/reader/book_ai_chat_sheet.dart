@@ -140,9 +140,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String? _graphHighlighted;
   Timer? _graphHighlightTimer;
   Timer? _streamCheckpointTimer;
+  int _scrollRequestEpoch = 0;
   DateTime? _lastStreamCheckpointAt;
   final _graphEntityKeys = <String, GlobalKey>{};
   int _graphListEpoch = 0;
+  String? _mindMapRevealTurnId;
 
   /// Attached highlight; null when cleared by user.
   String? _selection;
@@ -1062,9 +1064,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// Retries a few frames: ListView may not have clients yet right after
   /// bootstrap, and markdown bubbles can grow after the first layout.
   void _scrollToEnd({bool animated = true}) {
+    final epoch = ++_scrollRequestEpoch;
     void attempt(int remaining) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted || epoch != _scrollRequestEpoch) return;
         if (!_scroll.hasClients) {
           if (remaining > 0) attempt(remaining - 1);
           return;
@@ -1082,7 +1085,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         // Content may still grow (markdown) — pin again if not at end.
         if (remaining > 0) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted || !_scroll.hasClients) return;
+            if (!mounted ||
+                epoch != _scrollRequestEpoch ||
+                !_scroll.hasClients) {
+              return;
+            }
             final next = _scroll.position.maxScrollExtent;
             if (_scroll.offset < next - 1) {
               _scroll.jumpTo(next);
@@ -1102,18 +1109,28 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   void _updateMindMapLayout(AiChatMessage message, AiMindMapLayout layout) {
-    final map = message.mindMap;
-    if (map == null || map.layout == layout) return;
+    final sourceMap = message.mindMap;
+    if (sourceMap == null) return;
     final workKey = _chatWorkKey;
     final messages = List<AiChatMessage>.from(_session.messagesFor(workKey));
-    final index = messages.indexWhere(
-      (candidate) =>
-          identical(candidate, message) ||
-          (message.turnId != null && candidate.turnId == message.turnId),
+    var index = messages.indexWhere(
+      (candidate) => identical(candidate, message),
     );
+    if (index < 0 && message.turnId != null) {
+      // User + assistant messages intentionally share a turnId. Match the
+      // structured assistant artifact, not the earlier user bubble.
+      index = messages.lastIndexWhere(
+        (candidate) =>
+            candidate.role == message.role &&
+            candidate.turnId == message.turnId &&
+            candidate.mindMap?.scopeFingerprint == sourceMap.scopeFingerprint,
+      );
+    }
     if (index < 0) return;
+    final currentMap = messages[index].mindMap;
+    if (currentMap == null || currentMap.layout == layout) return;
     messages[index] = messages[index].copyWith(
-      mindMap: map.copyWith(layout: layout),
+      mindMap: currentMap.copyWith(layout: layout),
     );
     setState(() {
       _session = _session.withMessagesFor(workKey, messages);
@@ -1268,6 +1285,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         workKey: workKey,
       );
       if (result != null) {
+        _mindMapRevealTurnId = turnId;
         _commitAssistant(
           scope == AiMindMapRequestScope.currentChapter
               ? '已根据当前章生成思维导图。'
@@ -1288,7 +1306,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _mindMapTurnId = null;
     });
     unawaited(_persist());
-    _scrollToEnd();
+    if (result != null) {
+      // Cancel the pending "scroll to bottom" retries started for the user
+      // message. The newly mounted mind-map card will reveal its own toolbar.
+      _scrollRequestEpoch++;
+    } else {
+      _scrollToEnd();
+    }
   }
 
   void _goToMindMapEvidence(AiMindMapEvidence evidence) {
@@ -3310,6 +3334,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                           onOpenMindMapFullscreen: msg.mindMap == null
                               ? null
                               : () => _openMindMapFullscreen(msg),
+                          revealMindMapOnMount:
+                              msg.mindMap != null &&
+                              msg.turnId == _mindMapRevealTurnId,
+                          onMindMapRevealed: msg.turnId == null
+                              ? null
+                              : () {
+                                  if (_mindMapRevealTurnId == msg.turnId) {
+                                    _mindMapRevealTurnId = null;
+                                  }
+                                },
                         ),
                       if (showFollowUpShortcuts)
                         Padding(
@@ -3789,6 +3823,8 @@ class _Bubble extends StatelessWidget {
     this.onMindMapLayoutChanged,
     this.onOpenMindMapEvidence,
     this.onOpenMindMapFullscreen,
+    this.revealMindMapOnMount = false,
+    this.onMindMapRevealed,
   });
 
   final AiChatMessage message;
@@ -3797,6 +3833,8 @@ class _Bubble extends StatelessWidget {
   final ValueChanged<AiMindMapLayout>? onMindMapLayoutChanged;
   final ValueChanged<AiMindMapEvidence>? onOpenMindMapEvidence;
   final VoidCallback? onOpenMindMapFullscreen;
+  final bool revealMindMapOnMount;
+  final VoidCallback? onMindMapRevealed;
 
   @override
   Widget build(BuildContext context) {
@@ -3866,6 +3904,8 @@ class _Bubble extends StatelessWidget {
                       onLayoutChanged: onMindMapLayoutChanged ?? (_) {},
                       onOpenEvidence: onOpenMindMapEvidence ?? (_) {},
                       onOpenFullscreen: onOpenMindMapFullscreen,
+                      revealOnMount: revealMindMapOnMount,
+                      onRevealed: onMindMapRevealed,
                     ),
                   ),
                 ),

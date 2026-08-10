@@ -436,6 +436,32 @@ void main() {
     expect(find.text('已根据当前章生成思维导图。'), findsOneWidget);
     expect(find.widgetWithText(Tab, '思维导图'), findsNothing);
 
+    final chapterMap = find.byType(BookAiMindMapView).first;
+    await tester.tap(
+      find.descendant(of: chapterMap, matching: find.text('向右')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<SegmentedButton<AiMindMapLayout>>(
+            find
+                .descendant(
+                  of: find.byType(BookAiMindMapView).first,
+                  matching: find.byType(SegmentedButton<AiMindMapLayout>),
+                )
+                .first,
+          )
+          .selected,
+      {AiMindMapLayout.rightFacing},
+    );
+    expect(
+      tester
+          .widget<BookAiMindMapView>(find.byType(BookAiMindMapView).first)
+          .map
+          .layout,
+      AiMindMapLayout.rightFacing,
+    );
+
     await tester.enterText(find.byType(TextField).last, '为这本书生成思维导图');
     await tester.tap(find.byTooltip('发送'));
     await tester.pumpAndSettle();

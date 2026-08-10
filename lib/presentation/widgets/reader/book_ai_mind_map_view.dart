@@ -13,12 +13,16 @@ class BookAiMindMapView extends StatefulWidget {
     required this.onLayoutChanged,
     required this.onOpenEvidence,
     this.onOpenFullscreen,
+    this.revealOnMount = false,
+    this.onRevealed,
   });
 
   final AiBookMindMap map;
   final ValueChanged<AiMindMapLayout> onLayoutChanged;
   final ValueChanged<AiMindMapEvidence> onOpenEvidence;
   final VoidCallback? onOpenFullscreen;
+  final bool revealOnMount;
+  final VoidCallback? onRevealed;
 
   @override
   State<BookAiMindMapView> createState() => _BookAiMindMapViewState();
@@ -30,12 +34,14 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
   final _viewportKey = GlobalKey();
   late AiMindMapLayout _layout;
   bool _fitAfterLayoutChange = false;
+  bool _revealScheduled = false;
 
   @override
   void initState() {
     super.initState();
     _layout = widget.map.layout;
     _applyLargeMapDefaults();
+    _scheduleReveal();
   }
 
   @override
@@ -48,6 +54,9 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
     if (oldWidget.map.layout != widget.map.layout) {
       _layout = widget.map.layout;
       _fitAfterLayoutChange = true;
+    }
+    if (!oldWidget.revealOnMount && widget.revealOnMount) {
+      _scheduleReveal();
     }
     if (oldWidget.map.scopeFingerprint != widget.map.scopeFingerprint ||
         oldWidget.map.createdAt != widget.map.createdAt ||
@@ -69,6 +78,21 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
           .where((node) => node.level >= 2 && parentIds.contains(node.nodeId))
           .map((node) => node.nodeId),
     );
+  }
+
+  void _scheduleReveal() {
+    if (!widget.revealOnMount || _revealScheduled) return;
+    _revealScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await Scrollable.ensureVisible(
+        context,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+      if (mounted) widget.onRevealed?.call();
+    });
   }
 
   @override
