@@ -3,6 +3,7 @@ import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
@@ -437,6 +438,32 @@ void main() {
     expect(find.widgetWithText(Tab, '思维导图'), findsNothing);
 
     final chapterMap = find.byType(BookAiMindMapView).first;
+    final messageList = tester.widget<ListView>(
+      find.byKey(const ValueKey<String>('ai-chat-message-list')),
+    );
+    final listController = messageList.controller!;
+    final listOffsetBeforeZoom = listController.offset;
+    final viewerFinder = find.descendant(
+      of: chapterMap,
+      matching: find.byType(InteractiveViewer),
+    );
+    final viewer = tester.widget<InteractiveViewer>(viewerFinder);
+    final scaleBeforeZoom = viewer.transformationController!.value
+        .getMaxScaleOnAxis();
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(viewerFinder),
+        scrollDelta: const Offset(0, -20),
+        kind: PointerDeviceKind.mouse,
+      ),
+    );
+    await tester.pump();
+    expect(
+      viewer.transformationController!.value.getMaxScaleOnAxis(),
+      greaterThan(scaleBeforeZoom),
+    );
+    expect(listController.offset, closeTo(listOffsetBeforeZoom, 0.01));
+
     await tester.tap(
       find.descendant(of: chapterMap, matching: find.text('向右')),
     );

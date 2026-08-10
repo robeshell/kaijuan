@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../../ai/ai_mind_map.dart';
@@ -92,6 +93,20 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
         curve: Curves.easeOut,
       );
       if (mounted) widget.onRevealed?.call();
+    });
+  }
+
+  void _claimCanvasPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    // InteractiveViewer applies wheel zoom synchronously but does not claim
+    // PointerSignalResolver. Claim it at the canvas boundary so an enclosing
+    // conversation ListView cannot scroll from the same event.
+    GestureBinding.instance.pointerSignalResolver.register(event, (
+      resolvedEvent,
+    ) {
+      if (resolvedEvent is PointerScrollEvent) {
+        resolvedEvent.respond(allowPlatformDefault: false);
+      }
     });
   }
 
@@ -206,48 +221,51 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                 }
               });
               return ClipRect(
-                child: InteractiveViewer(
-                  key: _viewportKey,
-                  transformationController: _transformation,
-                  constrained: false,
-                  boundaryMargin: const EdgeInsets.all(240),
-                  minScale: 0.2,
-                  maxScale: 3,
-                  // Flutter treats PointerDeviceKind.trackpad scroll as pan
-                  // unless this is explicit. Enabling it uses the framework's
-                  // focal-point-preserving zoom path for both the embedded
-                  // card and fullscreen explorer on desktop.
-                  trackpadScrollCausesScale: true,
-                  child: SizedBox.fromSize(
-                    size: layout.size,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Positioned.fill(
-                          child: CustomPaint(
-                            painter: _MindMapEdgePainter(
-                              layout: layout,
-                              color: context.appColors.outline,
-                            ),
-                          ),
-                        ),
-                        for (final node in widget.map.nodes)
-                          if (layout.nodeRects[node.nodeId] case final rect?)
-                            Positioned.fromRect(
-                              rect: rect,
-                              child: _MindMapNodeCard(
-                                node: node,
-                                childCount: children[node.nodeId] ?? 0,
-                                collapsed: _collapsed.contains(node.nodeId),
-                                onToggleCollapsed: () => setState(() {
-                                  if (!_collapsed.add(node.nodeId)) {
-                                    _collapsed.remove(node.nodeId);
-                                  }
-                                }),
-                                onTap: () => _showNode(node),
+                child: Listener(
+                  onPointerSignal: _claimCanvasPointerSignal,
+                  child: InteractiveViewer(
+                    key: _viewportKey,
+                    transformationController: _transformation,
+                    constrained: false,
+                    boundaryMargin: const EdgeInsets.all(240),
+                    minScale: 0.2,
+                    maxScale: 3,
+                    // Flutter treats PointerDeviceKind.trackpad scroll as pan
+                    // unless this is explicit. Enabling it uses the framework's
+                    // focal-point-preserving zoom path for both the embedded
+                    // card and fullscreen explorer on desktop.
+                    trackpadScrollCausesScale: true,
+                    child: SizedBox.fromSize(
+                      size: layout.size,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: _MindMapEdgePainter(
+                                layout: layout,
+                                color: context.appColors.outline,
                               ),
                             ),
-                      ],
+                          ),
+                          for (final node in widget.map.nodes)
+                            if (layout.nodeRects[node.nodeId] case final rect?)
+                              Positioned.fromRect(
+                                rect: rect,
+                                child: _MindMapNodeCard(
+                                  node: node,
+                                  childCount: children[node.nodeId] ?? 0,
+                                  collapsed: _collapsed.contains(node.nodeId),
+                                  onToggleCollapsed: () => setState(() {
+                                    if (!_collapsed.add(node.nodeId)) {
+                                      _collapsed.remove(node.nodeId);
+                                    }
+                                  }),
+                                  onTap: () => _showNode(node),
+                                ),
+                              ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
