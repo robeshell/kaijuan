@@ -882,6 +882,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _suggestionCancel = null;
         if (!published && mounted) {
           setState(() => _generatingFollowUp = false);
+          // Empty/failed model suggestions reveal the stable fallback list.
+          // Keep that newly inserted UI in view just like generated follow-ups.
+          _scrollToEnd();
         }
       }
     }
@@ -3066,6 +3069,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     ),
                   )
                 : ListView(
+                    key: const ValueKey<String>('ai-chat-message-list'),
                     controller: _scroll,
                     padding: EdgeInsets.fromLTRB(
                       16,

@@ -208,6 +208,51 @@ class _AmbiguousOutlineController extends BookReaderController {
   }
 }
 
+class _CompletedChatController extends _AmbiguousOutlineController {
+  _CompletedChatController({required super.database, required super.item});
+
+  @override
+  Stream<AiRunEvent>? streamBookChat({
+    required String userText,
+    required List<AiChatMessage> history,
+    required AiChatContextBundle context,
+    required AiGraphWorkCandidate? workScope,
+    List<AiWebSearchHit>? webHits,
+    bool? reasoningEnabled,
+    CancelToken? cancelToken,
+    String? runId,
+  }) async* {
+    final descriptor = AiRunDescriptor(
+      runId: runId ?? 'completed-chat',
+      task: AiRunTask.bookChat,
+      scope: AiRunScope(contentHash: item.contentHash),
+    );
+    final now = DateTime.now();
+    yield AiRunStarted(descriptor: descriptor, sequence: 0, occurredAt: now);
+    yield AiRunModelStarted(
+      runId: descriptor.runId,
+      sequence: 1,
+      occurredAt: now,
+      purpose: AiRunModelPurpose.answer,
+      callIndex: 1,
+    );
+    yield AiRunTextSnapshot(
+      runId: descriptor.runId,
+      sequence: 2,
+      occurredAt: now,
+      text: List.filled(18, '这是一段用于撑高回答区域的测试内容。').join('\n\n'),
+    );
+  }
+
+  @override
+  Future<List<String>> suggestBookChatFollowUps({
+    required String userText,
+    required String answer,
+    required AiChatContextBundle context,
+    CancelToken? cancelToken,
+  }) async => const [];
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -360,6 +405,65 @@ void main() {
 
     controller.releaseChatCancellations();
   });
+
+  testWidgets(
+    'fallback follow-up shortcuts scroll into view after completion',
+    (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final database = AppDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final now = DateTime.utc(2026, 8, 10);
+      await database.upsertReadingItem(
+        ReadingItemsCompanion.insert(
+          id: 'chat-fallback-scroll',
+          kind: ReaderKind.book.storageValue,
+          format: ReaderFormat.epub.storageValue,
+          title: '快捷追问滚动测试',
+          filePath: '/tmp/chat-fallback-scroll.epub',
+          contentHash: 'hash-chat-fallback-scroll',
+          pageCount: const Value(2),
+          addedAt: now,
+          updatedAt: now,
+        ),
+      );
+      final item = (await database.readingItemById('chat-fallback-scroll'))!;
+      final controller = _CompletedChatController(
+        database: database,
+        item: item,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: FilledButton(
+                onPressed: () =>
+                    showBookAiChatSheet(context, controller: controller),
+                child: const Text('打开 AI'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开 AI'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField).last, '请介绍这本书');
+      await tester.tap(find.byTooltip('发送'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('结合书中内容再展开'), findsOneWidget);
+      final list = tester.widget<ListView>(
+        find.byKey(const ValueKey<String>('ai-chat-message-list')),
+      );
+      expect(list.controller!.position.extentAfter, lessThan(1));
+    },
+  );
 
   testWidgets('phone graph generation keeps visible feedback across routes', (
     tester,
