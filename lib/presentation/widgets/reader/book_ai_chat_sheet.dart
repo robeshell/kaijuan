@@ -99,6 +99,17 @@ typedef _MindMapGenerationUnit = ({
   int estimatedSections,
 });
 
+typedef _MindMapScopeChoice = ({int value, String label, String subtitle});
+
+class _MindMapScopePrompt {
+  _MindMapScopePrompt({required this.title, required this.choices});
+
+  final String title;
+  final List<_MindMapScopeChoice> choices;
+  final Completer<int?> completer = Completer<int?>();
+  int? selectedValue;
+}
+
 /// Default view is the person card list (Kindle X-Ray style); the force
 /// layout stays available as a secondary「关系图」view. Each entity type gets
 /// its own chapter-ordered list so「谁是谁 / 在哪里 / 发生了哪些事」are
@@ -198,6 +209,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String? _retryTurnId;
   int _turnSerial = 0;
   String? _mindMapTurnId;
+  _MindMapScopePrompt? _mindMapScopePrompt;
 
   BookReaderController get _c => widget.controller;
 
@@ -494,7 +506,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
-    if (text.isEmpty || _sending || _resolvingChatScope) return;
+    if (text.isEmpty ||
+        _sending ||
+        _resolvingChatScope ||
+        _mindMapScopePrompt != null) {
+      return;
+    }
     if (!_ready) return;
     final retrying = preset != null && preset == _retryText;
     final retryTurnId = retrying ? _retryTurnId : null;
@@ -953,6 +970,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _stop({bool commitPartial = true, bool persist = true}) async {
+    final scopePrompt = _mindMapScopePrompt;
+    if (scopePrompt != null && !scopePrompt.completer.isCompleted) {
+      scopePrompt.completer.complete(null);
+    }
     final turnId = _activeTurnId;
     final turnWorkKey = _activeTurnWorkKey;
     if (_mindMapTurnId == turnId) {
@@ -971,6 +992,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _sending = false;
       _searchingWeb = false;
       _toolStatus = null;
+      _mindMapScopePrompt = null;
       _runState = null;
       if (turnId != null) {
         _setTurnStatus(
@@ -1277,6 +1299,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     bool clearComposer = false,
   }) async {
     List<_MindMapGenerationUnit>? units;
+    var composerClearedForChoice = false;
     if (scope == AiMindMapRequestScope.currentChapter) {
       units = await _captureCurrentChapterUnit();
     } else {
@@ -1298,12 +1321,31 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           namedWork: scope == AiMindMapRequestScope.unspecified
               ? namedWork
               : null,
+          onChoicePresented: () {
+            if (!clearComposer || composerClearedForChoice) return;
+            _clearComposerAfterFrame(text);
+            composerClearedForChoice = true;
+          },
         );
       }
     }
-    if (!mounted || units == null || units.isEmpty) return;
-    if (clearComposer) _clearComposerAfterFrame(text);
+    if (!mounted || units == null || units.isEmpty) {
+      if (composerClearedForChoice && mounted && _input.text.isEmpty) {
+        _restoreComposerText(text);
+      }
+      return;
+    }
+    if (clearComposer && !composerClearedForChoice) {
+      _clearComposerAfterFrame(text);
+    }
     await _generateMindMapsInChat(text, units, retryTurnId: retryTurnId);
+  }
+
+  void _restoreComposerText(String text) {
+    _input.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
   }
 
   Future<List<_MindMapGenerationUnit>?> _captureCurrentChapterUnit() async {
@@ -1346,6 +1388,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required AiMindMapRequestScope scope,
     required AiBookStructureManifest? manifest,
     required AiBookWork? namedWork,
+    VoidCallback? onChoicePresented,
   }) async {
     if (namedWork != null) return _mindMapUnitsForWorks([namedWork]);
     if (scope == AiMindMapRequestScope.currentWork) {
@@ -1363,17 +1406,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         0,
         (total, count) => total + count,
       );
-      final choice = await showAppChoiceDialog<int>(
-        context,
+      onChoicePresented?.call();
+      final choice = await _showMindMapScopePrompt(
         title: '本书包含 ${works.length} 部作品，共 $totalChapters 章',
         choices: [
-          AppDialogChoice(
-            value: -1,
-            label: '全部作品',
-            subtitle: '按作品依次生成 ${works.length} 张思维导图',
-          ),
+          (value: -1, label: '全部作品', subtitle: '按作品依次生成 ${works.length} 张思维导图'),
           for (var index = 0; index < works.length; index++)
-            AppDialogChoice(
+            (
               value: index,
               label: works[index].title,
               subtitle: '共 ${chapterCounts[index]} 章',
@@ -1391,6 +1430,34 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         estimatedSections: math.max(1, _c.sectionCount),
       ),
     ];
+  }
+
+  Future<int?> _showMindMapScopePrompt({
+    required String title,
+    required List<_MindMapScopeChoice> choices,
+  }) async {
+    final prompt = _MindMapScopePrompt(title: title, choices: choices);
+    setState(() => _mindMapScopePrompt = prompt);
+    _scrollToEnd();
+    final selected = await prompt.completer.future;
+    if (selected == null && mounted && identical(_mindMapScopePrompt, prompt)) {
+      setState(() => _mindMapScopePrompt = null);
+    }
+    return selected;
+  }
+
+  void _selectMindMapScope(int value) {
+    final prompt = _mindMapScopePrompt;
+    if (prompt == null || prompt.completer.isCompleted) return;
+    setState(() => prompt.selectedValue = value);
+    prompt.completer.complete(value);
+  }
+
+  void _cancelMindMapScopePrompt() {
+    final prompt = _mindMapScopePrompt;
+    if (prompt == null) return;
+    if (!prompt.completer.isCompleted) prompt.completer.complete(null);
+    setState(() => _mindMapScopePrompt = null);
   }
 
   int _workChapterCount(AiBookWork work) {
@@ -1558,6 +1625,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _activeTurnId = null;
       _activeTurnWorkKey = null;
       _mindMapTurnId = null;
+      _mindMapScopePrompt = null;
     });
     unawaited(_persist());
     if (!failed) {
@@ -3320,6 +3388,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   void dispose() {
     _c.removeListener(_onReaderControllerChanged);
     _cancel.cancel();
+    final scopePrompt = _mindMapScopePrompt;
+    if (scopePrompt != null && !scopePrompt.completer.isCompleted) {
+      scopePrompt.completer.complete(null);
+    }
     _suggestionCancel?.cancel();
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _finalizeActiveTurnForDisposal();
@@ -3348,6 +3420,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final openingShortcuts = aiChatOpeningShortcuts(hasSelection: hasSelection);
     final showFollowUpShortcuts =
         !_sending &&
+        _mindMapScopePrompt == null &&
         !_generatingFollowUp &&
         !_searchingWeb &&
         _streaming.isEmpty &&
@@ -3373,6 +3446,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ? '知识图谱没有有效数据'
                   : '尚未生成知识图谱');
     final composerControlSize = compact ? 44.0 : 40.0;
+    final conversationInputLocked = _sending || _mindMapScopePrompt != null;
 
     // Side panel already has a fixed height; bottom sheet needs an explicit
     // height so Expanded children layout correctly.
@@ -3400,7 +3474,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   _messages.isNotEmpty)
                 IconButton(
                   tooltip: '清空对话',
-                  onPressed: _sending || _clearingHistory
+                  onPressed:
+                      _sending ||
+                          _clearingHistory ||
+                          _mindMapScopePrompt != null
                       ? null
                       : () => unawaited(_clearHistory()),
                   icon: const Icon(KaijuanIcons.delete, size: 20),
@@ -3562,7 +3639,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                                   color: context.appSecondaryText,
                                 ),
                               ),
-                              if (openingShortcuts.isNotEmpty) ...[
+                              if (_mindMapScopePrompt == null &&
+                                  openingShortcuts.isNotEmpty) ...[
                                 SizedBox(height: compact ? 12 : 16),
                                 _SuggestedQuestionList(
                                   shortcuts: openingShortcuts,
@@ -3605,6 +3683,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                             if (_mindMapPointerActive == active) return;
                             setState(() => _mindMapPointerActive = active);
                           },
+                        ),
+                      if (_mindMapScopePrompt case final prompt?)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            left: 4,
+                            right: 4,
+                            bottom: 14,
+                          ),
+                          child: _MindMapScopeChoiceCard(
+                            prompt: prompt,
+                            onSelected: _selectMindMapScope,
+                            onCancel: _cancelMindMapScopePrompt,
+                          ),
                         ),
                       if (showFollowUpShortcuts)
                         Padding(
@@ -3671,7 +3762,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 Row(
                   children: [
                     _WebSearchToggle(
-                      enabled: !_sending,
+                      enabled: !conversationInputLocked,
                       selected: _webSearchOn,
                       onPressed: () =>
                           unawaited(_onWebSearchChanged(!_webSearchOn)),
@@ -3679,7 +3770,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     if (_c.supportsDeepThinking) ...[
                       const SizedBox(width: 8),
                       _DeepThinkingToggle(
-                        enabled: !_sending,
+                        enabled: !conversationInputLocked,
                         selected: _deepThinkingOn,
                         onPressed: () =>
                             setState(() => _deepThinkingOn = !_deepThinkingOn),
@@ -3703,7 +3794,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18),
                           ),
-                          onDeleted: _sending
+                          onDeleted: conversationInputLocked
                               ? null
                               : () => setState(() => _selection = null),
                           deleteIcon: const Icon(KaijuanIcons.close, size: 16),
@@ -3737,6 +3828,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                             TextField(
                               controller: _input,
                               focusNode: _focus,
+                              enabled: !conversationInputLocked,
                               // Bootstrap requests focus after the first frame.
                               // Synchronous autofocus can let an IME update the
                               // controller during layout/semantics flushing.
@@ -3747,7 +3839,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                               textInputAction: TextInputAction.send,
                               textCapitalization: TextCapitalization.sentences,
                               enableInteractiveSelection: true,
-                              onTap: () => unawaited(_focusComposer()),
+                              onTap: conversationInputLocked
+                                  ? null
+                                  : () => unawaited(_focusComposer()),
                               onSubmitted: (_) {
                                 if (!_sending) unawaited(_send());
                               },
@@ -3788,7 +3882,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       else
                         IconButton.filled(
                           tooltip: '发送',
-                          onPressed: () => unawaited(_send()),
+                          onPressed: conversationInputLocked
+                              ? null
+                              : () => unawaited(_send()),
                           style: IconButton.styleFrom(
                             fixedSize: Size.square(composerControlSize),
                             padding: const EdgeInsets.all(10),
@@ -3865,6 +3961,171 @@ class _AiUnavailable extends StatelessWidget {
           const SizedBox(height: 12),
           FilledButton(onPressed: onOpenSettings, child: const Text('去设置')),
         ],
+      ),
+    );
+  }
+}
+
+class _MindMapScopeChoiceCard extends StatelessWidget {
+  const _MindMapScopeChoiceCard({
+    required this.prompt,
+    required this.onSelected,
+    required this.onCancel,
+  });
+
+  final _MindMapScopePrompt prompt;
+  final ValueChanged<int> onSelected;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final selectedValue = prompt.selectedValue;
+    return Material(
+      key: const ValueKey<String>('ai-mind-map-scope-choice-card'),
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.34),
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '选择思维导图范围',
+                    style: TextStyle(
+                      color: context.appPrimaryText,
+                      fontSize: context.aiBodySize,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    prompt.title,
+                    style: TextStyle(
+                      color: context.appSecondaryText,
+                      fontSize: context.aiDetailSize,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            for (var index = 0; index < prompt.choices.length; index++) ...[
+              _MindMapScopeChoiceRow(
+                choice: prompt.choices[index],
+                selected: selectedValue == prompt.choices[index].value,
+                enabled: selectedValue == null,
+                onTap: () => onSelected(prompt.choices[index].value),
+              ),
+              if (index < prompt.choices.length - 1) const SizedBox(height: 6),
+            ],
+            if (selectedValue == null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(onPressed: onCancel, child: const Text('取消')),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                child: Text(
+                  '已选择，正在准备正文…',
+                  style: TextStyle(
+                    color: context.appSecondaryText,
+                    fontSize: context.appCaptionSize,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MindMapScopeChoiceRow extends StatelessWidget {
+  const _MindMapScopeChoiceRow({
+    required this.choice,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final _MindMapScopeChoice choice;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      selected: selected,
+      label: choice.label,
+      value: choice.subtitle,
+      child: Material(
+        color: selected
+            ? colors.primary.withValues(alpha: 0.12)
+            : colors.surface.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          key: ValueKey<String>('ai-mind-map-scope-${choice.value}'),
+          borderRadius: BorderRadius.circular(10),
+          onTap: enabled ? onTap : null,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 52),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: selected ? colors.primary : context.appDivider,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        choice.label,
+                        style: TextStyle(
+                          color: context.appPrimaryText,
+                          fontSize: context.aiBodySize,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        choice.subtitle,
+                        style: TextStyle(
+                          color: context.appSecondaryText,
+                          fontSize: context.appCaptionSize,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Icon(
+                  selected
+                      ? KaijuanIcons.checkCircleFilled
+                      : KaijuanIcons.chevronRight,
+                  size: 18,
+                  color: selected ? colors.primary : context.appSecondaryText,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

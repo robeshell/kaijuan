@@ -670,9 +670,54 @@ void main() {
 
     expect(find.text('本书包含 2 部作品，共 4 章'), findsOneWidget);
     expect(find.text('全部作品'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey<String>('ai-mind-map-scope-choice-card')),
+      findsOneWidget,
+    );
+    expect(find.byType(AppDialog), findsNothing);
+    final allChoice = find.byKey(
+      const ValueKey<String>('ai-mind-map-scope--1'),
+    );
+    final firstChoice = find.byKey(
+      const ValueKey<String>('ai-mind-map-scope-0'),
+    );
+    final secondChoice = find.byKey(
+      const ValueKey<String>('ai-mind-map-scope-1'),
+    );
+    expect(allChoice, findsOneWidget);
+    expect(firstChoice, findsOneWidget);
+    expect(secondChoice, findsOneWidget);
+    expect(
+      tester.getTopLeft(allChoice).dy,
+      lessThan(tester.getTopLeft(firstChoice).dy),
+    );
+    expect(
+      tester.getTopLeft(firstChoice).dy,
+      lessThan(tester.getTopLeft(secondChoice).dy),
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).enabled,
+      isFalse,
+    );
     expect(controller.generatedMindMapScopes, isEmpty);
 
-    await tester.tap(find.text('作品甲'));
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey<String>('ai-mind-map-scope-choice-card')),
+      findsNothing,
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).controller?.text,
+      '生成整本书思维导图',
+    );
+    expect(controller.generatedMindMapScopes, isEmpty);
+
+    await tester.tap(find.byTooltip('发送').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('ai-mind-map-scope-0')));
     await tester.pumpAndSettle();
     expect(controller.generatedMindMapScopes, ['作品甲']);
     expect(find.text('已根据《作品甲》的 1 章内容生成思维导图。'), findsOneWidget);

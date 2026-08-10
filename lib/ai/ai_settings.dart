@@ -63,6 +63,7 @@ class AiContentRuleWords {
 
   static const defaultMindMapExcludedTitlePatterns = <String>[
     '封面',
+    '总封面',
     '扉页',
     '版权信息',
     '版权页',

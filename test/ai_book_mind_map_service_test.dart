@@ -104,6 +104,37 @@ void main() {
     expect(result.nodes[1].evidence, isEmpty);
   });
 
+  test(
+    'scales coverage guidance and output budget with the selected corpus',
+    () async {
+      final longSections = [
+        for (var index = 0; index < 12; index++)
+          AiBookSectionSlice(
+            index: index + 1,
+            sourceSectionIndex: index + 1,
+            label: '第 ${index + 1} 章',
+            text: List.filled(240, '第${index + 1}章包含政策背景、事实案例与影响分析。').join(),
+          ),
+      ];
+      final adapter = _FakeAdapter(tree());
+
+      await service(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '长书测试',
+        scopeLabel: '全书',
+        userInstruction: '生成一份详细完整的全书思维导图',
+        sections: longSections,
+      );
+
+      final prompt = adapter.request.messages.last.text;
+      expect(prompt, contains('有效章节：12'));
+      expect(prompt, contains('至少生成'));
+      expect(prompt, contains('建议约'));
+      expect(adapter.request.maxTokens, greaterThan(12000));
+    },
+  );
+
   test('rejects invalid parent references without retrying', () async {
     final value = tree();
     final nodes = value['nodes']! as List<Map<String, Object?>>;

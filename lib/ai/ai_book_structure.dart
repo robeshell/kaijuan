@@ -1,4 +1,5 @@
 import 'ai_chat_retrieve.dart';
+import '../domain/book_structure.dart';
 
 /// File-internal publication structure used by every book AI feature.
 ///
@@ -98,8 +99,8 @@ class AiBookStructureManifest {
 abstract final class AiBookStructureResolver {
   static final RegExp _chapterTitlePattern = RegExp(
     r'^('
-    r'第[0-9零一二三四五六七八九十百千两]+[章节回篇集讲则]'
-    r'|[章节回篇集讲][0-9零一二三四五六七八九十百千两]+'
+    r'第[0-9零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾]+[章节回篇集讲则]'
+    r'|[章节回篇集讲][0-9零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾]+'
     r'|(序章|楔子|引子|尾声|终章|番外|前言|序言|自序|序|跋|后记|引论|导论|绪论)'
     r'|(chapter|section|prologue|epilogue|introduction)\s*[0-9ivxlcdm]*'
     r')',
@@ -108,11 +109,26 @@ abstract final class AiBookStructureResolver {
 
   static final RegExp _volumeTitlePattern = RegExp(
     r'^('
-    r'第[0-9零一二三四五六七八九十百千两]+[部卷]'
-    r'|[部卷][0-9零一二三四五六七八九十百千两]+'
+    r'第[0-9零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾]+[部卷]'
+    r'|[部卷][0-9零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾]+'
     r'|(part|book|volume|vol\.?)\s*[0-9ivxlcdm]+'
     r')',
     caseSensitive: false,
+  );
+
+  static final RegExp _continuationTitlePattern = RegExp(r'^[—–－-]+\s*');
+
+  static final RegExp _omnibusTitlePattern = RegExp(
+    r'(全集|合集|合订|套装|全套|作品集|部曲|'
+    r'共[0-9零一二三四五六七八九十百千两]+册|'
+    r'全[0-9零一二三四五六七八九十百千两]+册|'
+    r'卷\s*[0-9零一二三四五六七八九十百千两]+\s*[-—–~至]\s*'
+    r'[0-9零一二三四五六七八九十百千两]+)',
+    caseSensitive: false,
+  );
+
+  static final RegExp _splitInstallmentSuffixPattern = RegExp(
+    r'\s*(?:[（(][上中下][）)]|[上中下](?:册|卷))\s*$',
   );
 
   static bool isChapterTitle(String raw) =>
@@ -120,6 +136,207 @@ abstract final class AiBookStructureResolver {
 
   static bool isVolumeTitle(String raw) =>
       _volumeTitlePattern.hasMatch(raw.trim());
+
+  static bool _isIndependentWorkCandidateTitle(String raw) {
+    final title = raw.trim();
+    return title.isNotEmpty &&
+        !isChapterTitle(title) &&
+        !_continuationTitlePattern.hasMatch(title);
+  }
+
+  /// Preferred classifier over the reader-owned, text-free structure index.
+  /// The legacy [resolve] path remains only for engines that cannot expose the
+  /// new bridge yet.
+  static AiBookStructureManifest resolveIndex({
+    required BookStructureIndex index,
+    required bool Function(String title) isSupplementTitle,
+  }) {
+    if (!index.isUsable) {
+      return const AiBookStructureManifest(
+        kind: AiBookStructureKind.singleWork,
+        source: AiBookStructureSource.heuristic,
+        confidence: 0.5,
+        reason: 'structure index is unavailable',
+      );
+    }
+
+    var candidates = index.navigationRoots;
+    if (candidates.length == 1) {
+      final children = index.childrenOf(candidates.single.nodeId);
+      if (children.length >= 2) candidates = children;
+    }
+    candidates = candidates
+        .where((node) => !isSupplementTitle(node.title))
+        .toList(growable: false);
+    if (candidates.length < 2) {
+      return const AiBookStructureManifest(
+        kind: AiBookStructureKind.singleWork,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: 0.9,
+        reason: 'structure index has fewer than two top-level ranges',
+      );
+    }
+
+    final chapterLikeCount = candidates
+        .where(
+          (node) =>
+              isChapterTitle(node.title) ||
+              _continuationTitlePattern.hasMatch(node.title.trim()),
+        )
+        .length;
+    if (chapterLikeCount * 2 >= candidates.length) {
+      return const AiBookStructureManifest(
+        kind: AiBookStructureKind.singleWork,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: 0.98,
+        reason: 'indexed top-level ranges are chapters and subtitles',
+      );
+    }
+
+    final ranges = _rangesFromIndexCandidates(candidates);
+    final volumeCount = candidates
+        .where((node) => isVolumeTitle(node.title))
+        .length;
+    if (volumeCount * 2 >= candidates.length) {
+      return AiBookStructureManifest(
+        kind: AiBookStructureKind.segmentedSingleWork,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: 0.95,
+        reason: 'indexed top-level ranges are parts or volumes',
+        works: ranges,
+      );
+    }
+
+    // A chapter owning several subsection nodes is normal and cannot prove an
+    // omnibus. Require publication-level collection metadata before promoting
+    // arbitrary titled roots to independent works.
+    final hasOmnibusTitleEvidence = _omnibusTitlePattern.hasMatch(
+      index.publicationTitle,
+    );
+    final omnibusCandidates = _mergeSplitInstallments(candidates);
+    final hasRepeatedInstallmentEvidence =
+        candidates.length >= 4 &&
+        omnibusCandidates.length >= 2 &&
+        omnibusCandidates.length * 2 <= candidates.length;
+    if (!hasOmnibusTitleEvidence && !hasRepeatedInstallmentEvidence) {
+      return const AiBookStructureManifest(
+        kind: AiBookStructureKind.singleWork,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: 0.94,
+        reason: 'chapter subtrees lack publication-level omnibus evidence',
+      );
+    }
+
+    final omnibusRanges = _rangesFromIndexCandidates(omnibusCandidates);
+
+    final independentCount = candidates
+        .where(
+          (node) =>
+              node.directChildCount >= 2 ||
+              index.childrenOf(node.nodeId).length >= 2,
+        )
+        .length;
+    if (independentCount * 2 >= candidates.length) {
+      if (omnibusRanges.length < 2) {
+        return const AiBookStructureManifest(
+          kind: AiBookStructureKind.uncertain,
+          source: AiBookStructureSource.navigationHierarchy,
+          confidence: 0.6,
+          reason: 'independent indexed ranges lack resolved anchors',
+        );
+      }
+      final starts = omnibusRanges.map((work) => work.startSection).toSet();
+      if (starts.length != omnibusRanges.length) {
+        return const AiBookStructureManifest(
+          kind: AiBookStructureKind.uncertain,
+          source: AiBookStructureSource.navigationHierarchy,
+          confidence: 0.72,
+          reason: 'independent indexed ranges share one spine',
+        );
+      }
+      return AiBookStructureManifest(
+        kind: AiBookStructureKind.multiWorkOmnibus,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: 0.97,
+        reason: 'indexed top-level ranges own chapter subtrees',
+        works: omnibusRanges,
+      );
+    }
+
+    if (omnibusRanges.length >= 2) {
+      return AiBookStructureManifest(
+        kind: AiBookStructureKind.multiWorkOmnibus,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: 0.92,
+        reason: hasOmnibusTitleEvidence
+            ? 'publication metadata corroborates indexed work ranges'
+            : 'repeated split installments corroborate indexed work ranges',
+        works: omnibusRanges,
+      );
+    }
+
+    return const AiBookStructureManifest(
+      kind: AiBookStructureKind.singleWork,
+      source: AiBookStructureSource.heuristic,
+      confidence: 0.72,
+      reason: 'indexed flat ranges have no independent-work evidence',
+    );
+  }
+
+  static List<BookStructureNavigationNode> _mergeSplitInstallments(
+    List<BookStructureNavigationNode> candidates,
+  ) {
+    final merged = <BookStructureNavigationNode>[];
+    String? previousTitle;
+    for (final candidate in candidates) {
+      final title = candidate.title
+          .replaceFirst(_splitInstallmentSuffixPattern, '')
+          .trim();
+      final normalized = title.replaceAll(RegExp(r'\s+'), '').toLowerCase();
+      if (normalized.isNotEmpty && normalized == previousTitle) continue;
+      previousTitle = normalized;
+      merged.add(
+        BookStructureNavigationNode(
+          nodeId: candidate.nodeId,
+          parentId: candidate.parentId,
+          title: title.isEmpty ? candidate.title : title,
+          depth: candidate.depth,
+          order: candidate.order,
+          href: candidate.href,
+          sectionIndex: candidate.sectionIndex,
+          directChildCount: candidate.directChildCount,
+          fragment: candidate.fragment,
+        ),
+      );
+    }
+    return merged;
+  }
+
+  static List<AiBookWork> _rangesFromIndexCandidates(
+    List<BookStructureNavigationNode> candidates,
+  ) {
+    final ordered =
+        candidates
+            .where((node) => node.sectionIndex != null)
+            .toList(growable: false)
+          ..sort((left, right) {
+            final section = left.sectionIndex!.compareTo(right.sectionIndex!);
+            return section != 0 ? section : left.order.compareTo(right.order);
+          });
+    return [
+      for (var index = 0; index < ordered.length; index++)
+        AiBookWork(
+          id: ordered[index].nodeId,
+          title: ordered[index].title,
+          startSection: ordered[index].sectionIndex! + 1,
+          endSectionExclusive:
+              index + 1 < ordered.length &&
+                  ordered[index + 1].sectionIndex != ordered[index].sectionIndex
+              ? ordered[index + 1].sectionIndex! + 1
+              : null,
+        ),
+    ];
+  }
 
   static AiBookStructureManifest resolve({
     required List<AiBookSectionSlice> navigationSections,
@@ -132,15 +349,17 @@ abstract final class AiBookStructureResolver {
     final allNavigation = <AiBookSectionSlice>[];
     final navigation = <AiBookSectionSlice>[];
     final seenStarts = <int>{};
-    var duplicateStart = false;
+    final navigationTitlesByStart = <int, List<String>>{};
     for (final section in navigationSections) {
       final title = section.label.trim();
       final start = section.sourceSectionIndex;
       if (!section.isNavigationUnit || start == null || title.isEmpty) {
         continue;
       }
+      if (!isSupplementTitle(title)) {
+        navigationTitlesByStart.putIfAbsent(start, () => []).add(title);
+      }
       if (!seenStarts.add(start)) {
-        duplicateStart = true;
         continue;
       }
       allNavigation.add(section);
@@ -160,7 +379,10 @@ abstract final class AiBookStructureResolver {
       spineSections,
       isSupplementTitle,
     );
-    if (logicalWorks.length >= 2 || duplicateStart) {
+    final duplicateIndependentStart = navigationTitlesByStart.values.any(
+      (titles) => titles.where(_isIndependentWorkCandidateTitle).length >= 2,
+    );
+    if (logicalWorks.length >= 2 || duplicateIndependentStart) {
       return AiBookStructureManifest(
         kind: AiBookStructureKind.uncertain,
         source: AiBookStructureSource.spineHeadings,
@@ -302,6 +524,7 @@ abstract final class AiBookStructureResolver {
               section.level == 1 &&
               section.text.trim().isEmpty &&
               section.label.trim().isNotEmpty &&
+              _isIndependentWorkCandidateTitle(section.label) &&
               !isSupplementTitle(section.label),
         )
         .toList(growable: false);

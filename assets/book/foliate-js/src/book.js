@@ -2942,6 +2942,124 @@ const tocSectionStarts = async (book, tocItems) => {
   return unique.length >= 2 ? unique : []
 }
 
+let bookStructureIndexPromise = null
+
+/// Complete, text-free publication structure for Dart consumers. Unlike
+/// getBookPlainText this scan has no character budget: it returns every nav
+/// node and every DOM heading, while正文 stays inside the reader process.
+window.getBookStructureIndex = async () => {
+  if (bookStructureIndexPromise) return bookStructureIndexPromise
+  bookStructureIndexPromise = (async () => {
+    const book = reader?.view?.book
+    const sections = book?.sections || []
+    if (!sections.length) return null
+
+    const navigation = []
+    let navigationOrder = 0
+    const visitNavigation = async (items, parentId = null, depth = 0) => {
+      if (!Array.isArray(items)) return
+      for (const item of items) {
+        const title = plainText(item?.label || item?.title)
+        const href = String(item?.href || '')
+        const hashIndex = href.indexOf('#')
+        const fragment = hashIndex >= 0 ? href.slice(hashIndex + 1) : null
+        const nodeId = `nav-${String(navigationOrder + 1).padStart(5, '0')}`
+        let sectionIndex = null
+        if (href && book?.resolveHref) {
+          try {
+            const target = await book.resolveHref(href)
+            if (Number.isInteger(target?.index) && target.index >= 0)
+              sectionIndex = target.index
+          } catch (e) {
+            console.warn('[Kaika][BookStructure] nav resolve failed=', title, e)
+          }
+        }
+        const children = Array.isArray(item?.subitems) ? item.subitems : []
+        if (title) {
+          navigation.push({
+            nodeId,
+            parentId,
+            title,
+            depth,
+            order: navigationOrder,
+            href,
+            fragment,
+            sectionIndex,
+            directChildCount: children.length,
+          })
+          navigationOrder += 1
+          await visitNavigation(children, nodeId, depth + 1)
+        } else {
+          await visitNavigation(children, parentId, depth)
+        }
+      }
+    }
+    await visitNavigation(book?.toc || [])
+
+    const sectionFacts = []
+    for (let index = 0; index < sections.length; index++) {
+      const section = sections[index]
+      if (!section?.createDocument) continue
+      try {
+        const doc = await section.createDocument()
+        const headingElements = [...(doc?.querySelectorAll?.('h1, h2, h3, h4, h5, h6') || [])]
+        const headings = []
+        for (const heading of headingElements) {
+          const title = plainText(heading.textContent)
+          if (!title) continue
+          let cfi = null
+          try {
+            const range = doc.createRange()
+            range.selectNodeContents(heading)
+            range.collapse(true)
+            cfi = reader?.view?.getCFI?.(index, range) || null
+          } catch (_) {}
+          headings.push({
+            title,
+            level: Number(heading.localName.slice(1)) || 1,
+            order: headings.length,
+            fragment: heading.id || null,
+            cfi,
+          })
+        }
+        sectionFacts.push({
+          sectionIndex: index,
+          href: String(section.href || section.id || index),
+          documentTitle: plainText(doc?.title),
+          bodyCharCount: plainText(doc?.body?.textContent).length,
+          headings,
+        })
+      } catch (e) {
+        console.warn('[Kaika][BookStructure] section scan failed=', index + 1, e)
+        sectionFacts.push({
+          sectionIndex: index,
+          href: String(section.href || section.id || index),
+          documentTitle: '',
+          bodyCharCount: 0,
+          headings: [],
+        })
+      }
+    }
+    const result = {
+      indexVersion: 1,
+      publicationTitle: String(book?.metadata?.title || '').trim(),
+      sections: sectionFacts,
+      navigation,
+    }
+    console.log(
+      '[Kaika][BookStructure] indexed=',
+      'sections=', sectionFacts.length,
+      'navigation=', navigation.length,
+      'headings=', sectionFacts.reduce((sum, section) => sum + section.headings.length, 0),
+    )
+    return result
+  })().catch(error => {
+    bookStructureIndexPromise = null
+    throw error
+  })
+  return bookStructureIndexPromise
+}
+
 // MOBI/AZW3 frequently provides a real navigation tree while flattening its
 // rendered content into one section without useful heading elements. The TOC
 // labels occur first in the contents page, then again where each work starts.

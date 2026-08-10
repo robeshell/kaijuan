@@ -393,7 +393,7 @@ class MermanAiMermaidRenderer implements AiMermaidRenderer {
   const MermanAiMermaidRenderer();
 
   static final Map<String, Future<String>> _cache = {};
-  static const _nativeSvgRevision = 1;
+  static const _nativeSvgRevision = 2;
   static const _maxSourceChars = 40000;
   static const _maxSvgChars = 1500000;
 
@@ -442,7 +442,7 @@ String materializeAiMindmapNativeStyles(String svg, AiMermaidTheme theme) {
   final rootClasses = _svgClasses(root);
   if (root.getAttribute('id') != 'mindmap' &&
       !rootClasses.contains('mindmapDiagram')) {
-    return svg;
+    return _stripUnsupportedAiNativeSvg(document);
   }
 
   ({String fill, String text}) paletteFor(Set<String> classes) {
@@ -495,6 +495,29 @@ String materializeAiMindmapNativeStyles(String svg, AiMermaidTheme theme) {
           child.setAttribute('fill', palette.text);
       }
     }
+  }
+  return _stripUnsupportedAiNativeSvg(document);
+}
+
+String _stripUnsupportedAiNativeSvg(XmlDocument document) {
+  final root = document.rootElement;
+  const unsupportedElements = {'style', 'marker', 'filter'};
+  for (final element in root.descendants.whereType<XmlElement>().toList(
+    growable: false,
+  )) {
+    if (unsupportedElements.contains(element.name.local)) {
+      element.parent?.children.remove(element);
+    }
+  }
+  for (final element in <XmlElement>[
+    root,
+    ...root.descendants.whereType<XmlElement>(),
+  ]) {
+    element
+      ..removeAttribute('filter')
+      ..removeAttribute('marker-start')
+      ..removeAttribute('marker-mid')
+      ..removeAttribute('marker-end');
   }
   return document.toXmlString();
 }

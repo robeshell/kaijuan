@@ -9,6 +9,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/book_reading_preferences.dart';
+import '../../domain/book_structure.dart';
 import '../../presentation/controllers/book_reader_controller.dart';
 import 'book_rendition_session.dart';
 import 'book_models.dart';
@@ -168,6 +169,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       setMenuOpen: _setMenuOpen,
       getChapterText: _getChapterText,
       getBookPlainText: _getBookPlainText,
+      getBookStructureIndex: _getBookStructureIndex,
       getSelectionContext: _getSelectionContext,
     );
     readerController.attachSearchBridge(
@@ -355,6 +357,40 @@ try {
     final raw = await _evaluate('window.theChapterContent()');
     if (raw is String) return raw;
     return raw?.toString() ?? '';
+  }
+
+  Future<BookStructureIndex?> _getBookStructureIndex() async {
+    if (!_webReady) return null;
+    final controller = _webController;
+    final lease = _webLease;
+    if (controller == null || lease == null || !lease.isCurrent) return null;
+    try {
+      final result = await controller.callAsyncJavaScript(
+        functionBody: '''
+try {
+  const index = await window.getBookStructureIndex();
+  return index ? JSON.stringify(index) : '';
+} catch (e) {
+  console.error('[Kaika][BookStructure] index failed', e);
+  return '';
+}
+''',
+      );
+      if (!lease.isCurrent || _disposed) return null;
+      final value = result?.value;
+      if (value is! String || value.isEmpty) return null;
+      final index = BookStructureIndex.tryParse(value);
+      if (index != null) {
+        debugPrint(
+          '[FoliateJs] book structure: sections=${index.sections.length} '
+          'navigation=${index.navigation.length} headings=${index.headingCount}',
+        );
+      }
+      return index;
+    } catch (error) {
+      debugPrint('[FoliateJs] book structure error: $error');
+      return null;
+    }
   }
 
   Future<String> _getBookPlainText(

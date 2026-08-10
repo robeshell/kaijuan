@@ -35,6 +35,31 @@ void main() {
     expect(manifest.scopedWorks, isEmpty);
   });
 
+  test('shared-spine chapter headings and dash subtitles stay one work', () {
+    final manifest = resolve(
+      '''
+[§1@6~ 第一章 保就业，还是保发展？]
+[§2@6~ ——回顾日本保就业史：为保就业付出了怎样的代价？]
+[§3@7~ 第二章 救老员工，还是大学生？]
+[§4@7~ ——回顾日本大学生失业潮]
+''',
+      '''
+[§1@6#1 第一章 保就业，还是保发展？]
+[§2@6#1 ——回顾日本保就业史：为保就业付出了怎样的代价？]
+[§3@6#2 第一章正文]
+正文一
+[§4@7#1 第二章 救老员工，还是大学生？]
+[§5@7#1 ——回顾日本大学生失业潮]
+[§6@7#2 第二章正文]
+正文二
+''',
+    );
+
+    expect(manifest.kind, AiBookStructureKind.singleWork);
+    expect(manifest.works, isEmpty);
+    expect(manifest.requiresUserScopeConfirmation, isFalse);
+  });
+
   test('parts with child chapters are one segmented work', () {
     final manifest = resolve(
       '''

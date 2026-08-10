@@ -33,6 +33,7 @@ import '../../ai/ai_settings.dart';
 import '../../ai/ai_translation.dart';
 import '../../ai/ai_user_error.dart';
 import '../../app/book_reading_preferences.dart';
+import '../../domain/book_structure.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/book/book_models.dart';
@@ -316,6 +317,7 @@ class BookReaderController extends ChangeNotifier {
     int? endSectionExclusive,
   })?
   _getBookPlainText;
+  Future<BookStructureIndex?> Function()? _getBookStructureIndex;
   Future<({String before, String after})?> Function(int before, int after)?
   _getSelectionContext;
   void Function(Map<String, double>? zone)? _setMenuCursorZone;
@@ -435,6 +437,7 @@ class BookReaderController extends ChangeNotifier {
   );
   late final AiBookStructureSession _aiStructure = AiBookStructureSession(
     corpus: _aiCorpus,
+    loadIndex: () async => await _getBookStructureIndex?.call(),
     isSupplementTitle: (title) =>
         _isOutlineMetadataTitle(title) || _isGraphAppendixLabel(title),
   );
@@ -742,6 +745,7 @@ class BookReaderController extends ChangeNotifier {
       int? endSectionExclusive,
     })?
     getBookPlainText,
+    Future<BookStructureIndex?> Function()? getBookStructureIndex,
     Future<({String before, String after})?> Function(int before, int after)?
     getSelectionContext,
   }) {
@@ -754,6 +758,7 @@ class BookReaderController extends ChangeNotifier {
     _setMenuOpen = setMenuOpen;
     _getChapterText = getChapterText;
     _getBookPlainText = getBookPlainText;
+    _getBookStructureIndex = getBookStructureIndex;
     _getSelectionContext = getSelectionContext;
   }
 
@@ -807,6 +812,7 @@ class BookReaderController extends ChangeNotifier {
     _getSelectedText = null;
     _getChapterText = null;
     _getBookPlainText = null;
+    _getBookStructureIndex = null;
     _setMenuCursorZone = null;
     _setMenuOpen = null;
     _aiCorpus.clear();

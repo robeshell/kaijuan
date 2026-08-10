@@ -217,7 +217,11 @@ final answer = 42;
         const svg = '''
 <svg id="mindmap" class="mindmapDiagram" viewBox="0 0 100 100">
   <style>.section-root circle{fill:red}.section-0 path{fill:blue}</style>
-  <path class="edge section-edge-0" d="M0 0L10 10"/>
+  <defs>
+    <marker id="arrow"><path d="M0 0L2 1L0 2Z"/></marker>
+    <filter id="shadow"><feGaussianBlur stdDeviation="1"/></filter>
+  </defs>
+  <path class="edge section-edge-0" d="M0 0L10 10" marker-end="url(#arrow)" filter="url(#shadow)"/>
   <g class="mindmap-node section-root"><circle r="10"/><text>中心</text></g>
   <g class="mindmap-node section-0"><path d="M0 0L5 0L5 5Z"/><text>分支</text></g>
 </svg>
@@ -236,6 +240,11 @@ final answer = 42;
             .firstWhere((path) => _classes(path).contains('edge'));
         final texts = document.findAllElements('text').toList();
 
+        expect(document.findAllElements('style'), isEmpty);
+        expect(document.findAllElements('marker'), isEmpty);
+        expect(document.findAllElements('filter'), isEmpty);
+        expect(edge.getAttribute('marker-end'), isNull);
+        expect(edge.getAttribute('filter'), isNull);
         expect(circle.getAttribute('fill'), theme.rootFill);
         expect(texts.first.getAttribute('fill'), theme.rootText);
         expect(branchPath.getAttribute('fill'), theme.branchFills.first);
@@ -244,6 +253,32 @@ final answer = 42;
         expect(edge.getAttribute('stroke'), theme.branchFills.first);
       },
     );
+
+    test('strips unsupported native SVG elements from non-mindmaps', () {
+      final theme = AiMermaidTheme.fromColorScheme(
+        AppTheme.light(AppColors.defaultAccent).colorScheme,
+      );
+      const svg = '''
+<svg viewBox="0 0 100 100">
+  <style>.node{fill:red}</style>
+  <defs>
+    <marker id="arrow"><path d="M0 0L2 1L0 2Z"/></marker>
+    <filter id="shadow"><feGaussianBlur stdDeviation="1"/></filter>
+  </defs>
+  <path class="node" d="M0 0L10 10" marker-end="url(#arrow)" filter="url(#shadow)"/>
+</svg>
+''';
+
+      final nativeSvg = materializeAiMindmapNativeStyles(svg, theme);
+      final document = XmlDocument.parse(nativeSvg);
+      final path = document.findAllElements('path').single;
+
+      expect(document.findAllElements('style'), isEmpty);
+      expect(document.findAllElements('marker'), isEmpty);
+      expect(document.findAllElements('filter'), isEmpty);
+      expect(path.getAttribute('marker-end'), isNull);
+      expect(path.getAttribute('filter'), isNull);
+    });
 
     test('maps the active light ColorScheme into Merman semantic colors', () {
       final colors = AppTheme.light(AppColors.defaultAccent).colorScheme;

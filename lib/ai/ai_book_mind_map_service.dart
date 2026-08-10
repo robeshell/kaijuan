@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'ai_cancel.dart';
 import 'ai_chat_retrieve.dart';
+import 'ai_log.dart';
 import 'ai_mind_map.dart';
 import 'ai_model_adapter.dart';
 import 'ai_models.dart';
@@ -50,6 +51,24 @@ final class AiBookMindMapService {
         .where((section) => section.text.trim().isNotEmpty)
         .toList(growable: false);
     if (usable.isEmpty) throw AiProviderException('所选范围没有可用于生成思维导图的正文');
+    final bodyChars = usable.fold<int>(
+      0,
+      (total, section) => total + section.text.trim().length,
+    );
+    final coverage = _coverageGoal(
+      sectionCount: usable.length,
+      bodyChars: bodyChars,
+      detailed: RegExp(r'详细|详尽|完整|全面|深入').hasMatch(userInstruction),
+    );
+    final outputTokens = (4000 + coverage.targetNodes * 150).clamp(
+      12000,
+      32000,
+    );
+    AiLog.d(
+      'mind map input: sections=${usable.length} chars=$bodyChars '
+      'minimumNodes=${coverage.minimumNodes} targetNodes=${coverage.targetNodes} '
+      'maxTokens=$outputTokens',
+    );
 
     final model = AiWorkflowModelSession(
       adapter,
@@ -74,6 +93,8 @@ final class AiBookMindMapService {
                   '也不能写“主要内容”“相关内容”“本节介绍了”等占位话术。'
                   '根节点概括所选范围的中心结论；其他节点按正文自然层级写清主题、原因、事实、例子、'
                   '过程、影响或结论。节点数量、分支数量和层级深度由正文决定，不凑数也不截断。'
+                  '必须先在内部检查全部 section，再组织跨章节主题；每个实质 section 至少要被一个节点总结，'
+                  '内容丰富的章节需要继续展开观点、事实、案例、过程和影响，不能只为一章生成一个标题节点。'
                   '论说内容覆盖主张、理由、事实或例子与结论；叙事内容覆盖人物或事件、动机、转折与影响；'
                   '知识型内容覆盖概念、定义、方法、条件与限制。避免逐章流水账、目录标题树和长句标题。'
                   'evidence 可以为空；只有提供 evidence 时，sectionId 必须来自输入，quote 必须逐字复制'
@@ -84,6 +105,9 @@ final class AiBookMindMapService {
               text:
                   '<book_metadata>\n${jsonEncode({'title': bookTitle.trim(), if (bookAuthor != null && bookAuthor.trim().isNotEmpty) 'author': bookAuthor.trim(), 'scope': scopeLabel.trim()})}\n</book_metadata>\n'
                   '<reader_request>\n${userInstruction.trim()}\n</reader_request>\n'
+                  '<coverage_target>\n有效章节：${usable.length}；正文字符：$bodyChars；'
+                  '至少生成 ${coverage.minimumNodes} 个实质节点，建议约 ${coverage.targetNodes} 个；'
+                  '如果正文主题确实需要，可以生成更多。该目标包含根节点。\n</coverage_target>\n'
                   '<book_content>\n${jsonEncode({
                     'sections': [
                       for (final section in usable) {'sectionId': section.index, 'title': section.label.trim().isEmpty ? '第 ${section.index} 节' : section.label.trim(), 'text': section.text.trim()},
@@ -92,7 +116,7 @@ final class AiBookMindMapService {
             ),
           ],
           schema: AiWorkflowSchemas.mindMap,
-          maxTokens: 12000,
+          maxTokens: outputTokens,
           temperature: 0.1,
           timeout: _mindMapCallTimeout,
         ),
@@ -100,6 +124,10 @@ final class AiBookMindMapService {
       );
       cancelToken?.throwIfCancelled();
       final nodes = _parseNodes(result.value, usable);
+      AiLog.d(
+        'mind map output: nodes=${nodes.length} '
+        'sections=${usable.length} chars=$bodyChars',
+      );
       final contentKind = AiMindMapContentKind.values
           .where((kind) => kind.name == result.value['contentKind'])
           .firstOrNull;
@@ -124,6 +152,17 @@ final class AiBookMindMapService {
     } finally {
       await model.close();
     }
+  }
+
+  static ({int minimumNodes, int targetNodes}) _coverageGoal({
+    required int sectionCount,
+    required int bodyChars,
+    required bool detailed,
+  }) {
+    final minimum = (sectionCount + (bodyChars / 2200).ceil()).clamp(8, 140);
+    var target = (sectionCount + (bodyChars / 900).ceil()).clamp(minimum, 160);
+    if (detailed) target = (target * 1.2).ceil().clamp(minimum, 180);
+    return (minimumNodes: minimum, targetNodes: target);
   }
 
   static List<AiBookMindMapNode> _parseNodes(
