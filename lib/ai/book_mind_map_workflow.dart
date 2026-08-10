@@ -49,6 +49,7 @@ class BookMindMapWorkflow {
   static const _maxSectionSampleChars = 3600;
   static const _maxSingleSectionSampleChars = 12000;
   static const _targetBatchChars = 30000;
+  static const _maxConcurrentBatches = 2;
   static const _substantiveSummaryInstructions =
       'title 只是便于浏览的短主题标签；summary 必须直接总结正文中的实质内容，不能复述 title，'
       '也不能写“主要内容”“相关内容”“本节介绍了”等占位话术。'
@@ -143,8 +144,7 @@ class BookMindMapWorkflow {
               checkpoint.scopeFingerprint == scopeFingerprint
           ? checkpoint.completedBatches
           : const <Map<String, Object?>>[];
-      final summaries = <Map<String, Object?>>[];
-      final completedIds = <String>{};
+      final completedById = <String, Map<String, Object?>>{};
       final resumedById = <String, Map<String, Object?>>{};
       for (final row in resumed) {
         final id = row['batchId'];
@@ -161,48 +161,105 @@ class BookMindMapWorkflow {
       for (final batch in batches) {
         final row = resumedById[batch.id];
         if (row == null) continue;
-        summaries.add(row);
-        completedIds.add(batch.id);
+        completedById[batch.id] = row;
       }
 
       final total = batches.length + 1;
-      for (var i = 0; i < batches.length; i++) {
+      final pending = [
+        for (final batch in batches)
+          if (!completedById.containsKey(batch.id)) batch,
+      ];
+      if (completedById.isNotEmpty) {
+        onProgress?.call(
+          AiMindMapProgress(
+            completed: completedById.length,
+            total: total,
+            label: '已恢复 ${completedById.length} / ${batches.length} 批',
+          ),
+        );
+      }
+      for (
+        var windowStart = 0;
+        windowStart < pending.length;
+        windowStart += _maxConcurrentBatches
+      ) {
         cancelToken?.throwIfCancelled();
-        final batch = batches[i];
-        if (completedIds.contains(batch.id)) {
-          onProgress?.call(
-            AiMindMapProgress(
-              completed: completedIds.length,
-              total: total,
-              label: '已恢复 ${completedIds.length} / ${batches.length} 批',
+        final windowEnd = math.min(
+          windowStart + _maxConcurrentBatches,
+          pending.length,
+        );
+        final window = pending.sublist(windowStart, windowEnd);
+        final positions = [
+          for (final batch in window) batches.indexOf(batch) + 1,
+        ];
+        onProgress?.call(
+          AiMindMapProgress(
+            completed: completedById.length,
+            total: total,
+            label: positions.length == 1
+                ? '正在提炼第 ${positions.single} / ${batches.length} 批主题'
+                : '正在并行提炼第 ${positions.first}–${positions.last} / ${batches.length} 批主题',
+          ),
+        );
+        final results = await Future.wait([
+          for (final batch in window)
+            (() async {
+              try {
+                return (
+                  batch: batch,
+                  value: await _summarizeBatch(
+                    model,
+                    batch,
+                    cancelToken: cancelToken,
+                  ),
+                  error: null as Object?,
+                  stackTrace: null as StackTrace?,
+                );
+              } catch (error, stackTrace) {
+                return (
+                  batch: batch,
+                  value: null as Map<String, Object?>?,
+                  error: error,
+                  stackTrace: stackTrace,
+                );
+              }
+            })(),
+        ]);
+        for (final result in results) {
+          final value = result.value;
+          if (value != null) completedById[result.batch.id] = value;
+        }
+        if (results.any((result) => result.value != null)) {
+          final orderedSummaries = [
+            for (final batch in batches) ?completedById[batch.id],
+          ];
+          await onCheckpoint?.call(
+            AiMindMapCheckpoint(
+              contentHash: contentHash,
+              workKey: workKey,
+              scopeFingerprint: scopeFingerprint,
+              completedBatches: List.unmodifiable(orderedSummaries),
             ),
           );
-          continue;
+        }
+        cancelToken?.throwIfCancelled();
+        final failed = results
+            .where((result) => result.error != null)
+            .firstOrNull;
+        if (failed != null) {
+          Error.throwWithStackTrace(failed.error!, failed.stackTrace!);
         }
         onProgress?.call(
           AiMindMapProgress(
-            completed: completedIds.length,
+            completed: completedById.length,
             total: total,
-            label: '正在提炼第 ${i + 1} / ${batches.length} 批主题',
+            label: '已提炼 ${completedById.length} / ${batches.length} 批主题',
           ),
         );
-        final summary = await _summarizeBatch(
-          model,
-          batch,
-          cancelToken: cancelToken,
-        );
-        summaries.add(summary);
-        completedIds.add(batch.id);
-        final nextCheckpoint = AiMindMapCheckpoint(
-          contentHash: contentHash,
-          workKey: workKey,
-          scopeFingerprint: scopeFingerprint,
-          completedBatches: List.unmodifiable(summaries),
-        );
-        await onCheckpoint?.call(nextCheckpoint);
       }
 
       cancelToken?.throwIfCancelled();
+      final summaries = [for (final batch in batches) completedById[batch.id]!];
       onProgress?.call(
         AiMindMapProgress(
           completed: batches.length,

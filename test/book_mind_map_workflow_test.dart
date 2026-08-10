@@ -205,6 +205,43 @@ void main() {
     ),
   ];
 
+  List<AiBookSectionSlice> twoBatchSections() => [
+    for (var index = 1; index <= 14; index++)
+      AiBookSectionSlice(
+        index: index,
+        sourceSectionIndex: index,
+        label: '第 $index 章',
+        text: List.filled(450, '第 $index 章正文包含观点、事实、例子与结论。').join(),
+      ),
+  ];
+
+  Map<String, dynamic> batchFor(String id, List<int> coveredSections) => {
+    'batchId': id,
+    'coveredSections': coveredSections,
+    'branches': [
+      {
+        'title': '$id 主题',
+        'summary': '$id 从对应章节提炼具体观点、事实、例子与结论。',
+        'evidence': [],
+      },
+    ],
+  };
+
+  Map<String, dynamic> twoBatchFinalTree() => {
+    'contentKind': 'mixed',
+    'coveredSections': [for (var index = 1; index <= 14; index++) index],
+    'nodes': [
+      {
+        'tempId': 'root',
+        'parentTempId': null,
+        'order': 0,
+        'title': '全书主题',
+        'summary': '全书综合十四章中的具体观点、事实、例子与结论形成完整主题结构。',
+        'evidence': [],
+      },
+    ],
+  };
+
   Map<String, dynamic> largeFinalTree() {
     final tree = finalTree();
     final nodes = tree['nodes']! as List<Map<String, Object?>>;
@@ -560,6 +597,86 @@ void main() {
     },
   );
 
+  test('independent whole-book batches run with bounded concurrency', () async {
+    final adapter = _FakeMindMapAdapter([
+      batchFor('m001', [for (var index = 1; index <= 8; index++) index]),
+      batchFor('m002', [for (var index = 9; index <= 14; index++) index]),
+      twoBatchFinalTree(),
+    ], delay: const Duration(milliseconds: 10));
+
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '并发批次测试',
+      sections: twoBatchSections(),
+    );
+
+    expect(result.scopeSectionIndices, [
+      for (var index = 1; index <= 14; index++) index,
+    ]);
+    expect(adapter.calls, 3);
+    expect(adapter.maxInFlight, 2);
+  });
+
+  test('checkpoints a successful peer when a concurrent batch fails', () async {
+    final checkpoints = <AiMindMapCheckpoint>[];
+    final adapter = _FakeMindMapAdapter([
+      AiProviderException('第一批失败'),
+      batchFor('m002', [for (var index = 9; index <= 14; index++) index]),
+    ], delay: const Duration(milliseconds: 10));
+
+    await expectLater(
+      workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '并发失败测试',
+        sections: twoBatchSections(),
+        onCheckpoint: (value) async => checkpoints.add(value),
+      ),
+      throwsA(isA<AiProviderException>()),
+    );
+
+    expect(adapter.calls, 2);
+    expect(adapter.maxInFlight, 2);
+    expect(checkpoints, hasLength(1));
+    expect(checkpoints.single.completedBatches.single['batchId'], 'm002');
+  });
+
+  test(
+    'resume skips a non-leading batch completed by a failed window',
+    () async {
+      final scope = twoBatchSections();
+      final checkpoint = AiMindMapCheckpoint(
+        contentHash: 'a' * 64,
+        workKey: null,
+        scopeFingerprint: aiMindMapScopeFingerprint(
+          contentHash: 'a' * 64,
+          workKey: null,
+          sectionIndices: scope.map((section) => section.index),
+        ),
+        completedBatches: [
+          batchFor('m002', [for (var index = 9; index <= 14; index++) index]),
+        ],
+      );
+      final adapter = _FakeMindMapAdapter([
+        batchFor('m001', [for (var index = 1; index <= 8; index++) index]),
+        twoBatchFinalTree(),
+      ]);
+
+      final result = await workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '并发恢复测试',
+        sections: scope,
+        checkpoint: checkpoint,
+      );
+
+      expect(result.nodes, hasLength(1));
+      expect(adapter.calls, 2);
+      expect(adapter.requests.first.messages.last.text, contains('批次 m001'));
+    },
+  );
+
   test('final output must cover every frozen section', () async {
     final incomplete = finalTree()..['coveredSections'] = [1];
     final adapter = _FakeMindMapAdapter([incomplete, finalTree()]);
@@ -791,11 +908,14 @@ void main() {
 }
 
 class _FakeMindMapAdapter implements AiModelAdapter, AiStructuredOutputAdapter {
-  _FakeMindMapAdapter(this.outputs);
+  _FakeMindMapAdapter(this.outputs, {this.delay = Duration.zero});
 
   final List<Object> outputs;
+  final Duration delay;
   final List<AiModelJsonRequest> requests = [];
   var calls = 0;
+  var inFlight = 0;
+  var maxInFlight = 0;
   var closed = false;
 
   @override
@@ -809,8 +929,16 @@ class _FakeMindMapAdapter implements AiModelAdapter, AiStructuredOutputAdapter {
     cancelToken?.throwIfCancelled();
     requests.add(request);
     final output = outputs[calls++];
-    if (output is Exception) throw output;
-    return AiModelJsonResult(value: Map<String, dynamic>.from(output as Map));
+    inFlight += 1;
+    if (inFlight > maxInFlight) maxInFlight = inFlight;
+    try {
+      if (delay > Duration.zero) await Future<void>.delayed(delay);
+      cancelToken?.throwIfCancelled();
+      if (output is Exception) throw output;
+      return AiModelJsonResult(value: Map<String, dynamic>.from(output as Map));
+    } finally {
+      inFlight -= 1;
+    }
   }
 
   @override
