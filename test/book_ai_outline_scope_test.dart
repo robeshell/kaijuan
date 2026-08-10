@@ -447,6 +447,18 @@ void main() {
       of: chapterMap,
       matching: find.byType(InteractiveViewer),
     );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(viewerFinder));
+    await tester.pump();
+    expect(
+      tester
+          .widget<ListView>(
+            find.byKey(const ValueKey<String>('ai-chat-message-list')),
+          )
+          .physics,
+      isA<NeverScrollableScrollPhysics>(),
+    );
     final viewer = tester.widget<InteractiveViewer>(viewerFinder);
     final scaleBeforeZoom = viewer.transformationController!.value
         .getMaxScaleOnAxis();
@@ -463,6 +475,17 @@ void main() {
       greaterThan(scaleBeforeZoom),
     );
     expect(listController.offset, closeTo(listOffsetBeforeZoom, 0.01));
+    await mouse.moveTo(tester.getCenter(find.text('对话')));
+    await tester.pump();
+    expect(
+      tester
+          .widget<ListView>(
+            find.byKey(const ValueKey<String>('ai-chat-message-list')),
+          )
+          .physics,
+      isNot(isA<NeverScrollableScrollPhysics>()),
+    );
+    await mouse.removePointer();
 
     await tester.tap(
       find.descendant(of: chapterMap, matching: find.text('向右')),

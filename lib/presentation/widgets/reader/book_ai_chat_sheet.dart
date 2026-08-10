@@ -145,6 +145,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   final _graphEntityKeys = <String, GlobalKey>{};
   int _graphListEpoch = 0;
   String? _mindMapRevealTurnId;
+  bool _mindMapPointerActive = false;
 
   /// Attached highlight; null when cleared by user.
   String? _selection;
@@ -3270,6 +3271,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 : ListView(
                     key: const ValueKey<String>('ai-chat-message-list'),
                     controller: _scroll,
+                    physics: _mindMapPointerActive
+                        ? const NeverScrollableScrollPhysics()
+                        : null,
                     padding: EdgeInsets.fromLTRB(
                       16,
                       compact ? 0 : 4,
@@ -3344,6 +3348,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                                     _mindMapRevealTurnId = null;
                                   }
                                 },
+                          onMindMapPointerHoverChanged: (active) {
+                            if (_mindMapPointerActive == active) return;
+                            setState(() => _mindMapPointerActive = active);
+                          },
                         ),
                       if (showFollowUpShortcuts)
                         Padding(
@@ -3825,6 +3833,7 @@ class _Bubble extends StatelessWidget {
     this.onOpenMindMapFullscreen,
     this.revealMindMapOnMount = false,
     this.onMindMapRevealed,
+    this.onMindMapPointerHoverChanged,
   });
 
   final AiChatMessage message;
@@ -3835,6 +3844,7 @@ class _Bubble extends StatelessWidget {
   final VoidCallback? onOpenMindMapFullscreen;
   final bool revealMindMapOnMount;
   final VoidCallback? onMindMapRevealed;
+  final ValueChanged<bool>? onMindMapPointerHoverChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -3906,6 +3916,7 @@ class _Bubble extends StatelessWidget {
                       onOpenFullscreen: onOpenMindMapFullscreen,
                       revealOnMount: revealMindMapOnMount,
                       onRevealed: onMindMapRevealed,
+                      onPointerHoverChanged: onMindMapPointerHoverChanged,
                     ),
                   ),
                 ),

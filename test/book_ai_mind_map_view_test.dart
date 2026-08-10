@@ -203,7 +203,7 @@ void main() {
     final viewerFinder = find.byType(InteractiveViewer);
     final viewer = tester.widget<InteractiveViewer>(viewerFinder);
     expect(viewer.boundaryMargin.left, double.infinity);
-    expect(viewer.minScale, 0.05);
+    expect(viewer.minScale, 0.2);
     expect(viewer.maxScale, 6);
 
     final controller = viewer.transformationController!;

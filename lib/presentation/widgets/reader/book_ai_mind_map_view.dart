@@ -16,6 +16,7 @@ class BookAiMindMapView extends StatefulWidget {
     this.onOpenFullscreen,
     this.revealOnMount = false,
     this.onRevealed,
+    this.onPointerHoverChanged,
   });
 
   final AiBookMindMap map;
@@ -24,6 +25,7 @@ class BookAiMindMapView extends StatefulWidget {
   final VoidCallback? onOpenFullscreen;
   final bool revealOnMount;
   final VoidCallback? onRevealed;
+  final ValueChanged<bool>? onPointerHoverChanged;
 
   @override
   State<BookAiMindMapView> createState() => _BookAiMindMapViewState();
@@ -221,54 +223,59 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                 }
               });
               return ClipRect(
-                child: Listener(
-                  onPointerSignal: _claimCanvasPointerSignal,
-                  child: InteractiveViewer(
-                    key: _viewportKey,
-                    transformationController: _transformation,
-                    constrained: false,
-                    // Mind-map canvases should feel spatially unbounded. A
-                    // finite margin creates an invisible wall close to the
-                    // outermost nodes and prevents bringing an edge branch to
-                    // the center for reading.
-                    boundaryMargin: const EdgeInsets.all(double.infinity),
-                    minScale: 0.05,
-                    maxScale: 6,
-                    // Flutter treats PointerDeviceKind.trackpad scroll as pan
-                    // unless this is explicit. Enabling it uses the framework's
-                    // focal-point-preserving zoom path for both the embedded
-                    // card and fullscreen explorer on desktop.
-                    trackpadScrollCausesScale: true,
-                    child: SizedBox.fromSize(
-                      size: layout.size,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _MindMapEdgePainter(
-                                layout: layout,
-                                color: context.appColors.outline,
-                              ),
-                            ),
-                          ),
-                          for (final node in widget.map.nodes)
-                            if (layout.nodeRects[node.nodeId] case final rect?)
-                              Positioned.fromRect(
-                                rect: rect,
-                                child: _MindMapNodeCard(
-                                  node: node,
-                                  childCount: children[node.nodeId] ?? 0,
-                                  collapsed: _collapsed.contains(node.nodeId),
-                                  onToggleCollapsed: () => setState(() {
-                                    if (!_collapsed.add(node.nodeId)) {
-                                      _collapsed.remove(node.nodeId);
-                                    }
-                                  }),
-                                  onTap: () => _showNode(node),
+                child: MouseRegion(
+                  onEnter: (_) => widget.onPointerHoverChanged?.call(true),
+                  onExit: (_) => widget.onPointerHoverChanged?.call(false),
+                  child: Listener(
+                    onPointerSignal: _claimCanvasPointerSignal,
+                    child: InteractiveViewer(
+                      key: _viewportKey,
+                      transformationController: _transformation,
+                      constrained: false,
+                      // Mind-map canvases should feel spatially unbounded. A
+                      // finite margin creates an invisible wall close to the
+                      // outermost nodes and prevents bringing an edge branch to
+                      // the center for reading.
+                      boundaryMargin: const EdgeInsets.all(double.infinity),
+                      minScale: 0.2,
+                      maxScale: 6,
+                      // Flutter treats PointerDeviceKind.trackpad scroll as pan
+                      // unless this is explicit. Enabling it uses the framework's
+                      // focal-point-preserving zoom path for both the embedded
+                      // card and fullscreen explorer on desktop.
+                      trackpadScrollCausesScale: true,
+                      child: SizedBox.fromSize(
+                        size: layout.size,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _MindMapEdgePainter(
+                                  layout: layout,
+                                  color: context.appColors.outline,
                                 ),
                               ),
-                        ],
+                            ),
+                            for (final node in widget.map.nodes)
+                              if (layout.nodeRects[node.nodeId]
+                                  case final rect?)
+                                Positioned.fromRect(
+                                  rect: rect,
+                                  child: _MindMapNodeCard(
+                                    node: node,
+                                    childCount: children[node.nodeId] ?? 0,
+                                    collapsed: _collapsed.contains(node.nodeId),
+                                    onToggleCollapsed: () => setState(() {
+                                      if (!_collapsed.add(node.nodeId)) {
+                                        _collapsed.remove(node.nodeId);
+                                      }
+                                    }),
+                                    onTap: () => _showNode(node),
+                                  ),
+                                ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
