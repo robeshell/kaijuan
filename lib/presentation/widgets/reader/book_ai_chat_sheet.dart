@@ -141,6 +141,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Timer? _graphHighlightTimer;
   Timer? _streamCheckpointTimer;
   int _scrollRequestEpoch = 0;
+  int _streamTailFollowEpoch = 0;
   DateTime? _lastStreamCheckpointAt;
   final _graphEntityKeys = <String, GlobalKey>{};
   int _graphListEpoch = 0;
@@ -728,6 +729,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _sub = stream.listen(
       (event) {
         if (!mounted) return;
+        final shouldFollowTail = _isNearMessageTail;
+        final previousOffset = _scroll.hasClients ? _scroll.offset : null;
         final current = switch (event) {
           AiRunStarted(:final descriptor) => AiRunState.initial(descriptor),
           _ => _runState,
@@ -743,7 +746,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         });
         if (event is AiRunTextSnapshot || event is AiRunReasoningSnapshot) {
           _scheduleStreamingCheckpoint();
-          _scrollToEnd();
+          if (shouldFollowTail) {
+            _followStreamingTail(previousOffset: previousOffset);
+          }
         } else if (event case AiRunFailed(:final error)) {
           handleFailure(error);
         } else if (event is AiRunCancelled) {
@@ -1060,11 +1065,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   /// Scroll message list to the bottom.
   ///
-  /// [animated] is for new tokens / send. Opening the sheet uses a jump so
-  /// the user does not briefly see the first message then animate down.
+  /// [animated] is for an explicit send or newly inserted follow-ups. Opening
+  /// the sheet uses a jump so the user does not briefly see the first message
+  /// then animate down. Streaming snapshots use [_followStreamingTail].
   /// Retries a few frames: ListView may not have clients yet right after
   /// bootstrap, and markdown bubbles can grow after the first layout.
   void _scrollToEnd({bool animated = true}) {
+    _streamTailFollowEpoch++;
     final epoch = ++_scrollRequestEpoch;
     void attempt(int remaining) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1102,6 +1109,32 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
 
     attempt(8);
+  }
+
+  bool get _isNearMessageTail {
+    if (!_scroll.hasClients) return true;
+    return _scroll.position.extentAfter <= 48;
+  }
+
+  /// Keeps a growing streaming bubble pinned without starting a new scroll
+  /// animation for every model snapshot. The captured offset protects a user
+  /// gesture that begins between the event and the next layout frame.
+  void _followStreamingTail({required double? previousOffset}) {
+    final epoch = ++_streamTailFollowEpoch;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || epoch != _streamTailFollowEpoch || !_scroll.hasClients) {
+        return;
+      }
+      if (_scroll.position.isScrollingNotifier.value) return;
+      if (previousOffset != null &&
+          (_scroll.offset - previousOffset).abs() > 1) {
+        return;
+      }
+      final max = _scroll.position.maxScrollExtent;
+      if ((_scroll.offset - max).abs() > 0.5) {
+        _scroll.jumpTo(max);
+      }
+    });
   }
 
   Future<void> _copy(String text) async {

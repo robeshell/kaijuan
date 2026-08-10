@@ -76,6 +76,7 @@ class _AmbiguousOutlineController extends BookReaderController {
   AiBookGraph? graphOverride;
   bool _generatingGraph = false;
   bool? lastDeepThinkingEnabled;
+  String? lastChatRunId;
   int? lastMindMapSourceSectionIndex;
 
   @override
@@ -156,6 +157,7 @@ class _AmbiguousOutlineController extends BookReaderController {
       task: AiRunTask.bookChat,
       scope: AiRunScope(contentHash: item.contentHash),
     );
+    lastChatRunId = descriptor.runId;
     late final StreamController<AiRunEvent> stream;
     stream = StreamController<AiRunEvent>(
       onListen: () {
@@ -606,6 +608,100 @@ void main() {
     expect(find.text('打开 AI'), findsOneWidget);
 
     controller.releaseChatCancellations();
+  });
+
+  testWidgets('streaming follow pauses when the user scrolls up', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = AppDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final now = DateTime.utc(2026, 8, 10);
+    await database.upsertReadingItem(
+      ReadingItemsCompanion.insert(
+        id: 'chat-stream-scroll',
+        kind: ReaderKind.book.storageValue,
+        format: ReaderFormat.epub.storageValue,
+        title: '流式滚动测试',
+        filePath: '/tmp/chat-stream-scroll.epub',
+        contentHash: 'hash-chat-stream-scroll',
+        pageCount: const Value(2),
+        addedAt: now,
+        updatedAt: now,
+      ),
+    );
+    final item = (await database.readingItemById('chat-stream-scroll'))!;
+    final controller = _AmbiguousOutlineController(
+      database: database,
+      item: item,
+    );
+    addTearDown(() {
+      controller.releaseChatCancellations();
+      controller.dispose();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () =>
+                  showBookAiChatSheet(context, controller: controller),
+              child: const Text('打开 AI'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开 AI'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, '生成长回答');
+    await tester.tap(find.byTooltip('发送'));
+    await tester.pump();
+    await tester.pump();
+
+    final stream = controller.chatStreams.single;
+    final firstBody = List.filled(80, '这是一段持续增长的流式回答内容。').join('\n\n');
+    stream.add(
+      AiRunTextSnapshot(
+        runId: controller.lastChatRunId!,
+        sequence: 4,
+        occurredAt: DateTime.now(),
+        text: firstBody,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    final listFinder = find.byKey(
+      const ValueKey<String>('ai-chat-message-list'),
+    );
+    final scroll = tester.widget<ListView>(listFinder).controller!;
+    expect(scroll.position.extentAfter, lessThan(1));
+
+    await tester.drag(listFinder, const Offset(0, 260));
+    await tester.pumpAndSettle();
+    expect(scroll.position.extentAfter, greaterThan(50));
+    final userOffset = scroll.offset;
+
+    stream.add(
+      AiRunTextSnapshot(
+        runId: controller.lastChatRunId!,
+        sequence: 5,
+        occurredAt: DateTime.now(),
+        text: '$firstBody\n\n${List.filled(20, '新增流式内容。').join('\n\n')}',
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(scroll.offset, closeTo(userOffset, 1));
+    expect(scroll.position.extentAfter, greaterThan(50));
   });
 
   testWidgets(
