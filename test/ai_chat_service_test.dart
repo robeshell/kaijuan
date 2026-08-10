@@ -15,6 +15,44 @@ import 'package:kaijuan/ai/ai_search.dart';
 
 void main() {
   group('AiChatService.buildMessages (tool mode)', () {
+    test('locks Chinese questions to Chinese user-visible prose', () {
+      final messages = AiChatService.buildMessages(
+        userText: '请为这本书生成完整大纲',
+        history: const [],
+        context: const AiChatContextBundle(),
+        bookTitle: '书',
+      );
+
+      expect(
+        messages.first.content,
+        contains('Output language for this turn: Chinese'),
+      );
+      expect(messages.last.content, contains('<response_contract>'));
+      expect(messages.last.content, contains('Do not narrate tool use'));
+      expect(
+        messages.last.content,
+        contains('Never announce that you now understand the book'),
+      );
+    });
+
+    test('does not force an English question into Chinese', () {
+      final messages = AiChatService.buildMessages(
+        userText: 'Summarize this chapter.',
+        history: const [],
+        context: const AiChatContextBundle(),
+        bookTitle: 'Book',
+      );
+
+      expect(
+        messages.first.content,
+        contains('Output language for this turn: the same language'),
+      );
+      expect(
+        messages.first.content,
+        isNot(contains('Output language for this turn: Chinese')),
+      );
+    });
+
     test('keeps reader context outside the system prompt', () {
       final messages = AiChatService.buildMessages(
         userText: '这一章讲什么？',
@@ -445,6 +483,15 @@ void main() {
               .reasoningText,
           '需要先搜索书内人物。',
         );
+        expect(adapter.requests[1].messages.last.role, AiModelRole.user);
+        expect(
+          adapter.requests[1].messages.last.text,
+          contains('Output language for this turn: Chinese'),
+        );
+        expect(
+          adapter.requests[1].messages.last.text,
+          contains('Do not narrate tool use'),
+        );
         expect((events.last as AiRunCompleted).text, '张居正是内阁首辅。');
         expect(
           events.whereType<AiRunReasoningSnapshot>().last.text,
@@ -492,6 +539,46 @@ void main() {
         '第一段继续',
       ]);
       expect((events.last as AiRunCompleted).text, '第一段继续');
+    });
+
+    test('automatic continuation preserves the answer language', () async {
+      final adapter = _ScriptedModelAdapter([
+        [
+          const AiModelTurnCompleted(
+            text: '第一段',
+            toolCalls: [],
+            truncated: true,
+          ),
+        ],
+        [
+          const AiModelTurnCompleted(
+            text: '继续内容',
+            toolCalls: [],
+            truncated: false,
+          ),
+        ],
+      ]);
+      final service = AiChatService(
+        isAvailable: () => true,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
+      );
+
+      final events = await service
+          .streamRun(
+            run: descriptor,
+            userText: '请继续回答',
+            history: const [],
+            context: const AiChatContextBundle(),
+            bookTitle: '书',
+            tools: _FakeHost(),
+          )
+          .toList();
+
+      expect((events.last as AiRunCompleted).text, '第一段继续内容');
+      expect(
+        adapter.requests[1].messages.last.text,
+        contains('Keep exactly the same language and writing system'),
+      );
     });
 
     test(
