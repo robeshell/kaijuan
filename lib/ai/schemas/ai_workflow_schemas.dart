@@ -56,6 +56,7 @@ abstract class $AiMindMapNodeOutput {
 @Schema()
 abstract class $AiMindMapOutput {
   String get contentKind;
+  List<int> get coveredSections;
   List<$AiMindMapNodeOutput> get nodes;
 }
 

@@ -492,10 +492,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty || _sending) return;
     if (!_ready) return;
+    final retrying = preset != null && preset == _retryText;
+    final retryTurnId = retrying ? _retryTurnId : null;
     final mindMapScope = resolveAiMindMapRequestScope(text);
     if (mindMapScope != null) {
       if (preset == null && _input.text.trim() == text) _input.clear();
-      await _generateMindMapInChat(text, mindMapScope);
+      await _generateMindMapInChat(
+        text,
+        mindMapScope,
+        retryTurnId: retryTurnId,
+      );
       return;
     }
 
@@ -508,7 +514,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
     final wantWeb = _webSearchOn;
     final wantDeepThinking = _c.supportsDeepThinking ? _deepThinkingOn : null;
-    final retrying = preset != null && preset == _retryText;
     if (wantWeb && !_canWebSearch) {
       showAppSnackBar(context, '请先在设置中填写联网搜索 Key');
       await _openSettings();
@@ -530,7 +535,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final turnWorkKey = turnWork == null
         ? null
         : BookReaderController.workKeyFor(turnWork);
-    final retryTurnId = retrying ? _retryTurnId : null;
     final turnId = _newTurnId();
     _activeTurnWorkKey = turnWorkKey;
     _activeTurnId = turnId;
@@ -1247,8 +1251,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   Future<void> _generateMindMapInChat(
     String text,
-    AiMindMapRequestScope scope,
-  ) async {
+    AiMindMapRequestScope scope, {
+    String? retryTurnId,
+  }) async {
     final work = _c.currentReadingWork;
     final workKey = work == null ? null : BookReaderController.workKeyFor(work);
     final turnId = _newTurnId();
@@ -1257,6 +1262,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _mindMapTurnId = turnId;
     _cancel = CancelToken();
     setState(() {
+      if (retryTurnId != null) {
+        final messages = List<AiChatMessage>.from(_session.messagesFor(workKey))
+          ..removeWhere((message) => message.turnId == retryTurnId);
+        _session = _session.withMessagesFor(workKey, messages);
+      }
       _session = _withMessage(
         AiChatMessage(
           role: AiMessageRole.user,

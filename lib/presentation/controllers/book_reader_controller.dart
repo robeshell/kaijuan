@@ -1301,17 +1301,16 @@ class BookReaderController extends ChangeNotifier {
     return value;
   }
 
-  /// Complete readable units for the frozen current work/publication.
-  /// Presentation may change only the selected set, never the unit identity.
-  Future<List<AiBookSectionSlice>> bookMindMapSectionChoices({
+  /// Deterministic substantive units for the frozen current work/publication.
+  /// The conversation scope is already confirmed by the user's wording, so
+  /// this never exposes graph-style section choices to presentation.
+  Future<List<AiBookSectionSlice>> bookMindMapSections({
     AiGraphWorkCandidate? work,
     bool useFrozenWork = false,
   }) async {
-    await resolveGraphWorkCandidates();
+    await resolveBookStructure();
     final target = useFrozenWork ? work : work ?? currentReadingWork;
-    return (await _graphSectionsForWork(target))
-        .where((section) => section.text.trim().isNotEmpty)
-        .toList(growable: false);
+    return _mindMapSectionsForWork(target);
   }
 
   /// Freezes the renderer-backed current chapter before any asynchronous
@@ -1338,7 +1337,6 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<AiBookMindMap?> generateBookMindMap({
-    Set<int> excludedSectionIndices = const {},
     AiGraphWorkCandidate? work,
     AiBookSectionSlice? frozenCurrentChapter,
     bool useFrozenWork = false,
@@ -1350,7 +1348,6 @@ class BookReaderController extends ChangeNotifier {
     unawaited(() async {
       try {
         final result = await _generateBookMindMap(
-          excludedSectionIndices: excludedSectionIndices,
           work: work,
           frozenCurrentChapter: frozenCurrentChapter,
           useFrozenWork: useFrozenWork,
@@ -1371,7 +1368,6 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<AiBookMindMap?> _generateBookMindMap({
-    required Set<int> excludedSectionIndices,
     AiGraphWorkCandidate? work,
     AiBookSectionSlice? frozenCurrentChapter,
     required bool useFrozenWork,
@@ -1394,20 +1390,18 @@ class BookReaderController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
     try {
       if (frozenCurrentChapter == null || !useFrozenWork) {
-        await resolveGraphWorkCandidates(cancel: cancel);
+        await resolveBookStructure(cancel: cancel);
       }
       final target = useFrozenWork ? work : work ?? currentReadingWork;
       final workKey = target == null ? null : workKeyFor(target);
       final allSections = frozenCurrentChapter == null
-          ? await bookMindMapSectionChoices(work: target, useFrozenWork: true)
+          ? await bookMindMapSections(work: target, useFrozenWork: true)
           : <AiBookSectionSlice>[frozenCurrentChapter];
-      final sections = allSections
-          .where((section) => !excludedSectionIndices.contains(section.index))
-          .toList(growable: false);
+      final sections = allSections;
       if (sections.isEmpty) {
         throw AiProviderException(
           frozenCurrentChapter == null
-              ? '所选章节都被排除了，请至少保留一节正文'
+              ? '这本书没有可用于生成思维导图的正文'
               : '当前章节没有可用于生成思维导图的正文',
         );
       }
@@ -1749,7 +1743,7 @@ class BookReaderController extends ChangeNotifier {
 
   /// Resolves deterministic file structure once per reader. Compatibility
   /// return: independent work scopes for an omnibus, otherwise null.
-  Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates({
+  Future<List<AiGraphWorkCandidate>?> resolveBookStructure({
     CancelToken? cancel,
   }) async {
     if (_aiStructure.isResolved) return _resolvedGraphWorks;
@@ -1758,12 +1752,16 @@ class BookReaderController extends ChangeNotifier {
       return await _resolveWorks(cancel);
     } catch (error) {
       // A corpus-extraction failure (WebView reload mid-read, JS callback
-      // error) must not wedge the caller: the graph tab's「识别中」spinner
-      // keys off _graphWorksLoading and would otherwise spin forever.
-      AiLog.d('resolveGraphWorkCandidates failed: $error');
+      // error) must not wedge callers waiting for deterministic structure.
+      AiLog.d('resolveBookStructure failed: $error');
       return null;
     }
   }
+
+  /// Compatibility name retained for the knowledge-graph presentation.
+  Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates({
+    CancelToken? cancel,
+  }) => resolveBookStructure(cancel: cancel);
 
   Future<List<AiGraphWorkCandidate>?> _resolveWorks(CancelToken? cancel) async {
     final works = await _aiStructure.resolve(
@@ -1968,7 +1966,7 @@ class BookReaderController extends ChangeNotifier {
   /// useful engine identifier but not a chapter name. Replace only those
   /// resource-shaped labels with the authoritative per-spine TOC title; keep
   /// real document headings such as “第一章” or “狂人日记” untouched.
-  List<AiBookSectionSlice> _withGraphDisplayTitles(
+  List<AiBookSectionSlice> _withAiDisplayTitles(
     List<AiBookSectionSlice> sections,
   ) => [
     for (final section in sections)
@@ -1994,6 +1992,75 @@ class BookReaderController extends ChangeNotifier {
     ).hasMatch(label);
   }
 
+  Future<List<AiBookSectionSlice>> _mindMapSectionsForWork(
+    AiGraphWorkCandidate? work,
+  ) async {
+    final body = await _aiCorpus.loadSpine(BookMindMapWorkflow.maxBodyChars);
+    final sections = AiChatRetrieve.splitSections(body);
+    if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
+    final titled = _withAiDisplayTitles(
+      _withTitles(
+        sections,
+        fallback: (section) =>
+            _titleForOutlineSection(section.originSectionIndex),
+      ),
+    );
+    final workScoped = work == null
+        ? titled
+        : titled
+              .where(
+                (section) =>
+                    work.contains(section.sourceSectionIndex ?? section.index),
+              )
+              .toList(growable: false);
+    final substantive = workScoped
+        .where((section) => !_isMindMapAutomaticSupplement(section))
+        .where((section) => !_isMindMapTitleOnlySection(section))
+        .toList(growable: false);
+    if (substantive.isEmpty) {
+      throw AiProviderException('这本书没有可用于生成思维导图的正文');
+    }
+    AiLog.d(
+      'mind map scope: work=${work?.title ?? 'whole-book'} '
+      'units=${titled.length} scoped=${workScoped.length} '
+      'substantive=${substantive.length}',
+    );
+    return substantive;
+  }
+
+  /// Mind-map input has its own conservative, non-configurable filter. It must
+  /// not inherit knowledge-graph supplement settings or a graph scope plan.
+  static bool _isMindMapAutomaticSupplement(AiBookSectionSlice section) {
+    final label = section.label.trim().replaceAll(RegExp(r'\s+'), '');
+    if (RegExp(
+      r'^(?:封面|扉页|版权信息|版权页|目录|目次|参考文献|参考资料|索引|数据引用说明|图书在版编目数据|出版信息|作者简介)$',
+    ).hasMatch(label)) {
+      return true;
+    }
+    if (RegExp(r'^(?:参考文献|参考资料|索引|数据引用说明)(?:[：:]|$)').hasMatch(label)) {
+      return true;
+    }
+    final text = section.text.trim();
+    if (text.isEmpty) return false;
+    final prefix = text.length > 640 ? text.substring(0, 640) : text;
+    final compact = prefix.replaceAll(RegExp(r'\s+'), '');
+    if (RegExp(r'^(目录|目次)(?:[：:]|$)').hasMatch(compact)) return true;
+    final hasCopyrightSignal = RegExp(
+      r'ISBN|图书在版编目|版权所有|版权归属|版权信息',
+    ).hasMatch(prefix);
+    return hasCopyrightSignal && RegExp(r'出版|出版社|版权|编目').hasMatch(prefix);
+  }
+
+  static bool _isMindMapTitleOnlySection(AiBookSectionSlice section) {
+    final text = _mindMapComparable(section.text);
+    final title = _mindMapComparable(section.label);
+    return text.isEmpty || (title.isNotEmpty && text == title);
+  }
+
+  static String _mindMapComparable(String value) => value
+      .replaceAll(RegExp(r'[\s\p{P}\p{S}]', unicode: true), '')
+      .toLowerCase();
+
   /// Loads the fine-grained graph corpus for [work] (null = the publication).
   /// Nothing is removed here: supplement rules only become recommendations in
   /// [graphScopePlan], and the user's confirmed selection is the final scope.
@@ -2003,7 +2070,7 @@ class BookReaderController extends ChangeNotifier {
     final body = await _aiCorpus.loadSpine(AiBookGraphService.maxBookBodyChars);
     final sections = AiChatRetrieve.splitSections(body);
     if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
-    final titled = _withGraphDisplayTitles(
+    final titled = _withAiDisplayTitles(
       _withTitles(
         sections,
         fallback: (section) =>

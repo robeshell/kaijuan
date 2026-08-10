@@ -87,6 +87,7 @@ class AiBookMindMapNode {
         title is! String ||
         title.trim().isEmpty ||
         summary is! String ||
+        summary.trim().isEmpty ||
         order is! num ||
         level is! num) {
       return null;
@@ -265,6 +266,9 @@ bool validateAiBookMindMapNodes(List<AiBookMindMapNode> nodes) {
   final childrenByParent = <String?, List<AiBookMindMapNode>>{};
   for (final node in nodes) {
     if (byId.containsKey(node.nodeId) ||
+        node.nodeId.trim().isEmpty ||
+        node.title.trim().isEmpty ||
+        node.summary.trim().isEmpty ||
         node.title.runes.length > 32 ||
         node.summary.runes.length > 220 ||
         node.level < 0 ||

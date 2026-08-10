@@ -29,6 +29,38 @@ AiMindMapRequestScope? resolveAiMindMapRequestScope(String text) {
       normalized.contains('脑图') ||
       normalized.contains('mindmap');
   if (!asksForMap || normalized.contains('mermaid')) return null;
+  final asksHowOrWhy = const [
+    '为什么',
+    '为何',
+    '怎么',
+    '如何',
+    'howto',
+    'why',
+  ].any(normalized.contains);
+  if (asksHowOrWhy) return null;
+  final hasGenerationAction = const [
+    '生成',
+    '重新生成',
+    '创建',
+    '制作',
+    '绘制',
+    '画一个',
+    '画一份',
+    '做一个',
+    '做一份',
+    '整理成',
+    '梳理成',
+    '输出',
+    '给我',
+    '想看',
+    '看看',
+    'generate',
+    'create',
+    'draw',
+    'make',
+    'showme',
+  ].any(normalized.contains);
+  if (!hasGenerationAction) return null;
   if (const ['当前章', '当前章节', '这一章', '这章', '本章'].any(normalized.contains)) {
     return AiMindMapRequestScope.currentChapter;
   }

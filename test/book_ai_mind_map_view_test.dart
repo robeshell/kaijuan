@@ -196,6 +196,43 @@ void main() {
     },
   );
 
+  testWidgets('fullscreen evidence closes the explorer before navigation', (
+    tester,
+  ) async {
+    AiMindMapEvidence? opened;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => BookAiMindMapFullscreen(
+                    map: map,
+                    onLayoutChanged: (_) {},
+                    onOpenEvidence: (value) => opened = value,
+                  ),
+                ),
+              ),
+              child: const Text('打开全屏'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('打开全屏'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('主题甲'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('本章 · 约 25% 处'));
+    await tester.pumpAndSettle();
+
+    expect(opened?.progressInSection, 0.25);
+    expect(find.text('打开全屏'), findsOneWidget);
+    expect(find.text('思维导图'), findsNothing);
+  });
+
   testWidgets('multi-section evidence shows section and in-section progress', (
     tester,
   ) async {

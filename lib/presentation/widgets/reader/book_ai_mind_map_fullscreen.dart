@@ -72,7 +72,13 @@ class _BookAiMindMapFullscreenState extends State<BookAiMindMapFullscreen> {
               setState(() => _map = _map.copyWith(layout: layout));
               widget.onLayoutChanged(layout);
             },
-            onOpenEvidence: widget.onOpenEvidence,
+            onOpenEvidence: (evidence) {
+              // The node-detail sheet has already closed itself. Remove the
+              // fullscreen route before the chat workspace callback performs
+              // its delayed pop, so the reader text is the final visible route.
+              Navigator.of(context).pop();
+              widget.onOpenEvidence(evidence);
+            },
           ),
         ),
       ),

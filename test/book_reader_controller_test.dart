@@ -1243,5 +1243,42 @@ void main() {
         controller.dispose();
       },
     );
+
+    test('mind map scope removes metadata and title-only containers', () async {
+      final item = await insertBook(id: 'mind-map-substantive-scope');
+      final controller = BookReaderController(database: database, item: item);
+      controller.attachAnnotationBridge(
+        renderAll: (_) {},
+        add: (_) {},
+        remove: (_) {},
+        clearSelection: () {},
+        getSelectedText: () async => '',
+        setMenuCursorZone: (_) {},
+        setMenuOpen: (_) {},
+        getBookPlainText:
+            (
+              maxChars, {
+              bool toc = true,
+              int? startSection,
+              int? endSectionExclusive,
+            }) async => '''
+[§1@1 版权信息]
+版权所有 出版社 ISBN
+[§2@2 第一篇 就业冲击]
+第一篇 就业冲击
+[§3@3 第一章 保就业还是保发展]
+本章通过政策背景、就业数据与长期代价讨论两种目标的取舍。
+[§4@4 结语]
+作者最后总结短期稳定与长期发展的关系。
+[§5@5 参考文献]
+参考资料一
+''',
+      );
+
+      final sections = await controller.bookMindMapSections();
+
+      expect(sections.map((section) => section.label), ['第一章 保就业还是保发展', '结语']);
+      controller.dispose();
+    });
   });
 }

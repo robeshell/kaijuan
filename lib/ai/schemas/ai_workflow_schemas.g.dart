@@ -654,10 +654,12 @@ base class AiMindMapOutput {
 
   AiMindMapOutput({
     required String contentKind,
+    required List<int> coveredSections,
     required List<AiMindMapNodeOutput> nodes,
   }) {
     _json = {
       'contentKind': contentKind,
+      'coveredSections': coveredSections,
       'nodes': nodes.map((e) => e.toJson()).toList(),
     };
   }
@@ -674,6 +676,14 @@ base class AiMindMapOutput {
 
   set contentKind(String value) {
     _json['contentKind'] = value;
+  }
+
+  List<int> get coveredSections {
+    return (_json['coveredSections'] as List).cast<int>();
+  }
+
+  set coveredSections(List<int> value) {
+    _json['coveredSections'] = value;
   }
 
   List<AiMindMapNodeOutput> get nodes {
@@ -712,11 +722,12 @@ base class _AiMindMapOutputTypeFactory extends SchemanticType<AiMindMapOutput> {
         .object(
           properties: {
             'contentKind': $Schema.string(),
+            'coveredSections': $Schema.list(items: $Schema.integer()),
             'nodes': $Schema.list(
               items: $Schema.fromMap({'\$ref': r'#/$defs/AiMindMapNodeOutput'}),
             ),
           },
-          required: ['contentKind', 'nodes'],
+          required: ['contentKind', 'coveredSections', 'nodes'],
         )
         .value,
     dependencies: [AiMindMapNodeOutput.$schema],

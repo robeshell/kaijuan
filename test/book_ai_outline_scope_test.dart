@@ -78,6 +78,7 @@ class _AmbiguousOutlineController extends BookReaderController {
   bool? lastDeepThinkingEnabled;
   String? lastChatRunId;
   int? lastMindMapSourceSectionIndex;
+  int mindMapFailuresRemaining = 0;
 
   @override
   Future<AiBookSectionSlice?> captureCurrentBookMindMapChapter() async {
@@ -91,12 +92,15 @@ class _AmbiguousOutlineController extends BookReaderController {
 
   @override
   Future<AiBookMindMap?> generateBookMindMap({
-    Set<int> excludedSectionIndices = const {},
     AiGraphWorkCandidate? work,
     AiBookSectionSlice? frozenCurrentChapter,
     bool useFrozenWork = false,
   }) async {
     lastMindMapSourceSectionIndex = frozenCurrentChapter?.originSectionIndex;
+    if (mindMapFailuresRemaining > 0) {
+      mindMapFailuresRemaining--;
+      return null;
+    }
     return AiBookMindMap(
       contentHash: item.contentHash,
       workKey: null,
@@ -432,11 +436,22 @@ void main() {
     await tester.tap(find.text('打开 AI'));
     await tester.pumpAndSettle();
 
+    controller.mindMapFailuresRemaining = 1;
     await tester.tap(find.text('生成本章思维导图'));
+    await tester.pumpAndSettle();
+    expect(find.text('重试'), findsOneWidget);
+
+    await tester.tap(find.text('重试'));
     await tester.pumpAndSettle();
     expect(controller.lastMindMapSourceSectionIndex, 1);
     expect(find.byType(BookAiMindMapView), findsOneWidget);
     expect(find.text('已根据当前章生成思维导图。'), findsOneWidget);
+    final retryMessageList = tester.widget<ListView>(
+      find.byKey(const ValueKey<String>('ai-chat-message-list')),
+    );
+    retryMessageList.controller!.jumpTo(0);
+    await tester.pump();
+    expect(find.text('请为当前章生成思维导图'), findsOneWidget);
     expect(find.widgetWithText(Tab, '思维导图'), findsNothing);
 
     final chapterMap = find.byType(BookAiMindMapView).first;

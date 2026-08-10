@@ -546,7 +546,7 @@ class _MindMapNodeCard extends StatelessWidget {
                         tooltip: collapsed ? '展开分支' : '折叠分支',
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints.tightFor(
-                          width: 36,
+                          width: 44,
                           height: 44,
                         ),
                         onPressed: onToggleCollapsed,

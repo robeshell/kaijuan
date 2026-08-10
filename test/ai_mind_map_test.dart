@@ -86,6 +86,14 @@ void main() {
     expect(restored.nodes[1].evidence.single.spanResolved, isTrue);
   });
 
+  test('mind map JSON rejects an empty persisted summary', () {
+    final json = sample().toJson();
+    final nodes = json['nodes']! as List<Map<String, Object?>>;
+    nodes[1]['summary'] = '   ';
+
+    expect(AiBookMindMap.fromJson(json), isNull);
+  });
+
   test('node validator rejects cycles and inconsistent levels', () {
     final invalid = [
       const AiBookMindMapNode(
