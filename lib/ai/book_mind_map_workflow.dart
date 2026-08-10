@@ -376,6 +376,7 @@ class BookMindMapWorkflow {
         final parsed = _parseFinal(
           result.value,
           sections,
+          summaries: summaries,
           requiredCoverageGroups: [
             for (final summary in summaries)
               (summary['coveredSections'] as List)
@@ -401,6 +402,7 @@ class BookMindMapWorkflow {
   _parseFinal(
     Map<String, dynamic> raw,
     List<_MindMapInputSection> sections, {
+    required List<Map<String, Object?>> summaries,
     required List<Set<int>> requiredCoverageGroups,
     void Function(String reason)? onInvalid,
   }) {
@@ -422,8 +424,8 @@ class BookMindMapWorkflow {
     final sectionById = {
       for (final section in sections) section.sectionId: section,
     };
+    final verifiedEvidence = _verifiedEvidenceBySection(summaries, sectionById);
     final temp = <String, _RawMindMapNode>{};
-    final evidencedSectionIds = <int>{};
     for (final row in rows) {
       if (row is! Map ||
           row['tempId'] is! String ||
@@ -437,7 +439,7 @@ class BookMindMapWorkflow {
       if (id.isEmpty || temp.containsKey(id)) {
         return invalid('tempId 为空或重复');
       }
-      final evidence = <AiMindMapEvidence>[];
+      final evidence = <_RawMindMapEvidence>[];
       for (final item in row['evidence'] as List) {
         if (item is! Map ||
             item['sectionId'] is! num ||
@@ -449,8 +451,19 @@ class BookMindMapWorkflow {
         if (section == null || quote.isEmpty) {
           return invalid('evidence 引用了范围外章节或空引文');
         }
-        evidencedSectionIds.add(section.sectionId);
-        evidence.add(_resolveEvidence(section, quote));
+        final resolved = _resolveEvidence(section, quote);
+        if (resolved.spanResolved) {
+          evidence.add(
+            _RawMindMapEvidence(sectionId: section.sectionId, value: resolved),
+          );
+          continue;
+        }
+        final repaired = _repairEvidence(
+          section.sectionId,
+          quote,
+          verifiedEvidence,
+        );
+        if (repaired != null) evidence.add(repaired);
       }
       temp[id] = _RawMindMapNode(
         id: id,
@@ -465,12 +478,9 @@ class BookMindMapWorkflow {
     }
     final roots = temp.values.where((node) => node.parentId == null).toList();
     if (roots.length != 1) return invalid('必须恰好有一个根节点');
-    if (roots.single.evidence.isNotEmpty) return invalid('根节点 evidence 必须为空');
-    if (requiredCoverageGroups.any(
-      (group) => !group.any(evidencedSectionIds.contains),
-    )) {
-      return invalid('每个输入批次至少要有一条 evidence 被最终节点使用');
-    }
+    // The root represents the whole map rather than a directly grounded
+    // assertion. Model-added root evidence is harmless but not canonical.
+    roots.single.evidence.clear();
     if (!_bounded(roots.single.title, 2, 12) ||
         !_bounded(roots.single.summary, 0, 140)) {
       return invalid('根节点标题或摘要长度不符合约束');
@@ -482,10 +492,6 @@ class BookMindMapWorkflow {
       if (node.parentId != null &&
           (!_bounded(node.title, 2, 20) || !_bounded(node.summary, 0, 140))) {
         return invalid('非根节点标题或摘要长度不符合约束');
-      }
-      if (node.parentId != null &&
-          !node.evidence.any((evidence) => evidence.spanResolved)) {
-        return invalid('非根节点必须逐字复用至少一条可定位 evidence 引文');
       }
     }
     final children = <String, List<_RawMindMapNode>>{};
@@ -499,6 +505,54 @@ class BookMindMapWorkflow {
             : a.title.compareTo(b.title),
       );
       if (siblings.length > 12) return invalid('同一父节点的直接子节点不能超过 12 个');
+    }
+    final topologyVisiting = <String>{};
+    final topologyVisited = <String>{};
+    bool validateTopology(_RawMindMapNode node, int level) {
+      if (!topologyVisiting.add(node.id) || level > 4) return false;
+      for (final child in children[node.id] ?? const <_RawMindMapNode>[]) {
+        if (!validateTopology(child, level + 1)) return false;
+      }
+      topologyVisiting.remove(node.id);
+      topologyVisited.add(node.id);
+      return true;
+    }
+
+    if (!validateTopology(roots.single, 0) ||
+        topologyVisited.length != temp.length) {
+      return invalid('树包含环、孤立节点或超过 level=4');
+    }
+
+    // Grouping nodes express hierarchy and may not have a direct quotation.
+    // Ground them bottom-up with the first stable, already-grounded descendant.
+    // Leaves remain strict: a subtree with no grounded leaf is rejected.
+    bool groundSubtree(_RawMindMapNode node) {
+      for (final child in children[node.id] ?? const <_RawMindMapNode>[]) {
+        if (!groundSubtree(child)) return false;
+      }
+      if (node.parentId == null) return true;
+      if (node.evidence.isNotEmpty) return true;
+      for (final child in children[node.id] ?? const <_RawMindMapNode>[]) {
+        if (child.evidence.isNotEmpty) {
+          node.evidence.add(child.evidence.first);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (!groundSubtree(roots.single)) {
+      return invalid('非根叶节点必须至少有一条可定位 evidence 引文');
+    }
+    final evidencedSectionIds = temp.values
+        .where((node) => node.parentId != null)
+        .expand((node) => node.evidence)
+        .map((item) => item.sectionId)
+        .toSet();
+    if (requiredCoverageGroups.any(
+      (group) => !group.any(evidencedSectionIds.contains),
+    )) {
+      return invalid('每个输入批次至少要有一条 evidence 被最终节点使用');
     }
     final result = <AiBookMindMapNode>[];
     final visiting = <String>{};
@@ -514,7 +568,7 @@ class BookMindMapWorkflow {
           level: level,
           title: node.title,
           summary: node.summary,
-          evidence: List.unmodifiable(node.evidence),
+          evidence: List.unmodifiable(node.evidence.map((item) => item.value)),
         ),
       );
       for (final child in children[node.id] ?? const <_RawMindMapNode>[]) {
@@ -581,6 +635,89 @@ class BookMindMapWorkflow {
       progressInSection: offset < 0 || body.isEmpty ? 0 : offset / body.length,
       spanResolved: offset >= 0,
     );
+  }
+
+  Map<int, List<_RawMindMapEvidence>> _verifiedEvidenceBySection(
+    List<Map<String, Object?>> summaries,
+    Map<int, _MindMapInputSection> sectionById,
+  ) {
+    final result = <int, List<_RawMindMapEvidence>>{};
+    final seen = <int, Set<String>>{};
+    for (final summary in summaries) {
+      final branches = summary['branches'];
+      if (branches is! List) continue;
+      for (final branch in branches.whereType<Map>()) {
+        final evidence = branch['evidence'];
+        if (evidence is! List) continue;
+        for (final item in evidence.whereType<Map>()) {
+          final rawSectionId = item['sectionId'];
+          final rawQuote = item['quote'];
+          if (rawSectionId is! num || rawQuote is! String) continue;
+          final sectionId = rawSectionId.toInt();
+          final section = sectionById[sectionId];
+          final quote = rawQuote.trim();
+          if (section == null || quote.isEmpty) continue;
+          final resolved = _resolveEvidence(section, quote);
+          if (!resolved.spanResolved) continue;
+          final normalized = _normalize(quote);
+          if (!(seen
+              .putIfAbsent(sectionId, () => <String>{})
+              .add(normalized))) {
+            continue;
+          }
+          result
+              .putIfAbsent(sectionId, () => [])
+              .add(_RawMindMapEvidence(sectionId: sectionId, value: resolved));
+        }
+      }
+    }
+    return result;
+  }
+
+  _RawMindMapEvidence? _repairEvidence(
+    int sectionId,
+    String modelQuote,
+    Map<int, List<_RawMindMapEvidence>> verifiedEvidence,
+  ) {
+    final candidates = verifiedEvidence[sectionId];
+    if (candidates == null || candidates.isEmpty) return null;
+    if (candidates.length == 1) return candidates.single;
+    final ranked =
+        candidates
+            .map(
+              (candidate) => (
+                candidate: candidate,
+                score: _evidenceSimilarity(modelQuote, candidate.value.quote),
+              ),
+            )
+            .toList()
+          ..sort((a, b) {
+            final byScore = b.score.compareTo(a.score);
+            if (byScore != 0) return byScore;
+            return a.candidate.value.quote.compareTo(b.candidate.value.quote);
+          });
+    return ranked.first.score >= 0.32 ? ranked.first.candidate : null;
+  }
+
+  static double _evidenceSimilarity(String left, String right) {
+    final a = _normalize(left);
+    final b = _normalize(right);
+    if (a.isEmpty || b.isEmpty) return 0;
+    if (a == b || a.contains(b) || b.contains(a)) return 1;
+    Set<String> bigrams(String value) {
+      final runes = value.runes.toList(growable: false);
+      if (runes.length == 1) return {String.fromCharCode(runes.single)};
+      return {
+        for (var i = 0; i < runes.length - 1; i++)
+          String.fromCharCodes([runes[i], runes[i + 1]]),
+      };
+    }
+
+    final aBigrams = bigrams(a);
+    final bBigrams = bigrams(b);
+    final intersection = aBigrams.intersection(bBigrams).length;
+    final union = aBigrams.union(bBigrams).length;
+    return union == 0 ? 0 : intersection / union;
   }
 
   static Map<String, Object?> _compactSummary(Map<String, Object?> source) => {
@@ -693,5 +830,12 @@ class _RawMindMapNode {
   final int order;
   final String title;
   final String summary;
-  final List<AiMindMapEvidence> evidence;
+  final List<_RawMindMapEvidence> evidence;
+}
+
+class _RawMindMapEvidence {
+  const _RawMindMapEvidence({required this.sectionId, required this.value});
+
+  final int sectionId;
+  final AiMindMapEvidence value;
 }

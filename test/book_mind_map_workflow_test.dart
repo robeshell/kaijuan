@@ -229,6 +229,111 @@ void main() {
       );
     },
   );
+
+  test('drops model-added root evidence deterministically', () async {
+    final tree = finalTree();
+    final rows = tree['nodes']! as List<Map<String, Object?>>;
+    rows.first['evidence'] = [
+      {'sectionId': 1, 'quote': '第一章证据'},
+    ];
+    final adapter = _FakeMindMapAdapter([batch(), tree]);
+
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '测试书',
+      sections: sections,
+    );
+
+    expect(result.nodes.first.evidence, isEmpty);
+    expect(adapter.calls, 2);
+  });
+
+  test('abstract group inherits evidence from grounded descendant', () async {
+    final tree = finalTree();
+    final rows = tree['nodes']! as List<Map<String, Object?>>;
+    rows[1]['evidence'] = <Object?>[];
+    final adapter = _FakeMindMapAdapter([batch(), tree]);
+
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '测试书',
+      sections: sections,
+    );
+
+    expect(result.nodes[1].title, '问题提出');
+    expect(result.nodes[1].evidence.single.quote, '展开论据');
+    expect(result.nodes[1].evidence.single.spanResolved, isTrue);
+  });
+
+  test('ungrounded leaf still rejects the final tree', () async {
+    final tree = finalTree();
+    final rows = tree['nodes']! as List<Map<String, Object?>>;
+    rows[2]['evidence'] = <Object?>[];
+    final adapter = _FakeMindMapAdapter([batch(), tree, tree]);
+
+    await expectLater(
+      workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '测试书',
+        sections: sections,
+      ),
+      throwsA(isA<AiProviderException>()),
+    );
+    expect(
+      adapter.requests.last.messages.first.text,
+      contains('非根叶节点必须至少有一条可定位 evidence 引文'),
+    );
+  });
+
+  test(
+    'repairs rewritten quote from verified evidence in same section',
+    () async {
+      final tree = finalTree();
+      final rows = tree['nodes']! as List<Map<String, Object?>>;
+      rows[2]['evidence'] = [
+        {'sectionId': 1, 'quote': '模型改写后无法直接定位的句子'},
+      ];
+      final adapter = _FakeMindMapAdapter([batch(), tree]);
+
+      final result = await workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '测试书',
+        sections: sections,
+      );
+
+      expect(result.nodes[2].evidence.single.quote, '第一章证据');
+      expect(result.nodes[2].evidence.single.spanResolved, isTrue);
+    },
+  );
+
+  test('does not repair rewritten quote with cross-section evidence', () async {
+    final summary = batch();
+    final branches = summary['branches']! as List<Map<String, Object?>>;
+    branches[0]['evidence'] = [
+      {'sectionId': 2, 'quote': '第二章证据'},
+    ];
+    final tree = finalTree();
+    final rows = tree['nodes']! as List<Map<String, Object?>>;
+    rows[2]['evidence'] = [
+      {'sectionId': 1, 'quote': '模型改写后无法直接定位的句子'},
+    ];
+    final adapter = _FakeMindMapAdapter([summary, tree, tree]);
+
+    await expectLater(
+      workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '测试书',
+        sections: sections,
+      ),
+      throwsA(isA<AiProviderException>()),
+    );
+    expect(adapter.calls, 3);
+  });
 }
 
 class _FakeMindMapAdapter implements AiModelAdapter, AiStructuredOutputAdapter {
