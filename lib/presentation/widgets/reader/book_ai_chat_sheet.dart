@@ -33,6 +33,7 @@ import 'book_ai_graph_sort.dart';
 import 'book_ai_graph_tiles.dart';
 import 'book_ai_graph_fullscreen.dart';
 import 'book_ai_graph_view.dart';
+import 'book_ai_mind_map_fullscreen.dart';
 import 'book_ai_mind_map_view.dart';
 import 'book_ai_narration_dialog.dart';
 
@@ -1118,6 +1119,21 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _session = _session.withMessagesFor(workKey, messages);
     });
     unawaited(_persist());
+  }
+
+  void _openMindMapFullscreen(AiChatMessage message) {
+    final map = message.mindMap;
+    if (map == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BookAiMindMapFullscreen(
+          title: map.root.title.isEmpty ? '思维导图' : map.root.title,
+          map: map,
+          onLayoutChanged: (layout) => _updateMindMapLayout(message, layout),
+          onOpenEvidence: _goToMindMapEvidence,
+        ),
+      ),
+    );
   }
 
   Future<void> _openSettings() async {
@@ -3291,6 +3307,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                           onOpenMindMapEvidence: msg.mindMap == null
                               ? null
                               : _goToMindMapEvidence,
+                          onOpenMindMapFullscreen: msg.mindMap == null
+                              ? null
+                              : () => _openMindMapFullscreen(msg),
                         ),
                       if (showFollowUpShortcuts)
                         Padding(
@@ -3769,6 +3788,7 @@ class _Bubble extends StatelessWidget {
     this.streaming = false,
     this.onMindMapLayoutChanged,
     this.onOpenMindMapEvidence,
+    this.onOpenMindMapFullscreen,
   });
 
   final AiChatMessage message;
@@ -3776,6 +3796,7 @@ class _Bubble extends StatelessWidget {
   final bool streaming;
   final ValueChanged<AiMindMapLayout>? onMindMapLayoutChanged;
   final ValueChanged<AiMindMapEvidence>? onOpenMindMapEvidence;
+  final VoidCallback? onOpenMindMapFullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -3844,6 +3865,7 @@ class _Bubble extends StatelessWidget {
                       map: map,
                       onLayoutChanged: onMindMapLayoutChanged ?? (_) {},
                       onOpenEvidence: onOpenMindMapEvidence ?? (_) {},
+                      onOpenFullscreen: onOpenMindMapFullscreen,
                     ),
                   ),
                 ),

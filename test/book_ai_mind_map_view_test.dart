@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
+import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_fullscreen.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_view.dart';
 
 void main() {
@@ -46,6 +47,7 @@ void main() {
   ) async {
     AiMindMapLayout? selected;
     AiMindMapEvidence? opened;
+    var openedFullscreen = false;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -56,6 +58,7 @@ void main() {
               map: map,
               onLayoutChanged: (value) => selected = value,
               onOpenEvidence: (value) => opened = value,
+              onOpenFullscreen: () => openedFullscreen = true,
             ),
           ),
         ),
@@ -64,6 +67,9 @@ void main() {
     await tester.pump();
     expect(find.text('向右'), findsOneWidget);
     expect(find.text('主题甲'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('全屏查看'));
+    expect(openedFullscreen, isTrue);
 
     await tester.tap(find.text('双向'));
     await tester.pump();
@@ -79,6 +85,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened?.progressInSection, 0.25);
   });
+
+  testWidgets(
+    'fullscreen explorer fills its route and writes layout changes back',
+    (tester) async {
+      AiMindMapLayout? savedLayout;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BookAiMindMapFullscreen(
+            map: map,
+            onLayoutChanged: (value) => savedLayout = value,
+            onOpenEvidence: (_) {},
+          ),
+        ),
+      );
+
+      expect(find.byType(Scaffold), findsOneWidget);
+      expect(find.text('思维导图'), findsOneWidget);
+      expect(find.byTooltip('全屏查看'), findsNothing);
+
+      await tester.tap(find.text('双向'));
+      await tester.pump();
+      expect(savedLayout, AiMindMapLayout.bidirectional);
+    },
+  );
 
   testWidgets('large maps start with deep branches collapsed', (tester) async {
     final nodes = <AiBookMindMapNode>[

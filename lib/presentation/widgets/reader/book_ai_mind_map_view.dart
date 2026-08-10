@@ -12,11 +12,13 @@ class BookAiMindMapView extends StatefulWidget {
     required this.map,
     required this.onLayoutChanged,
     required this.onOpenEvidence,
+    this.onOpenFullscreen,
   });
 
   final AiBookMindMap map;
   final ValueChanged<AiMindMapLayout> onLayoutChanged;
   final ValueChanged<AiMindMapEvidence> onOpenEvidence;
+  final VoidCallback? onOpenFullscreen;
 
   @override
   State<BookAiMindMapView> createState() => _BookAiMindMapViewState();
@@ -120,6 +122,12 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                 onPressed: () => _fit(layout.size),
                 icon: const Icon(Icons.center_focus_strong_outlined, size: 20),
               ),
+              if (widget.onOpenFullscreen != null)
+                IconButton(
+                  tooltip: '全屏查看',
+                  onPressed: widget.onOpenFullscreen,
+                  icon: const Icon(Icons.fullscreen, size: 20),
+                ),
             ],
           ),
         ),
