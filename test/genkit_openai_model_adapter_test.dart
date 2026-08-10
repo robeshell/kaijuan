@@ -302,6 +302,63 @@ data: [DONE]
   );
 
   test(
+    'malformed structured JSON is exposed as a workflow-retryable error',
+    () async {
+      final client = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'id': 'chatcmpl-malformed-json',
+            'object': 'chat.completion',
+            'created': 1,
+            'model': 'gpt-compatible',
+            'choices': [
+              {
+                'index': 0,
+                'message': {
+                  'role': 'assistant',
+                  'content': '{"summary":"缺少结束括号"',
+                },
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+      final adapter = GenkitOpenAiModelAdapter(
+        baseUrl: 'https://compatible.example/v1',
+        apiKey: 'test-key',
+        model: 'gpt-compatible',
+        providerKind: AiProviderKind.custom,
+        httpClient: client,
+        maxAttempts: 1,
+      );
+
+      try {
+        await expectLater(
+          adapter.completeJson(
+            const AiModelJsonRequest(
+              messages: [AiModelMessage(role: AiModelRole.user, text: '总结')],
+              schema: {
+                'type': 'object',
+                'properties': {
+                  'summary': {'type': 'string'},
+                },
+                'required': ['summary'],
+              },
+            ),
+          ),
+          throwsA(isA<AiModelStructuredOutputFormatException>()),
+        );
+      } finally {
+        await adapter.close();
+        client.close();
+      }
+    },
+  );
+
+  test(
     'DeepSeek structured output uses native json_object with schema guidance',
     () async {
       Map<String, dynamic>? requestJson;

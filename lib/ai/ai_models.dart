@@ -42,6 +42,14 @@ class AiModelOutputTruncatedException extends AiProviderException {
     : super(message ?? '模型输出达到长度上限');
 }
 
+/// The provider completed a structured-output turn, but the returned JSON
+/// could not be parsed. Workflows may ask the model to regenerate the complete
+/// value, but must never repair or accept the malformed payload locally.
+class AiModelStructuredOutputFormatException extends AiProviderException {
+  AiModelStructuredOutputFormatException([String? message])
+    : super(message ?? '模型返回的结构化 JSON 无法解析');
+}
+
 /// One model id returned by a provider's list-models API.
 class AiModelInfo {
   const AiModelInfo({required this.id, this.displayName});

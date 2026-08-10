@@ -493,12 +493,23 @@ class GenkitAnthropicModelAdapter
     Object error, {
     required String operation,
   }) {
+    if (operation == '结构化输出' && _isStructuredOutputFormatError(error)) {
+      return AiModelStructuredOutputFormatException();
+    }
     if (error is AiProviderException) return error;
     final match = RegExp(r'\b([45]\d\d|529)\b').firstMatch(error.toString());
     return AiProviderException(
       'Genkit Anthropic $operation失败：$error',
       statusCode: match == null ? null : int.tryParse(match.group(1)!),
     );
+  }
+
+  static bool _isStructuredOutputFormatError(Object error) {
+    if (error is FormatException) return true;
+    final text = error.toString().toLowerCase();
+    return text.contains('failed to parse extracted json') ||
+        text.contains('unexpected character') ||
+        text.contains('unexpected end of input');
   }
 
   void _ensureOpen() {

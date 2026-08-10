@@ -276,6 +276,40 @@ void main() {
   });
 
   test(
+    'retries malformed structured JSON without accepting partial nodes',
+    () async {
+      final body =
+          '开篇标记第一处遗漏标记第二处遗漏标记'
+          '${List.filled(300, '正文论证与事实说明。').join()}';
+      final adapter = _FakeMindMapAdapter([
+        AiModelStructuredOutputFormatException(),
+        longChapterTree(),
+      ]);
+
+      final result = await workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '结构化输出测试',
+        sections: [
+          AiBookSectionSlice(
+            index: 6,
+            sourceSectionIndex: 6,
+            label: '第一章',
+            text: body,
+          ),
+        ],
+      );
+
+      expect(adapter.calls, 2);
+      expect(result.nodes, hasLength(10));
+      expect(
+        adapter.requests.last.messages.first.text,
+        contains('JSON 语法无效或不完整'),
+      );
+    },
+  );
+
+  test(
     'rejects a title-only placeholder summary and retries with reason',
     () async {
       final invalid = finalTree();
@@ -532,7 +566,7 @@ void main() {
 class _FakeMindMapAdapter implements AiModelAdapter, AiStructuredOutputAdapter {
   _FakeMindMapAdapter(this.outputs);
 
-  final List<Map<String, dynamic>> outputs;
+  final List<Object> outputs;
   final List<AiModelJsonRequest> requests = [];
   var calls = 0;
   var closed = false;
@@ -547,7 +581,9 @@ class _FakeMindMapAdapter implements AiModelAdapter, AiStructuredOutputAdapter {
   }) async {
     cancelToken?.throwIfCancelled();
     requests.add(request);
-    return AiModelJsonResult(value: outputs[calls++]);
+    final output = outputs[calls++];
+    if (output is Exception) throw output;
+    return AiModelJsonResult(value: Map<String, dynamic>.from(output as Map));
   }
 
   @override
