@@ -267,10 +267,30 @@ void main() {
     expect(result.nodes[1].evidence.single.spanResolved, isTrue);
   });
 
-  test('ungrounded leaf still rejects the final tree', () async {
+  test('leaf with omitted evidence matches a verified batch theme', () async {
     final tree = finalTree();
     final rows = tree['nodes']! as List<Map<String, Object?>>;
     rows[2]['evidence'] = <Object?>[];
+    final adapter = _FakeMindMapAdapter([batch(), tree]);
+
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '测试书',
+      sections: sections,
+    );
+
+    expect(result.nodes[2].evidence.single.quote, '第一章证据');
+    expect(result.nodes[2].evidence.single.spanResolved, isTrue);
+  });
+
+  test('unmatched ungrounded leaf still rejects the final tree', () async {
+    final tree = finalTree();
+    final rows = tree['nodes']! as List<Map<String, Object?>>;
+    rows[2]
+      ..['title'] = '陌生主题'
+      ..['summary'] = '这段内容与所有批次主题完全没有共同信息。'
+      ..['evidence'] = <Object?>[];
     final adapter = _FakeMindMapAdapter([batch(), tree, tree]);
 
     await expectLater(
@@ -306,6 +326,37 @@ void main() {
       );
 
       expect(result.nodes[2].evidence.single.quote, '第一章证据');
+      expect(result.nodes[2].evidence.single.spanResolved, isTrue);
+    },
+  );
+
+  test(
+    'uses node semantics to disambiguate evidence within one section',
+    () async {
+      final summary = batch();
+      final branches = summary['branches']! as List;
+      branches.add(<String, Object>{
+        'title': '论据展开',
+        'summary': '第一章围绕核心问题继续展开论据。',
+        'evidence': [
+          {'sectionId': 1, 'quote': '展开论据'},
+        ],
+      });
+      final tree = finalTree();
+      final rows = tree['nodes']! as List<Map<String, Object?>>;
+      rows[2]['evidence'] = [
+        {'sectionId': 1, 'quote': '模型漏掉了原始引文'},
+      ];
+      final adapter = _FakeMindMapAdapter([summary, tree]);
+
+      final result = await workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '测试书',
+        sections: sections,
+      );
+
+      expect(result.nodes[2].evidence.single.quote, '展开论据');
       expect(result.nodes[2].evidence.single.spanResolved, isTrue);
     },
   );

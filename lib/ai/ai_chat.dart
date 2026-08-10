@@ -1,4 +1,5 @@
 import 'ai_models.dart';
+import 'ai_mind_map.dart';
 import 'ai_outline.dart';
 import 'ai_provider_kind.dart';
 
@@ -17,6 +18,26 @@ enum AiChatTurnStatus {
   }
 }
 
+enum AiMindMapRequestScope { currentChapter, wholeBook }
+
+/// Routes only product mind-map requests. Explicit Mermaid requests remain
+/// ordinary rich chat content even when they mention a mind map.
+AiMindMapRequestScope? resolveAiMindMapRequestScope(String text) {
+  final normalized = text.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+  final asksForMap =
+      normalized.contains('思维导图') ||
+      normalized.contains('脑图') ||
+      normalized.contains('mindmap');
+  if (!asksForMap || normalized.contains('mermaid')) return null;
+  if (const ['当前章', '当前章节', '这一章', '这章', '本章'].any(normalized.contains)) {
+    return AiMindMapRequestScope.currentChapter;
+  }
+  if (const ['这本书', '本书', '整本书', '全书'].any(normalized.contains)) {
+    return AiMindMapRequestScope.wholeBook;
+  }
+  return AiMindMapRequestScope.currentChapter;
+}
+
 /// One user or assistant bubble in the book chat.
 class AiChatMessage {
   const AiChatMessage({
@@ -30,6 +51,7 @@ class AiChatMessage {
     this.suggestedQuestions = const [],
     this.turnId,
     this.status = AiChatTurnStatus.completed,
+    this.mindMap,
   });
 
   final AiMessageRole role;
@@ -57,6 +79,10 @@ class AiChatMessage {
   /// future model history, so a failed request cannot poison the next prompt.
   final AiChatTurnStatus status;
 
+  /// App-owned structured artifact rendered inside this conversation turn.
+  /// It is never sent back to the chat model as Mermaid or prompt text.
+  final AiBookMindMap? mindMap;
+
   AiChatMessage copyWith({
     AiMessageRole? role,
     String? content,
@@ -68,7 +94,9 @@ class AiChatMessage {
     List<String>? suggestedQuestions,
     String? turnId,
     AiChatTurnStatus? status,
+    AiBookMindMap? mindMap,
     bool clearWebHitCount = false,
+    bool clearMindMap = false,
   }) {
     return AiChatMessage(
       role: role ?? this.role,
@@ -81,6 +109,7 @@ class AiChatMessage {
       suggestedQuestions: suggestedQuestions ?? this.suggestedQuestions,
       turnId: turnId ?? this.turnId,
       status: status ?? this.status,
+      mindMap: clearMindMap ? null : (mindMap ?? this.mindMap),
     );
   }
 
@@ -96,6 +125,7 @@ class AiChatMessage {
     if (suggestedQuestions.isNotEmpty) 'suggestedQuestions': suggestedQuestions,
     if (turnId != null) 'turnId': turnId,
     'status': status.name,
+    if (mindMap != null) 'mindMap': mindMap!.toJson(),
   };
 
   static AiChatMessage fromJson(Map<String, dynamic> json) {
@@ -124,6 +154,7 @@ class AiChatMessage {
           : const [],
       turnId: json['turnId'] as String?,
       status: AiChatTurnStatus.fromStorage(json['status']),
+      mindMap: AiBookMindMap.fromJson(json['mindMap']),
     );
   }
 }
@@ -182,7 +213,7 @@ const kAiChatShortcuts = <AiChatShortcut>[
         '再按内容推进列出主要结构阶段；每一项包含简短标题和说明，并覆盖全书的重要部分。'
         '请直接基于书中内容回答。',
   ),
-  AiChatShortcut(label: '生成思维导图', prompt: '打开图书思维导图工作区'),
+  AiChatShortcut(label: '生成本章思维导图', prompt: '请为当前章生成思维导图'),
   AiChatShortcut(label: '总结这一章', prompt: '请总结我正在读的这一章：主线、关键转折，尽量简短。'),
   AiChatShortcut(
     label: '这本书在讲什么',

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_session_ops.dart';
 import 'package:kaijuan/ai/ai_models.dart';
+import 'package:kaijuan/ai/ai_mind_map.dart';
 
 void main() {
   const base = AiChatSession(contentHash: 'hash', itemId: 'book');
@@ -75,5 +76,72 @@ void main() {
       session.workMessages['work']!.last.status,
       AiChatTurnStatus.completed,
     );
+  });
+
+  test('mind map intent freezes chapter or whole-book scope', () {
+    expect(
+      resolveAiMindMapRequestScope('给当前章生成一个思维导图'),
+      AiMindMapRequestScope.currentChapter,
+    );
+    expect(
+      resolveAiMindMapRequestScope('我想看看这本书的思维导图'),
+      AiMindMapRequestScope.wholeBook,
+    );
+    expect(
+      resolveAiMindMapRequestScope('生成思维导图'),
+      AiMindMapRequestScope.currentChapter,
+    );
+    expect(resolveAiMindMapRequestScope('用 Mermaid 画这本书的思维导图'), isNull);
+    expect(resolveAiMindMapRequestScope('总结这一章'), isNull);
+  });
+
+  test('structured mind map survives chat message JSON round-trip', () {
+    final map = AiBookMindMap(
+      contentHash: 'hash',
+      workKey: null,
+      createdAt: DateTime.utc(2026, 8, 10),
+      model: 'test',
+      scopeSectionIndices: const [3],
+      scopeFingerprint: 'chapter-3',
+      contentKind: AiMindMapContentKind.narrative,
+      layout: AiMindMapLayout.radial,
+      nodes: const [
+        AiBookMindMapNode(
+          nodeId: 'mm001',
+          parentId: null,
+          order: 0,
+          level: 0,
+          title: '本章',
+          summary: '本章结构',
+        ),
+        AiBookMindMapNode(
+          nodeId: 'mm002',
+          parentId: 'mm001',
+          order: 0,
+          level: 1,
+          title: '主题',
+          summary: '主题说明',
+          evidence: [
+            AiMindMapEvidence(
+              sectionIndex: 3,
+              quote: '原文证据',
+              progressInSection: 0.2,
+              spanResolved: true,
+            ),
+          ],
+        ),
+      ],
+    );
+    final source = AiChatMessage(
+      role: AiMessageRole.assistant,
+      content: '已生成。',
+      mindMap: map,
+    );
+
+    final restored = AiChatMessage.fromJson(source.toJson());
+
+    expect(restored.mindMap, isNotNull);
+    expect(restored.mindMap!.scopeSectionIndices, const [3]);
+    expect(restored.mindMap!.nodes[1].evidence.single.quote, '原文证据');
   });
 }

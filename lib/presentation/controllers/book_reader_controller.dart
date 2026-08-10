@@ -345,7 +345,7 @@ class BookReaderController extends ChangeNotifier {
   AiMindMapProgress? _bookMindMapProgress;
   String? _bookMindMapError;
   CancelToken? _bookMindMapCancel;
-  Future<void>? _bookMindMapGeneration;
+  Future<AiBookMindMap?>? _bookMindMapGeneration;
   AiBookGraph? _bookGraph;
 
   /// Graph of the work currently shown/generated when viewing a collection
@@ -1305,29 +1305,34 @@ class BookReaderController extends ChangeNotifier {
   /// Presentation may change only the selected set, never the unit identity.
   Future<List<AiBookSectionSlice>> bookMindMapSectionChoices({
     AiGraphWorkCandidate? work,
+    bool useFrozenWork = false,
   }) async {
     await resolveGraphWorkCandidates();
-    final target = work ?? currentReadingWork;
+    final target = useFrozenWork ? work : work ?? currentReadingWork;
     return (await _graphSectionsForWork(target))
         .where((section) => section.text.trim().isNotEmpty)
         .toList(growable: false);
   }
 
-  Future<void> generateBookMindMap({
+  Future<AiBookMindMap?> generateBookMindMap({
     Set<int> excludedSectionIndices = const {},
     AiGraphWorkCandidate? work,
+    int? onlySourceSectionIndex,
+    bool useFrozenWork = false,
   }) {
     final active = _bookMindMapGeneration;
     if (active != null) return active;
-    final done = Completer<void>();
+    final done = Completer<AiBookMindMap?>();
     _bookMindMapGeneration = done.future;
     unawaited(() async {
       try {
-        await _generateBookMindMap(
+        final result = await _generateBookMindMap(
           excludedSectionIndices: excludedSectionIndices,
           work: work,
+          onlySourceSectionIndex: onlySourceSectionIndex,
+          useFrozenWork: useFrozenWork,
         );
-        done.complete();
+        done.complete(result);
       } catch (error, stackTrace) {
         done.completeError(error, stackTrace);
       }
@@ -1342,16 +1347,18 @@ class BookReaderController extends ChangeNotifier {
     return done.future;
   }
 
-  Future<void> _generateBookMindMap({
+  Future<AiBookMindMap?> _generateBookMindMap({
     required Set<int> excludedSectionIndices,
     AiGraphWorkCandidate? work,
+    int? onlySourceSectionIndex,
+    required bool useFrozenWork,
   }) async {
     final workflow = _aiMindMap;
     final store = _aiMindMapStore;
     if (workflow == null || store == null || !canUseAiChat) {
       _bookMindMapError = 'AI 未启用或未配置';
       if (!_disposed) notifyListeners();
-      return;
+      return null;
     }
     _bookMindMapError = null;
     _bookMindMapProgress = const AiMindMapProgress(
@@ -1364,14 +1371,26 @@ class BookReaderController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
     try {
       await resolveGraphWorkCandidates(cancel: cancel);
-      final target = work ?? currentReadingWork;
+      final target = useFrozenWork ? work : work ?? currentReadingWork;
       final workKey = target == null ? null : workKeyFor(target);
-      final allSections = await bookMindMapSectionChoices(work: target);
+      final allSections = await bookMindMapSectionChoices(
+        work: target,
+        useFrozenWork: true,
+      );
       final sections = allSections
-          .where((section) => !excludedSectionIndices.contains(section.index))
+          .where(
+            (section) =>
+                !excludedSectionIndices.contains(section.index) &&
+                (onlySourceSectionIndex == null ||
+                    section.originSectionIndex == onlySourceSectionIndex),
+          )
           .toList(growable: false);
       if (sections.isEmpty) {
-        throw AiProviderException('所选章节都被排除了，请至少保留一节正文');
+        throw AiProviderException(
+          onlySourceSectionIndex == null
+              ? '所选章节都被排除了，请至少保留一节正文'
+              : '当前章节没有可用于生成思维导图的正文',
+        );
       }
       final checkpoint = await store.readCheckpoint(
         item.contentHash,
@@ -1423,6 +1442,7 @@ class BookReaderController extends ChangeNotifier {
       _bookMindMapWorkKey = workKey;
       _bookMindMapProgress = null;
       if (!_disposed) notifyListeners();
+      return result;
     } on AiProviderException catch (error) {
       _bookMindMapProgress = null;
       AiLog.d('mind map failed: ${error.message}');
@@ -1433,6 +1453,7 @@ class BookReaderController extends ChangeNotifier {
         );
       }
       if (!_disposed) notifyListeners();
+      return null;
     } catch (error, stackTrace) {
       _bookMindMapProgress = null;
       AiLog.d('mind map failed: $error\n$stackTrace');
@@ -1440,6 +1461,7 @@ class BookReaderController extends ChangeNotifier {
         _bookMindMapError = '生成思维导图失败，请稍后重试';
       }
       if (!_disposed) notifyListeners();
+      return null;
     }
   }
 

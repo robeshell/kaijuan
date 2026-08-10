@@ -173,6 +173,42 @@ void main() {
               role: AiMessageRole.assistant,
               content: '先看主要人物和关键转折。',
               createdAt: DateTime.utc(2026, 8, 3, 11, 1),
+              mindMap: AiBookMindMap(
+                contentHash: item.contentHash,
+                workKey: null,
+                createdAt: DateTime.utc(2026, 8, 3, 11, 1),
+                model: 'backup-test',
+                scopeSectionIndices: const [1],
+                scopeFingerprint: 'chat-mind-map',
+                contentKind: AiMindMapContentKind.narrative,
+                layout: AiMindMapLayout.radial,
+                nodes: const [
+                  AiBookMindMapNode(
+                    nodeId: 'mm001',
+                    parentId: null,
+                    order: 0,
+                    level: 0,
+                    title: '对话图',
+                    summary: '对话内思维导图。',
+                  ),
+                  AiBookMindMapNode(
+                    nodeId: 'mm002',
+                    parentId: 'mm001',
+                    order: 0,
+                    level: 1,
+                    title: '主线',
+                    summary: '主线说明。',
+                    evidence: [
+                      AiMindMapEvidence(
+                        sectionIndex: 1,
+                        quote: '主线证据',
+                        progressInSection: 0.1,
+                        spanResolved: true,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
           outline: AiBookOutline(
@@ -442,6 +478,7 @@ void main() {
           as Map<String, dynamic>,
     );
     expect(restoredChat.messages, hasLength(2));
+    expect(restoredChat.messages.last.mindMap?.root.title, '对话图');
     expect(restoredChat.outline?.overview, '远端大纲。');
     expect(restoredChat.outline?.units.single.title, '主题');
     expect(restoredChat.workOutlines['s3']?.overview, '合集篇目大纲。');

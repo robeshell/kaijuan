@@ -11,6 +11,7 @@ import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_graph_scope.dart';
 import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
+import 'package:kaijuan/ai/ai_mind_map.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
@@ -21,6 +22,7 @@ import 'package:kaijuan/presentation/controllers/book_reader_controller.dart';
 import 'package:kaijuan/presentation/widgets/app_components.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_chat_sheet.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_language_sheet.dart';
+import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_view.dart';
 import 'package:kaijuan/readers/book/book_language_actions.dart';
 
 class _AmbiguousOutlineController extends BookReaderController {
@@ -73,6 +75,58 @@ class _AmbiguousOutlineController extends BookReaderController {
   AiBookGraph? graphOverride;
   bool _generatingGraph = false;
   bool? lastDeepThinkingEnabled;
+  int? lastMindMapSourceSectionIndex;
+
+  @override
+  Future<AiBookMindMap?> generateBookMindMap({
+    Set<int> excludedSectionIndices = const {},
+    AiGraphWorkCandidate? work,
+    int? onlySourceSectionIndex,
+    bool useFrozenWork = false,
+  }) async {
+    lastMindMapSourceSectionIndex = onlySourceSectionIndex;
+    return AiBookMindMap(
+      contentHash: item.contentHash,
+      workKey: null,
+      createdAt: DateTime.utc(2026, 8, 10),
+      model: 'test',
+      scopeSectionIndices: [
+        onlySourceSectionIndex ?? 1,
+        if (onlySourceSectionIndex == null) 2,
+      ],
+      scopeFingerprint: onlySourceSectionIndex == null
+          ? 'whole-book'
+          : 'chapter',
+      contentKind: AiMindMapContentKind.narrative,
+      layout: AiMindMapLayout.radial,
+      nodes: const [
+        AiBookMindMapNode(
+          nodeId: 'mm001',
+          parentId: null,
+          order: 0,
+          level: 0,
+          title: '主题',
+          summary: '结构总览',
+        ),
+        AiBookMindMapNode(
+          nodeId: 'mm002',
+          parentId: 'mm001',
+          order: 0,
+          level: 1,
+          title: '分支',
+          summary: '分支说明',
+          evidence: [
+            AiMindMapEvidence(
+              sectionIndex: 1,
+              quote: '正文一',
+              progressInSection: 0,
+              spanResolved: true,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   @override
   Stream<AiRunEvent>? streamBookChat({
@@ -314,9 +368,73 @@ void main() {
     expect(find.byTooltip('深度思考已开启'), findsOneWidget);
 
     expect(find.widgetWithText(Tab, '大纲'), findsNothing);
+    expect(find.widgetWithText(Tab, '思维导图'), findsNothing);
     expect(find.text('生成本书大纲'), findsOneWidget);
+    expect(find.text('生成本章思维导图'), findsOneWidget);
     expect(find.text('选择范围生成大纲'), findsNothing);
     expect(find.text('选择范围并生成'), findsNothing);
+  });
+
+  testWidgets('mind maps route by chat intent and render inside conversation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(820, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final now = DateTime.utc(2026, 8, 10);
+    await database.upsertReadingItem(
+      ReadingItemsCompanion.insert(
+        id: 'mind-map-chat',
+        kind: ReaderKind.book.storageValue,
+        format: ReaderFormat.epub.storageValue,
+        title: '思维导图测试',
+        filePath: '/tmp/mind-map-chat.epub',
+        contentHash: 'hash-mind-map-chat',
+        pageCount: const Value(2),
+        addedAt: now,
+        updatedAt: now,
+      ),
+    );
+    final item = (await database.readingItemById('mind-map-chat'))!;
+    final controller = _AmbiguousOutlineController(
+      database: database,
+      item: item,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () =>
+                  showBookAiChatSheet(context, controller: controller),
+              child: const Text('打开 AI'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开 AI'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('生成本章思维导图'));
+    await tester.pumpAndSettle();
+    expect(controller.lastMindMapSourceSectionIndex, 1);
+    expect(find.byType(BookAiMindMapView), findsOneWidget);
+    expect(find.text('已根据当前章生成思维导图。'), findsOneWidget);
+    expect(find.widgetWithText(Tab, '思维导图'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).last, '为这本书生成思维导图');
+    await tester.tap(find.byTooltip('发送'));
+    await tester.pumpAndSettle();
+    expect(controller.lastMindMapSourceSectionIndex, isNull);
+    // The conversation ListView lazily builds only the visible artifact card.
+    expect(find.byType(BookAiMindMapView), findsWidgets);
+    expect(find.text('已根据这本书生成思维导图。'), findsOneWidget);
   });
 
   testWidgets('chat stop and close react on the first tap', (tester) async {

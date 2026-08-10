@@ -282,7 +282,7 @@
 | 本书对话 | **已有（MVP）** | 顶栏「本书 AI」；**按需 tool 取文**（目录/当前章/按节/书内搜/全书取样），不默认灌全书；可选联网补充；会话按 **contentHash** 存盘；见 [ai.md](./specs/ai.md) |
 | 统一 AI 运行时 | **已有** | `AiRunOrchestrator` 统一 run 状态/事件、冻结作用域、预算、取消、usage 与 checkpoint；对话、词典/翻译、结构化大纲与知识图谱全部只依赖 App 自有 `AiModelAdapter`，OpenAI Compatible 和 Anthropic 的 Genkit adapter 精确锁版并隔离。工具使用原生 Function Calling / Tool Use，确定性 Workflow 使用 Schemantic + Genkit 结构化输出；DeepSeek 按其原生 `json_object` 能力输出合法 JSON，再由同一 schema 与业务校验拒绝不合格结果，不退回 fenced JSON。旧 `AiProvider` 双栈及旧 transport 已删除。模型列表是独立只读 catalog，连接测试也走 adapter；见 [完整收口记录](./research/ai-runtime-genkit-completion-plan.md) |
 | AI 大纲 | **已有（对话快捷操作）** | 本书 AI「对话」中的「生成本书大纲」快捷操作，直接复用对话的书内上下文、检索工具与流式回答，不再提供独立 Tab、范围选择或分批汇总任务；回答作为普通对话消息保存。旧结构化大纲缓存继续兼容读取、备份与恢复，避免历史数据丢失，但不再作为主入口展示 |
-| 图书思维导图 | **已有** | 独立 `BookMindMapWorkflow`，以用户确认的书籍/作品/章节范围生成稳定层级节点与证据；Flutter 原生支持放射、向右、双向布局、折叠、缩放与跳回原文。它不复用知识图谱数据，也不把聊天 Mermaid 当业务缓存；生成失败或取消后必须保留可见终态与重试入口，不得无声回到未生成空态。见 [ai-mind-map.md](./specs/ai-mind-map.md) |
+| 图书思维导图 | **已有** | 在本书对话中通过自然语言或快捷入口生成：用户说“当前章/本章”时冻结当前章，说“这本书/全书”时冻结当前作品或整书；结果作为对话内的原生交互卡片呈现，不设独立思维导图 Tab。后台由独立 `BookMindMapWorkflow` 生成稳定层级节点与证据，支持放射、向右、双向布局、折叠、缩放与跳回原文；不复用知识图谱数据，也不把通用 Mermaid 当业务缓存。见 [ai-mind-map.md](./specs/ai-mind-map.md) |
 | 整本 / 按章翻译任务 | **中** | 后台队列、进度、可取消；**复用翻译偏好**；契约 `fullBookTranslation` 已预留 |
 | 知识图谱 | **已有（v3）** | 保留本书 AI 入口与单本/分段单本/文件内多作品识别；识别后由用户先选作品、再选该作品的具体内容单元。程序可以把前言、目录、附言、索引等标为“建议排除”并默认取消，但必须完整展示并允许重新选择，不能把范围绑定到当前阅读位置。确认范围后逐节抽取、逐节原子快照；实体覆盖人物、地点、事件、组织、物件、概念与非人角色，关系和可定位出处以稳定 ID 相连；家族树只接收证据复核后的代际亲属边并全程按 ID 构建。展示采用固定索引 + 关系图/家族树探索层。见 [ai-graph.md](./specs/ai-graph.md)、[ai-graph-pipeline.md](./specs/ai-graph-pipeline.md)、[ai-graph-narration.md](./specs/ai-graph-narration.md)。 |
 | 导出个人知识库（Obsidian 等） | **中** | 单向 Markdown 导出（划线、笔记、大纲、钉选回答）；先不做双向同步 |
@@ -368,7 +368,7 @@ M6  Markdown / Obsidian 导出
 | **漫画** | 四模式阅读体验闭环 |
 | **图书** | Foliate 主链、标注搜索书摘、字体三源、听书 MVP、系统词典/翻译 |
 | **统计与备份** | 洞察 + 时长 + 热力；WebDAV 逻辑快照 |
-| **AI** | BYOK（云端/本地 Ollama）、AI 词典/翻译、本书对话、大纲、独立图书思维导图、知识图谱（M0–M3b + M5） |
+| **AI** | BYOK（云端/本地 Ollama）、AI 词典/翻译、本书对话、对话内大纲与图书思维导图、知识图谱（M0–M3b + M5） |
 
 历史阶段 0–4（comic 闭环 → 双引擎 → 整理 → reflow → 阅读加深）均已完成，不再作为待办切片。
 

@@ -425,6 +425,7 @@ class BookMindMapWorkflow {
       for (final section in sections) section.sectionId: section,
     };
     final verifiedEvidence = _verifiedEvidenceBySection(summaries, sectionById);
+    final verifiedBranches = _verifiedBranches(summaries, sectionById);
     final temp = <String, _RawMindMapNode>{};
     for (final row in rows) {
       if (row is! Map ||
@@ -440,6 +441,7 @@ class BookMindMapWorkflow {
         return invalid('tempId 为空或重复');
       }
       final evidence = <_RawMindMapEvidence>[];
+      final hintedSectionIds = <int>{};
       for (final item in row['evidence'] as List) {
         if (item is! Map ||
             item['sectionId'] is! num ||
@@ -451,6 +453,7 @@ class BookMindMapWorkflow {
         if (section == null || quote.isEmpty) {
           return invalid('evidence 引用了范围外章节或空引文');
         }
+        hintedSectionIds.add(section.sectionId);
         final resolved = _resolveEvidence(section, quote);
         if (resolved.spanResolved) {
           evidence.add(
@@ -474,6 +477,7 @@ class BookMindMapWorkflow {
         title: (row['title'] as String).trim(),
         summary: (row['summary'] as String).trim(),
         evidence: evidence,
+        hintedSectionIds: hintedSectionIds,
       );
     }
     final roots = temp.values.where((node) => node.parentId == null).toList();
@@ -532,6 +536,13 @@ class BookMindMapWorkflow {
       }
       if (node.parentId == null) return true;
       if (node.evidence.isNotEmpty) return true;
+      if ((children[node.id] ?? const <_RawMindMapNode>[]).isEmpty) {
+        final matched = _matchVerifiedBranch(node, verifiedBranches);
+        if (matched != null) {
+          node.evidence.addAll(matched.evidence);
+          return true;
+        }
+      }
       for (final child in children[node.id] ?? const <_RawMindMapNode>[]) {
         if (child.evidence.isNotEmpty) {
           node.evidence.add(child.evidence.first);
@@ -672,6 +683,121 @@ class BookMindMapWorkflow {
       }
     }
     return result;
+  }
+
+  List<_VerifiedMindMapBranch> _verifiedBranches(
+    List<Map<String, Object?>> summaries,
+    Map<int, _MindMapInputSection> sectionById,
+  ) {
+    final result = <_VerifiedMindMapBranch>[];
+    var order = 0;
+    for (final summary in summaries) {
+      final branches = summary['branches'];
+      if (branches is! List) continue;
+      for (final branch in branches.whereType<Map>()) {
+        final title = '${branch['title'] ?? ''}'.trim();
+        final description = '${branch['summary'] ?? ''}'.trim();
+        final grounded = <_RawMindMapEvidence>[];
+        final evidence = branch['evidence'];
+        if (evidence is List) {
+          for (final item in evidence.whereType<Map>()) {
+            final rawSectionId = item['sectionId'];
+            final rawQuote = item['quote'];
+            if (rawSectionId is! num || rawQuote is! String) continue;
+            final sectionId = rawSectionId.toInt();
+            final section = sectionById[sectionId];
+            if (section == null) continue;
+            final resolved = _resolveEvidence(section, rawQuote.trim());
+            if (!resolved.spanResolved) continue;
+            grounded.add(
+              _RawMindMapEvidence(sectionId: sectionId, value: resolved),
+            );
+          }
+        }
+        if (grounded.isNotEmpty &&
+            (title.isNotEmpty || description.isNotEmpty)) {
+          result.add(
+            _VerifiedMindMapBranch(
+              order: order,
+              title: title,
+              summary: description,
+              evidence: List.unmodifiable(grounded),
+            ),
+          );
+        }
+        order++;
+      }
+    }
+    return result;
+  }
+
+  _VerifiedMindMapBranch? _matchVerifiedBranch(
+    _RawMindMapNode node,
+    List<_VerifiedMindMapBranch> branches,
+  ) {
+    var candidates = branches;
+    if (node.hintedSectionIds.isNotEmpty) {
+      candidates = branches
+          .where(
+            (branch) => branch.evidence.any(
+              (item) => node.hintedSectionIds.contains(item.sectionId),
+            ),
+          )
+          .toList(growable: false);
+    }
+    if (candidates.isEmpty) return null;
+    if (candidates.length == 1 && node.hintedSectionIds.isNotEmpty) {
+      return candidates.single;
+    }
+    final ranked =
+        candidates
+            .map(
+              (branch) =>
+                  (branch: branch, score: _branchSimilarity(node, branch)),
+            )
+            .toList()
+          ..sort((a, b) {
+            final byScore = b.score.compareTo(a.score);
+            if (byScore != 0) return byScore;
+            return a.branch.order.compareTo(b.branch.order);
+          });
+    final best = ranked.first;
+    final secondScore = ranked.length > 1 ? ranked[1].score : 0.0;
+    if (best.score < 0.2 || best.score - secondScore < 0.04) return null;
+    return best.branch;
+  }
+
+  static double _branchSimilarity(
+    _RawMindMapNode node,
+    _VerifiedMindMapBranch branch,
+  ) {
+    final title = _overlapSimilarity(node.title, branch.title);
+    final summary = _overlapSimilarity(node.summary, branch.summary);
+    final combined = _overlapSimilarity(
+      '${node.title}${node.summary}',
+      '${branch.title}${branch.summary}',
+    );
+    return math.max(combined, title * 0.72 + summary * 0.28);
+  }
+
+  static double _overlapSimilarity(String left, String right) {
+    final a = _normalize(left);
+    final b = _normalize(right);
+    if (a.isEmpty || b.isEmpty) return 0;
+    if (a == b || a.contains(b) || b.contains(a)) return 1;
+    Set<String> bigrams(String value) {
+      final runes = value.runes.toList(growable: false);
+      if (runes.length == 1) return {String.fromCharCode(runes.single)};
+      return {
+        for (var i = 0; i < runes.length - 1; i++)
+          String.fromCharCodes([runes[i], runes[i + 1]]),
+      };
+    }
+
+    final aBigrams = bigrams(a);
+    final bBigrams = bigrams(b);
+    final shorter = math.min(aBigrams.length, bBigrams.length);
+    return shorter == 0 ? 0 : aBigrams.intersection(bBigrams).length / shorter;
   }
 
   _RawMindMapEvidence? _repairEvidence(
@@ -823,6 +949,7 @@ class _RawMindMapNode {
     required this.title,
     required this.summary,
     required this.evidence,
+    required this.hintedSectionIds,
   });
 
   final String id;
@@ -831,6 +958,7 @@ class _RawMindMapNode {
   final String title;
   final String summary;
   final List<_RawMindMapEvidence> evidence;
+  final Set<int> hintedSectionIds;
 }
 
 class _RawMindMapEvidence {
@@ -838,4 +966,18 @@ class _RawMindMapEvidence {
 
   final int sectionId;
   final AiMindMapEvidence value;
+}
+
+class _VerifiedMindMapBranch {
+  const _VerifiedMindMapBranch({
+    required this.order,
+    required this.title,
+    required this.summary,
+    required this.evidence,
+  });
+
+  final int order;
+  final String title;
+  final String summary;
+  final List<_RawMindMapEvidence> evidence;
 }
