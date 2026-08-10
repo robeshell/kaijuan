@@ -385,7 +385,7 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                           ? Icons.menu_book_outlined
                           : Icons.location_searching_outlined,
                     ),
-                    title: Text('第 ${evidence.sectionIndex} 节'),
+                    title: Text(_evidenceLocationLabel(evidence)),
                     subtitle: Text(
                       evidence.quote,
                       maxLines: 3,
@@ -405,6 +405,15 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
         ),
       ),
     );
+  }
+
+  String _evidenceLocationLabel(AiMindMapEvidence evidence) {
+    final scope = widget.map.scopeSectionIndices.length == 1
+        ? '本章'
+        : '第 ${evidence.sectionIndex} 节';
+    if (!evidence.spanResolved) return '$scope · 位置未解析';
+    final percent = (evidence.progressInSection.clamp(0, 1) * 100).round();
+    return '$scope · 约 $percent% 处';
   }
 }
 

@@ -89,6 +89,18 @@ void main() {
     ],
   );
 
+  final multiSectionMap = AiBookMindMap(
+    contentHash: map.contentHash,
+    workKey: map.workKey,
+    createdAt: map.createdAt,
+    model: map.model,
+    scopeSectionIndices: const [1, 2],
+    scopeFingerprint: 'multi-section-scope',
+    contentKind: map.contentKind,
+    layout: map.layout,
+    nodes: map.nodes,
+  );
+
   testWidgets('native view exposes layout, hierarchy list and node details', (
     tester,
   ) async {
@@ -154,7 +166,8 @@ void main() {
     await tester.tap(find.text('主题甲').last);
     await tester.pumpAndSettle();
     expect(find.text('原文依据'), findsOneWidget);
-    await tester.tap(find.text('第 1 节'));
+    expect(find.text('本章 · 约 25% 处'), findsOneWidget);
+    await tester.tap(find.text('本章 · 约 25% 处'));
     await tester.pumpAndSettle();
     expect(opened?.progressInSection, 0.25);
   });
@@ -182,6 +195,30 @@ void main() {
       expect(savedLayout, AiMindMapLayout.bidirectional);
     },
   );
+
+  testWidgets('multi-section evidence shows section and in-section progress', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 600,
+            child: BookAiMindMapView(
+              map: multiSectionMap,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('主题甲'));
+    await tester.pumpAndSettle();
+    expect(find.text('第 1 节 · 约 25% 处'), findsOneWidget);
+  });
 
   testWidgets('branch colors are distinct, inherited and theme-derived', (
     tester,

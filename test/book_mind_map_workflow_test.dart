@@ -247,6 +247,14 @@ void main() {
     expect(batchInput, contains('第二处遗漏标记'));
     expect(adapter.requests.first.messages.first.text, contains('不能只读取章节标题'));
     expect(result.nodes, hasLength(10));
+    final evidence = result.nodes
+        .expand((node) => node.evidence)
+        .toList(growable: false);
+    expect(evidence.map((item) => item.sectionIndex).toSet(), {6});
+    expect(
+      evidence.map((item) => item.progressInSection).toSet(),
+      hasLength(3),
+    );
     expect(adapter.calls, 1);
   });
 

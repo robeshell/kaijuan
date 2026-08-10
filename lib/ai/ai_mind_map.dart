@@ -14,6 +14,9 @@ class AiMindMapEvidence {
     required this.spanResolved,
   });
 
+  /// 1-based physical EPUB/Foliate section used by the reader locator.
+  /// Multiple quotes from one chapter intentionally share this value and are
+  /// distinguished by [progressInSection].
   final int sectionIndex;
   final String quote;
   final double progressInSection;
