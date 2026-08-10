@@ -344,7 +344,7 @@ void main() {
     expect(darkBranchSurface, isNot(lightBranchSurface));
   });
 
-  testWidgets('trackpad scroll zoom keeps the scene point under the pointer', (
+  testWidgets('trackpad two-finger scroll pans without changing scale', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -367,17 +367,67 @@ void main() {
 
     final viewerFinder = find.byType(InteractiveViewer);
     final viewer = tester.widget<InteractiveViewer>(viewerFinder);
-    expect(viewer.trackpadScrollCausesScale, isTrue);
+    expect(viewer.trackpadScrollCausesScale, isFalse);
     final controller = viewer.transformationController!;
+    final pointerLocal = const Offset(610, 250);
+    final pointerGlobal = tester.getTopLeft(viewerFinder) + pointerLocal;
+    final scaleBefore = controller.value.getMaxScaleOnAxis();
+    final translationBefore = controller.value.getTranslation();
+
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: pointerGlobal,
+        scrollDelta: const Offset(36, -24),
+        kind: PointerDeviceKind.trackpad,
+      ),
+    );
+    await tester.pump();
+
+    expect(controller.value.getMaxScaleOnAxis(), closeTo(scaleBefore, 0.0001));
+    final translationAfter = controller.value.getTranslation();
+    expect(
+      Offset(
+        translationAfter.x - translationBefore.x,
+        translationAfter.y - translationBefore.y,
+      ).distance,
+      greaterThan(1),
+    );
+  });
+
+  testWidgets('trackpad pinch zoom keeps the scene point under the pointer', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 600,
+            child: BookAiMindMapView(
+              map: map,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final viewerFinder = find.byType(InteractiveViewer);
+    final controller = tester
+        .widget<InteractiveViewer>(viewerFinder)
+        .transformationController!;
     final pointerLocal = const Offset(610, 250);
     final pointerGlobal = tester.getTopLeft(viewerFinder) + pointerLocal;
     final sceneBefore = controller.toScene(pointerLocal);
     final scaleBefore = controller.value.getMaxScaleOnAxis();
 
     await tester.sendEventToBinding(
-      PointerScrollEvent(
+      PointerScaleEvent(
         position: pointerGlobal,
-        scrollDelta: const Offset(0, -20),
+        scale: 1.2,
         kind: PointerDeviceKind.trackpad,
       ),
     );
