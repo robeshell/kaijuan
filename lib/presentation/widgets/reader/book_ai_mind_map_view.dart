@@ -133,6 +133,13 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
     )) {
       children.update(node.parentId!, (value) => value + 1, ifAbsent: () => 1);
     }
+    final branchAccents = _resolveBranchAccents(
+      widget.map.nodes,
+      context.appColors,
+    );
+    final nodeLevels = <String, int>{
+      for (final node in widget.map.nodes) node.nodeId: node.level,
+    };
     return Column(
       children: [
         Padding(
@@ -253,7 +260,12 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                               child: CustomPaint(
                                 painter: _MindMapEdgePainter(
                                   layout: layout,
-                                  color: context.appColors.outline,
+                                  branchAccents: branchAccents,
+                                  nodeLevels: nodeLevels,
+                                  fallbackColor: context.appColors.primary,
+                                  dark:
+                                      Theme.of(context).brightness ==
+                                      Brightness.dark,
                                 ),
                               ),
                             ),
@@ -264,6 +276,9 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                                   rect: rect,
                                   child: _MindMapNodeCard(
                                     node: node,
+                                    accent:
+                                        branchAccents[node.nodeId] ??
+                                        context.appColors.primary,
                                     childCount: children[node.nodeId] ?? 0,
                                     collapsed: _collapsed.contains(node.nodeId),
                                     onToggleCollapsed: () => setState(() {
@@ -396,6 +411,7 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
 class _MindMapNodeCard extends StatelessWidget {
   const _MindMapNodeCard({
     required this.node,
+    required this.accent,
     required this.childCount,
     required this.collapsed,
     required this.onToggleCollapsed,
@@ -403,6 +419,7 @@ class _MindMapNodeCard extends StatelessWidget {
   });
 
   final AiBookMindMapNode node;
+  final Color accent;
   final int childCount;
   final bool collapsed;
   final VoidCallback onToggleCollapsed;
@@ -412,90 +429,163 @@ class _MindMapNodeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.appColors;
     final root = node.level == 0;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final radius = BorderRadius.circular(16);
+    final baseSurface = node.level <= 1
+        ? colors.surfaceContainerHigh
+        : colors.surfaceContainer;
+    final tintOpacity = dark
+        ? (node.level <= 1 ? 0.18 : 0.10)
+        : (node.level <= 1 ? 0.10 : 0.055);
+    final surface = Color.alphaBlend(
+      accent.withValues(alpha: tintOpacity),
+      baseSurface,
+    );
+    final shadowScale = context.appSkinEffects.shadowScale;
+    final shadow = context.appGlass.shadow;
+    final boxShadows = shadowScale <= 0
+        ? const <BoxShadow>[]
+        : <BoxShadow>[
+            BoxShadow(
+              color: shadow.withValues(alpha: shadow.a * (root ? 0.62 : 0.45)),
+              blurRadius: (root ? 18 : 12) * shadowScale,
+              offset: Offset(0, (root ? 5 : 3) * shadowScale),
+            ),
+          ];
     return Semantics(
       button: true,
       label:
           '${node.title}，第 ${node.level + 1} 层${node.summary.isEmpty ? '' : '，${node.summary}'}',
-      child: Material(
-        color: root
-            ? colors.primary
-            : colors.surfaceContainerHighest.withValues(alpha: 0.96),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: root ? colors.primary : colors.outlineVariant,
+      child: DecoratedBox(
+        key: ValueKey('mind-map-node-surface-${node.nodeId}'),
+        decoration: BoxDecoration(
+          color: root ? null : surface,
+          gradient: root
+              ? LinearGradient(
+                  begin: AlignmentDirectional.topStart,
+                  end: AlignmentDirectional.bottomEnd,
+                  colors: [
+                    colors.primary,
+                    Color.alphaBlend(
+                      colors.onPrimary.withValues(alpha: 0.09),
+                      colors.primary,
+                    ),
+                  ],
+                )
+              : null,
+          borderRadius: radius,
+          border: Border.all(
+            color: root
+                ? colors.onPrimary.withValues(alpha: 0.16)
+                : accent.withValues(alpha: dark ? 0.48 : 0.32),
           ),
+          boxShadow: boxShadows,
         ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 9, 6, 9),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        node.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          height: 1.18,
-                          fontWeight: root ? FontWeight.w700 : FontWeight.w600,
-                          color: root
-                              ? colors.onPrimary
-                              : context.appPrimaryText,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: radius,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            borderRadius: radius,
+            mouseCursor: SystemMouseCursors.click,
+            overlayColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.pressed)) {
+                return (root ? colors.onPrimary : accent).withValues(
+                  alpha: 0.13,
+                );
+              }
+              if (states.contains(WidgetState.hovered)) {
+                return (root ? colors.onPrimary : accent).withValues(
+                  alpha: 0.075,
+                );
+              }
+              return null;
+            }),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(11, 7, 6, 7),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (!root) ...[
+                    SizedBox(
+                      width: 3,
+                      height: 56,
+                      child: DecoratedBox(
+                        key: ValueKey('mind-map-branch-accent-${node.nodeId}'),
+                        decoration: BoxDecoration(
+                          color: accent,
+                          borderRadius: BorderRadius.circular(99),
                         ),
-                      ),
-                      if (node.summary.isNotEmpty) ...[
-                        const SizedBox(height: 5),
-                        Text(
-                          node.summary,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.25,
-                            fontWeight: FontWeight.w400,
-                            color: root
-                                ? colors.onPrimary.withValues(alpha: 0.84)
-                                : context.appSecondaryText,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                if (childCount > 0)
-                  Semantics(
-                    button: true,
-                    toggled: !collapsed,
-                    label: collapsed ? '展开分支' : '折叠分支',
-                    child: IconButton(
-                      tooltip: collapsed ? '展开分支' : '折叠分支',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 36,
-                        height: 44,
-                      ),
-                      onPressed: onToggleCollapsed,
-                      icon: Icon(
-                        collapsed
-                            ? Icons.add_circle_outline
-                            : Icons.remove_circle_outline,
-                        size: 18,
-                        color: root
-                            ? colors.onPrimary
-                            : context.appSecondaryText,
                       ),
                     ),
+                    const SizedBox(width: 10),
+                  ] else
+                    const SizedBox(width: 3),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          node.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: context.appLabelSize,
+                            height: 1.18,
+                            fontWeight: root
+                                ? FontWeight.w700
+                                : FontWeight.w600,
+                            letterSpacing: -0.1,
+                            color: root
+                                ? colors.onPrimary
+                                : context.appPrimaryText,
+                          ),
+                        ),
+                        if (node.summary.isNotEmpty) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            node.summary,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: context.appCaptionSize,
+                              height: 1.4,
+                              fontWeight: FontWeight.w400,
+                              color: root
+                                  ? colors.onPrimary.withValues(alpha: 0.86)
+                                  : context.appSecondaryText,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-              ],
+                  if (childCount > 0)
+                    Semantics(
+                      button: true,
+                      toggled: !collapsed,
+                      label: collapsed ? '展开分支' : '折叠分支',
+                      child: IconButton(
+                        tooltip: collapsed ? '展开分支' : '折叠分支',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 36,
+                          height: 44,
+                        ),
+                        onPressed: onToggleCollapsed,
+                        icon: Icon(
+                          collapsed
+                              ? Icons.add_circle_outline
+                              : Icons.remove_circle_outline,
+                          size: 18,
+                          color: root ? colors.onPrimary : accent,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -505,21 +595,37 @@ class _MindMapNodeCard extends StatelessWidget {
 }
 
 class _MindMapEdgePainter extends CustomPainter {
-  const _MindMapEdgePainter({required this.layout, required this.color});
+  const _MindMapEdgePainter({
+    required this.layout,
+    required this.branchAccents,
+    required this.nodeLevels,
+    required this.fallbackColor,
+    required this.dark,
+  });
 
   final AiMindMapLayoutResult layout;
-  final Color color;
+  final Map<String, Color> branchAccents;
+  final Map<String, int> nodeLevels;
+  final Color fallbackColor;
+  final bool dark;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = color.withValues(alpha: 0.72)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+      ..strokeCap = StrokeCap.round;
     for (final edge in layout.edges) {
       final parent = layout.nodeRects[edge.parentId];
       final child = layout.nodeRects[edge.childId];
       if (parent == null || child == null) continue;
+      final childLevel = nodeLevels[edge.childId] ?? 1;
+      paint
+        ..color = (branchAccents[edge.childId] ?? fallbackColor).withValues(
+          alpha: dark
+              ? (childLevel == 1 ? 0.62 : 0.43)
+              : (childLevel == 1 ? 0.50 : 0.34),
+        )
+        ..strokeWidth = childLevel == 1 ? 2.2 : 1.55;
       final start = parent.center;
       final end = child.center;
       final control = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
@@ -533,5 +639,69 @@ class _MindMapEdgePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_MindMapEdgePainter oldDelegate) =>
-      oldDelegate.layout != layout || oldDelegate.color != color;
+      oldDelegate.layout != layout ||
+      oldDelegate.branchAccents != branchAccents ||
+      oldDelegate.nodeLevels != nodeLevels ||
+      oldDelegate.fallbackColor != fallbackColor ||
+      oldDelegate.dark != dark;
+}
+
+Map<String, Color> _resolveBranchAccents(
+  List<AiBookMindMapNode> nodes,
+  ColorScheme colors,
+) {
+  if (nodes.isEmpty) return const {};
+  AiBookMindMapNode? root;
+  for (final node in nodes) {
+    if (node.parentId == null) {
+      root = node;
+      break;
+    }
+  }
+  if (root == null) return const {};
+  final children = <String, List<AiBookMindMapNode>>{};
+  for (final node in nodes) {
+    final parentId = node.parentId;
+    if (parentId == null) continue;
+    children.putIfAbsent(parentId, () => []).add(node);
+  }
+  for (final siblings in children.values) {
+    siblings.sort((a, b) {
+      final byOrder = a.order.compareTo(b.order);
+      return byOrder != 0 ? byOrder : a.nodeId.compareTo(b.nodeId);
+    });
+  }
+  final palette = <Color>[
+    colors.primary,
+    colors.tertiary,
+    colors.secondary,
+    Color.lerp(colors.primary, colors.tertiary, 0.33)!,
+    Color.lerp(colors.tertiary, colors.secondary, 0.33)!,
+    Color.lerp(colors.secondary, colors.primary, 0.33)!,
+    Color.lerp(colors.primary, colors.tertiary, 0.67)!,
+    Color.lerp(colors.tertiary, colors.secondary, 0.67)!,
+    Color.lerp(colors.secondary, colors.primary, 0.67)!,
+    Color.lerp(colors.primary, colors.tertiary, 0.50)!,
+    Color.lerp(colors.tertiary, colors.secondary, 0.50)!,
+    Color.lerp(colors.secondary, colors.primary, 0.50)!,
+  ];
+  final result = <String, Color>{root.nodeId: colors.primary};
+  final visited = <String>{root.nodeId};
+
+  void colorSubtree(AiBookMindMapNode node, Color accent) {
+    if (!visited.add(node.nodeId)) return;
+    result[node.nodeId] = accent;
+    for (final child in children[node.nodeId] ?? const []) {
+      colorSubtree(child, accent);
+    }
+  }
+
+  final branches = children[root.nodeId] ?? const [];
+  for (var index = 0; index < branches.length; index++) {
+    colorSubtree(branches[index], palette[index % palette.length]);
+  }
+  for (final node in nodes) {
+    result.putIfAbsent(node.nodeId, () => colors.primary);
+  }
+  return Map.unmodifiable(result);
 }

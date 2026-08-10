@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
+import 'package:kaijuan/core/theme.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_fullscreen.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_view.dart';
 
@@ -43,6 +44,51 @@ void main() {
     ],
   );
 
+  final styledMap = AiBookMindMap(
+    contentHash: 'c' * 64,
+    workKey: null,
+    createdAt: DateTime.utc(2026, 8, 10),
+    model: 'test',
+    scopeSectionIndices: const [1],
+    scopeFingerprint: 'styled-scope',
+    contentKind: AiMindMapContentKind.argumentative,
+    layout: AiMindMapLayout.bidirectional,
+    nodes: const [
+      AiBookMindMapNode(
+        nodeId: 'root',
+        parentId: null,
+        order: 0,
+        level: 0,
+        title: '全书主题',
+        summary: '整本书的中心结论',
+      ),
+      AiBookMindMapNode(
+        nodeId: 'branch-a',
+        parentId: 'root',
+        order: 0,
+        level: 1,
+        title: '论点一',
+        summary: '第一条主要论证',
+      ),
+      AiBookMindMapNode(
+        nodeId: 'detail-a',
+        parentId: 'branch-a',
+        order: 0,
+        level: 2,
+        title: '事实依据',
+        summary: '支撑第一条论证的正文事实',
+      ),
+      AiBookMindMapNode(
+        nodeId: 'branch-b',
+        parentId: 'root',
+        order: 1,
+        level: 1,
+        title: '论点二',
+        summary: '第二条主要论证',
+      ),
+    ],
+  );
+
   testWidgets('native view exposes layout, hierarchy list and node details', (
     tester,
   ) async {
@@ -51,6 +97,7 @@ void main() {
     var openedFullscreen = false;
     await tester.pumpWidget(
       MaterialApp(
+        theme: AppTheme.light(AppColors.defaultAccent),
         home: Scaffold(
           body: SizedBox(
             width: 800,
@@ -135,6 +182,84 @@ void main() {
       expect(savedLayout, AiMindMapLayout.bidirectional);
     },
   );
+
+  testWidgets('branch colors are distinct, inherited and theme-derived', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(AppColors.defaultAccent),
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 650,
+            child: BookAiMindMapView(
+              map: styledMap,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    Color accentOf(String nodeId) {
+      final rail = tester.widget<DecoratedBox>(
+        find.byKey(ValueKey('mind-map-branch-accent-$nodeId')),
+      );
+      return (rail.decoration as BoxDecoration).color!;
+    }
+
+    expect(accentOf('branch-a'), isNot(accentOf('branch-b')));
+    expect(accentOf('detail-a'), accentOf('branch-a'));
+
+    final rootSurface = tester.widget<DecoratedBox>(
+      find.byKey(const ValueKey('mind-map-node-surface-root')),
+    );
+    final rootDecoration = rootSurface.decoration as BoxDecoration;
+    expect(rootDecoration.gradient, isNotNull);
+    expect(rootDecoration.boxShadow, isNotEmpty);
+
+    final branchSurface = tester.widget<DecoratedBox>(
+      find.byKey(const ValueKey('mind-map-node-surface-branch-a')),
+    );
+    final branchDecoration = branchSurface.decoration as BoxDecoration;
+    expect(branchDecoration.color, isNotNull);
+    expect(branchDecoration.border, isNotNull);
+    final lightBranchSurface = branchDecoration.color;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(AppColors.defaultAccent),
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 650,
+            child: BookAiMindMapView(
+              map: styledMap,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(accentOf('branch-a'), isNot(accentOf('branch-b')));
+    final darkBranchSurface =
+        (tester
+                    .widget<DecoratedBox>(
+                      find.byKey(
+                        const ValueKey('mind-map-node-surface-branch-a'),
+                      ),
+                    )
+                    .decoration
+                as BoxDecoration)
+            .color;
+    expect(darkBranchSurface, isNot(lightBranchSurface));
+  });
 
   testWidgets('trackpad scroll zoom keeps the scene point under the pointer', (
     tester,
