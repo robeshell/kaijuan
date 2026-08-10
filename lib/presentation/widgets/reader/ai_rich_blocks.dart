@@ -10,6 +10,7 @@ import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:highlighting/languages/all.dart';
 import 'package:merman/merman.dart';
+import 'package:xml/xml.dart';
 
 import '../../../core/theme.dart';
 import '../ai_typography.dart';
@@ -290,9 +291,19 @@ abstract interface class AiMermaidRenderer {
 
 @immutable
 class AiMermaidTheme {
-  const AiMermaidTheme({required this.optionsJson});
+  const AiMermaidTheme({
+    required this.optionsJson,
+    required this.rootFill,
+    required this.rootText,
+    required this.branchFills,
+    required this.branchTexts,
+  });
 
   final String optionsJson;
+  final String rootFill;
+  final String rootText;
+  final List<String> branchFills;
+  final List<String> branchTexts;
 
   factory AiMermaidTheme.fromColorScheme(ColorScheme colors) {
     String hex(Color color) =>
@@ -337,6 +348,10 @@ class AiMermaidTheme {
     ].join();
 
     return AiMermaidTheme(
+      rootFill: root,
+      rootText: onRoot,
+      branchFills: [for (final branch in branches) hex(branch.$1)],
+      branchTexts: [for (final branch in branches) hex(branch.$2)],
       optionsJson: jsonEncode({
         'version': 2,
         'presentation': {
@@ -378,6 +393,7 @@ class MermanAiMermaidRenderer implements AiMermaidRenderer {
   const MermanAiMermaidRenderer();
 
   static final Map<String, Future<String>> _cache = {};
+  static const _nativeSvgRevision = 1;
   static const _maxSourceChars = 40000;
   static const _maxSvgChars = 1500000;
 
@@ -386,7 +402,8 @@ class MermanAiMermaidRenderer implements AiMermaidRenderer {
     if (source.trim().isEmpty || source.length > _maxSourceChars) {
       return Future.error(const FormatException('diagram size is invalid'));
     }
-    final cacheKey = '$source\u0000${theme.optionsJson}';
+    final cacheKey =
+        'native-svg-$_nativeSvgRevision\u0000$source\u0000${theme.optionsJson}';
     if (_cache.length > 12) _cache.remove(_cache.keys.first);
     return _cache.putIfAbsent(cacheKey, () {
       final optionsJson = theme.optionsJson;
@@ -398,7 +415,7 @@ class MermanAiMermaidRenderer implements AiMermaidRenderer {
         if (svg.length > _maxSvgChars) {
           throw const FormatException('rendered diagram is too large');
         }
-        return svg;
+        return materializeAiMindmapNativeStyles(svg, theme);
       });
       return pending.catchError((Object error) {
         _cache.remove(cacheKey);
@@ -407,6 +424,87 @@ class MermanAiMermaidRenderer implements AiMermaidRenderer {
     });
   }
 }
+
+/// `flutter_svg` deliberately supports only a subset of browser CSS. Merman's
+/// mindmap output still places the node and edge palette in descendant class
+/// selectors, so an unsupported `<style>` block leaves every shape at SVG's
+/// default black fill. Materialize the semantic palette as attributes while
+/// the SVG is still in the rendering isolate.
+@visibleForTesting
+String materializeAiMindmapNativeStyles(String svg, AiMermaidTheme theme) {
+  XmlDocument document;
+  try {
+    document = XmlDocument.parse(svg);
+  } on XmlParserException {
+    return svg;
+  }
+  final root = document.rootElement;
+  final rootClasses = _svgClasses(root);
+  if (root.getAttribute('id') != 'mindmap' &&
+      !rootClasses.contains('mindmapDiagram')) {
+    return svg;
+  }
+
+  ({String fill, String text}) paletteFor(Set<String> classes) {
+    if (classes.contains('section-root')) {
+      return (fill: theme.rootFill, text: theme.rootText);
+    }
+    for (final className in classes) {
+      final match = RegExp(r'^section-(\d+)$').firstMatch(className);
+      if (match == null) continue;
+      final index = int.parse(match.group(1)!);
+      return (
+        fill: theme.branchFills[index % theme.branchFills.length],
+        text: theme.branchTexts[index % theme.branchTexts.length],
+      );
+    }
+    return (fill: theme.branchFills.first, text: theme.branchTexts.first);
+  }
+
+  for (final element in root.descendants.whereType<XmlElement>()) {
+    final classes = _svgClasses(element);
+    if (classes.contains('edge')) {
+      final palette = paletteFor({
+        for (final className in classes)
+          if (className.startsWith('section-edge-'))
+            className.replaceFirst('section-edge-', 'section-'),
+      });
+      element
+        ..setAttribute('fill', 'none')
+        ..setAttribute('stroke', palette.fill)
+        ..setAttribute('stroke-width', '3')
+        ..setAttribute('stroke-linecap', 'round');
+    }
+    if (!classes.contains('mindmap-node')) continue;
+    final palette = paletteFor(classes);
+    for (final child in element.descendants.whereType<XmlElement>()) {
+      switch (child.name.local) {
+        case 'rect':
+        case 'path':
+        case 'circle':
+        case 'polygon':
+          child
+            ..setAttribute('fill', palette.fill)
+            ..setAttribute('stroke', palette.fill)
+            ..setAttribute('stroke-width', '1');
+        case 'line':
+          child
+            ..setAttribute('stroke', palette.fill)
+            ..setAttribute('stroke-width', '3');
+        case 'text':
+          child.setAttribute('fill', palette.text);
+      }
+    }
+  }
+  return document.toXmlString();
+}
+
+Set<String> _svgClasses(XmlElement element) => element
+    .getAttribute('class')
+    .toString()
+    .split(RegExp(r'\s+'))
+    .where((value) => value.isNotEmpty && value != 'null')
+    .toSet();
 
 class AiMermaidBlock extends StatefulWidget {
   const AiMermaidBlock({

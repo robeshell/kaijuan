@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/core/theme.dart';
 import 'package:kaijuan/presentation/widgets/reader/ai_result_body.dart';
 import 'package:kaijuan/presentation/widgets/reader/ai_rich_blocks.dart';
+import 'package:xml/xml.dart';
 
 void main() {
   group('AI rich content', () {
@@ -206,6 +208,43 @@ final answer = 42;
   });
 
   group('AiMermaidTheme', () {
+    test(
+      'materializes CSS-only mindmap colors for the native SVG surface',
+      () async {
+        final theme = AiMermaidTheme.fromColorScheme(
+          AppTheme.light(AppColors.defaultAccent).colorScheme,
+        );
+        const svg = '''
+<svg id="mindmap" class="mindmapDiagram" viewBox="0 0 100 100">
+  <style>.section-root circle{fill:red}.section-0 path{fill:blue}</style>
+  <path class="edge section-edge-0" d="M0 0L10 10"/>
+  <g class="mindmap-node section-root"><circle r="10"/><text>中心</text></g>
+  <g class="mindmap-node section-0"><path d="M0 0L5 0L5 5Z"/><text>分支</text></g>
+</svg>
+''';
+
+        final nativeSvg = await Isolate.run(
+          () => materializeAiMindmapNativeStyles(svg, theme),
+        );
+        final document = XmlDocument.parse(nativeSvg);
+        final circle = document.findAllElements('circle').single;
+        final branchPath = document
+            .findAllElements('path')
+            .firstWhere((path) => !(_classes(path).contains('edge')));
+        final edge = document
+            .findAllElements('path')
+            .firstWhere((path) => _classes(path).contains('edge'));
+        final texts = document.findAllElements('text').toList();
+
+        expect(circle.getAttribute('fill'), theme.rootFill);
+        expect(texts.first.getAttribute('fill'), theme.rootText);
+        expect(branchPath.getAttribute('fill'), theme.branchFills.first);
+        expect(texts.last.getAttribute('fill'), theme.branchTexts.first);
+        expect(edge.getAttribute('fill'), 'none');
+        expect(edge.getAttribute('stroke'), theme.branchFills.first);
+      },
+    );
+
     test('maps the active light ColorScheme into Merman semantic colors', () {
       final colors = AppTheme.light(AppColors.defaultAccent).colorScheme;
       final options =
@@ -256,6 +295,9 @@ final answer = 42;
     });
   });
 }
+
+Set<String> _classes(XmlElement element) =>
+    (element.getAttribute('class') ?? '').split(' ').toSet();
 
 String _hex(Color color) =>
     '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
