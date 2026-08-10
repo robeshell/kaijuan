@@ -297,23 +297,4 @@ bool validateAiBookMindMapNodes(List<AiBookMindMapNode> nodes) {
 AiMindMapLayout chooseAiMindMapLayout({
   required AiMindMapContentKind contentKind,
   required List<AiBookMindMapNode> nodes,
-}) {
-  final root = nodes.firstWhere((node) => node.parentId == null);
-  final rootBranches = nodes
-      .where((node) => node.parentId == root.nodeId)
-      .length;
-  final maxLevel = nodes.fold<int>(
-    0,
-    (value, node) => node.level > value ? node.level : value,
-  );
-  if (contentKind == AiMindMapContentKind.argumentative &&
-      rootBranches >= 4 &&
-      nodes.length <= 72 &&
-      maxLevel <= 4) {
-    return AiMindMapLayout.bidirectional;
-  }
-  if (nodes.length <= 42 && maxLevel <= 3 && rootBranches <= 8) {
-    return AiMindMapLayout.radial;
-  }
-  return AiMindMapLayout.rightFacing;
-}
+}) => AiMindMapLayout.bidirectional;

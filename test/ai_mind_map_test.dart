@@ -172,14 +172,13 @@ void main() {
     }
   });
 
-  test('layout policy accounts for content kind and topology', () {
-    expect(
-      chooseAiMindMapLayout(
-        contentKind: AiMindMapContentKind.argumentative,
-        nodes: sample().nodes,
-      ),
-      AiMindMapLayout.radial,
-    );
+  test('new mind maps default to bidirectional layout', () {
+    for (final contentKind in AiMindMapContentKind.values) {
+      expect(
+        chooseAiMindMapLayout(contentKind: contentKind, nodes: sample().nodes),
+        AiMindMapLayout.bidirectional,
+      );
+    }
   });
 
   test('layout handles the 160-node storage boundary without overflow', () {
