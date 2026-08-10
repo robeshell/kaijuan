@@ -28,16 +28,25 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
   final _transformation = TransformationController();
   final _collapsed = <String>{};
   final _viewportKey = GlobalKey();
+  late AiMindMapLayout _layout;
 
   @override
   void initState() {
     super.initState();
+    _layout = widget.map.layout;
     _applyLargeMapDefaults();
   }
 
   @override
   void didUpdateWidget(BookAiMindMapView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Update from restored/persisted conversation state, but do not make the
+    // visual switch wait for the parent session write. The card is allowed to
+    // be reused by its stable message key, so relying on widget.map.layout
+    // alone makes its segmented buttons appear inert for a frame or longer.
+    if (oldWidget.map.layout != widget.map.layout) {
+      _layout = widget.map.layout;
+    }
     if (oldWidget.map.scopeFingerprint != widget.map.scopeFingerprint ||
         oldWidget.map.createdAt != widget.map.createdAt ||
         oldWidget.map.nodes.length != widget.map.nodes.length) {
@@ -68,8 +77,11 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
 
   @override
   Widget build(BuildContext context) {
+    final displayMap = _layout == widget.map.layout
+        ? widget.map
+        : widget.map.copyWith(layout: _layout);
     final layout = AiMindMapLayoutEngine.layout(
-      widget.map,
+      displayMap,
       collapsedNodeIds: _collapsed,
     );
     final children = <String, int>{};
@@ -102,12 +114,15 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                         label: Text('双向'),
                       ),
                     ],
-                    selected: {widget.map.layout},
+                    selected: {_layout},
                     showSelectedIcon: false,
                     onSelectionChanged: (selection) {
-                      if (selection.isNotEmpty) {
-                        widget.onLayoutChanged(selection.first);
+                      if (selection.isEmpty || selection.first == _layout) {
+                        return;
                       }
+                      final next = selection.first;
+                      setState(() => _layout = next);
+                      widget.onLayoutChanged(next);
                     },
                   ),
                 ),

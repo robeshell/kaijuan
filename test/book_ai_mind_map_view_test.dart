@@ -74,6 +74,14 @@ void main() {
     await tester.tap(find.text('双向'));
     await tester.pump();
     expect(selected, AiMindMapLayout.bidirectional);
+    expect(
+      tester
+          .widget<SegmentedButton<AiMindMapLayout>>(
+            find.byType(SegmentedButton<AiMindMapLayout>),
+          )
+          .selected,
+      {AiMindMapLayout.bidirectional},
+    );
 
     await tester.tap(find.byTooltip('层级列表'));
     await tester.pumpAndSettle();
