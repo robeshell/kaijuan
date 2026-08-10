@@ -1129,8 +1129,8 @@ class BookReaderController extends ChangeNotifier {
   String? _metadataWordsKey;
   RegExp? _metadataWordsRegExp;
 
-  AiGraphRuleWords get _graphRuleWords =>
-      _aiSettings?.settings.graphRuleWords ?? const AiGraphRuleWords();
+  AiContentRuleWords get _contentRuleWords =>
+      _aiSettings?.settings.contentRuleWords ?? const AiContentRuleWords();
 
   /// Never-matches regex used when a word list is empty (rule disabled).
   static final RegExp _neverMatches = RegExp(r'$.^');
@@ -1170,7 +1170,7 @@ class BookReaderController extends ChangeNotifier {
     if (RegExp(r'^作者.{0,16}(?:小传|生平|简介)$').hasMatch(label)) {
       return true;
     }
-    final words = _graphRuleWords.appendixUnits;
+    final words = _contentRuleWords.appendixUnits;
     final key = words.join('\u0001');
     if (key != _appendixWordsKey) {
       _appendixWordsKey = key;
@@ -1181,7 +1181,7 @@ class BookReaderController extends ChangeNotifier {
 
   bool _isOutlineMetadataTitle(String value) {
     final title = value.trim().replaceAll(RegExp(r'\s+'), '');
-    final words = _graphRuleWords.metadataUnits;
+    final words = _contentRuleWords.metadataUnits;
     final key = words.join('\u0001');
     if (key != _metadataWordsKey) {
       _metadataWordsKey = key;
@@ -2027,37 +2027,20 @@ class BookReaderController extends ChangeNotifier {
     return substantive;
   }
 
-  /// Mind-map input has its own conservative, non-configurable filter. It must
-  /// not inherit knowledge-graph supplement settings or a graph scope plan.
-  static bool _isMindMapAutomaticSupplement(AiBookSectionSlice section) {
+  String? _mindMapExcludedPatternsKey;
+  RegExp? _mindMapExcludedPatternsRegExp;
+
+  /// Mind-map input uses its own configurable title globs. It must not inherit
+  /// knowledge-graph supplement settings or a graph scope plan.
+  bool _isMindMapAutomaticSupplement(AiBookSectionSlice section) {
     final label = section.label.trim().replaceAll(RegExp(r'\s+'), '');
-    if (RegExp(
-      r'^(?:封面|扉页|版权信息|版权页|目录|目次|参考文献|参考资料|索引|数据引用说明|图书在版编目数据|出版信息|作者简介|内容简介|本书简介)$',
-    ).hasMatch(label)) {
-      return true;
+    final patterns = _contentRuleWords.mindMapExcludedTitlePatterns;
+    final key = patterns.join('\u0001');
+    if (key != _mindMapExcludedPatternsKey) {
+      _mindMapExcludedPatternsKey = key;
+      _mindMapExcludedPatternsRegExp = _titleGlobsRegExp(patterns);
     }
-    if (RegExp(
-      r'^(?:(?:参考文献|参考资料|索引|数据引用说明)(?:[：:].*|$)|(?:附录|附表|附图).*)',
-    ).hasMatch(label)) {
-      return true;
-    }
-    if (RegExp(
-      r'^(?:(?:名家|专家|学者|媒体|编辑|编者|译者)(?:推荐|推荐语|点评|评论|评介|书评|导读).*|(?:推荐语|书评|导读)(?:[：:].*|$))',
-    ).hasMatch(label)) {
-      return true;
-    }
-    if (RegExp(r'^(?:前沿点评|前言点评|阅读指南|推荐序|名家序|专家序|编者序|译者序).*').hasMatch(label)) {
-      return true;
-    }
-    if (RegExp(
-      r'(?:出版说明|编辑说明|编校说明|再版说明|重印说明|修订说明|版本说明|出版始末|出版纪事|版本纪事|出版后记|编后记)(?:[：:].*)?$',
-    ).hasMatch(label)) {
-      return true;
-    }
-    if (RegExp(r'(?:印象记|阅读指南|的读法)(?:[：:].*)?$').hasMatch(label) ||
-        RegExp(r'^《[^》]+》纪事$').hasMatch(label)) {
-      return true;
-    }
+    if (_mindMapExcludedPatternsRegExp!.hasMatch(label)) return true;
     final text = section.text.trim();
     if (text.isEmpty) return false;
     final prefix = text.length > 640 ? text.substring(0, 640) : text;
@@ -2067,6 +2050,18 @@ class BookReaderController extends ChangeNotifier {
       r'ISBN|图书在版编目|版权所有|版权归属|版权信息',
     ).hasMatch(prefix);
     return hasCopyrightSignal && RegExp(r'出版|出版社|版权|编目').hasMatch(prefix);
+  }
+
+  static RegExp _titleGlobsRegExp(List<String> patterns) {
+    final expressions = <String>[];
+    for (final raw in patterns) {
+      final pattern = raw.trim().replaceAll(RegExp(r'\s+'), '');
+      if (pattern.isEmpty) continue;
+      final parts = pattern.split('*').map(RegExp.escape).join('.*');
+      expressions.add('(?:$parts)');
+    }
+    if (expressions.isEmpty) return _neverMatches;
+    return RegExp('^(?:${expressions.join('|')})\$');
   }
 
   static bool _isMindMapTitleOnlySection(AiBookSectionSlice section) {

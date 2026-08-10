@@ -248,7 +248,7 @@ class AiSettingsController extends ChangeNotifier {
     required String apiKey,
     required String baseUrl,
     required String model,
-    AiGraphRuleWords? graphRuleWords,
+    AiContentRuleWords? contentRuleWords,
   }) async {
     final key = apiKey;
     final url = baseUrl.trim();
@@ -265,9 +265,9 @@ class AiSettingsController extends ChangeNotifier {
       await settingsStore.write(_settings);
       changed = true;
     }
-    final words = graphRuleWords;
-    if (words != null && !_sameRuleWords(_settings.graphRuleWords, words)) {
-      _settings = _settings.copyWith(graphRuleWords: words);
+    final words = contentRuleWords;
+    if (words != null && !_sameRuleWords(_settings.contentRuleWords, words)) {
+      _settings = _settings.copyWith(contentRuleWords: words);
       await settingsStore.write(_settings);
       changed = true;
     }
@@ -277,7 +277,7 @@ class AiSettingsController extends ChangeNotifier {
     }
   }
 
-  static bool _sameRuleWords(AiGraphRuleWords a, AiGraphRuleWords b) {
+  static bool _sameRuleWords(AiContentRuleWords a, AiContentRuleWords b) {
     bool sameList(List<String> x, List<String> y) {
       if (x.length != y.length) return false;
       for (var i = 0; i < x.length; i++) {
@@ -286,7 +286,11 @@ class AiSettingsController extends ChangeNotifier {
       return true;
     }
 
-    return sameList(a.appendixUnits, b.appendixUnits) &&
+    return sameList(
+          a.mindMapExcludedTitlePatterns,
+          b.mindMapExcludedTitlePatterns,
+        ) &&
+        sameList(a.appendixUnits, b.appendixUnits) &&
         sameList(a.metadataUnits, b.metadataUnits) &&
         sameList(a.citationQuoteTemplates, b.citationQuoteTemplates) &&
         sameList(a.relationTypes, b.relationTypes) &&

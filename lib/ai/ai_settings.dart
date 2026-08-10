@@ -2,11 +2,12 @@ import 'ai_provider_kind.dart';
 import 'ai_search.dart';
 import 'ai_translation.dart';
 
-/// Tunable word lists that drive the graph-pipeline hard rules. Kept in
-/// settings so the user can extend them without a code change; the const
-/// constructor carries today's built-in defaults.
-class AiGraphRuleWords {
-  const AiGraphRuleWords({
+/// Tunable content and graph rules shared by deterministic AI workflows.
+/// Kept in settings so the user can extend them without a code change; the
+/// const constructor carries today's built-in defaults.
+class AiContentRuleWords {
+  const AiContentRuleWords({
+    this.mindMapExcludedTitlePatterns = defaultMindMapExcludedTitlePatterns,
     this.appendixUnits = defaultAppendixUnits,
     this.metadataUnits = defaultMetadataUnits,
     this.citationQuoteTemplates = defaultCitationQuoteTemplates,
@@ -16,6 +17,11 @@ class AiGraphRuleWords {
     this.genericPersonTerms = defaultGenericPersonTerms,
     this.bookNamePriors = defaultBookNamePriors,
   });
+
+  /// Whole-book mind-map section-title globs. `*` matches any characters;
+  /// every other character is treated literally and the full title must
+  /// match. This intentionally is not an arbitrary regular-expression input.
+  final List<String> mindMapExcludedTitlePatterns;
 
   /// Front/back-matter unit words matched as a PREFIX of a section label
   /// (附录, 后记, 文前辅文, 序 ...). Lines starting with `!` are exclusions
@@ -54,6 +60,68 @@ class AiGraphRuleWords {
   /// config library, never pipeline code. Aliases here are resolved before
   /// every generic merge rule (they are certain, not probabilistic).
   final Map<String, Map<String, String>> bookNamePriors;
+
+  static const defaultMindMapExcludedTitlePatterns = <String>[
+    '封面',
+    '扉页',
+    '版权信息',
+    '版权页',
+    '目录',
+    '目次',
+    '图书在版编目数据',
+    '出版信息',
+    '作者简介',
+    '内容简介',
+    '本书简介',
+    '参考文献*',
+    '参考资料*',
+    '索引*',
+    '数据引用说明*',
+    '附录*',
+    '附表*',
+    '附图*',
+    '名家*推荐*',
+    '专家*推荐*',
+    '学者*推荐*',
+    '媒体*推荐*',
+    '编辑*推荐*',
+    '编者*推荐*',
+    '译者*推荐*',
+    '名家*点评*',
+    '专家*点评*',
+    '学者*点评*',
+    '媒体*点评*',
+    '编辑*点评*',
+    '编者*点评*',
+    '译者*点评*',
+    '推荐语*',
+    '书评*',
+    '导读*',
+    '前沿点评*',
+    '前言点评*',
+    '阅读指南*',
+    '推荐序*',
+    '名家序*',
+    '专家序*',
+    '编者序*',
+    '译者序*',
+    '*出版说明*',
+    '*编辑说明*',
+    '*编校说明*',
+    '*再版说明*',
+    '*重印说明*',
+    '*修订说明*',
+    '*版本说明*',
+    '*出版始末*',
+    '*出版纪事*',
+    '*版本纪事*',
+    '*出版后记*',
+    '*编后记*',
+    '*印象记*',
+    '*阅读指南*',
+    '*的读法',
+    '《*》纪事',
+  ];
 
   static const defaultAppendixUnits = <String>[
     '附录',
@@ -428,7 +496,8 @@ class AiGraphRuleWords {
     },
   };
 
-  AiGraphRuleWords copyWith({
+  AiContentRuleWords copyWith({
+    List<String>? mindMapExcludedTitlePatterns,
     List<String>? appendixUnits,
     List<String>? metadataUnits,
     List<String>? citationQuoteTemplates,
@@ -438,7 +507,9 @@ class AiGraphRuleWords {
     List<String>? genericPersonTerms,
     Map<String, Map<String, String>>? bookNamePriors,
   }) {
-    return AiGraphRuleWords(
+    return AiContentRuleWords(
+      mindMapExcludedTitlePatterns:
+          mindMapExcludedTitlePatterns ?? this.mindMapExcludedTitlePatterns,
       appendixUnits: appendixUnits ?? this.appendixUnits,
       metadataUnits: metadataUnits ?? this.metadataUnits,
       citationQuoteTemplates:
@@ -452,6 +523,7 @@ class AiGraphRuleWords {
   }
 
   Map<String, Object?> toJson() => {
+    'mindMapExcludedTitlePatterns': mindMapExcludedTitlePatterns,
     'appendixUnits': appendixUnits,
     'metadataUnits': metadataUnits,
     'citationQuoteTemplates': citationQuoteTemplates,
@@ -462,11 +534,14 @@ class AiGraphRuleWords {
     'bookNamePriors': bookNamePriors,
   };
 
-  static AiGraphRuleWords fromJson(Object? json) {
-    if (json is! Map) return const AiGraphRuleWords();
+  static AiContentRuleWords fromJson(Object? json) {
+    if (json is! Map) return const AiContentRuleWords();
     final map = Map<String, dynamic>.from(json);
-    final defaults = const AiGraphRuleWords();
-    return AiGraphRuleWords(
+    final defaults = const AiContentRuleWords();
+    return AiContentRuleWords(
+      mindMapExcludedTitlePatterns:
+          (map['mindMapExcludedTitlePatterns'] as List?)?.cast<String>() ??
+          defaults.mindMapExcludedTitlePatterns,
       appendixUnits:
           (map['appendixUnits'] as List?)?.cast<String>() ??
           defaults.appendixUnits,
@@ -516,7 +591,7 @@ class AiSettings {
     this.allowUnreadContext = false,
     this.translation = const AiTranslationPreferences(),
     this.searchProviderKind = AiSearchProviderKind.tavily,
-    this.graphRuleWords = const AiGraphRuleWords(),
+    this.contentRuleWords = const AiContentRuleWords(),
   });
 
   final bool enabled;
@@ -542,8 +617,8 @@ class AiSettings {
   /// Web search backend for book-chat「联网」(key in secure storage).
   final AiSearchProviderKind searchProviderKind;
 
-  /// Word lists driving the graph pipeline hard rules.
-  final AiGraphRuleWords graphRuleWords;
+  /// Deterministic content-selection and graph-pipeline rules.
+  final AiContentRuleWords contentRuleWords;
 
   String get resolvedBaseUrl {
     final trimmed = baseUrl.trim();
@@ -594,7 +669,7 @@ class AiSettings {
     bool? allowUnreadContext,
     AiTranslationPreferences? translation,
     AiSearchProviderKind? searchProviderKind,
-    AiGraphRuleWords? graphRuleWords,
+    AiContentRuleWords? contentRuleWords,
   }) {
     return AiSettings(
       enabled: enabled ?? this.enabled,
@@ -605,7 +680,7 @@ class AiSettings {
       allowUnreadContext: allowUnreadContext ?? this.allowUnreadContext,
       translation: translation ?? this.translation,
       searchProviderKind: searchProviderKind ?? this.searchProviderKind,
-      graphRuleWords: graphRuleWords ?? this.graphRuleWords,
+      contentRuleWords: contentRuleWords ?? this.contentRuleWords,
     );
   }
 
@@ -618,7 +693,7 @@ class AiSettings {
     'allowUnreadContext': allowUnreadContext,
     'translation': translation.toJson(),
     'searchProviderKind': searchProviderKind.storageValue,
-    'graphRuleWords': graphRuleWords.toJson(),
+    'contentRuleWords': contentRuleWords.toJson(),
   };
 
   static AiSettings fromJson(Map<String, dynamic> json) {
@@ -638,7 +713,9 @@ class AiSettings {
       searchProviderKind: AiSearchProviderKind.fromStorage(
         json['searchProviderKind'] as String?,
       ),
-      graphRuleWords: AiGraphRuleWords.fromJson(json['graphRuleWords']),
+      contentRuleWords: AiContentRuleWords.fromJson(
+        json['contentRuleWords'] ?? json['graphRuleWords'],
+      ),
     );
   }
 

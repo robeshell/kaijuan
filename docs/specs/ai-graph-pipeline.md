@@ -176,7 +176,7 @@ TOC / spine facts
   十五年》」「罗素、苏东坡」、organization 例子的「史塔克家族」——全部换成
   通用表述或中性虚构例
 - **已配置化**：泛称拦截词表（genericPersonTerms，80+ 词）与称谓后缀表
-  （personTitleSuffixes）从 `static const` 挪进 `AiGraphRuleWords`
+  （personTitleSuffixes）从 `static const` 挪进 `AiContentRuleWords`
   （AI 设置页可改，含 toJson/fromJson 持久化，旧配置缺字段回退默认值）
 - **已删除（essay 抽取特调）**：`essay ≥0.5 → scope 从严` prompt 分支——
   散文/议论集没有人物关系/家族树可挖掘，不该为它打抽取补丁；「不同书生成

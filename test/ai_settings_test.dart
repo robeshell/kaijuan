@@ -110,6 +110,25 @@ void main() {
       expect(restored.reasoningEnabled, isFalse);
     });
 
+    test('legacy graph rules migrate into general AI content rules', () {
+      final restored = AiSettings.fromJson(const {
+        'graphRuleWords': {
+          'appendixUnits': ['旧辅文'],
+          'relationTypes': ['旧关系'],
+        },
+      });
+
+      expect(restored.contentRuleWords.appendixUnits, ['旧辅文']);
+      expect(restored.contentRuleWords.relationTypes, ['旧关系']);
+      expect(
+        restored.contentRuleWords.mindMapExcludedTitlePatterns,
+        AiContentRuleWords.defaultMindMapExcludedTitlePatterns,
+      );
+      final encoded = restored.toJson();
+      expect(encoded, contains('contentRuleWords'));
+      expect(encoded, isNot(contains('graphRuleWords')));
+    });
+
     test('reasoning capability follows provider and selected model', () {
       expect(
         AiProviderKind.openai.reasoningCapabilities('gpt-5.4-mini').supported,

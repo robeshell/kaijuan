@@ -91,14 +91,14 @@ class AiBookGraphService {
   static const int chunkOverlapChars = 200;
 
   /// Curated Chinese relation-type vocabulary (from AI settings, defaults in
-  /// `AiGraphRuleWords`). The extraction prompt asks the model to pick from
+  /// `AiContentRuleWords`). The extraction prompt asks the model to pick from
   /// these; [normalizeRelationType] folds anything else (English NER tags,
   /// free-form words) back into this set, so the UI never shows raw model
   /// output (e.g. "trusts", "teacher_student").
-  List<String> get _relationTypes => _settings().graphRuleWords.relationTypes;
+  List<String> get _relationTypes => _settings().contentRuleWords.relationTypes;
 
   Map<String, String> get _relationTypeAliases =>
-      _settings().graphRuleWords.relationTypeAliases;
+      _settings().contentRuleWords.relationTypeAliases;
 
   /// Maps any raw relation-type string (Chinese or English NER tag) into the
   /// curated Chinese vocabulary. Unknown values collapse to [relationFallback].
@@ -370,7 +370,7 @@ class AiBookGraphService {
       // Book-name priors (config library, e.g. the four classics): certain
       // alias→canonical mappings resolved before any probabilistic rule.
       final priorAliases =
-          _settings().graphRuleWords.bookNamePriors[bookTitle.trim()] ??
+          _settings().contentRuleWords.bookNamePriors[bookTitle.trim()] ??
           const <String, String>{};
 
       // ER pipeline state: fuzzy merges queued for LLM review + audit trail.
@@ -1657,7 +1657,7 @@ class AiBookGraphService {
   /// from AI settings; `{name}` is replaced with the entity name.
   bool _isCitationQuote(String quote, String name, List<String> aliases) {
     if (quote.isEmpty || name.isEmpty) return false;
-    final templates = _settings().graphRuleWords.citationQuoteTemplates;
+    final templates = _settings().contentRuleWords.citationQuoteTemplates;
     if (templates.isEmpty) return false;
     for (final n in {name, ...aliases}) {
       if (n.isEmpty) continue;
@@ -2527,7 +2527,7 @@ class AiBookGraphService {
   /// edit-distance based — 王皇后 vs 王皇太后 is distance 1 but only the
   /// title-suffix rule (which handles the real 皇后→太后升格) applies.
   /// Honorific/kinship terms excluded from substring merges come from the
-  /// configurable [AiGraphRuleWords.genericPersonTerms] (roles, not names).
+  /// configurable [AiContentRuleWords.genericPersonTerms] (roles, not names).
   double? _nameSimilarityScore(String a, String b) {
     if (a == b) return 1.0;
     if (a.length < 2 || b.length < 2) return null;
@@ -2539,7 +2539,7 @@ class AiBookGraphService {
     // short side is a real part of the name (short*2 >= long: 万历⊂万历皇帝
     // passes, but 北京 ⊂ 北京理工大学 does not — the short 2-char word is a
     // common token, not the person's name).
-    final genericTerms = _settings().graphRuleWords.genericPersonTerms;
+    final genericTerms = _settings().contentRuleWords.genericPersonTerms;
     if ((long.startsWith(short) || long.endsWith(short)) &&
         !genericTerms.contains(short) &&
         short.length * 2 >= long.length) {
@@ -2678,7 +2678,7 @@ class AiBookGraphService {
   }
 
   String? _titleStem(String name) {
-    for (final suffix in _settings().graphRuleWords.personTitleSuffixes) {
+    for (final suffix in _settings().contentRuleWords.personTitleSuffixes) {
       if (name.endsWith(suffix) && name.length > suffix.length) {
         return name.substring(0, name.length - suffix.length);
       }

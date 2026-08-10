@@ -19,6 +19,18 @@ Widget _host(AiSettingsController controller) =>
     MaterialApp(home: AiSettingsScreen(controller: controller));
 
 void main() {
+  testWidgets('settings exposes general AI rules outside graph-only naming', (
+    tester,
+  ) async {
+    final controller = await _controller();
+    await tester.pumpWidget(_host(controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('高级 AI 规则'), findsOneWidget);
+    expect(find.text('思维导图内容范围、图谱关系与别名'), findsOneWidget);
+    expect(find.text('高级图谱规则'), findsNothing);
+  });
+
   testWidgets('providers expose a persistent deep-thinking switch', (
     tester,
   ) async {

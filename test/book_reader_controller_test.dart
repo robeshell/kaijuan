@@ -13,10 +13,13 @@ import 'package:kaijuan/ai/ai_graph_scope.dart';
 import 'package:kaijuan/ai/ai_graph_store.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
+import 'package:kaijuan/ai/ai_settings.dart';
+import 'package:kaijuan/ai/ai_settings_store.dart';
 import 'package:kaijuan/app/book_reading_preferences.dart';
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
 import 'package:kaijuan/presentation/controllers/book_reader_controller.dart';
+import 'package:kaijuan/presentation/controllers/ai_settings_controller.dart';
 import 'package:kaijuan/readers/book/book_models.dart';
 import 'package:kaijuan/readers/book/book_theme.dart';
 
@@ -1320,5 +1323,58 @@ void main() {
         controller.dispose();
       },
     );
+
+    test('mind map scope honors custom excluded-title globs', () async {
+      final settingsStore = MemoryAiSettingsStore();
+      await settingsStore.write(
+        const AiSettings(
+          contentRuleWords: AiContentRuleWords(
+            mindMapExcludedTitlePatterns: ['特别资料*'],
+          ),
+        ),
+      );
+      final aiSettings = AiSettingsController(
+        settingsStore: settingsStore,
+        credentialStore: MemoryAiCredentialStore(),
+      );
+      await aiSettings.load();
+      final item = await insertBook(id: 'mind-map-custom-scope');
+      final controller = BookReaderController(
+        database: database,
+        item: item,
+        aiSettings: aiSettings,
+      );
+      controller.attachAnnotationBridge(
+        renderAll: (_) {},
+        add: (_) {},
+        remove: (_) {},
+        clearSelection: () {},
+        getSelectedText: () async => '',
+        setMenuCursorZone: (_) {},
+        setMenuOpen: (_) {},
+        getBookPlainText:
+            (
+              maxChars, {
+              bool toc = true,
+              int? startSection,
+              int? endSectionExclusive,
+            }) async => '''
+[§1@1 特别资料 数据口径]
+这是用户决定排除的出版资料。
+[§2@2 附录一]
+默认列表已经被用户替换，因此这一节应当保留。
+[§3@3 第一章 正文]
+本章包含需要生成思维导图的正文。
+''',
+      );
+
+      final sections = await controller.bookMindMapSections(
+        useFrozenWork: true,
+      );
+
+      expect(sections.map((section) => section.label), ['附录一', '第一章 正文']);
+      controller.dispose();
+      aiSettings.dispose();
+    });
   });
 }

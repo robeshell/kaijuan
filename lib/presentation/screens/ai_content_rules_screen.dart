@@ -11,12 +11,13 @@ import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/settings_components.dart';
 
-/// Advanced, explicitly saved knowledge-graph extraction rules.
+/// Advanced, explicitly saved deterministic AI content rules.
 ///
 /// These fields intentionally live outside the ordinary AI setup page: they
-/// tune extraction heuristics rather than enabling a reader-facing feature.
-class AiGraphRulesScreen extends StatefulWidget {
-  const AiGraphRulesScreen({super.key, required this.controller});
+/// tune content selection and extraction heuristics rather than enabling a
+/// reader-facing feature.
+class AiContentRulesScreen extends StatefulWidget {
+  const AiContentRulesScreen({super.key, required this.controller});
 
   final AiSettingsController controller;
 
@@ -25,15 +26,16 @@ class AiGraphRulesScreen extends StatefulWidget {
     required AiSettingsController controller,
   }) {
     return Navigator.of(context).push<void>(
-      appPageRoute<void>((_) => AiGraphRulesScreen(controller: controller)),
+      appPageRoute<void>((_) => AiContentRulesScreen(controller: controller)),
     );
   }
 
   @override
-  State<AiGraphRulesScreen> createState() => _AiGraphRulesScreenState();
+  State<AiContentRulesScreen> createState() => _AiContentRulesScreenState();
 }
 
-class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
+class _AiContentRulesScreenState extends State<AiContentRulesScreen> {
+  late final TextEditingController _mindMapExcludedTitles;
   late final TextEditingController _appendixWords;
   late final TextEditingController _metadataWords;
   late final TextEditingController _citationTemplates;
@@ -50,6 +52,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
   AiSettingsController get controller => widget.controller;
 
   List<TextEditingController> get _controllers => [
+    _mindMapExcludedTitles,
     _appendixWords,
     _metadataWords,
     _citationTemplates,
@@ -63,7 +66,10 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
   @override
   void initState() {
     super.initState();
-    final rules = controller.settings.graphRuleWords;
+    final rules = controller.settings.contentRuleWords;
+    _mindMapExcludedTitles = TextEditingController(
+      text: rules.mindMapExcludedTitlePatterns.join('\n'),
+    );
     _appendixWords = TextEditingController(
       text: rules.appendixUnits.join('\n'),
     );
@@ -107,7 +113,8 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
     setState(() => _dirty = true);
   }
 
-  AiGraphRuleWords _draftRules() => AiGraphRuleWords(
+  AiContentRuleWords _draftRules() => AiContentRuleWords(
+    mindMapExcludedTitlePatterns: _parseWords(_mindMapExcludedTitles.text),
     appendixUnits: _parseWords(_appendixWords.text),
     metadataUnits: _parseWords(_metadataWords.text),
     citationQuoteTemplates: _parseWords(_citationTemplates.text),
@@ -127,7 +134,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
         apiKey: controller.apiKey,
         baseUrl: controller.settings.baseUrl,
         model: controller.settings.model,
-        graphRuleWords: _draftRules(),
+        contentRuleWords: _draftRules(),
       );
       if (!mounted) return;
       setState(() {
@@ -136,12 +143,12 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
       });
       showAppSnackBar(
         context,
-        skipped == 0 ? '图谱规则已保存' : '图谱规则已保存，已忽略 $skipped 行格式不正确的内容',
+        skipped == 0 ? 'AI 规则已保存' : 'AI 规则已保存，已忽略 $skipped 行格式不正确的内容',
       );
     } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
-      showAppSnackBar(context, '图谱规则保存失败，请稍后重试');
+      showAppSnackBar(context, 'AI 规则保存失败，请稍后重试');
     }
   }
 
@@ -152,7 +159,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
     }
     final discard = await showAppConfirmDialog(
       context,
-      title: '放弃图谱规则修改？',
+      title: '放弃 AI 规则修改？',
       message: '尚未保存的修改不会生效。',
       cancelLabel: '继续编辑',
       confirmLabel: '放弃修改',
@@ -238,7 +245,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
   @override
   Widget build(BuildContext context) {
     final hPad = context.appPageGutter;
-    const rules = AiGraphRuleWords();
+    const rules = AiContentRuleWords();
     return PopScope(
       canPop: !_dirty,
       onPopInvokedWithResult: (didPop, _) {
@@ -258,11 +265,11 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
             ),
             children: [
               AppSettingsPageHeader(
-                title: '高级图谱规则',
+                title: '高级 AI 规则',
                 onBack: () => unawaited(_requestBack()),
                 actions: [
                   TextButton(
-                    key: const ValueKey('graph-rules-save-top'),
+                    key: const ValueKey('ai-rules-save-top'),
                     onPressed: _dirty && !_saving
                         ? () => unawaited(_save())
                         : null,
@@ -272,7 +279,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
               ),
               const SizedBox(height: AppSettingsMetrics.headerGap),
               Text(
-                '这些规则用于识别辅文、关系和别名。一般不需要修改；格式错误的行会在保存时忽略。',
+                '这些规则用于控制思维导图内容范围，以及知识图谱的辅文、关系和别名。一般不需要修改；格式错误的行会在保存时忽略。',
                 style: TextStyle(
                   fontSize: context.appCaptionSize,
                   height: 1.45,
@@ -284,10 +291,44 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                 padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
                 children: [
                   Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _GraphRuleWordsField(
+                      Text(
+                        '思维导图内容范围',
+                        style: TextStyle(
+                          fontSize: context.appBodySize,
+                          fontWeight: FontWeight.w600,
+                          color: context.settingsPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _RuleWordsField(
+                        fieldKey: const ValueKey(
+                          'content-rule-mind-map-excluded-titles',
+                        ),
+                        label: '整书排除标题',
+                        helper: '每行一个完整标题模式；* 可匹配任意文字，例如 附录*、*出版始末*',
+                        controller: _mindMapExcludedTitles,
+                        enabled: !_saving,
+                        onReset: () => _mindMapExcludedTitles.text = rules
+                            .mindMapExcludedTitlePatterns
+                            .join('\n'),
+                      ),
+                      const SizedBox(height: 24),
+                      Divider(color: context.appColors.outlineVariant),
+                      const SizedBox(height: 20),
+                      Text(
+                        '知识图谱',
+                        style: TextStyle(
+                          fontSize: context.appBodySize,
+                          fontWeight: FontWeight.w600,
+                          color: context.settingsPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _RuleWordsField(
                         fieldKey: const ValueKey('graph-rule-appendix'),
-                        label: '正文前的辅文',
+                        label: '建议排除的辅文',
                         helper: '每行一个词，按开头匹配；以 ! 开头表示排除，例如 !序曲',
                         controller: _appendixWords,
                         enabled: !_saving,
@@ -295,7 +336,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                             .join('\n'),
                       ),
                       const SizedBox(height: 20),
-                      _GraphRuleWordsField(
+                      _RuleWordsField(
                         fieldKey: const ValueKey('graph-rule-metadata'),
                         label: '目录和版权页标题',
                         helper: '每行一个词，完全匹配，例如 目录',
@@ -305,7 +346,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                             .join('\n'),
                       ),
                       const SizedBox(height: 20),
-                      _GraphRuleWordsField(
+                      _RuleWordsField(
                         fieldKey: const ValueKey('graph-rule-citations'),
                         label: '引用识别句式',
                         helper: '每行一个句式；用 {name} 代表实体名，例如 据{name}',
@@ -316,7 +357,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                             .join('\n'),
                       ),
                       const SizedBox(height: 20),
-                      _GraphRuleWordsField(
+                      _RuleWordsField(
                         fieldKey: const ValueKey('graph-rule-relations'),
                         label: '关系词表',
                         helper: '每行一个关系词，例如 信任、敌对、师徒',
@@ -343,7 +384,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                       ),
                       if (_showAdvanced) ...[
                         const SizedBox(height: 12),
-                        _GraphRuleWordsField(
+                        _RuleWordsField(
                           fieldKey: const ValueKey('graph-rule-aliases'),
                           label: '英文关系别名',
                           helper: '每行 英文=中文，例如 trusts=信任',
@@ -356,7 +397,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                               .join('\n'),
                         ),
                         const SizedBox(height: 20),
-                        _GraphRuleWordsField(
+                        _RuleWordsField(
                           fieldKey: const ValueKey('graph-rule-titles'),
                           label: '称谓后缀',
                           helper: '每行一个称谓，例如 皇太后、皇帝',
@@ -367,7 +408,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                               .join('\n'),
                         ),
                         const SizedBox(height: 20),
-                        _GraphRuleWordsField(
+                        _RuleWordsField(
                           fieldKey: const ValueKey('graph-rule-generics'),
                           label: '泛称拦截词',
                           helper: '每行一个；这些泛称不会与具体人名合并',
@@ -378,7 +419,7 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
                               .join('\n'),
                         ),
                         const SizedBox(height: 20),
-                        _GraphRuleWordsField(
+                        _RuleWordsField(
                           fieldKey: const ValueKey('graph-rule-book-priors'),
                           label: '书名别名先验',
                           helper: '每行 书名::别名=规范名，例如 西游记::行者=孙悟空',
@@ -402,10 +443,10 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
-                key: const ValueKey('graph-rules-save-bottom'),
+                key: const ValueKey('ai-rules-save-bottom'),
                 onPressed: _dirty && !_saving ? () => unawaited(_save()) : null,
                 icon: const Icon(KaijuanIcons.check, size: 18),
-                label: Text(_saving ? '保存中…' : '保存图谱规则'),
+                label: Text(_saving ? '保存中…' : '保存 AI 规则'),
               ),
             ],
           ),
@@ -415,8 +456,8 @@ class _AiGraphRulesScreenState extends State<AiGraphRulesScreen> {
   }
 }
 
-class _GraphRuleWordsField extends StatelessWidget {
-  const _GraphRuleWordsField({
+class _RuleWordsField extends StatelessWidget {
+  const _RuleWordsField({
     required this.fieldKey,
     required this.label,
     required this.helper,

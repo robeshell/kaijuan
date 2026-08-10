@@ -15,7 +15,7 @@ import '../navigation/app_page_route.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/settings_components.dart';
-import 'ai_graph_rules_screen.dart';
+import 'ai_content_rules_screen.dart';
 
 /// Settings subpage: BYOK, provider preset, model, test connection.
 class AiSettingsScreen extends StatefulWidget {
@@ -127,7 +127,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
 
   @override
   void dispose() {
-    // Connection fields persist best-effort on leave. Advanced graph rules
+    // Connection fields persist best-effort on leave. Advanced AI rules
     // live on their own explicitly-saved route.
     unawaited(
       controller.applyDraft(
@@ -879,9 +879,16 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                       onChanged: (value) =>
                           unawaited(controller.setAllowUnreadContext(value)),
                     ),
+                  ],
+                ),
+                const SizedBox(height: AppSettingsMetrics.sectionGap),
+                const _SectionLabel('高级设置'),
+                const SizedBox(height: 10),
+                AppSettingsGroup(
+                  children: [
                     AppListRow(
-                      title: const Text('高级图谱规则'),
-                      subtitle: const Text('辅文、关系词表、别名与书名先验'),
+                      title: const Text('高级 AI 规则'),
+                      subtitle: const Text('思维导图内容范围、图谱关系与别名'),
                       trailing: Icon(
                         KaijuanIcons.chevronRight,
                         size: 18,
@@ -891,7 +898,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                       onTap: controller.isBusy
                           ? null
                           : () => unawaited(
-                              AiGraphRulesScreen.open(
+                              AiContentRulesScreen.open(
                                 context,
                                 controller: controller,
                               ),

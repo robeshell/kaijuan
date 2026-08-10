@@ -1376,14 +1376,14 @@ void main() {
           ''',
           },
         );
-        // 老爷子 is a book-specific 称谓: configured via AiGraphRuleWords —
+        // 老爷子 is a book-specific 称谓: configured via AiContentRuleWords —
         // the pipeline itself has no hardcoded book vocabulary.
         final service = AiBookGraphService(
           isAvailable: () => true,
           openModelAdapter: () => provider,
           settings: () => const AiSettings(
             model: 'graph-test',
-            graphRuleWords: AiGraphRuleWords(genericPersonTerms: ['老爷子']),
+            contentRuleWords: AiContentRuleWords(genericPersonTerms: ['老爷子']),
           ),
         );
 
@@ -1482,7 +1482,7 @@ void main() {
           openModelAdapter: () => provider,
           settings: () => const AiSettings(
             model: 'graph-test',
-            graphRuleWords: AiGraphRuleWords(
+            contentRuleWords: AiContentRuleWords(
               bookNamePriors: {
                 '江湖志': {'师太': '静玄师太'},
               },
@@ -2350,25 +2350,28 @@ void main() {
       );
     });
 
-    test('invalid structured output fails without a text-format retry', () async {
-      final provider = _GraphProvider(invalidJson: true);
+    test(
+      'invalid structured output fails without a text-format retry',
+      () async {
+        final provider = _GraphProvider(invalidJson: true);
 
-      await expectLater(
-        serviceWith(provider).generate(
-          bookTitle: '测试书',
-          sections: [slice(1, '第一回', '正文。')],
-          includesUnread: true,
-        ),
-        throwsA(
-          isA<AiGraphGenerationException>().having(
-            (e) => e.message,
-            'message',
-            contains('校验失败'),
+        await expectLater(
+          serviceWith(provider).generate(
+            bookTitle: '测试书',
+            sections: [slice(1, '第一回', '正文。')],
+            includesUnread: true,
           ),
-        ),
-      );
-      expect(provider.extractionRequests.length, 1);
-    });
+          throwsA(
+            isA<AiGraphGenerationException>().having(
+              (e) => e.message,
+              'message',
+              contains('校验失败'),
+            ),
+          ),
+        );
+        expect(provider.extractionRequests.length, 1);
+      },
+    );
 
     test('entities without evidence are dropped', () async {
       final provider = _GraphProvider(
@@ -2658,7 +2661,7 @@ void main() {
         isAvailable: () => true,
         openModelAdapter: () => _GraphProvider(),
         settings: () => const AiSettings(
-          graphRuleWords: AiGraphRuleWords(
+          contentRuleWords: AiContentRuleWords(
             relationTypes: ['知己'],
             relationTypeAliases: {'pal': '知己'},
           ),
