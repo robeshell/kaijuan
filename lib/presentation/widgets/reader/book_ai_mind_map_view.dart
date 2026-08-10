@@ -29,6 +29,7 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
   final _collapsed = <String>{};
   final _viewportKey = GlobalKey();
   late AiMindMapLayout _layout;
+  bool _fitAfterLayoutChange = false;
 
   @override
   void initState() {
@@ -46,6 +47,7 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
     // alone makes its segmented buttons appear inert for a frame or longer.
     if (oldWidget.map.layout != widget.map.layout) {
       _layout = widget.map.layout;
+      _fitAfterLayoutChange = true;
     }
     if (oldWidget.map.scopeFingerprint != widget.map.scopeFingerprint ||
         oldWidget.map.createdAt != widget.map.createdAt ||
@@ -121,7 +123,14 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                         return;
                       }
                       final next = selection.first;
-                      setState(() => _layout = next);
+                      setState(() {
+                        _layout = next;
+                        // The embedded card has a much smaller viewport than
+                        // the fullscreen route. Reusing the prior layout's
+                        // transform can leave the new tree looking unchanged
+                        // or outside its visible area.
+                        _fitAfterLayoutChange = true;
+                      });
                       widget.onLayoutChanged(next);
                     },
                   ),
@@ -164,7 +173,11 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted && _transformation.value.isIdentity()) {
+                if (!mounted) return;
+                if (_fitAfterLayoutChange) {
+                  _fitAfterLayoutChange = false;
+                  _fit(layout.size);
+                } else if (_transformation.value.isIdentity()) {
                   _fit(layout.size);
                 }
               });

@@ -71,7 +71,15 @@ void main() {
     await tester.tap(find.byTooltip('全屏查看'));
     expect(openedFullscreen, isTrue);
 
+    final transformBefore = List<double>.from(
+      tester
+          .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+          .transformationController!
+          .value
+          .storage,
+    );
     await tester.tap(find.text('双向'));
+    await tester.pump();
     await tester.pump();
     expect(selected, AiMindMapLayout.bidirectional);
     expect(
@@ -81,6 +89,14 @@ void main() {
           )
           .selected,
       {AiMindMapLayout.bidirectional},
+    );
+    expect(
+      tester
+          .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+          .transformationController!
+          .value
+          .storage,
+      isNot(transformBefore),
     );
 
     await tester.tap(find.byTooltip('层级列表'));
