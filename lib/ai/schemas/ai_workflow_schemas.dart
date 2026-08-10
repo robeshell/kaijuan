@@ -24,6 +24,42 @@ abstract class $AiOutlineOutput {
 }
 
 @Schema()
+abstract class $AiMindMapEvidenceOutput {
+  int get sectionId;
+  String get quote;
+}
+
+@Schema()
+abstract class $AiMindMapBranchOutput {
+  String get title;
+  String get summary;
+  List<$AiMindMapEvidenceOutput> get evidence;
+}
+
+@Schema()
+abstract class $AiMindMapBatchOutput {
+  String get batchId;
+  List<int> get coveredSections;
+  List<$AiMindMapBranchOutput> get branches;
+}
+
+@Schema()
+abstract class $AiMindMapNodeOutput {
+  String get tempId;
+  String? get parentTempId;
+  int get order;
+  String get title;
+  String get summary;
+  List<$AiMindMapEvidenceOutput> get evidence;
+}
+
+@Schema()
+abstract class $AiMindMapOutput {
+  String get contentKind;
+  List<$AiMindMapNodeOutput> get nodes;
+}
+
+@Schema()
 abstract class $AiNarrationFeaturesOutput {
   double get eventDriven;
   double get characterEnsemble;
@@ -115,6 +151,14 @@ abstract final class AiWorkflowSchemas {
 
   static final Map<String, Object?> outline = Map<String, Object?>.from(
     AiOutlineOutput.$schema.jsonSchema(useRefs: true),
+  );
+
+  static final Map<String, Object?> mindMapBatch = Map<String, Object?>.from(
+    AiMindMapBatchOutput.$schema.jsonSchema(useRefs: true),
+  );
+
+  static final Map<String, Object?> mindMap = Map<String, Object?>.from(
+    AiMindMapOutput.$schema.jsonSchema(useRefs: true),
   );
 
   static final Map<String, Object?> narrationPlan = Map<String, Object?>.from(

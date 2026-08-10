@@ -20,6 +20,7 @@
 | 本书 AI 智能体 | [specs/ai.md](./specs/ai.md)（BYOK / 词典译 / 对话…） |
 | AI 翻译偏好与选区译 | [specs/ai-translation.md](./specs/ai-translation.md)（设计定稿） |
 | 本书知识图谱 | [specs/ai-graph.md](./specs/ai-graph.md)（M5 已实现；实体/关系/出处，章级增量） · 展示方案驱动 + 家族树见 [specs/ai-graph-narration.md](./specs/ai-graph-narration.md)（N1–N4 已实现） |
+| 图书思维导图 | [specs/ai-mind-map.md](./specs/ai-mind-map.md)（独立确定性 Workflow、结构化节点与原生布局） |
 | 代码约定 | [../AGENTS.md](../AGENTS.md) |
 
 ## 目录树
@@ -50,6 +51,7 @@ docs/
     ai-translation.md                ← AI 翻译偏好与选区译（设计定稿）
     ai-graph.md                      ← 本书知识图谱（M5 已实现）
     ai-graph-narration.md            ← 图谱展示方案驱动 + 家族树（N1–N4 已实现）
+    ai-mind-map.md                   ← 图书思维导图（独立 Workflow）
 ```
 
 ## 权威层级
@@ -110,10 +112,11 @@ docs/
 | webdav-backup | 用户自有 WebDAV 备份与恢复 |
 | reading-stats | 阅读统计 |
 | book-tts | 听书（系统 TTS；T1 MVP 已有） |
-| ai | 本书 AI 智能体（BYOK / 词典译 / 对话 / 大纲；M0–M3 已有） |
+| ai | 本书 AI 智能体（BYOK / 词典译 / 对话 / 大纲 / 思维导图；M0–M3b 已有） |
 | ai-translation | AI 翻译偏好与选区译（设计定稿；T0–T3 已有，T4 整本译待办） |
 | ai-graph | 本书知识图谱（M5 已有；实体/关系/出处，章级增量） |
 | ai-graph-narration | 图谱展示方案驱动 + 家族树（N1–N4 已实现；方案契约/方向约定/连线架构图/地点链） |
+| ai-mind-map | 图书思维导图（独立确定性 Workflow；结构化节点/证据/原生布局） |
 | settings / mobile / overlay | **待写** |
 
 整理三概念权威表见 [PRODUCT.md §4.3](./PRODUCT.md)。

@@ -2,7 +2,14 @@ import 'ai_provider_kind.dart';
 
 /// App-owned task categories. Provider/framework-specific concepts must not
 /// leak into this contract.
-enum AiRunTask { bookChat, bookOutline, bookGraph, bookTranslation, language }
+enum AiRunTask {
+  bookChat,
+  bookOutline,
+  bookMindMap,
+  bookGraph,
+  bookTranslation,
+  language,
+}
 
 /// Frozen book/work boundary for one run.
 ///

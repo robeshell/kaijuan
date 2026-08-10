@@ -412,7 +412,8 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
           '${_formatDate(manifest.createdAt)} · ${manifest.deviceName}\n'
           '新增书籍 ${preview.newBooks} 本，已有书籍 ${preview.existingBooks} 本\n'
           '将合并进度、书签、划线、笔记、书单和 ${preview.aiChatRows} 项 AI 内容'
-          '${preview.aiGraphRows == 0 ? '' : '、${preview.aiGraphRows} 张图谱'}；'
+          '${preview.aiGraphRows == 0 ? '' : '、${preview.aiGraphRows} 张图谱'}'
+          '${preview.aiMindMapRows == 0 ? '' : '、${preview.aiMindMapRows} 张思维导图'}；'
           '不会删除本地内容。',
           style: TextStyle(
             color: context.settingsSecondary,
@@ -442,9 +443,12 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
       final graphText = result.restoredAiGraphs == 0
           ? ''
           : '、${result.restoredAiGraphs} 张图谱';
+      final mindMapText = result.restoredAiMindMaps == 0
+          ? ''
+          : '、${result.restoredAiMindMaps} 张思维导图';
       showAppSnackBar(
         context,
-        '恢复完成，新增 ${result.addedBooks} 本书$chatText$graphText',
+        '恢复完成，新增 ${result.addedBooks} 本书$chatText$graphText$mindMapText',
       );
     } else if (controller.message != null) {
       showAppSnackBar(context, controller.message!);

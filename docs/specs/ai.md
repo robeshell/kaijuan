@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | M0–M3 已完成；**M5 知识图谱已实现**（见 [ai-graph.md](./ai-graph.md)）；M4 整本译 / M6 导出未做 |
+| **状态** | M0–M3b 已完成；**M5 知识图谱已实现**（见 [ai-graph.md](./ai-graph.md)）；M4 整本译 / M6 导出未做 |
 | **日期** | 2026-08-09 |
 | **PRODUCT** | [§6](../PRODUCT.md) · [§10.2](../PRODUCT.md) |
 | **视觉** | [../DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md) |
@@ -38,7 +38,7 @@
 - 本书对话，按 `contentHash` 持久化，支持当前章节、选区、目录、全文取样和书内检索工具。
 - 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。停止与关闭必须在第一次点击时立即更新界面并撤销请求，不等待 transport / stream 的异步清理完成。
 - AI 对话纳入用户主动执行的 WebDAV 备份；恢复时按书籍 `contentHash` 合并并去重。
-- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；「生成本书大纲」是对话快捷操作，直接走正常书内对话，不弹范围选择，也不启动独立分批任务。
+- 本书 AI 工作区提供对话 / 思维导图 / 知识图谱三个 Tab；「生成本书大纲」仍是普通对话快捷操作；「生成思维导图」只路由到独立 `BookMindMapWorkflow`，不向聊天 Agent 发送长期任务提示词。
 - 大纲回答作为普通对话消息按 `contentHash` 缓存。历史结构化大纲数据继续随手动 WebDAV 快照备份和恢复，以兼容旧版本；Key 仍不备份。
 - 可选联网搜索（Tavily / Brave，独立搜索 Key）注入本书对话；Ollama 本地后端免 Key（`AiProviderKind.ollama`，模型经 `GET /v1/models` 列出）。
 - 知识图谱 M5：实体（人物/地点/事件）+ 关系 + 出处，章级增量；文件内多作品先由用户选作品，再确认具体内容单元，`allowUnreadContext` 只负责限制未读内容；随手动 WebDAV 快照备份（Key 永不备份）。规格与验收见 [ai-graph.md](./ai-graph.md)。
@@ -97,7 +97,7 @@
   ├─ 选区菜单
   │    ├─ 词典  → AI 结果卡（有 Key）/ 系统词典（fallback）
   │    └─ 翻译  → AI 结果卡（有 Key）/ 系统翻译（fallback）
-  ├─ 顶栏入口「本书 AI」→ 对话 / 知识图谱工作区
+  ├─ 顶栏入口「本书 AI」→ 对话 / 思维导图 / 知识图谱工作区
   │    └─ 输入区「联网」与「深度思考」开关；后者以设置偏好为初值，可在当前面板临时覆盖
   └─（中后期）大纲 / 任务进度 / 导出
 ```
@@ -106,7 +106,7 @@
 |------|------|----------|
 | 设置 → AI | 管理型子页（[subpages.md](./subpages.md)） | 始终可进；未配置时内文引导 |
 | 选区词典/翻译 | 浮层结果卡（贴选区或底 sheet） | 图书选区菜单已有动作，改结果承载 |
-| 本书 AI | 阅读器内 sheet / 半屏面板 | 对话（含生成本书大纲快捷操作）/ 知识图谱；未配置时点进引导去设置 |
+| 本书 AI | 阅读器内 sheet / 半屏面板 | 对话（含生成本书大纲快捷操作）/ 独立思维导图 Workflow / 知识图谱；未配置时点进引导去设置 |
 | 全局 AI Tab | — | **不做** |
 
 漫画阅读器 v1 **不出现** AI 入口。
@@ -410,6 +410,7 @@ lib/ai/   （ENGINEERING 落地时挂树）
 | 划线 note（用户确认写入） | 现有 annotations | **是**（已有备份范围） |
 | 大纲 | `ai_chat/` 下按 contentHash 的会话文件 | **是**（用户主动 WebDAV 快照） |
 | 图谱 | `ai_graph/` 下按 contentHash 的图谱文件 | **是**（用户主动 WebDAV 快照）；不含 Key；见 [ai-graph.md](./ai-graph.md) |
+| 思维导图 | `ai_mind_map/` 下按 contentHash/workKey 的结构化节点文件 | **是**（用户主动 WebDAV 快照）；不含 Key 和运行中 checkpoint；见 [ai-mind-map.md](./ai-mind-map.md) |
 | 译稿 | 本地 cache + contentHash | 未做；导出后是用户文件 |
 
 #### 身份与删书再导入（已定）
@@ -607,7 +608,7 @@ AiBookLanguageProvider（或 Composite）
 
 ## 12. 文档回写清单（已回写）
 
-- [x] PRODUCT §6 各能力状态：M0–M3 与 M5 图谱已完成，M4/M6 待办  
+- [x] PRODUCT §6 各能力状态：M0–M3b 与 M5 图谱已完成，M4/M6 待办
 - [x] ENGINEERING：`lib/ai` 树与安全存储、禁止 UI 直连  
 - [x] book-reader.md：选区词典/翻译结果改为可应用内  
 - [x] webdav-backup.md：明确 AI Key 不备份、AI 对话随主动备份同步  

@@ -12,6 +12,7 @@ import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_family_tree.dart';
 import '../../../ai/ai_graph_service.dart';
 import '../../../ai/ai_models.dart';
+import '../../../ai/ai_mind_map.dart';
 import '../../../ai/ai_provider_kind.dart';
 import '../../../ai/ai_run.dart';
 import '../../../ai/ai_search.dart';
@@ -32,6 +33,7 @@ import 'book_ai_graph_sort.dart';
 import 'book_ai_graph_tiles.dart';
 import 'book_ai_graph_fullscreen.dart';
 import 'book_ai_graph_view.dart';
+import 'book_ai_mind_map_view.dart';
 import 'book_ai_narration_dialog.dart';
 
 /// Book-scoped AI chat (M2). Session is isolated by contentHash.
@@ -75,7 +77,7 @@ class _BookAiChatSheet extends StatefulWidget {
   State<_BookAiChatSheet> createState() => _BookAiChatSheetState();
 }
 
-enum _BookAiWorkspaceTab { chat, graph }
+enum _BookAiWorkspaceTab { chat, mindMap, graph }
 
 /// Kept only while old structured-outline caches remain readable by older
 /// app versions. The current UI generates outlines through normal chat.
@@ -286,6 +288,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (_activeTab == _BookAiWorkspaceTab.graph) {
       _graphListEpoch++;
       unawaited(_ensureGraphWorks());
+    } else if (_activeTab == _BookAiWorkspaceTab.mindMap) {
+      unawaited(_c.loadBookMindMap());
     }
   }
 
@@ -329,6 +333,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       await _c.resolveGraphWorkCandidates();
       if (!mounted) return;
       await _c.loadBookGraph();
+      if (!mounted) return;
+      await _c.loadBookMindMap();
       if (!mounted) return;
       setState(() {
         _session = session;
@@ -479,6 +485,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty || _sending) return;
     if (!_ready) return;
+    if (_isBookMindMapWorkflowIntent(text)) {
+      if (preset == null && _input.text.trim() == text) _input.clear();
+      await _openMindMapWorkspace();
+      return;
+    }
 
     // Prefer the resolved work. Null deliberately means the whole
     // publication: uncertain structure/front matter must not disable chat.
@@ -1128,6 +1139,225 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
     if (confirmed != true || !mounted) return;
     await _c.deleteBookOutline();
+  }
+
+  Future<void> _handleOpeningShortcut(AiChatShortcut shortcut) async {
+    if (shortcut.label == '生成思维导图') {
+      await _openMindMapWorkspace();
+      return;
+    }
+    await _send(shortcut.prompt);
+  }
+
+  bool _isBookMindMapWorkflowIntent(String text) {
+    // Keep the boundary intentionally narrow. Requests such as "用 Mermaid
+    // 画……" remain ordinary chat rich content; only explicit book-workflow
+    // commands leave the chat pipeline.
+    final normalized = text.replaceAll(RegExp(r'[，。！？!?\s]+$'), '').trim();
+    return const {
+      '生成思维导图',
+      '生成本书思维导图',
+      '为本书生成思维导图',
+      '打开思维导图',
+      '打开本书思维导图',
+    }.contains(normalized);
+  }
+
+  Future<void> _openMindMapWorkspace() async {
+    if (_activeTab != _BookAiWorkspaceTab.mindMap) {
+      // The tab listener owns the load when changing workspaces.
+      _tabs.animateTo(_BookAiWorkspaceTab.mindMap.index);
+      return;
+    }
+    await _c.loadBookMindMap();
+  }
+
+  Future<void> _generateMindMap({bool force = false}) async {
+    if (!_ready || _c.isGeneratingBookMindMap) return;
+    // Freeze the active work before opening the async range picker. A page
+    // turn while the dialog is open must not switch either its rows or the
+    // eventual workflow scope to another work in the same publication.
+    final work = _c.currentReadingWork;
+    if (force && _c.bookMindMap != null) {
+      final confirmed = await showAppConfirmDialog(
+        context,
+        title: '重新生成思维导图？',
+        message: '将重新请求 AI，并替换当前保存的思维导图。',
+        confirmLabel: '重新生成',
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    final selection = await _showNarrationChooser(
+      work: work,
+      initialExcluded: force ? const {} : const {},
+      useRecommendedSelection: true,
+      scopeOnly: true,
+      dialogTitle: '选择思维导图范围',
+      confirmLabel: '生成思维导图',
+    );
+    if (selection == null || !mounted) return;
+    await _c.generateBookMindMap(
+      excludedSectionIndices: selection.excludedSections,
+      work: work,
+    );
+  }
+
+  Future<void> _deleteMindMap() async {
+    if (_c.bookMindMap == null || _c.isGeneratingBookMindMap) return;
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: '删除思维导图？',
+      message: '只删除这本书保存的思维导图，不影响对话与知识图谱。',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (confirmed == true && mounted) await _c.deleteBookMindMap();
+  }
+
+  Widget _buildMindMapTab(BuildContext context) {
+    final map = _c.bookMindMap;
+    final generating = _c.isGeneratingBookMindMap;
+    final progress = _c.bookMindMapProgress;
+    final error = _c.bookMindMapError;
+    if (!_ready) {
+      return _AiUnavailable(
+        message: '添加 API Key 后，就可以生成这本书的思维导图。',
+        onOpenSettings: () => unawaited(_openSettings()),
+        icon: Icons.account_tree_outlined,
+      );
+    }
+    if (map == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.account_tree_outlined,
+                size: 36,
+                color: context.appSecondaryText,
+              ),
+              const SizedBox(height: 14),
+              if (!generating)
+                Text(
+                  '图书思维导图',
+                  style: TextStyle(
+                    fontSize: _panelTitleSize(context),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                generating
+                    ? progress?.label ?? '正在生成思维导图…'
+                    : '按主题和论点整理层级，可缩放、折叠并跳回原文。',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: _panelBodySize(context),
+                  color: context.appSecondaryText,
+                ),
+              ),
+              if (generating) ...[
+                const SizedBox(height: 14),
+                TextButton.icon(
+                  onPressed: _c.cancelBookMindMapGeneration,
+                  icon: const Icon(KaijuanIcons.stop, size: 18),
+                  label: const Text('停止'),
+                ),
+              ] else ...[
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    error,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      color: context.appColors.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () => unawaited(_generateMindMap()),
+                  icon: const Icon(Icons.account_tree_outlined, size: 18),
+                  label: const Text('选择范围并生成'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${map.nodes.length} 个节点 · ${map.scopeSectionIndices.length} 个内容单元',
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '重新生成思维导图',
+                onPressed: generating
+                    ? null
+                    : () => unawaited(_generateMindMap(force: true)),
+                icon: const Icon(KaijuanIcons.refresh, size: 20),
+              ),
+              IconButton(
+                tooltip: '删除思维导图',
+                onPressed: generating
+                    ? null
+                    : () => unawaited(_deleteMindMap()),
+                icon: const Icon(KaijuanIcons.delete, size: 20),
+              ),
+            ],
+          ),
+        ),
+        if (generating)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(
+              children: [
+                Expanded(child: Text(progress?.label ?? '正在生成思维导图…')),
+                TextButton(
+                  onPressed: _c.cancelBookMindMapGeneration,
+                  child: const Text('停止'),
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: BookAiMindMapView(
+            map: map,
+            onLayoutChanged: (layout) =>
+                unawaited(_c.setBookMindMapLayout(layout)),
+            onOpenEvidence: _goToMindMapEvidence,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _goToMindMapEvidence(AiMindMapEvidence evidence) {
+    final index = evidence.sectionIndex - 1;
+    if (index < 0 || index >= _c.sectionCount) return;
+    _c.goToSection(index, progressInSection: evidence.progressInSection);
+    // The node detail has just started closing. Wait for it to leave before
+    // closing the AI workspace, otherwise the immediate pop can hit the same
+    // modal twice and leave the workspace covering the target passage.
+    Future<void>.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).maybePop();
+      }
+    });
   }
 
   // Legacy renderer kept during the structured-outline cache compatibility
@@ -2974,6 +3204,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
             tabs: const [
               Tab(text: '对话'),
+              Tab(text: '思维导图'),
               Tab(text: '知识图谱'),
             ],
           ),
@@ -2988,6 +3219,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               announce: !_graphBusy,
             ),
           )
+        else if (_activeTab == _BookAiWorkspaceTab.mindMap)
+          Expanded(child: _buildMindMapTab(context))
         else if (!_ready)
           Expanded(
             child: Padding(
@@ -3110,8 +3343,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                                 SizedBox(height: compact ? 12 : 16),
                                 _SuggestedQuestionList(
                                   shortcuts: openingShortcuts,
-                                  onSelected: (shortcut) =>
-                                      unawaited(_send(shortcut.prompt)),
+                                  onSelected: (shortcut) => unawaited(
+                                    _handleOpeningShortcut(shortcut),
+                                  ),
                                 ),
                               ],
                             ],

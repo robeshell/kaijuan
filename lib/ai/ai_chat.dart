@@ -182,6 +182,7 @@ const kAiChatShortcuts = <AiChatShortcut>[
         '再按内容推进列出主要结构阶段；每一项包含简短标题和说明，并覆盖全书的重要部分。'
         '请直接基于书中内容回答。',
   ),
+  AiChatShortcut(label: '生成思维导图', prompt: '打开图书思维导图工作区'),
   AiChatShortcut(label: '总结这一章', prompt: '请总结我正在读的这一章：主线、关键转折，尽量简短。'),
   AiChatShortcut(
     label: '这本书在讲什么',

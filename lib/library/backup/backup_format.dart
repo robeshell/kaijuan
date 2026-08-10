@@ -258,6 +258,7 @@ class BackupRecords {
     this.itemTime = const [],
     this.aiChats = const [],
     this.aiGraphs = const [],
+    this.aiMindMaps = const [],
   });
 
   final List<Map<String, Object?>> items;
@@ -284,6 +285,9 @@ class BackupRecords {
   /// Never contains API keys or provider credentials.
   final List<Map<String, Object?>> aiGraphs;
 
+  /// Completed book mind maps. In-progress checkpoint files are excluded.
+  final List<Map<String, Object?>> aiMindMaps;
+
   Map<String, Object?> toJson() => {
     'format': KaijuanBackupFormat.id,
     'version': KaijuanBackupFormat.version,
@@ -299,6 +303,7 @@ class BackupRecords {
     'itemTime': itemTime,
     'aiChats': aiChats,
     'aiGraphs': aiGraphs,
+    'aiMindMaps': aiMindMaps,
   };
 
   String encode() => jsonEncode(toJson());
@@ -344,6 +349,7 @@ class BackupRecords {
     final itemTime = optionalList('itemTime');
     final aiChats = optionalList('aiChats');
     final aiGraphs = optionalList('aiGraphs');
+    final aiMindMaps = optionalList('aiMindMaps');
     if (items == null ||
         progress == null ||
         bookmarks == null ||
@@ -355,7 +361,8 @@ class BackupRecords {
         dayStats == null ||
         itemTime == null ||
         aiChats == null ||
-        aiGraphs == null) {
+        aiGraphs == null ||
+        aiMindMaps == null) {
       return null;
     }
     return BackupRecords(
@@ -371,6 +378,7 @@ class BackupRecords {
       itemTime: itemTime,
       aiChats: aiChats,
       aiGraphs: aiGraphs,
+      aiMindMaps: aiMindMaps,
     );
   }
 }
