@@ -108,34 +108,6 @@ void main() {
     ],
   };
 
-  Map<String, dynamic> longChapterBatch() => {
-    'batchId': 'm001',
-    'coveredSections': [6],
-    'branches': [
-      {
-        'title': '背景判断',
-        'summary': '本章从开篇背景判断展开第一组论证和事实依据。',
-        'evidence': [
-          {'sectionId': 6, 'quote': '开篇标记'},
-        ],
-      },
-      {
-        'title': '政策过程',
-        'summary': '本章中部梳理政策过程及其连续发生的影响。',
-        'evidence': [
-          {'sectionId': 6, 'quote': '第一处遗漏标记'},
-        ],
-      },
-      {
-        'title': '结果代价',
-        'summary': '本章后部归纳最终结果与长期代价之间的关系。',
-        'evidence': [
-          {'sectionId': 6, 'quote': '第二处遗漏标记'},
-        ],
-      },
-    ],
-  };
-
   Map<String, dynamic> longChapterTree() => {
     'contentKind': 'argumentative',
     'nodes': [
@@ -254,10 +226,7 @@ void main() {
         '第二处遗漏标记'
         '${List.filled(2400, '丁').join()}'
         '尾部标记';
-    final adapter = _FakeMindMapAdapter([
-      longChapterBatch(),
-      longChapterTree(),
-    ]);
+    final adapter = _FakeMindMapAdapter([longChapterTree()]);
 
     final result = await workflow(adapter).generate(
       contentHash: 'a' * 64,
@@ -277,12 +246,12 @@ void main() {
     expect(batchInput, contains('第一处遗漏标记'));
     expect(batchInput, contains('第二处遗漏标记'));
     expect(result.nodes, hasLength(10));
+    expect(adapter.calls, 1);
   });
 
   test('rejects a schema-minimum tree for a long chapter', () async {
     final body = '开篇标记第一处遗漏标记第二处遗漏标记${List.filled(4000, '正文').join()}';
     final adapter = _FakeMindMapAdapter([
-      longChapterBatch(),
       minimalLongChapterTree(),
       longChapterTree(),
     ]);
@@ -429,7 +398,7 @@ void main() {
     expect(result.nodes[1].evidence.single.spanResolved, isTrue);
   });
 
-  test('leaf with omitted evidence matches a verified batch theme', () async {
+  test('leaf without evidence remains a valid summary node', () async {
     final tree = finalTree();
     final rows = tree['nodes']! as List<Map<String, Object?>>;
     rows[2]['evidence'] = <Object?>[];
@@ -442,36 +411,30 @@ void main() {
       sections: sections,
     );
 
-    expect(result.nodes[2].evidence.single.quote, '第一章证据');
-    expect(result.nodes[2].evidence.single.spanResolved, isTrue);
+    expect(result.nodes[2].evidence, isEmpty);
   });
 
-  test('unmatched ungrounded leaf still rejects the final tree', () async {
+  test('ungrounded leaf does not reject an otherwise valid tree', () async {
     final tree = finalTree();
     final rows = tree['nodes']! as List<Map<String, Object?>>;
     rows[2]
       ..['title'] = '陌生主题'
       ..['summary'] = '这段内容与所有批次主题完全没有共同信息。'
       ..['evidence'] = <Object?>[];
-    final adapter = _FakeMindMapAdapter([batch(), tree, tree]);
+    final adapter = _FakeMindMapAdapter([batch(), tree]);
 
-    await expectLater(
-      workflow(adapter).generate(
-        contentHash: 'a' * 64,
-        workKey: null,
-        bookTitle: '测试书',
-        sections: sections,
-      ),
-      throwsA(isA<AiProviderException>()),
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '测试书',
+      sections: sections,
     );
-    expect(
-      adapter.requests.last.messages.first.text,
-      contains('非根叶节点必须至少有一条可定位 evidence 引文'),
-    );
+    expect(result.nodes[2].title, '陌生主题');
+    expect(result.nodes[2].evidence, isEmpty);
   });
 
   test(
-    'repairs rewritten quote from verified evidence in same section',
+    'drops an unresolved evidence quote without rejecting the tree',
     () async {
       final tree = finalTree();
       final rows = tree['nodes']! as List<Map<String, Object?>>;
@@ -487,43 +450,38 @@ void main() {
         sections: sections,
       );
 
-      expect(result.nodes[2].evidence.single.quote, '第一章证据');
-      expect(result.nodes[2].evidence.single.spanResolved, isTrue);
+      expect(result.nodes[2].evidence, isEmpty);
     },
   );
 
-  test(
-    'uses node semantics to disambiguate evidence within one section',
-    () async {
-      final summary = batch();
-      final branches = summary['branches']! as List;
-      branches.add(<String, Object>{
-        'title': '论据展开',
-        'summary': '第一章围绕核心问题继续展开论据。',
-        'evidence': [
-          {'sectionId': 1, 'quote': '展开论据'},
-        ],
-      });
-      final tree = finalTree();
-      final rows = tree['nodes']! as List<Map<String, Object?>>;
-      rows[2]['evidence'] = [
-        {'sectionId': 1, 'quote': '模型漏掉了原始引文'},
-      ];
-      final adapter = _FakeMindMapAdapter([summary, tree]);
+  test('does not fabricate an evidence quote from node semantics', () async {
+    final summary = batch();
+    final branches = summary['branches']! as List;
+    branches.add(<String, Object>{
+      'title': '论据展开',
+      'summary': '第一章围绕核心问题继续展开论据。',
+      'evidence': [
+        {'sectionId': 1, 'quote': '展开论据'},
+      ],
+    });
+    final tree = finalTree();
+    final rows = tree['nodes']! as List<Map<String, Object?>>;
+    rows[2]['evidence'] = [
+      {'sectionId': 1, 'quote': '模型漏掉了原始引文'},
+    ];
+    final adapter = _FakeMindMapAdapter([summary, tree]);
 
-      final result = await workflow(adapter).generate(
-        contentHash: 'a' * 64,
-        workKey: null,
-        bookTitle: '测试书',
-        sections: sections,
-      );
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '测试书',
+      sections: sections,
+    );
 
-      expect(result.nodes[2].evidence.single.quote, '展开论据');
-      expect(result.nodes[2].evidence.single.spanResolved, isTrue);
-    },
-  );
+    expect(result.nodes[2].evidence, isEmpty);
+  });
 
-  test('does not repair rewritten quote with cross-section evidence', () async {
+  test('cross-section evidence mismatch leaves the node ungrounded', () async {
     final summary = batch();
     final branches = summary['branches']! as List<Map<String, Object?>>;
     branches[0]['evidence'] = [
@@ -534,18 +492,15 @@ void main() {
     rows[2]['evidence'] = [
       {'sectionId': 1, 'quote': '模型改写后无法直接定位的句子'},
     ];
-    final adapter = _FakeMindMapAdapter([summary, tree, tree]);
+    final adapter = _FakeMindMapAdapter([summary, tree]);
 
-    await expectLater(
-      workflow(adapter).generate(
-        contentHash: 'a' * 64,
-        workKey: null,
-        bookTitle: '测试书',
-        sections: sections,
-      ),
-      throwsA(isA<AiProviderException>()),
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '测试书',
+      sections: sections,
     );
-    expect(adapter.calls, 3);
+    expect(result.nodes[2].evidence, isEmpty);
   });
 }
 
