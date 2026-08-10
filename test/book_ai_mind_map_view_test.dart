@@ -179,6 +179,48 @@ void main() {
     expect((sceneAfter - sceneBefore).distance, lessThan(0.01));
   });
 
+  testWidgets('canvas has no nearby pan wall and supports wide zoom range', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 600,
+            child: BookAiMindMapView(
+              map: map,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final viewerFinder = find.byType(InteractiveViewer);
+    final viewer = tester.widget<InteractiveViewer>(viewerFinder);
+    expect(viewer.boundaryMargin.left, double.infinity);
+    expect(viewer.minScale, 0.05);
+    expect(viewer.maxScale, 6);
+
+    final controller = viewer.transformationController!;
+    final translationBefore = controller.value.getTranslation().x;
+    final rect = tester.getRect(viewerFinder);
+    final gesture = await tester.startGesture(
+      Offset(rect.left + 20, rect.bottom - 20),
+    );
+    await gesture.moveBy(const Offset(600, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(
+      controller.value.getTranslation().x - translationBefore,
+      greaterThan(500),
+    );
+  });
+
   testWidgets('large maps start with deep branches collapsed', (tester) async {
     final nodes = <AiBookMindMapNode>[
       const AiBookMindMapNode(

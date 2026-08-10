@@ -227,9 +227,13 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                     key: _viewportKey,
                     transformationController: _transformation,
                     constrained: false,
-                    boundaryMargin: const EdgeInsets.all(240),
-                    minScale: 0.2,
-                    maxScale: 3,
+                    // Mind-map canvases should feel spatially unbounded. A
+                    // finite margin creates an invisible wall close to the
+                    // outermost nodes and prevents bringing an edge branch to
+                    // the center for reading.
+                    boundaryMargin: const EdgeInsets.all(double.infinity),
+                    minScale: 0.05,
+                    maxScale: 6,
                     // Flutter treats PointerDeviceKind.trackpad scroll as pan
                     // unless this is explicit. Enabling it uses the framework's
                     // focal-point-preserving zoom path for both the embedded
