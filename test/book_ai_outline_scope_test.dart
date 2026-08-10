@@ -6,6 +6,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
@@ -56,6 +57,32 @@ class _AmbiguousOutlineController extends BookReaderController {
   }
 
   @override
+  Future<List<AiGraphWorkCandidate>?> resolveBookStructure({
+    CancelToken? cancel,
+  }) async {
+    structureResolveCalls++;
+    return null;
+  }
+
+  @override
+  Future<List<AiBookSectionSlice>> bookMindMapSections({
+    AiGraphWorkCandidate? work,
+    bool useFrozenWork = false,
+  }) async => work == null
+      ? const [
+          AiBookSectionSlice(index: 1, label: '第一章', text: '正文一'),
+          AiBookSectionSlice(index: 2, label: '第二章', text: '正文二'),
+        ]
+      : [
+          AiBookSectionSlice(
+            index: work.startSection,
+            sourceSectionIndex: work.startSection,
+            label: '${work.title}第一章',
+            text: '${work.title}正文',
+          ),
+        ];
+
+  @override
   Future<AiBookOutline?> loadBookOutline({AiChatSession? session}) async =>
       null;
 
@@ -77,6 +104,7 @@ class _AmbiguousOutlineController extends BookReaderController {
   final chatCancelGates = <Completer<void>>[];
   final chatStreams = <StreamController<AiRunEvent>>[];
   AiBookGraph? graphOverride;
+  AiBookStructureManifest? manifestOverride;
   bool _generatingGraph = false;
   bool? lastDeepThinkingEnabled;
   String? lastChatRunId;
@@ -85,6 +113,10 @@ class _AmbiguousOutlineController extends BookReaderController {
   bool? lastMindMapUseFrozenWork;
   int structureResolveCalls = 0;
   int mindMapFailuresRemaining = 0;
+  final generatedMindMapScopes = <String>[];
+
+  @override
+  AiBookStructureManifest? get bookStructureManifest => manifestOverride;
 
   @override
   Future<AiBookSectionSlice?> captureCurrentBookMindMapChapter() async {
@@ -100,11 +132,20 @@ class _AmbiguousOutlineController extends BookReaderController {
   Future<AiBookMindMap?> generateBookMindMap({
     AiGraphWorkCandidate? work,
     AiBookSectionSlice? frozenCurrentChapter,
+    List<AiBookSectionSlice>? frozenSections,
     bool useFrozenWork = false,
+    required String userInstruction,
+    String? scopeLabel,
+    String? progressLabel,
   }) async {
+    generatedMindMapScopes.add(scopeLabel ?? '');
     lastMindMapWork = work;
     lastMindMapUseFrozenWork = useFrozenWork;
-    lastMindMapSourceSectionIndex = frozenCurrentChapter?.originSectionIndex;
+    lastMindMapSourceSectionIndex =
+        frozenCurrentChapter?.originSectionIndex ??
+        (frozenSections?.length == 1
+            ? frozenSections!.single.originSectionIndex
+            : null);
     if (mindMapFailuresRemaining > 0) {
       mindMapFailuresRemaining--;
       return null;
@@ -115,8 +156,15 @@ class _AmbiguousOutlineController extends BookReaderController {
       createdAt: DateTime.utc(2026, 8, 10),
       model: 'test',
       scopeSectionIndices: [
-        frozenCurrentChapter?.originSectionIndex ?? 1,
-        if (frozenCurrentChapter == null) 2,
+        for (final section
+            in frozenSections ??
+                (frozenCurrentChapter == null
+                    ? const [
+                        AiBookSectionSlice(index: 1, label: '第一章', text: '正文一'),
+                        AiBookSectionSlice(index: 2, label: '第二章', text: '正文二'),
+                      ]
+                    : [frozenCurrentChapter]))
+          section.originSectionIndex,
       ],
       scopeFingerprint: frozenCurrentChapter == null ? 'whole-book' : 'chapter',
       contentKind: AiMindMapContentKind.narrative,
@@ -454,7 +502,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.lastMindMapSourceSectionIndex, 1);
     expect(find.byType(BookAiMindMapView), findsOneWidget);
-    expect(find.text('已根据当前章生成思维导图。'), findsOneWidget);
+    expect(find.text('已根据《当前章》的 1 章内容生成思维导图。'), findsOneWidget);
     final retryMessageList = tester.widget<ListView>(
       find.byKey(const ValueKey<String>('ai-chat-message-list')),
     );
@@ -542,13 +590,92 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(controller.structureResolveCalls, 0);
+    expect(controller.structureResolveCalls, 1);
     expect(controller.lastMindMapSourceSectionIndex, isNull);
     expect(controller.lastMindMapWork, isNull);
     expect(controller.lastMindMapUseFrozenWork, isTrue);
     // The conversation ListView lazily builds only the visible artifact card.
     expect(find.byType(BookAiMindMapView), findsWidgets);
-    expect(find.text('已根据这本书生成思维导图。'), findsOneWidget);
+    expect(find.text('已根据《思维导图测试》的 2 章内容生成思维导图。'), findsOneWidget);
+  });
+
+  testWidgets('omnibus mind map explains scope and waits for a work choice', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(820, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final now = DateTime.utc(2026, 8, 10);
+    await database.upsertReadingItem(
+      ReadingItemsCompanion.insert(
+        id: 'mind-map-omnibus',
+        kind: ReaderKind.book.storageValue,
+        format: ReaderFormat.epub.storageValue,
+        title: '测试合集',
+        filePath: '/tmp/mind-map-omnibus.epub',
+        contentHash: 'hash-mind-map-omnibus',
+        pageCount: const Value(4),
+        addedAt: now,
+        updatedAt: now,
+      ),
+    );
+    final controller =
+        _AmbiguousOutlineController(
+            database: database,
+            item: (await database.readingItemById('mind-map-omnibus'))!,
+          )
+          ..manifestOverride = const AiBookStructureManifest(
+            kind: AiBookStructureKind.multiWorkOmnibus,
+            source: AiBookStructureSource.navigationHierarchy,
+            confidence: 0.95,
+            reason: 'test omnibus',
+            works: [
+              AiBookWork(
+                id: 'work-a',
+                title: '作品甲',
+                startSection: 1,
+                endSectionExclusive: 3,
+              ),
+              AiBookWork(
+                id: 'work-b',
+                title: '作品乙',
+                startSection: 3,
+                endSectionExclusive: 5,
+              ),
+            ],
+          );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () =>
+                  showBookAiChatSheet(context, controller: controller),
+              child: const Text('打开 AI'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开 AI'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '生成整本书思维导图');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+
+    expect(find.text('本书包含 2 部作品，共 4 章'), findsOneWidget);
+    expect(find.text('全部作品'), findsOneWidget);
+    expect(controller.generatedMindMapScopes, isEmpty);
+
+    await tester.tap(find.text('作品甲'));
+    await tester.pumpAndSettle();
+    expect(controller.generatedMindMapScopes, ['作品甲']);
+    expect(find.text('已根据《作品甲》的 1 章内容生成思维导图。'), findsOneWidget);
   });
 
   testWidgets('chat stop and close react on the first tap', (tester) async {

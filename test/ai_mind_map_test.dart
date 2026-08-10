@@ -1,9 +1,6 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
 import 'package:kaijuan/ai/ai_mind_map_layout.dart';
-import 'package:kaijuan/ai/ai_mind_map_store.dart';
 
 void main() {
   AiBookMindMap sample({AiMindMapLayout layout = AiMindMapLayout.rightFacing}) {
@@ -252,60 +249,5 @@ void main() {
     }
     watch.stop();
     expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
-  });
-
-  test('file store round-trips result and checkpoint independently', () async {
-    final directory = await Directory.systemTemp.createTemp('mind-map-store-');
-    addTearDown(() => directory.delete(recursive: true));
-    final store = AiBookMindMapStore(directory);
-    final value = sample();
-    final checkpoint = AiMindMapCheckpoint(
-      contentHash: value.contentHash,
-      workKey: value.workKey,
-      scopeFingerprint: value.scopeFingerprint,
-      completedBatches: const [
-        {
-          'batchId': 'm001',
-          'coveredSections': [1],
-          'branches': [],
-        },
-      ],
-    );
-    await store.writeCheckpoint(checkpoint);
-    await store.write(value);
-    expect(
-      (await store.read(value.contentHash, workKey: 's1'))?.nodes.length,
-      4,
-    );
-    expect(
-      (await store.readCheckpoint(
-        value.contentHash,
-        workKey: 's1',
-      ))?.completedBatches.length,
-      1,
-    );
-    await store.delete(value.contentHash, workKey: 's1');
-    expect(await store.read(value.contentHash, workKey: 's1'), isNull);
-    expect(
-      await store.readCheckpoint(value.contentHash, workKey: 's1'),
-      isNull,
-    );
-  });
-
-  test('file store falls back to previous valid result', () async {
-    final directory = await Directory.systemTemp.createTemp('mind-map-store-');
-    addTearDown(() => directory.delete(recursive: true));
-    final store = AiBookMindMapStore(directory);
-    final value = sample();
-    await store.write(value);
-    final file = File(
-      '${directory.path}/${AiBookMindMapStore.fileNameFor(value.contentHash, workKey: 's1')}',
-    );
-    await file.copy('${file.path}.previous');
-    await file.writeAsString('{damaged');
-    expect(
-      (await store.read(value.contentHash, workKey: 's1'))?.root.title,
-      '全书',
-    );
   });
 }

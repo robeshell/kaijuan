@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 
 import '../../ai/ai_chat_store.dart';
 import '../../ai/ai_graph_store.dart';
-import '../../ai/ai_mind_map_store.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
 import '../../core/text_editing_focus.dart';
@@ -156,9 +155,6 @@ class _BookReaderScreenState extends State<BookReaderScreen>
         JsonAiChatHistoryStore(paths.aiChatDirectory),
       );
       _controller.attachAiGraphStore(AiGraphStore(paths.aiGraphDirectory));
-      _controller.attachAiMindMapStore(
-        AiBookMindMapStore(paths.aiMindMapDirectory),
-      );
     } catch (error) {
       debugPrint('[AI] failed to attach reader stores: $error');
     }

@@ -11,8 +11,6 @@ import '../../ai/ai_chat.dart';
 import '../../ai/ai_chat_store.dart';
 import '../../ai/ai_graph.dart';
 import '../../ai/ai_graph_store.dart';
-import '../../ai/ai_mind_map.dart';
-import '../../ai/ai_mind_map_store.dart';
 import '../../domain/reader_models.dart';
 import '../import/import_pipeline.dart';
 import '../import/import_sources.dart';
@@ -67,7 +65,6 @@ class BackupRestorePreview {
     required this.annotationRows,
     required this.aiChatRows,
     required this.aiGraphRows,
-    required this.aiMindMapRows,
   });
 
   final BackupSnapshotManifest manifest;
@@ -78,7 +75,6 @@ class BackupRestorePreview {
   final int annotationRows;
   final int aiChatRows;
   final int aiGraphRows;
-  final int aiMindMapRows;
 }
 
 class BackupRestoreResult {
@@ -92,7 +88,6 @@ class BackupRestoreResult {
     required this.restoredCollections,
     required this.restoredAiChats,
     required this.restoredAiGraphs,
-    required this.restoredAiMindMaps,
   });
 
   final int addedBooks;
@@ -104,7 +99,6 @@ class BackupRestoreResult {
   final int restoredCollections;
   final int restoredAiChats;
   final int restoredAiGraphs;
-  final int restoredAiMindMaps;
 }
 
 /// Orchestrates logical snapshots. It knows the database and import pipeline,
@@ -239,7 +233,6 @@ class BackupService {
           'itemTime': exported.records.itemTime.length,
           'aiChats': exported.records.aiChats.length,
           'aiGraphs': exported.records.aiGraphs.length,
-          'aiMindMaps': exported.records.aiMindMaps.length,
         },
         databaseSchemaVersion: database.schemaVersion,
       );
@@ -351,7 +344,6 @@ class BackupService {
         annotationRows: records.annotations.length,
         aiChatRows: records.aiChats.length,
         aiGraphRows: records.aiGraphs.length,
-        aiMindMapRows: records.aiMindMaps.length,
       );
     });
   }
@@ -484,7 +476,6 @@ class BackupService {
     var restoredCollections = 0;
     var restoredAiChats = 0;
     var restoredAiGraphs = 0;
-    var restoredAiMindMaps = 0;
 
     final itemIds = <String, String>{};
     await database.transaction(() async {
@@ -787,7 +778,6 @@ class BackupService {
     });
     restoredAiChats = await _mergeAiChats(records.aiChats, itemIds);
     restoredAiGraphs = await _mergeAiGraphs(records.aiGraphs, itemIds);
-    restoredAiMindMaps = await _mergeAiMindMaps(records.aiMindMaps, itemIds);
     onProgress?.call(
       const BackupProgress(
         phase: BackupPhase.restoring,
@@ -806,36 +796,7 @@ class BackupService {
       restoredCollections: restoredCollections,
       restoredAiChats: restoredAiChats,
       restoredAiGraphs: restoredAiGraphs,
-      restoredAiMindMaps: restoredAiMindMaps,
     );
-  }
-
-  Future<int> _mergeAiMindMaps(
-    List<Map<String, Object?>> rows,
-    Map<String, String> itemIds,
-  ) async {
-    var restored = 0;
-    final store = AiBookMindMapStore(
-      Directory(p.join(supportDirectory.path, 'ai_mind_map')),
-    );
-    for (final raw in rows) {
-      final hash = _string(raw['contentHash']);
-      final valueRaw = raw['mindMap'];
-      if (hash == null ||
-          !KaijuanBackupFormat.isSha256(hash) ||
-          !itemIds.containsKey(hash) ||
-          valueRaw is! Map) {
-        continue;
-      }
-      final remote = AiBookMindMap.fromJson(valueRaw);
-      if (remote == null || remote.contentHash != hash) continue;
-      final workKey = _string(raw['workKey']);
-      if (workKey != remote.workKey) continue;
-      if (await store.read(hash, workKey: workKey) != null) continue;
-      await store.write(remote);
-      restored++;
-    }
-    return restored;
   }
 
   Future<int> _mergeAiGraphs(

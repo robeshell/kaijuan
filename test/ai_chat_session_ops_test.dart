@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_session_ops.dart';
 import 'package:kaijuan/ai/ai_models.dart';
@@ -78,18 +79,23 @@ void main() {
     );
   });
 
-  test('mind map intent freezes chapter or whole-book scope', () {
+  test('mind map intent uses narrow action commands and explicit scope', () {
     expect(
       resolveAiMindMapRequestScope('给当前章生成一个思维导图'),
       AiMindMapRequestScope.currentChapter,
     );
-    expect(
-      resolveAiMindMapRequestScope('我想看看这本书的思维导图'),
-      AiMindMapRequestScope.wholeBook,
-    );
+    expect(resolveAiMindMapRequestScope('我想看看这本书的思维导图'), isNull);
     expect(
       resolveAiMindMapRequestScope('生成思维导图'),
-      AiMindMapRequestScope.currentChapter,
+      AiMindMapRequestScope.unspecified,
+    );
+    expect(
+      resolveAiMindMapRequestScope('生成当前作品思维导图'),
+      AiMindMapRequestScope.currentWork,
+    );
+    expect(
+      resolveAiMindMapRequestScope('生成整部合集思维导图'),
+      AiMindMapRequestScope.wholeBook,
     );
     expect(resolveAiMindMapRequestScope('用 Mermaid 画这本书的思维导图'), isNull);
     expect(resolveAiMindMapRequestScope('总结这一章'), isNull);
@@ -147,5 +153,60 @@ void main() {
     expect(restored.mindMap, isNotNull);
     expect(restored.mindMap!.scopeSectionIndices, const [3]);
     expect(restored.mindMap!.nodes[1].evidence.single.quote, '原文证据');
+  });
+
+  test('mind map structure route separates volumes from omnibus works', () {
+    const volumes = AiBookStructureManifest(
+      kind: AiBookStructureKind.segmentedSingleWork,
+      source: AiBookStructureSource.navigationHierarchy,
+      confidence: 0.9,
+      reason: 'volumes',
+      works: [
+        AiBookWork(
+          id: 'v1',
+          title: '上卷',
+          startSection: 1,
+          endSectionExclusive: 3,
+        ),
+        AiBookWork(
+          id: 'v2',
+          title: '下卷',
+          startSection: 3,
+          endSectionExclusive: 5,
+        ),
+      ],
+    );
+    const omnibus = AiBookStructureManifest(
+      kind: AiBookStructureKind.multiWorkOmnibus,
+      source: AiBookStructureSource.navigationHierarchy,
+      confidence: 0.9,
+      reason: 'works',
+      works: [
+        AiBookWork(
+          id: 'w1',
+          title: '作品一',
+          startSection: 1,
+          endSectionExclusive: 3,
+        ),
+        AiBookWork(
+          id: 'w2',
+          title: '作品二',
+          startSection: 3,
+          endSectionExclusive: 5,
+        ),
+      ],
+    );
+    expect(
+      resolveAiMindMapStructureRoute(volumes),
+      AiMindMapStructureRoute.sequentialUnits,
+    );
+    expect(
+      resolveAiMindMapStructureRoute(omnibus),
+      AiMindMapStructureRoute.chooseUnits,
+    );
+    expect(
+      resolveAiMindMapStructureRoute(null),
+      AiMindMapStructureRoute.wholePublication,
+    );
   });
 }

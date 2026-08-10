@@ -205,48 +205,6 @@ class AiBookMindMap {
   }
 }
 
-class AiMindMapCheckpoint {
-  const AiMindMapCheckpoint({
-    required this.contentHash,
-    required this.workKey,
-    required this.scopeFingerprint,
-    required this.completedBatches,
-  });
-
-  static const currentVersion = 1;
-  final String contentHash;
-  final String? workKey;
-  final String scopeFingerprint;
-  final List<Map<String, Object?>> completedBatches;
-
-  Map<String, Object?> toJson() => {
-    'version': currentVersion,
-    'contentHash': contentHash,
-    if (workKey != null) 'workKey': workKey,
-    'scopeFingerprint': scopeFingerprint,
-    'completedBatches': completedBatches,
-  };
-
-  static AiMindMapCheckpoint? fromJson(Object? raw) {
-    if (raw is! Map || raw['version'] != currentVersion) return null;
-    final hash = raw['contentHash'];
-    final fingerprint = raw['scopeFingerprint'];
-    final batches = raw['completedBatches'];
-    if (hash is! String || fingerprint is! String || batches is! List) {
-      return null;
-    }
-    return AiMindMapCheckpoint(
-      contentHash: hash,
-      workKey: raw['workKey'] is String ? raw['workKey'] as String : null,
-      scopeFingerprint: fingerprint,
-      completedBatches: [
-        for (final item in batches)
-          if (item is Map) Map<String, Object?>.from(item),
-      ],
-    );
-  }
-}
-
 String aiMindMapScopeFingerprint({
   required String contentHash,
   String? workKey,

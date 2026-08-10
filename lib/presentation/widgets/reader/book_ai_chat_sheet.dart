@@ -6,7 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:thinking_orbs/thinking_orbs.dart';
 
 import '../../../ai/ai_cancel.dart';
+import '../../../ai/ai_book_structure.dart';
 import '../../../ai/ai_chat.dart';
+import '../../../ai/ai_chat_retrieve.dart';
 import '../../../ai/ai_chat_session_ops.dart';
 import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_family_tree.dart';
@@ -88,6 +90,13 @@ typedef _NarrationConfirmation = ({
   AiNarrationPlan? plan,
   AiNarrationPlanMode mode,
   Set<int> excludedSections,
+});
+
+typedef _MindMapGenerationUnit = ({
+  AiBookWork? work,
+  String label,
+  List<AiBookSectionSlice>? frozenSections,
+  int estimatedSections,
 });
 
 /// Default view is the person card list (Kindle X-Ray style); the force
@@ -322,7 +331,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
     if (_mindMapTurnId != null) {
       _toolStatus =
-          _c.bookMindMapProgress?.label ??
+          _c.bookMindMapProgress ??
           (_c.isGeneratingBookMindMap ? '正在生成思维导图' : _toolStatus);
     }
     // The graph scope is user-selected and must not follow pagination.
@@ -491,20 +500,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final retryTurnId = retrying ? _retryTurnId : null;
     final mindMapScope = resolveAiMindMapRequestScope(text);
     if (mindMapScope != null) {
-      if (preset == null && _input.text.trim() == text) {
-        _clearComposerAfterFrame(text);
-      }
-      await _generateMindMapInChat(
+      await _routeMindMapRequest(
         text,
         mindMapScope,
         retryTurnId: retryTurnId,
+        clearComposer: preset == null && _input.text.trim() == text,
       );
       return;
     }
 
-    // Ordinary chat preserves the per-work scope of an omnibus, but structure
-    // recognition is deliberately lazy so an explicit mind-map request never
-    // pays this extraction cost.
+    // Ordinary chat also preserves the resolved work of an omnibus. Mind-map
+    // requests returned above after their own range preflight.
     _resolvingChatScope = true;
     try {
       await _c.resolveGraphWorkCandidates();
@@ -1264,22 +1270,164 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     await _send(shortcut.prompt);
   }
 
-  Future<void> _generateMindMapInChat(
+  Future<void> _routeMindMapRequest(
     String text,
     AiMindMapRequestScope scope, {
     String? retryTurnId,
+    bool clearComposer = false,
   }) async {
-    // Keep the artifact in the conversation where the user requested it, while
-    // independently freezing the generation scope. “This book / whole book”
-    // means the complete publication and must not be scoped back to the current
-    // recognized work.
+    List<_MindMapGenerationUnit>? units;
+    if (scope == AiMindMapRequestScope.currentChapter) {
+      units = await _captureCurrentChapterUnit();
+    } else {
+      setState(() => _resolvingChatScope = true);
+      try {
+        await _c.resolveBookStructure();
+      } finally {
+        if (mounted) setState(() => _resolvingChatScope = false);
+      }
+      if (!mounted) return;
+      final manifest = _c.bookStructureManifest;
+      final namedWork = _namedMindMapWork(text, manifest?.works ?? const []);
+      if (scope == AiMindMapRequestScope.unspecified && namedWork == null) {
+        units = await _captureCurrentChapterUnit();
+      } else {
+        units = await _resolveMindMapUnits(
+          scope: scope,
+          manifest: manifest,
+          namedWork: scope == AiMindMapRequestScope.unspecified
+              ? namedWork
+              : null,
+        );
+      }
+    }
+    if (!mounted || units == null || units.isEmpty) return;
+    if (clearComposer) _clearComposerAfterFrame(text);
+    await _generateMindMapsInChat(text, units, retryTurnId: retryTurnId);
+  }
+
+  Future<List<_MindMapGenerationUnit>?> _captureCurrentChapterUnit() async {
+    try {
+      final chapter = await _c.captureCurrentBookMindMapChapter();
+      if (chapter == null) {
+        if (mounted) showAppSnackBar(context, '当前章节正文尚未就绪，请稍后重试');
+        return null;
+      }
+      return [
+        (
+          work: null,
+          label: chapter.label.trim().isEmpty ? '当前章' : chapter.label.trim(),
+          frozenSections: [chapter],
+          estimatedSections: 1,
+        ),
+      ];
+    } catch (_) {
+      if (mounted) showAppSnackBar(context, '读取当前章节失败，请稍后重试');
+      return null;
+    }
+  }
+
+  AiBookWork? _namedMindMapWork(String text, List<AiBookWork> works) {
+    String normalize(String value) => value.toLowerCase().replaceAll(
+      RegExp(r'[\s《》〈〉“”"「」『』·—_，。！？、：:；;（）()]'),
+      '',
+    );
+    final request = normalize(text);
+    final matches = works
+        .where((work) {
+          final title = normalize(work.title);
+          return title.length >= 2 && request.contains(title);
+        })
+        .toList(growable: false);
+    return matches.length == 1 ? matches.single : null;
+  }
+
+  Future<List<_MindMapGenerationUnit>?> _resolveMindMapUnits({
+    required AiMindMapRequestScope scope,
+    required AiBookStructureManifest? manifest,
+    required AiBookWork? namedWork,
+  }) async {
+    if (namedWork != null) return _mindMapUnitsForWorks([namedWork]);
+    if (scope == AiMindMapRequestScope.currentWork) {
+      final current = _c.currentMindMapStructureUnit;
+      if (current != null) return _mindMapUnitsForWorks([current]);
+    }
+    final works = manifest?.works ?? const <AiBookWork>[];
+    final structureRoute = resolveAiMindMapStructureRoute(manifest);
+    if (structureRoute == AiMindMapStructureRoute.sequentialUnits) {
+      return _mindMapUnitsForWorks(works);
+    }
+    if (structureRoute == AiMindMapStructureRoute.chooseUnits) {
+      final chapterCounts = [for (final work in works) _workChapterCount(work)];
+      final totalChapters = chapterCounts.fold<int>(
+        0,
+        (total, count) => total + count,
+      );
+      final choice = await showAppChoiceDialog<int>(
+        context,
+        title: '本书包含 ${works.length} 部作品，共 $totalChapters 章',
+        choices: [
+          AppDialogChoice(
+            value: -1,
+            label: '全部作品',
+            subtitle: '按作品依次生成 ${works.length} 张思维导图',
+          ),
+          for (var index = 0; index < works.length; index++)
+            AppDialogChoice(
+              value: index,
+              label: works[index].title,
+              subtitle: '共 ${chapterCounts[index]} 章',
+            ),
+        ],
+      );
+      if (choice == null) return null;
+      return _mindMapUnitsForWorks(choice == -1 ? works : [works[choice]]);
+    }
+    return [
+      (
+        work: null,
+        label: _c.item.title,
+        frozenSections: null,
+        estimatedSections: math.max(1, _c.sectionCount),
+      ),
+    ];
+  }
+
+  int _workChapterCount(AiBookWork work) {
+    final logicalStart = work.startLogicalIndex;
+    final logicalEnd = work.endLogicalIndexExclusive;
+    if (logicalStart != null && logicalEnd != null) {
+      return math.max(1, logicalEnd - logicalStart);
+    }
+    final end = work.endSectionExclusive;
+    return end == null ? 1 : math.max(1, end - work.startSection);
+  }
+
+  List<_MindMapGenerationUnit> _mindMapUnitsForWorks(List<AiBookWork> works) =>
+      [
+        for (final work in works)
+          (
+            work: work,
+            label: work.title,
+            frozenSections: null,
+            estimatedSections: _workChapterCount(work),
+          ),
+      ];
+
+  String _mindMapScopeText(_MindMapGenerationUnit unit) =>
+      unit.label == _c.item.title
+      ? '《${unit.label}》'
+      : '《${_c.item.title}》中的《${unit.label}》';
+
+  Future<void> _generateMindMapsInChat(
+    String text,
+    List<_MindMapGenerationUnit> units, {
+    String? retryTurnId,
+  }) async {
     final chatWork = _c.currentReadingWork;
     final workKey = chatWork == null
         ? null
         : BookReaderController.workKeyFor(chatWork);
-    final generationWork = scope == AiMindMapRequestScope.wholeBook
-        ? null
-        : chatWork;
     final turnId = _newTurnId();
     _activeTurnId = turnId;
     _activeTurnWorkKey = workKey;
@@ -1305,43 +1453,87 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _error = null;
       _retryText = null;
       _retryTurnId = null;
-      _toolStatus = scope == AiMindMapRequestScope.currentChapter
-          ? '正在读取当前章'
-          : '正在读取全书范围';
+      final totalSections = units.fold<int>(
+        0,
+        (total, unit) => total + unit.estimatedSections,
+      );
+      final unitKind =
+          _c.bookStructureManifest?.kind ==
+              AiBookStructureKind.segmentedSingleWork
+          ? '卷'
+          : '部作品';
+      _toolStatus = units.length == 1
+          ? '正在为你生成${_mindMapScopeText(units.single)}的思维导图，共 $totalSections 章'
+          : '本书分为 ${units.length} $unitKind，共 $totalSections 章，准备依次生成';
     });
     unawaited(_persist());
     _scrollToEnd();
 
-    AiBookMindMap? result;
+    var completed = 0;
     String? localError;
-    try {
-      final frozenChapter = scope == AiMindMapRequestScope.currentChapter
-          ? await _c.captureCurrentBookMindMapChapter()
-          : null;
+    for (var index = 0; index < units.length; index++) {
+      final unit = units[index];
+      final unitKind =
+          _c.bookStructureManifest?.kind ==
+              AiBookStructureKind.segmentedSingleWork
+          ? '卷'
+          : '部作品';
+      var progress = units.length == 1
+          ? '正在读取${_mindMapScopeText(unit)}正文，预计 ${unit.estimatedSections} 章'
+          : '本书共 ${units.length} $unitKind，正在读取第 ${index + 1}/${units.length} 个范围《${unit.label}》';
+      if (mounted) setState(() => _toolStatus = progress);
+      List<AiBookSectionSlice> sections;
+      try {
+        sections =
+            unit.frozenSections ??
+            await _c.bookMindMapSections(work: unit.work, useFrozenWork: true);
+      } catch (error) {
+        localError = aiUserErrorMessage(
+          error,
+          operation: AiUserOperation.mindMap,
+        );
+        break;
+      }
       if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
         return;
       }
-      if (scope == AiMindMapRequestScope.currentChapter &&
-          frozenChapter == null) {
-        localError = '当前章节正文尚未就绪，请稍后重试';
-      } else {
-        result = await _c.generateBookMindMap(
-          work: generationWork,
-          useFrozenWork: true,
-          frozenCurrentChapter: frozenChapter,
+      progress = units.length == 1
+          ? '正在为你生成${_mindMapScopeText(unit)}的思维导图，共 ${sections.length} 章'
+          : '本书共 ${units.length} $unitKind，正在生成第 ${index + 1}/${units.length} 个范围《${unit.label}》，共 ${sections.length} 章';
+      setState(() => _toolStatus = progress);
+      final result = await _c.generateBookMindMap(
+        work: unit.work,
+        useFrozenWork: true,
+        frozenSections: sections,
+        userInstruction: text,
+        scopeLabel: unit.label,
+        progressLabel: progress,
+      );
+      if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
+        return;
+      }
+      if (result == null) {
+        localError = _c.bookMindMapError;
+        break;
+      }
+      completed++;
+      final artifactTurnId = '$turnId-mind-map-${index + 1}';
+      setState(() {
+        _mindMapRevealTurnId = artifactTurnId;
+        _commitAssistant(
+          '已根据《${unit.label}》的 ${sections.length} 章内容生成思维导图。',
+          workKey: workKey,
+          turnId: artifactTurnId,
+          mindMap: result,
         );
-      }
-    } catch (_) {
-      result = null;
-      if (scope == AiMindMapRequestScope.currentChapter) {
-        localError = '读取当前章节失败，请稍后重试';
-      }
+      });
+      await _persist();
     }
     if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
       return;
     }
-    final failed = result == null;
-    final cancelled = localError == null && _c.bookMindMapError == '已停止';
+    final failed = completed != units.length;
+    final cancelled = _c.bookMindMapError == '已停止';
     setState(() {
       _setTurnStatus(
         turnId,
@@ -1352,20 +1544,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             : AiChatTurnStatus.completed,
         workKey: workKey,
       );
-      if (result != null) {
-        _mindMapRevealTurnId = turnId;
-        _commitAssistant(
-          scope == AiMindMapRequestScope.currentChapter
-              ? '已根据当前章生成思维导图。'
-              : '已根据这本书生成思维导图。',
-          workKey: workKey,
-          turnId: turnId,
-          mindMap: result,
-        );
-      } else if (!cancelled) {
-        _error = localError ?? _c.bookMindMapError ?? '暂时无法生成思维导图，请稍后重试';
-        _retryText = text;
-        _retryTurnId = turnId;
+      if (failed && !cancelled) {
+        _error = completed == 0
+            ? localError ?? _c.bookMindMapError ?? '暂时无法生成思维导图，请稍后重试'
+            : '已保留前 $completed 张思维导图，生成《${units[completed].label}》时失败，可单独请求该部或卷。';
+        if (completed == 0) {
+          _retryText = text;
+          _retryTurnId = turnId;
+        }
       }
       _sending = false;
       _toolStatus = null;
@@ -1374,7 +1560,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _mindMapTurnId = null;
     });
     unawaited(_persist());
-    if (result != null) {
+    if (!failed) {
       // Cancel the pending "scroll to bottom" retries started for the user
       // message. The newly mounted mind-map card will reveal its own toolbar.
       _scrollRequestEpoch++;

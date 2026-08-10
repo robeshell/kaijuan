@@ -38,7 +38,7 @@
 - 本书对话，按 `contentHash` 持久化，支持当前章节、选区、目录、全文取样和书内检索工具。
 - 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。停止与关闭必须在第一次点击时立即更新界面并撤销请求，不等待 transport / stream 的异步清理完成。
 - AI 对话纳入用户主动执行的 WebDAV 备份；恢复时按书籍 `contentHash` 合并并去重。
-- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。思维导图请求由 App 识别带生成动作的“当前章/本章”与“这本书/全书”范围，范围词本身就是确认，不弹章节选择器；冻结并自动移除明确辅文后只路由到独立 `BookMindMapWorkflow`，结果作为结构化对话附件显示，不向聊天 Agent 发送长期任务提示词。
+- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。思维导图只匹配明确的生成动作，讨论、评价、教程和 Mermaid 请求仍走普通聊天；当前章、普通单书或合集中的单部作品将完整有效正文与用户原始要求一次发送给 `AiBookMindMapService`。分卷单书按卷依次生成；多作品合集先展示作品数和章节数并让用户选择一部或全部，全部作品逐部生成独立对话附件。生成服务不拥有字符批次、reduce、checkpoint 或独立缓存。
 - 大纲回答作为普通对话消息按 `contentHash` 缓存。历史结构化大纲数据继续随手动 WebDAV 快照备份和恢复，以兼容旧版本；Key 仍不备份。
 - 可选联网搜索（Tavily / Brave，独立搜索 Key）注入本书对话；Ollama 本地后端免 Key（`AiProviderKind.ollama`，模型经 `GET /v1/models` 列出）。
 - 知识图谱 M5：实体（人物/地点/事件）+ 关系 + 出处，章级增量；文件内多作品先由用户选作品，再确认具体内容单元，`allowUnreadContext` 只负责限制未读内容；随手动 WebDAV 快照备份（Key 永不备份）。规格与验收见 [ai-graph.md](./ai-graph.md)。
@@ -413,7 +413,7 @@ lib/ai/   （ENGINEERING 落地时挂树）
 | 划线 note（用户确认写入） | 现有 annotations | **是**（已有备份范围） |
 | 大纲 | `ai_chat/` 下按 contentHash 的会话文件 | **是**（用户主动 WebDAV 快照） |
 | 图谱 | `ai_graph/` 下按 contentHash 的图谱文件 | **是**（用户主动 WebDAV 快照）；不含 Key；见 [ai-graph.md](./ai-graph.md) |
-| 思维导图 | `ai_chat/` 消息内的结构化附件；`ai_mind_map/` 保留最近产物与运行中 checkpoint | **是**（用户主动 WebDAV 快照）；不含 Key 和运行中 checkpoint；见 [ai-mind-map.md](./ai-mind-map.md) |
+| 思维导图 | 仅保存为 `ai_chat/` 消息内的结构化附件 | **是**（随用户主动 WebDAV 对话快照）；不含 Key；见 [ai-mind-map.md](./ai-mind-map.md) |
 | 译稿 | 本地 cache + contentHash | 未做；导出后是用户文件 |
 
 #### 身份与删书再导入（已定）

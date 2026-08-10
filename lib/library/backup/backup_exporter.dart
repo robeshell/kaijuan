@@ -8,7 +8,6 @@ import 'package:path/path.dart' as p;
 import '../../ai/ai_chat.dart';
 import '../../ai/ai_graph.dart';
 import '../../ai/ai_graph_store.dart';
-import '../../ai/ai_mind_map.dart';
 import '../persistence/app_database.dart';
 import '../storage/library_paths.dart';
 import 'backup_format.dart';
@@ -179,7 +178,6 @@ class BackupExporter {
       ],
       aiChats: await _readAiChats(),
       aiGraphs: await _readAiGraphs(),
-      aiMindMaps: await _readAiMindMaps(),
     );
 
     final paths = LibraryPaths(supportDirectory);
@@ -226,35 +224,6 @@ class BackupExporter {
         });
       } catch (_) {
         // A damaged graph file must not make the entire library backup fail.
-      }
-    }
-    return result;
-  }
-
-  Future<List<Map<String, Object?>>> _readAiMindMaps() async {
-    final directory = Directory(p.join(supportDirectory.path, 'ai_mind_map'));
-    if (!await directory.exists()) return const [];
-    final result = <Map<String, Object?>>[];
-    await for (final entity in directory.list(followLinks: false)) {
-      if (entity is! File ||
-          !entity.path.endsWith('.json') ||
-          entity.path.endsWith('.checkpoint.json')) {
-        continue;
-      }
-      try {
-        final value = AiBookMindMap.fromJson(
-          jsonDecode(await entity.readAsString()),
-        );
-        if (value == null || !KaijuanBackupFormat.isSha256(value.contentHash)) {
-          continue;
-        }
-        result.add({
-          'contentHash': value.contentHash,
-          if (value.workKey != null) 'workKey': value.workKey,
-          'mindMap': value.toJson(),
-        });
-      } catch (_) {
-        // A damaged result or checkpoint must not block the whole backup.
       }
     }
     return result;

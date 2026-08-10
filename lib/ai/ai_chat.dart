@@ -1,4 +1,5 @@
 import 'ai_models.dart';
+import 'ai_book_structure.dart';
 import 'ai_mind_map.dart';
 import 'ai_outline.dart';
 import 'ai_provider_kind.dart';
@@ -18,7 +19,29 @@ enum AiChatTurnStatus {
   }
 }
 
-enum AiMindMapRequestScope { currentChapter, wholeBook }
+enum AiMindMapRequestScope {
+  unspecified,
+  currentChapter,
+  currentWork,
+  wholeBook,
+}
+
+enum AiMindMapStructureRoute { wholePublication, sequentialUnits, chooseUnits }
+
+AiMindMapStructureRoute resolveAiMindMapStructureRoute(
+  AiBookStructureManifest? manifest,
+) {
+  if (manifest == null || manifest.works.length < 2) {
+    return AiMindMapStructureRoute.wholePublication;
+  }
+  return switch (manifest.kind) {
+    AiBookStructureKind.segmentedSingleWork =>
+      AiMindMapStructureRoute.sequentialUnits,
+    AiBookStructureKind.multiWorkOmnibus ||
+    AiBookStructureKind.uncertain => AiMindMapStructureRoute.chooseUnits,
+    AiBookStructureKind.singleWork => AiMindMapStructureRoute.wholePublication,
+  };
+}
 
 /// Routes only product mind-map requests. Explicit Mermaid requests remain
 /// ordinary rich chat content even when they mention a mind map.
@@ -39,35 +62,34 @@ AiMindMapRequestScope? resolveAiMindMapRequestScope(String text) {
   ].any(normalized.contains);
   if (asksHowOrWhy) return null;
   final hasGenerationAction = const [
-    '生成',
     '重新生成',
+    '生成',
     '创建',
     '制作',
     '绘制',
-    '画一个',
-    '画一份',
-    '做一个',
-    '做一份',
+    '画',
+    '做',
     '整理成',
     '梳理成',
-    '输出',
-    '给我',
-    '想看',
-    '看看',
     'generate',
     'create',
     'draw',
     'make',
-    'showme',
   ].any(normalized.contains);
   if (!hasGenerationAction) return null;
   if (const ['当前章', '当前章节', '这一章', '这章', '本章'].any(normalized.contains)) {
     return AiMindMapRequestScope.currentChapter;
   }
+  if (const ['当前作品', '这部作品', '当前这部', '这一部'].any(normalized.contains)) {
+    return AiMindMapRequestScope.currentWork;
+  }
   if (const ['这本书', '本书', '整本书', '全书'].any(normalized.contains)) {
     return AiMindMapRequestScope.wholeBook;
   }
-  return AiMindMapRequestScope.currentChapter;
+  if (const ['合集', '全部作品', '整部合集'].any(normalized.contains)) {
+    return AiMindMapRequestScope.wholeBook;
+  }
+  return AiMindMapRequestScope.unspecified;
 }
 
 /// One user or assistant bubble in the book chat.

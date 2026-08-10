@@ -277,63 +277,6 @@ void main() {
       ),
     );
 
-    final aiMindMapDirectory = Directory(p.join(sourceDir.path, 'ai_mind_map'));
-    await aiMindMapDirectory.create(recursive: true);
-    await File(
-      p.join(aiMindMapDirectory.path, '${item.contentHash}.json'),
-    ).writeAsString(
-      jsonEncode(
-        AiBookMindMap(
-          contentHash: item.contentHash,
-          workKey: null,
-          createdAt: DateTime.utc(2026, 8, 3, 12, 40),
-          model: 'backup-test',
-          scopeSectionIndices: const [1],
-          scopeFingerprint: 'backup-scope',
-          contentKind: AiMindMapContentKind.narrative,
-          layout: AiMindMapLayout.rightFacing,
-          nodes: const [
-            AiBookMindMapNode(
-              nodeId: 'mm001',
-              parentId: null,
-              order: 0,
-              level: 0,
-              title: '全书主题',
-              summary: '远端思维导图总览。',
-            ),
-            AiBookMindMapNode(
-              nodeId: 'mm002',
-              parentId: 'mm001',
-              order: 0,
-              level: 1,
-              title: '第一主题',
-              summary: '远端思维导图分支。',
-              evidence: [
-                AiMindMapEvidence(
-                  sectionIndex: 1,
-                  quote: '第一章证据',
-                  progressInSection: 0.25,
-                  spanResolved: true,
-                ),
-              ],
-            ),
-          ],
-        ).toJson(),
-      ),
-    );
-    await File(
-      p.join(aiMindMapDirectory.path, '${item.contentHash}.checkpoint.json'),
-    ).writeAsString(
-      jsonEncode(
-        AiMindMapCheckpoint(
-          contentHash: item.contentHash,
-          workKey: null,
-          scopeFingerprint: 'in-progress-scope',
-          completedBatches: const [],
-        ).toJson(),
-      ),
-    );
-
     sourceConnections = MemoryRemoteConnectionStore();
     sourceCredentials = MemoryRemoteCredentialStore();
     final connection = _connection();
@@ -376,7 +319,7 @@ void main() {
       expect(first.manifest.objects, hasLength(1));
       expect(first.manifest.counts['aiChats'], 1);
       expect(first.manifest.counts['aiGraphs'], 1);
-      expect(first.manifest.counts['aiMindMaps'], 1);
+      expect(first.manifest.counts.containsKey('aiMindMaps'), isFalse);
       expect(first.uploadedObjects, 1);
       expect(
         server.files.keys.any((key) => key.endsWith('/manifest.json')),
@@ -455,7 +398,6 @@ void main() {
     expect(restored.restoredAnnotations, 1);
     expect(restored.restoredAiChats, 1);
     expect(restored.restoredAiGraphs, 1);
-    expect(restored.restoredAiMindMaps, 1);
     expect(restored.restoredLists, 1);
     expect(restored.restoredCollections, 1);
     expect(
@@ -498,18 +440,6 @@ void main() {
     expect(restoredGraph!.entities.single.name, '张三');
     expect(restoredGraph.relations.single.type, 'meet');
     expect(restoredGraph.coveredSections, [1]);
-
-    final restoredMindMap = AiBookMindMap.fromJson(
-      jsonDecode(
-        await File(
-          p.join(targetDir.path, 'ai_mind_map', '$targetHash.json'),
-        ).readAsString(),
-      ),
-    );
-    expect(restoredMindMap, isNotNull);
-    expect(restoredMindMap!.root.title, '全书主题');
-    expect(restoredMindMap.layout, AiMindMapLayout.rightFacing);
-    expect(restoredMindMap.nodes[1].evidence.single.sectionIndex, 1);
 
     final targetItem =
         (await targetDb.select(targetDb.readingItems).get()).single;

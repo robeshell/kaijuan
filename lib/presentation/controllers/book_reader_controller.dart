@@ -8,6 +8,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../../ai/ai_chat.dart';
 import '../../ai/ai_chat_store.dart';
+import '../../ai/ai_book_mind_map_service.dart';
 import '../../ai/ai_book_chat_tool_host.dart';
 import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_chat_service.dart';
@@ -24,7 +25,6 @@ import '../../ai/ai_log.dart';
 import '../../ai/ai_language_service.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_mind_map.dart';
-import '../../ai/ai_mind_map_store.dart';
 import '../../ai/ai_outline.dart';
 import '../../ai/ai_run.dart';
 import '../../ai/ai_run_orchestrator.dart';
@@ -32,7 +32,6 @@ import '../../ai/ai_search.dart';
 import '../../ai/ai_settings.dart';
 import '../../ai/ai_translation.dart';
 import '../../ai/ai_user_error.dart';
-import '../../ai/book_mind_map_workflow.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
@@ -157,7 +156,7 @@ class BookReaderController extends ChangeNotifier {
           );
     _aiMindMap = aiSettings == null
         ? null
-        : BookMindMapWorkflow(
+        : AiBookMindMapService(
             isAvailable: () => aiSettings.isReadyForRequests,
             openModelAdapter: () => aiSettings.openModelAdapter(),
             settings: () => aiSettings.settings,
@@ -323,11 +322,10 @@ class BookReaderController extends ChangeNotifier {
   void Function(bool open)? _setMenuOpen;
   AiChatService? _aiChat;
   AiBookOutlineService? _aiOutline;
-  BookMindMapWorkflow? _aiMindMap;
+  AiBookMindMapService? _aiMindMap;
   AiBookGraphService? _aiGraph;
   AiChatHistoryStore? _chatHistoryStore;
   AiGraphStore? _aiGraphStore;
-  AiBookMindMapStore? _aiMindMapStore;
   final Map<String, AiRunState> _aiRunStates = {};
   String? _latestAiRunId;
   AiBookOutline? _bookOutline;
@@ -340,9 +338,7 @@ class BookReaderController extends ChangeNotifier {
   String? _bookOutlineError;
   CancelToken? _bookOutlineCancel;
   Future<void>? _bookOutlineGeneration;
-  AiBookMindMap? _bookMindMap;
-  String? _bookMindMapWorkKey;
-  AiMindMapProgress? _bookMindMapProgress;
+  String? _bookMindMapProgress;
   String? _bookMindMapError;
   CancelToken? _bookMindMapCancel;
   Future<AiBookMindMap?>? _bookMindMapGeneration;
@@ -769,11 +765,6 @@ class BookReaderController extends ChangeNotifier {
   /// Optional graph cache store (per contentHash under `ai_graph/`).
   void attachAiGraphStore(AiGraphStore? store) {
     _aiGraphStore = store;
-  }
-
-  /// Optional mind-map cache store (per contentHash under `ai_mind_map/`).
-  void attachAiMindMapStore(AiBookMindMapStore? store) {
-    _aiMindMapStore = store;
   }
 
   void attachSearchBridge({
@@ -1284,22 +1275,9 @@ class BookReaderController extends ChangeNotifier {
   // Book mind map — independent from chat Mermaid and the knowledge graph.
   // ------------------------------------------------------------------
 
-  AiBookMindMap? get bookMindMap => _bookMindMap;
-  AiMindMapProgress? get bookMindMapProgress => _bookMindMapProgress;
+  String? get bookMindMapProgress => _bookMindMapProgress;
   String? get bookMindMapError => _bookMindMapError;
   bool get isGeneratingBookMindMap => _bookMindMapGeneration != null;
-
-  Future<AiBookMindMap?> loadBookMindMap({AiBookWork? work}) async {
-    final store = _aiMindMapStore;
-    if (store == null) return null;
-    final target = work ?? currentReadingWork;
-    final workKey = target == null ? null : workKeyFor(target);
-    final value = await store.read(item.contentHash, workKey: workKey);
-    _bookMindMap = value;
-    _bookMindMapWorkKey = workKey;
-    if (!_disposed) notifyListeners();
-    return value;
-  }
 
   /// Deterministic substantive units for the frozen current work/publication.
   /// The conversation scope is already confirmed by the user's wording, so
@@ -1339,52 +1317,52 @@ class BookReaderController extends ChangeNotifier {
   Future<AiBookMindMap?> generateBookMindMap({
     AiBookWork? work,
     AiBookSectionSlice? frozenCurrentChapter,
+    List<AiBookSectionSlice>? frozenSections,
     bool useFrozenWork = false,
-  }) {
+    required String userInstruction,
+    String? scopeLabel,
+    String? progressLabel,
+  }) async {
     final active = _bookMindMapGeneration;
-    if (active != null) return active;
-    final done = Completer<AiBookMindMap?>();
-    _bookMindMapGeneration = done.future;
-    unawaited(() async {
-      try {
-        final result = await _generateBookMindMap(
-          work: work,
-          frozenCurrentChapter: frozenCurrentChapter,
-          useFrozenWork: useFrozenWork,
-        );
-        done.complete(result);
-      } catch (error, stackTrace) {
-        done.completeError(error, stackTrace);
-      }
-    }());
-    unawaited(
-      done.future.whenComplete(() {
+    if (active != null) return await active;
+    final future = _generateBookMindMap(
+      work: work,
+      frozenCurrentChapter: frozenCurrentChapter,
+      frozenSections: frozenSections,
+      useFrozenWork: useFrozenWork,
+      userInstruction: userInstruction,
+      scopeLabel: scopeLabel,
+      progressLabel: progressLabel,
+    );
+    _bookMindMapGeneration = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_bookMindMapGeneration, future)) {
         _bookMindMapGeneration = null;
         _bookMindMapCancel = null;
         if (!_disposed) notifyListeners();
-      }),
-    );
-    return done.future;
+      }
+    }
   }
 
   Future<AiBookMindMap?> _generateBookMindMap({
     AiBookWork? work,
     AiBookSectionSlice? frozenCurrentChapter,
+    List<AiBookSectionSlice>? frozenSections,
     required bool useFrozenWork,
+    required String userInstruction,
+    String? scopeLabel,
+    String? progressLabel,
   }) async {
-    final workflow = _aiMindMap;
-    final store = _aiMindMapStore;
-    if (workflow == null || store == null || !canUseAiChat) {
+    final service = _aiMindMap;
+    if (service == null || !canUseAiChat) {
       _bookMindMapError = 'AI 未启用或未配置';
       if (!_disposed) notifyListeners();
       return null;
     }
     _bookMindMapError = null;
-    _bookMindMapProgress = const AiMindMapProgress(
-      completed: 0,
-      total: 1,
-      label: '正在读取思维导图范围',
-    );
+    _bookMindMapProgress = progressLabel ?? '正在读取思维导图范围';
     final cancel = CancelToken();
     _bookMindMapCancel = cancel;
     if (!_disposed) notifyListeners();
@@ -1394,9 +1372,11 @@ class BookReaderController extends ChangeNotifier {
       }
       final target = useFrozenWork ? work : work ?? currentReadingWork;
       final workKey = target == null ? null : workKeyFor(target);
-      final allSections = frozenCurrentChapter == null
-          ? await bookMindMapSections(work: target, useFrozenWork: true)
-          : <AiBookSectionSlice>[frozenCurrentChapter];
+      final allSections =
+          frozenSections ??
+          (frozenCurrentChapter == null
+              ? await bookMindMapSections(work: target, useFrozenWork: true)
+              : <AiBookSectionSlice>[frozenCurrentChapter]);
       final sections = allSections;
       if (sections.isEmpty) {
         throw AiProviderException(
@@ -1405,10 +1385,6 @@ class BookReaderController extends ChangeNotifier {
               : '当前章节没有可用于生成思维导图的正文',
         );
       }
-      final checkpoint = await store.readCheckpoint(
-        item.contentHash,
-        workKey: workKey,
-      );
       final result = await _executeAiWorkflow<AiBookMindMap>(
         descriptor: AiRunDescriptor(
           runId: AiRunIds.next(),
@@ -1420,39 +1396,26 @@ class BookReaderController extends ChangeNotifier {
           ),
         ),
         budget: AiRunBudget(
-          maxModelCalls: (sections.length * 2 + 8).clamp(12, 192),
-          maxElapsed: const Duration(minutes: 30),
+          maxModelCalls: 1,
+          maxElapsed: const Duration(minutes: 10),
         ),
         cancelToken: cancel,
-        checkpointWriter: (runCheckpoint) async {
-          final parsed = AiMindMapCheckpoint.fromJson(runCheckpoint.payload);
-          if (parsed != null) await store.writeCheckpoint(parsed);
-        },
-        body: (execution) => workflow.generate(
+        body: (execution) => service.generate(
           contentHash: item.contentHash,
           workKey: workKey,
           bookTitle: target?.title ?? item.title,
           bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+          scopeLabel: scopeLabel ?? target?.title ?? item.title,
+          userInstruction: userInstruction,
           sections: sections,
-          checkpoint: checkpoint,
           cancelToken: execution.cancelToken,
           onModelStarted: execution.modelStarted,
           onUsage: ({inputTokens, outputTokens}) => execution.reportTokens(
             inputTokens: inputTokens,
             outputTokens: outputTokens,
           ),
-          onCheckpoint: (value) => execution.checkpoint(value.toJson()),
-          onProgress: (progress) {
-            execution.progress(progress.label);
-            _bookMindMapProgress = progress;
-            if (!_disposed) notifyListeners();
-          },
         ),
       );
-      await store.write(result);
-      await store.deleteCheckpoint(item.contentHash, workKey: workKey);
-      _bookMindMap = result;
-      _bookMindMapWorkKey = workKey;
       _bookMindMapProgress = null;
       if (!_disposed) notifyListeners();
       return result;
@@ -1482,27 +1445,6 @@ class BookReaderController extends ChangeNotifier {
     if (_bookMindMapGeneration == null) return;
     _bookMindMapError = '已停止';
     _bookMindMapCancel?.cancel();
-    if (!_disposed) notifyListeners();
-  }
-
-  Future<void> setBookMindMapLayout(AiMindMapLayout layout) async {
-    final map = _bookMindMap;
-    final store = _aiMindMapStore;
-    if (map == null || store == null || map.layout == layout) return;
-    final updated = map.copyWith(layout: layout);
-    await store.write(updated);
-    _bookMindMap = updated;
-    if (!_disposed) notifyListeners();
-  }
-
-  Future<void> deleteBookMindMap() async {
-    if (isGeneratingBookMindMap) return;
-    final store = _aiMindMapStore;
-    if (store != null) {
-      await store.delete(item.contentHash, workKey: _bookMindMapWorkKey);
-    }
-    _bookMindMap = null;
-    _bookMindMapError = null;
     if (!_disposed) notifyListeners();
   }
 
@@ -1572,6 +1514,18 @@ class BookReaderController extends ChangeNotifier {
   /// behavior for a multi-work file.
   AiBookWork? get currentReadingWork {
     return _aiStructure.workAtSection(_sectionIndex + 1);
+  }
+
+  /// Current deterministic part/volume as well as an omnibus work. Logical
+  /// ranges that share one physical spine cannot be inferred from the reader
+  /// locator and deliberately return null.
+  AiBookWork? get currentMindMapStructureUnit {
+    final manifest = bookStructureManifest;
+    if (manifest == null) return null;
+    final matches = manifest.works
+        .where((work) => work.contains(_sectionIndex + 1))
+        .toList(growable: false);
+    return matches.length == 1 ? matches.single : null;
   }
 
   /// Public view of the cached structural-recognition result (null = not
@@ -1994,7 +1948,10 @@ class BookReaderController extends ChangeNotifier {
   Future<List<AiBookSectionSlice>> _mindMapSectionsForWork(
     AiBookWork? work,
   ) async {
-    final body = await _aiCorpus.loadSpine(BookMindMapWorkflow.maxBodyChars);
+    final body = await _aiCorpus.loadSpine(AiBookMindMapService.maxBodyChars);
+    if (body.length >= AiBookMindMapService.maxBodyChars - 64) {
+      throw AiProviderException('本书正文超过当前可完整读取的范围，未生成删减版思维导图');
+    }
     final sections = AiChatRetrieve.splitSections(body);
     if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
     final titled = _withAiDisplayTitles(
@@ -2007,10 +1964,18 @@ class BookReaderController extends ChangeNotifier {
     final workScoped = work == null
         ? titled
         : titled
-              .where(
-                (section) =>
-                    work.contains(section.sourceSectionIndex ?? section.index),
-              )
+              .where((section) {
+                if (work.needsLogicalLocator) {
+                  final physical = section.sourceSectionIndex ?? section.index;
+                  final logicalEnd = work.endLogicalIndexExclusive;
+                  return physical == work.startSection &&
+                      section.index >= work.startLogicalIndex! &&
+                      (logicalEnd == null || section.index < logicalEnd);
+                }
+                return work.contains(
+                  section.sourceSectionIndex ?? section.index,
+                );
+              })
               .toList(growable: false);
     final substantive = workScoped
         .where((section) => !_isMindMapAutomaticSupplement(section))

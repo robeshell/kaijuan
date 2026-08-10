@@ -332,190 +332,6 @@ base class _AiMindMapEvidenceOutputTypeFactory
   );
 }
 
-base class AiMindMapBranchOutput {
-  /// Creates a [AiMindMapBranchOutput] from a JSON map.
-  factory AiMindMapBranchOutput.fromJson(Map<String, dynamic> json) =>
-      $schema.parse(json);
-
-  AiMindMapBranchOutput._(this._json);
-
-  AiMindMapBranchOutput({
-    required String title,
-    required String summary,
-    required List<AiMindMapEvidenceOutput> evidence,
-  }) {
-    _json = {
-      'title': title,
-      'summary': summary,
-      'evidence': evidence.map((e) => e.toJson()).toList(),
-    };
-  }
-
-  late final Map<String, dynamic> _json;
-
-  /// The JSON schema and type descriptor for [AiMindMapBranchOutput].
-  static const SchemanticType<AiMindMapBranchOutput> $schema =
-      _AiMindMapBranchOutputTypeFactory();
-
-  String get title {
-    return _json['title'] as String;
-  }
-
-  set title(String value) {
-    _json['title'] = value;
-  }
-
-  String get summary {
-    return _json['summary'] as String;
-  }
-
-  set summary(String value) {
-    _json['summary'] = value;
-  }
-
-  List<AiMindMapEvidenceOutput> get evidence {
-    return (_json['evidence'] as List)
-        .map((e) => AiMindMapEvidenceOutput.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  set evidence(List<AiMindMapEvidenceOutput> value) {
-    _json['evidence'] = value.map((e) => e.toJson()).toList();
-  }
-
-  @override
-  String toString() {
-    return _json.toString();
-  }
-
-  /// Serializes this [AiMindMapBranchOutput] to a JSON map.
-  Map<String, dynamic> toJson() {
-    return _json;
-  }
-}
-
-base class _AiMindMapBranchOutputTypeFactory
-    extends SchemanticType<AiMindMapBranchOutput> {
-  const _AiMindMapBranchOutputTypeFactory();
-
-  @override
-  AiMindMapBranchOutput parse(Object? json) {
-    return AiMindMapBranchOutput._(json as Map<String, dynamic>);
-  }
-
-  @override
-  JsonSchemaMetadata get schemaMetadata => JsonSchemaMetadata(
-    name: 'AiMindMapBranchOutput',
-    definition: $Schema
-        .object(
-          properties: {
-            'title': $Schema.string(),
-            'summary': $Schema.string(),
-            'evidence': $Schema.list(
-              items: $Schema.fromMap({
-                '\$ref': r'#/$defs/AiMindMapEvidenceOutput',
-              }),
-            ),
-          },
-          required: ['title', 'summary', 'evidence'],
-        )
-        .value,
-    dependencies: [AiMindMapEvidenceOutput.$schema],
-  );
-}
-
-base class AiMindMapBatchOutput {
-  /// Creates a [AiMindMapBatchOutput] from a JSON map.
-  factory AiMindMapBatchOutput.fromJson(Map<String, dynamic> json) =>
-      $schema.parse(json);
-
-  AiMindMapBatchOutput._(this._json);
-
-  AiMindMapBatchOutput({
-    required String batchId,
-    required List<int> coveredSections,
-    required List<AiMindMapBranchOutput> branches,
-  }) {
-    _json = {
-      'batchId': batchId,
-      'coveredSections': coveredSections,
-      'branches': branches.map((e) => e.toJson()).toList(),
-    };
-  }
-
-  late final Map<String, dynamic> _json;
-
-  /// The JSON schema and type descriptor for [AiMindMapBatchOutput].
-  static const SchemanticType<AiMindMapBatchOutput> $schema =
-      _AiMindMapBatchOutputTypeFactory();
-
-  String get batchId {
-    return _json['batchId'] as String;
-  }
-
-  set batchId(String value) {
-    _json['batchId'] = value;
-  }
-
-  List<int> get coveredSections {
-    return (_json['coveredSections'] as List).cast<int>();
-  }
-
-  set coveredSections(List<int> value) {
-    _json['coveredSections'] = value;
-  }
-
-  List<AiMindMapBranchOutput> get branches {
-    return (_json['branches'] as List)
-        .map((e) => AiMindMapBranchOutput.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  set branches(List<AiMindMapBranchOutput> value) {
-    _json['branches'] = value.map((e) => e.toJson()).toList();
-  }
-
-  @override
-  String toString() {
-    return _json.toString();
-  }
-
-  /// Serializes this [AiMindMapBatchOutput] to a JSON map.
-  Map<String, dynamic> toJson() {
-    return _json;
-  }
-}
-
-base class _AiMindMapBatchOutputTypeFactory
-    extends SchemanticType<AiMindMapBatchOutput> {
-  const _AiMindMapBatchOutputTypeFactory();
-
-  @override
-  AiMindMapBatchOutput parse(Object? json) {
-    return AiMindMapBatchOutput._(json as Map<String, dynamic>);
-  }
-
-  @override
-  JsonSchemaMetadata get schemaMetadata => JsonSchemaMetadata(
-    name: 'AiMindMapBatchOutput',
-    definition: $Schema
-        .object(
-          properties: {
-            'batchId': $Schema.string(),
-            'coveredSections': $Schema.list(items: $Schema.integer()),
-            'branches': $Schema.list(
-              items: $Schema.fromMap({
-                '\$ref': r'#/$defs/AiMindMapBranchOutput',
-              }),
-            ),
-          },
-          required: ['batchId', 'coveredSections', 'branches'],
-        )
-        .value,
-    dependencies: [AiMindMapBranchOutput.$schema],
-  );
-}
-
 base class AiMindMapNodeOutput {
   /// Creates a [AiMindMapNodeOutput] from a JSON map.
   factory AiMindMapNodeOutput.fromJson(Map<String, dynamic> json) =>
@@ -654,12 +470,10 @@ base class AiMindMapOutput {
 
   AiMindMapOutput({
     required String contentKind,
-    required List<int> coveredSections,
     required List<AiMindMapNodeOutput> nodes,
   }) {
     _json = {
       'contentKind': contentKind,
-      'coveredSections': coveredSections,
       'nodes': nodes.map((e) => e.toJson()).toList(),
     };
   }
@@ -676,14 +490,6 @@ base class AiMindMapOutput {
 
   set contentKind(String value) {
     _json['contentKind'] = value;
-  }
-
-  List<int> get coveredSections {
-    return (_json['coveredSections'] as List).cast<int>();
-  }
-
-  set coveredSections(List<int> value) {
-    _json['coveredSections'] = value;
   }
 
   List<AiMindMapNodeOutput> get nodes {
@@ -722,12 +528,11 @@ base class _AiMindMapOutputTypeFactory extends SchemanticType<AiMindMapOutput> {
         .object(
           properties: {
             'contentKind': $Schema.string(),
-            'coveredSections': $Schema.list(items: $Schema.integer()),
             'nodes': $Schema.list(
               items: $Schema.fromMap({'\$ref': r'#/$defs/AiMindMapNodeOutput'}),
             ),
           },
-          required: ['contentKind', 'coveredSections', 'nodes'],
+          required: ['contentKind', 'nodes'],
         )
         .value,
     dependencies: [AiMindMapNodeOutput.$schema],
