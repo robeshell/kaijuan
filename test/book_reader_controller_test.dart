@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
@@ -615,6 +616,39 @@ void main() {
   });
 
   group('graph section chooser', () {
+    test(
+      'current mind-map chapter freezes renderer text and locator',
+      () async {
+        final item = await insertBook(id: 'mind-map-current-chapter');
+        final controller = BookReaderController(database: database, item: item);
+        addTearDown(controller.dispose);
+        await controller.attachEngine(sectionMap, tocTitles);
+        controller.goToSection(1);
+        final chapter = Completer<String>();
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getChapterText: () => chapter.future,
+        );
+
+        final frozen = controller.captureCurrentBookMindMapChapter();
+        controller.goToSection(2);
+        chapter.complete('第二章正文');
+
+        final section = await frozen;
+        expect(section, isNotNull);
+        expect(section!.originSectionIndex, 2);
+        expect(section.label, 'Chapter 2');
+        expect(section.text, '第二章正文');
+        expect(controller.sectionIndex, 2);
+      },
+    );
+
     test(
       'chat scope narrows the body to the reading work, indices round-trip',
       () {

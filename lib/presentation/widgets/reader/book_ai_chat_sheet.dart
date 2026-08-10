@@ -1184,7 +1184,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   ) async {
     final work = _c.currentReadingWork;
     final workKey = work == null ? null : BookReaderController.workKeyFor(work);
-    final frozenSourceSection = _c.sectionIndex + 1;
     final turnId = _newTurnId();
     _activeTurnId = turnId;
     _activeTurnWorkKey = workKey;
@@ -1213,22 +1212,35 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _scrollToEnd();
 
     AiBookMindMap? result;
+    String? localError;
     try {
-      result = await _c.generateBookMindMap(
-        work: work,
-        useFrozenWork: true,
-        onlySourceSectionIndex: scope == AiMindMapRequestScope.currentChapter
-            ? frozenSourceSection
-            : null,
-      );
+      final frozenChapter = scope == AiMindMapRequestScope.currentChapter
+          ? await _c.captureCurrentBookMindMapChapter()
+          : null;
+      if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
+        return;
+      }
+      if (scope == AiMindMapRequestScope.currentChapter &&
+          frozenChapter == null) {
+        localError = '当前章节正文尚未就绪，请稍后重试';
+      } else {
+        result = await _c.generateBookMindMap(
+          work: work,
+          useFrozenWork: true,
+          frozenCurrentChapter: frozenChapter,
+        );
+      }
     } catch (_) {
       result = null;
+      if (scope == AiMindMapRequestScope.currentChapter) {
+        localError = '读取当前章节失败，请稍后重试';
+      }
     }
     if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
       return;
     }
     final failed = result == null;
-    final cancelled = _c.bookMindMapError == '已停止';
+    final cancelled = localError == null && _c.bookMindMapError == '已停止';
     setState(() {
       _setTurnStatus(
         turnId,
@@ -1249,7 +1261,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           mindMap: result,
         );
       } else if (!cancelled) {
-        _error = _c.bookMindMapError ?? '暂时无法生成思维导图，请稍后重试';
+        _error = localError ?? _c.bookMindMapError ?? '暂时无法生成思维导图，请稍后重试';
         _retryText = text;
         _retryTurnId = turnId;
       }

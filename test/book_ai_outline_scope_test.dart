@@ -78,25 +78,33 @@ class _AmbiguousOutlineController extends BookReaderController {
   int? lastMindMapSourceSectionIndex;
 
   @override
+  Future<AiBookSectionSlice?> captureCurrentBookMindMapChapter() async {
+    return const AiBookSectionSlice(
+      index: 1,
+      sourceSectionIndex: 1,
+      label: '当前章',
+      text: '当前章正文',
+    );
+  }
+
+  @override
   Future<AiBookMindMap?> generateBookMindMap({
     Set<int> excludedSectionIndices = const {},
     AiGraphWorkCandidate? work,
-    int? onlySourceSectionIndex,
+    AiBookSectionSlice? frozenCurrentChapter,
     bool useFrozenWork = false,
   }) async {
-    lastMindMapSourceSectionIndex = onlySourceSectionIndex;
+    lastMindMapSourceSectionIndex = frozenCurrentChapter?.originSectionIndex;
     return AiBookMindMap(
       contentHash: item.contentHash,
       workKey: null,
       createdAt: DateTime.utc(2026, 8, 10),
       model: 'test',
       scopeSectionIndices: [
-        onlySourceSectionIndex ?? 1,
-        if (onlySourceSectionIndex == null) 2,
+        frozenCurrentChapter?.originSectionIndex ?? 1,
+        if (frozenCurrentChapter == null) 2,
       ],
-      scopeFingerprint: onlySourceSectionIndex == null
-          ? 'whole-book'
-          : 'chapter',
+      scopeFingerprint: frozenCurrentChapter == null ? 'whole-book' : 'chapter',
       contentKind: AiMindMapContentKind.narrative,
       layout: AiMindMapLayout.radial,
       nodes: const [

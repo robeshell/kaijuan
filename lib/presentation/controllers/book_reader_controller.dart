@@ -1314,10 +1314,33 @@ class BookReaderController extends ChangeNotifier {
         .toList(growable: false);
   }
 
+  /// Freezes the renderer-backed current chapter before any asynchronous
+  /// structure resolution can observe a later page turn. Reader section
+  /// indices and the logical whole-book corpus are deliberately not joined:
+  /// some EPUBs expose different spine spaces through those two bridges.
+  Future<AiBookSectionSlice?> captureCurrentBookMindMapChapter() async {
+    final load = _getChapterText;
+    if (load == null) return null;
+    final sourceSectionIndex = _sectionIndex + 1;
+    final title = currentChapterTitle.trim();
+    final text = (await load()).trim();
+    if (text.isEmpty) return null;
+    AiLog.d(
+      'mind map chapter scope: source=$sourceSectionIndex '
+      'title=${title.isEmpty ? '-' : title} chars=${text.length}',
+    );
+    return AiBookSectionSlice(
+      index: sourceSectionIndex,
+      sourceSectionIndex: sourceSectionIndex,
+      label: title.isEmpty ? '当前章节' : title,
+      text: text,
+    );
+  }
+
   Future<AiBookMindMap?> generateBookMindMap({
     Set<int> excludedSectionIndices = const {},
     AiGraphWorkCandidate? work,
-    int? onlySourceSectionIndex,
+    AiBookSectionSlice? frozenCurrentChapter,
     bool useFrozenWork = false,
   }) {
     final active = _bookMindMapGeneration;
@@ -1329,7 +1352,7 @@ class BookReaderController extends ChangeNotifier {
         final result = await _generateBookMindMap(
           excludedSectionIndices: excludedSectionIndices,
           work: work,
-          onlySourceSectionIndex: onlySourceSectionIndex,
+          frozenCurrentChapter: frozenCurrentChapter,
           useFrozenWork: useFrozenWork,
         );
         done.complete(result);
@@ -1350,7 +1373,7 @@ class BookReaderController extends ChangeNotifier {
   Future<AiBookMindMap?> _generateBookMindMap({
     required Set<int> excludedSectionIndices,
     AiGraphWorkCandidate? work,
-    int? onlySourceSectionIndex,
+    AiBookSectionSlice? frozenCurrentChapter,
     required bool useFrozenWork,
   }) async {
     final workflow = _aiMindMap;
@@ -1370,24 +1393,20 @@ class BookReaderController extends ChangeNotifier {
     _bookMindMapCancel = cancel;
     if (!_disposed) notifyListeners();
     try {
-      await resolveGraphWorkCandidates(cancel: cancel);
+      if (frozenCurrentChapter == null || !useFrozenWork) {
+        await resolveGraphWorkCandidates(cancel: cancel);
+      }
       final target = useFrozenWork ? work : work ?? currentReadingWork;
       final workKey = target == null ? null : workKeyFor(target);
-      final allSections = await bookMindMapSectionChoices(
-        work: target,
-        useFrozenWork: true,
-      );
+      final allSections = frozenCurrentChapter == null
+          ? await bookMindMapSectionChoices(work: target, useFrozenWork: true)
+          : <AiBookSectionSlice>[frozenCurrentChapter];
       final sections = allSections
-          .where(
-            (section) =>
-                !excludedSectionIndices.contains(section.index) &&
-                (onlySourceSectionIndex == null ||
-                    section.originSectionIndex == onlySourceSectionIndex),
-          )
+          .where((section) => !excludedSectionIndices.contains(section.index))
           .toList(growable: false);
       if (sections.isEmpty) {
         throw AiProviderException(
-          onlySourceSectionIndex == null
+          frozenCurrentChapter == null
               ? '所选章节都被排除了，请至少保留一节正文'
               : '当前章节没有可用于生成思维导图的正文',
         );
