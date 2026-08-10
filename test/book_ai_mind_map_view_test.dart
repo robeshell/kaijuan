@@ -204,21 +204,30 @@ void main() {
     );
     await tester.pump();
 
-    Color accentOf(String nodeId) {
-      final rail = tester.widget<DecoratedBox>(
-        find.byKey(ValueKey('mind-map-branch-accent-$nodeId')),
+    Color borderColorOf(String nodeId) {
+      final surface = tester.widget<DecoratedBox>(
+        find.byKey(ValueKey('mind-map-node-surface-$nodeId')),
       );
-      return (rail.decoration as BoxDecoration).color!;
+      final border = (surface.decoration as BoxDecoration).border! as Border;
+      return border.top.color;
     }
 
-    expect(accentOf('branch-a'), isNot(accentOf('branch-b')));
-    expect(accentOf('detail-a'), accentOf('branch-a'));
+    expect(borderColorOf('branch-a'), isNot(borderColorOf('branch-b')));
+    expect(borderColorOf('detail-a'), borderColorOf('branch-a'));
+    expect(
+      find.byKey(const ValueKey('mind-map-branch-accent-branch-a')),
+      findsNothing,
+    );
 
     final rootSurface = tester.widget<DecoratedBox>(
       find.byKey(const ValueKey('mind-map-node-surface-root')),
     );
     final rootDecoration = rootSurface.decoration as BoxDecoration;
-    expect(rootDecoration.gradient, isNotNull);
+    expect(rootDecoration.gradient, isNull);
+    expect(
+      rootDecoration.color,
+      isNot(AppTheme.light(AppColors.defaultAccent).colorScheme.primary),
+    );
     expect(rootDecoration.boxShadow, isNotEmpty);
 
     final branchSurface = tester.widget<DecoratedBox>(
@@ -247,7 +256,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(accentOf('branch-a'), isNot(accentOf('branch-b')));
+    expect(borderColorOf('branch-a'), isNot(borderColorOf('branch-b')));
     final darkBranchSurface =
         (tester
                     .widget<DecoratedBox>(

@@ -431,16 +431,17 @@ class _MindMapNodeCard extends StatelessWidget {
     final root = node.level == 0;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final radius = BorderRadius.circular(16);
-    final baseSurface = node.level <= 1
+    final baseSurface = root
+        ? colors.surfaceContainerHighest
+        : node.level <= 1
         ? colors.surfaceContainerHigh
         : colors.surfaceContainer;
     final tintOpacity = dark
         ? (node.level <= 1 ? 0.18 : 0.10)
         : (node.level <= 1 ? 0.10 : 0.055);
-    final surface = Color.alphaBlend(
-      accent.withValues(alpha: tintOpacity),
-      baseSurface,
-    );
+    final surface = root
+        ? baseSurface
+        : Color.alphaBlend(accent.withValues(alpha: tintOpacity), baseSurface);
     final shadowScale = context.appSkinEffects.shadowScale;
     final shadow = context.appGlass.shadow;
     final boxShadows = shadowScale <= 0
@@ -459,25 +460,13 @@ class _MindMapNodeCard extends StatelessWidget {
       child: DecoratedBox(
         key: ValueKey('mind-map-node-surface-${node.nodeId}'),
         decoration: BoxDecoration(
-          color: root ? null : surface,
-          gradient: root
-              ? LinearGradient(
-                  begin: AlignmentDirectional.topStart,
-                  end: AlignmentDirectional.bottomEnd,
-                  colors: [
-                    colors.primary,
-                    Color.alphaBlend(
-                      colors.onPrimary.withValues(alpha: 0.09),
-                      colors.primary,
-                    ),
-                  ],
-                )
-              : null,
+          color: surface,
           borderRadius: radius,
           border: Border.all(
             color: root
-                ? colors.onPrimary.withValues(alpha: 0.16)
+                ? colors.primary.withValues(alpha: dark ? 0.68 : 0.46)
                 : accent.withValues(alpha: dark ? 0.48 : 0.32),
+            width: root ? 1.4 : 1,
           ),
           boxShadow: boxShadows,
         ),
@@ -490,14 +479,10 @@ class _MindMapNodeCard extends StatelessWidget {
             mouseCursor: SystemMouseCursors.click,
             overlayColor: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.pressed)) {
-                return (root ? colors.onPrimary : accent).withValues(
-                  alpha: 0.13,
-                );
+                return accent.withValues(alpha: 0.13);
               }
               if (states.contains(WidgetState.hovered)) {
-                return (root ? colors.onPrimary : accent).withValues(
-                  alpha: 0.075,
-                );
+                return accent.withValues(alpha: 0.075);
               }
               return null;
             }),
@@ -507,21 +492,6 @@ class _MindMapNodeCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  if (!root) ...[
-                    SizedBox(
-                      width: 3,
-                      height: 56,
-                      child: DecoratedBox(
-                        key: ValueKey('mind-map-branch-accent-${node.nodeId}'),
-                        decoration: BoxDecoration(
-                          color: accent,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                  ] else
-                    const SizedBox(width: 3),
                   Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -538,9 +508,7 @@ class _MindMapNodeCard extends StatelessWidget {
                                 ? FontWeight.w700
                                 : FontWeight.w600,
                             letterSpacing: -0.1,
-                            color: root
-                                ? colors.onPrimary
-                                : context.appPrimaryText,
+                            color: context.appPrimaryText,
                           ),
                         ),
                         if (node.summary.isNotEmpty) ...[
@@ -553,9 +521,7 @@ class _MindMapNodeCard extends StatelessWidget {
                               fontSize: context.appCaptionSize,
                               height: 1.4,
                               fontWeight: FontWeight.w400,
-                              color: root
-                                  ? colors.onPrimary.withValues(alpha: 0.86)
-                                  : context.appSecondaryText,
+                              color: context.appSecondaryText,
                             ),
                           ),
                         ],
@@ -580,7 +546,7 @@ class _MindMapNodeCard extends StatelessWidget {
                               ? Icons.add_circle_outline
                               : Icons.remove_circle_outline,
                           size: 18,
-                          color: root ? colors.onPrimary : accent,
+                          color: root ? colors.primary : accent,
                         ),
                       ),
                     ),
