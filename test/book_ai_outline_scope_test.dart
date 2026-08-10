@@ -13,6 +13,7 @@ import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_run.dart';
+import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
@@ -27,6 +28,12 @@ class _AmbiguousOutlineController extends BookReaderController {
 
   @override
   bool get canUseAiChat => true;
+
+  @override
+  bool get supportsDeepThinking => true;
+
+  @override
+  bool get defaultDeepThinkingEnabled => true;
 
   @override
   bool get hasAmbiguousInternalWorks => true;
@@ -65,6 +72,7 @@ class _AmbiguousOutlineController extends BookReaderController {
   final chatStreams = <StreamController<AiRunEvent>>[];
   AiBookGraph? graphOverride;
   bool _generatingGraph = false;
+  bool? lastDeepThinkingEnabled;
 
   @override
   Stream<AiRunEvent>? streamBookChat({
@@ -73,9 +81,11 @@ class _AmbiguousOutlineController extends BookReaderController {
     required AiChatContextBundle context,
     required AiGraphWorkCandidate? workScope,
     List<AiWebSearchHit>? webHits,
+    bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
   }) {
+    lastDeepThinkingEnabled = reasoningEnabled;
     final gate = Completer<void>();
     chatCancelGates.add(gate);
     final descriptor = AiRunDescriptor(
@@ -107,9 +117,18 @@ class _AmbiguousOutlineController extends BookReaderController {
               ),
             )
             ..add(
-              AiRunTextSnapshot(
+              AiRunReasoningSnapshot(
                 runId: descriptor.runId,
                 sequence: 2,
+                occurredAt: now,
+                text: '先分析问题。',
+                kind: AiReasoningContentKind.process,
+              ),
+            )
+            ..add(
+              AiRunTextSnapshot(
+                runId: descriptor.runId,
+                sequence: 3,
                 occurredAt: now,
                 text: '已经生成一部分',
               ),
@@ -247,6 +266,7 @@ void main() {
     expect(chatField.style?.fontSize, 16);
     expect(chatField.enabled, isNot(equals(false)));
     expect(chatField.decoration?.hintText, '问这本书…');
+    expect(find.byTooltip('深度思考已开启'), findsOneWidget);
 
     expect(find.widgetWithText(Tab, '大纲'), findsNothing);
     expect(find.text('生成本书大纲'), findsOneWidget);
@@ -302,16 +322,30 @@ void main() {
     await tester.tap(find.text('打开 AI'));
     await tester.pumpAndSettle();
 
+    await tester.tap(
+      find.byKey(const ValueKey<String>('ai-chat-deep-thinking-toggle')),
+    );
+    await tester.pump();
+    expect(find.byTooltip('开启深度思考'), findsOneWidget);
+
     await tester.enterText(find.byType(TextField).last, '第一次问题');
     await tester.tap(find.byTooltip('发送'));
     await tester.pump();
     await tester.pump();
+    expect(controller.lastDeepThinkingEnabled, isFalse);
+    expect(find.text('正在思考'), findsOneWidget);
+    expect(find.text('先分析问题。'), findsOneWidget);
     expect(find.textContaining('已经生成一部分'), findsOneWidget);
 
     await tester.tap(find.byTooltip('停止'));
     await tester.pump();
     expect(find.byTooltip('发送'), findsOneWidget);
     expect(find.text('回答已停止'), findsOneWidget);
+    expect(find.text('思考过程'), findsOneWidget);
+    expect(find.text('先分析问题。'), findsNothing);
+    await tester.tap(find.text('思考过程'));
+    await tester.pump();
+    expect(find.text('先分析问题。'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).last, '第二次问题');
     await tester.tap(find.byTooltip('发送'));

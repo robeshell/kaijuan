@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:genkit/genkit.dart' as genkit;
@@ -9,6 +10,7 @@ import 'package:schemantic/schemantic.dart';
 import '../ai_cancel.dart';
 import '../ai_model_adapter.dart';
 import '../ai_models.dart';
+import '../ai_provider_kind.dart';
 
 /// Isolated Preview SDK integration. No Genkit type crosses this file.
 class GenkitOpenAiModelAdapter
@@ -21,6 +23,8 @@ class GenkitOpenAiModelAdapter
     Duration requestTimeout = const Duration(seconds: 45),
     Duration retryDelay = const Duration(milliseconds: 700),
     int maxAttempts = 2,
+    required AiProviderKind providerKind,
+    bool reasoningEnabled = false,
   }) {
     final client = httpClient ?? http.Client();
     return GenkitOpenAiModelAdapter._(
@@ -32,6 +36,8 @@ class GenkitOpenAiModelAdapter
       requestTimeout: requestTimeout,
       retryDelay: retryDelay,
       maxAttempts: maxAttempts,
+      providerKind: providerKind,
+      reasoningEnabled: reasoningEnabled,
     );
   }
 
@@ -44,6 +50,8 @@ class GenkitOpenAiModelAdapter
     required this.requestTimeout,
     required this.retryDelay,
     required this.maxAttempts,
+    required this.providerKind,
+    required this.reasoningEnabled,
   }) : assert(maxAttempts > 0),
        _modelName = model,
        _client = client {
@@ -61,20 +69,33 @@ class GenkitOpenAiModelAdapter
   final Duration requestTimeout;
   final Duration retryDelay;
   final int maxAttempts;
+  final AiProviderKind providerKind;
+  final bool reasoningEnabled;
   final Map<String, genkit.Tool> _tools = {};
+  late _OpenAiRequestDecorator _requestDecorator;
   var _closed = false;
 
-  genkit.Genkit _createGenkit(http.Client client) => genkit.Genkit(
-    plugins: [
-      openAI(
-        name: _namespace,
-        baseUrl: _baseUrl,
-        apiKey: _apiKey,
-        models: [CustomModelDefinition(name: _modelName)],
-        httpClient: client,
+  genkit.Genkit _createGenkit(http.Client client) {
+    _requestDecorator = _OpenAiRequestDecorator(
+      client,
+      policy: _OpenAiReasoningPolicy(
+        providerKind: providerKind,
+        model: _modelName,
+        enabled: reasoningEnabled,
       ),
-    ],
-  );
+    );
+    return genkit.Genkit(
+      plugins: [
+        openAI(
+          name: _namespace,
+          baseUrl: _baseUrl,
+          apiKey: _apiKey,
+          models: [CustomModelDefinition(name: _modelName)],
+          httpClient: _requestDecorator,
+        ),
+      ],
+    );
+  }
 
   void _resetOwnedTransport() {
     if (!_ownsClient || _closed) return;
@@ -97,7 +118,7 @@ class GenkitOpenAiModelAdapter
     if (_closed) throw AiProviderException('AI 运行时已关闭');
     cancelToken?.throwIfCancelled();
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
-      var emittedText = false;
+      var emittedVisibleOutput = false;
       try {
         await for (final event in _streamTurnOnce(
           request,
@@ -106,7 +127,12 @@ class GenkitOpenAiModelAdapter
           if (event case AiModelTextDelta(
             text: final text,
           ) when text.isNotEmpty) {
-            emittedText = true;
+            emittedVisibleOutput = true;
+          }
+          if (event case AiModelReasoningDelta(
+            text: final text,
+          ) when text.isNotEmpty) {
+            emittedVisibleOutput = true;
           }
           yield event;
         }
@@ -115,7 +141,9 @@ class GenkitOpenAiModelAdapter
         if (cancelToken?.isCancelled ?? false) {
           throw AiProviderException('已取消');
         }
-        if (emittedText || attempt + 1 >= maxAttempts || !_isRetryable(error)) {
+        if (emittedVisibleOutput ||
+            attempt + 1 >= maxAttempts ||
+            !_isRetryable(error)) {
           throw _asProviderException(error, operation: '模型调用');
         }
         await Future<void>.delayed(retryDelay);
@@ -129,6 +157,12 @@ class GenkitOpenAiModelAdapter
   }) async* {
     final tools = [for (final tool in request.tools) _resolveTool(tool)];
     final messages = request.messages.map(_toGenkitMessage).toList();
+    _requestDecorator.reasoningByAssistantMessage = [
+      for (final message in request.messages)
+        if (message.role == AiModelRole.assistant) message.reasoningText,
+    ];
+    final pendingReasoning = <String>[];
+    _requestDecorator.onReasoningDelta = pendingReasoning.add;
     var timedOut = false;
     final timeout = request.timeout ?? requestTimeout;
     void cancelTransport() => _client.close();
@@ -157,7 +191,19 @@ class GenkitOpenAiModelAdapter
       );
       await for (final chunk in chunks) {
         cancelToken?.throwIfCancelled();
+        while (pendingReasoning.isNotEmpty) {
+          yield AiModelReasoningDelta(
+            pendingReasoning.removeAt(0),
+            kind: _requestDecorator.policy.visibleKind,
+          );
+        }
         if (chunk.text.isNotEmpty) yield AiModelTextDelta(chunk.text);
+      }
+      while (pendingReasoning.isNotEmpty) {
+        yield AiModelReasoningDelta(
+          pendingReasoning.removeAt(0),
+          kind: _requestDecorator.policy.visibleKind,
+        );
       }
       if (timedOut) return;
       cancelToken?.throwIfCancelled();
@@ -209,12 +255,15 @@ class GenkitOpenAiModelAdapter
       final usage = response.usage;
       yield AiModelTurnCompleted(
         text: response.text,
+        reasoningText: _extractReasoningText(response.raw),
+        reasoningKind: _requestDecorator.policy.visibleKind,
         toolCalls: List.unmodifiable(calls),
         truncated: finishReason == genkit.FinishReason.length,
         inputTokens: usage?.inputTokens?.round(),
         outputTokens: usage?.outputTokens?.round(),
       );
     } finally {
+      _requestDecorator.onReasoningDelta = null;
       cancelToken?.removeCancelListener(cancelTransport);
     }
   }
@@ -309,6 +358,10 @@ class GenkitOpenAiModelAdapter
 
     cancelToken?.addCancelListener(cancelTransport);
     try {
+      _requestDecorator.reasoningByAssistantMessage = [
+        for (final message in request.messages)
+          if (message.role == AiModelRole.assistant) message.reasoningText,
+      ];
       final schema = SchemanticType.from<Map<String, dynamic>>(
         jsonSchema: request.schema,
         parse: (value) {
@@ -396,11 +449,230 @@ class GenkitOpenAiModelAdapter
         .replaceAll('>', '&gt;');
   }
 
+  static String _extractReasoningText(Object? raw) {
+    if (raw is! Map) return '';
+    final choices = raw['choices'];
+    if (choices is! List || choices.isEmpty || choices.first is! Map) return '';
+    final message = (choices.first as Map)['message'];
+    if (message is! Map) return '';
+    return _reasoningString(message);
+  }
+
   @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
     if (_ownsClient) _client.close();
     await _ai.shutdown();
+  }
+}
+
+/// Adds vendor fields omitted by the pinned Genkit OpenAI plugin without
+/// letting those fields cross the adapter boundary.
+final class _OpenAiRequestDecorator extends http.BaseClient {
+  _OpenAiRequestDecorator(this._inner, {required this.policy});
+
+  final http.Client _inner;
+  final _OpenAiReasoningPolicy policy;
+  List<String> reasoningByAssistantMessage = const [];
+  void Function(String text)? onReasoningDelta;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (request is http.Request &&
+        request.method == 'POST' &&
+        request.url.path.endsWith('/chat/completions')) {
+      final decoded = jsonDecode(request.body);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('OpenAI request body must be an object');
+      }
+      policy.decorateRequest(decoded);
+      final messages = decoded['messages'];
+      if (policy.requiresReasoningContinuity &&
+          messages is List &&
+          reasoningByAssistantMessage.isNotEmpty) {
+        var assistantIndex = 0;
+        for (final item in messages) {
+          if (item is! Map || item['role'] != 'assistant') continue;
+          if (assistantIndex < reasoningByAssistantMessage.length) {
+            final reasoning = reasoningByAssistantMessage[assistantIndex];
+            if (reasoning.isNotEmpty) item['reasoning_content'] = reasoning;
+          }
+          assistantIndex++;
+        }
+      }
+      request.body = jsonEncode(decoded);
+    }
+    final response = await _inner.send(request);
+    final onReasoning = onReasoningDelta;
+    if (!policy.canExposeReasoning || onReasoning == null) {
+      return response;
+    }
+    return http.StreamedResponse(
+      response.stream.transform(_ReasoningSseTap(onReasoning)),
+      response.statusCode,
+      contentLength: response.contentLength,
+      request: response.request,
+      headers: response.headers,
+      isRedirect: response.isRedirect,
+      persistentConnection: response.persistentConnection,
+      reasonPhrase: response.reasonPhrase,
+    );
+  }
+
+  @override
+  void close() {
+    // The adapter owns and closes the underlying transport. The Genkit plugin
+    // receives this decorator as an injected client and must not own it.
+  }
+}
+
+/// Observes OpenAI-compatible reasoning extensions while forwarding the byte
+/// stream to Genkit unchanged. The incremental UTF-8 decoder is required because a
+/// reasoning character or JSON line may be split across HTTP chunks.
+final class _ReasoningSseTap
+    extends StreamTransformerBase<List<int>, List<int>> {
+  const _ReasoningSseTap(this.onReasoning);
+
+  final void Function(String text) onReasoning;
+
+  @override
+  Stream<List<int>> bind(Stream<List<int>> stream) async* {
+    final parser = _ReasoningSseParser(onReasoning);
+    final decoder = const Utf8Decoder(
+      allowMalformed: true,
+    ).startChunkedConversion(_ReasoningTextSink(parser.addText));
+    try {
+      await for (final bytes in stream) {
+        decoder.add(bytes);
+        yield bytes;
+      }
+    } finally {
+      decoder.close();
+      parser.close();
+    }
+  }
+}
+
+final class _ReasoningTextSink extends StringConversionSinkBase {
+  _ReasoningTextSink(this.onText);
+
+  final void Function(String text) onText;
+
+  @override
+  void add(String str) => onText(str);
+
+  @override
+  void addSlice(String str, int start, int end, bool isLast) {
+    onText(str.substring(start, end));
+    if (isLast) close();
+  }
+
+  @override
+  void close() {}
+}
+
+final class _ReasoningSseParser {
+  _ReasoningSseParser(this.onReasoning);
+
+  final void Function(String text) onReasoning;
+  var _pending = '';
+
+  void addText(String text) {
+    _pending += text;
+    var newline = _pending.indexOf('\n');
+    while (newline >= 0) {
+      final line = _pending.substring(0, newline).trimRight();
+      _pending = _pending.substring(newline + 1);
+      _parseLine(line);
+      newline = _pending.indexOf('\n');
+    }
+  }
+
+  void close() {
+    if (_pending.isNotEmpty) _parseLine(_pending.trimRight());
+    _pending = '';
+  }
+
+  void _parseLine(String line) {
+    if (!line.startsWith('data:')) return;
+    final payload = line.substring(5).trimLeft();
+    if (payload.isEmpty || payload == '[DONE]') return;
+    Object? decoded;
+    try {
+      decoded = jsonDecode(payload);
+    } on FormatException {
+      return;
+    }
+    if (decoded is! Map) return;
+    final choices = decoded['choices'];
+    if (choices is! List) return;
+    for (final choice in choices) {
+      if (choice is! Map) continue;
+      final delta = choice['delta'];
+      if (delta is! Map) continue;
+      final reasoning = _reasoningString(delta);
+      if (reasoning.isNotEmpty) onReasoning(reasoning);
+    }
+  }
+}
+
+String _reasoningString(Map<dynamic, dynamic> value) {
+  final reasoning =
+      value['reasoning_content'] ?? value['reasoning'] ?? value['thinking'];
+  if (reasoning is String) return reasoning;
+  if (reasoning is Map) {
+    final text =
+        reasoning['content'] ?? reasoning['text'] ?? reasoning['summary'];
+    if (text is String) return text;
+  }
+  return '';
+}
+
+final class _OpenAiReasoningPolicy {
+  const _OpenAiReasoningPolicy({
+    required this.providerKind,
+    required this.model,
+    required this.enabled,
+  });
+
+  final AiProviderKind providerKind;
+  final String model;
+  final bool enabled;
+
+  AiReasoningContentKind get visibleKind =>
+      providerKind.reasoningCapabilities(model).visibleKind;
+
+  bool get canExposeReasoning =>
+      providerKind.reasoningCapabilities(model).supported;
+
+  bool get requiresReasoningContinuity =>
+      providerKind == AiProviderKind.deepseek;
+
+  void decorateRequest(Map<String, dynamic> body) {
+    switch (providerKind) {
+      case AiProviderKind.deepseek:
+        body['thinking'] = {'type': enabled ? 'enabled' : 'disabled'};
+      case AiProviderKind.openai:
+        if (!canExposeReasoning) return;
+        body['reasoning_effort'] = enabled
+            ? 'high'
+            : (_openAiCanDisable(model) ? 'none' : 'low');
+      case AiProviderKind.xai:
+        body['reasoning_effort'] = enabled ? 'high' : 'low';
+      case AiProviderKind.ollama:
+        body['reasoning_effort'] = enabled ? 'high' : 'none';
+      case AiProviderKind.custom:
+        if (enabled) body['reasoning_effort'] = 'high';
+      case AiProviderKind.anthropic:
+        throw StateError('Anthropic must not use the OpenAI adapter');
+    }
+  }
+
+  static bool _openAiCanDisable(String value) {
+    final model = value.trim().toLowerCase();
+    final match = RegExp(r'^gpt-5[.-](\d+)').firstMatch(model);
+    if (match == null) return false;
+    return (int.tryParse(match.group(1)!) ?? 0) >= 1;
   }
 }

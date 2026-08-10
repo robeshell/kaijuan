@@ -9,6 +9,7 @@ import 'package:kaijuan/ai/ai_chat_service.dart';
 import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
+import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 
@@ -343,7 +344,7 @@ void main() {
       final adapter = _SuggestionModelAdapter();
       final service = AiChatService(
         isAvailable: () => true,
-        openModelAdapter: () => adapter,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
       );
 
       final questions = await service.suggestFollowUpQuestions(
@@ -379,8 +380,10 @@ void main() {
       () async {
         final adapter = _ScriptedModelAdapter([
           [
+            const AiModelReasoningDelta('需要先搜索书内人物。'),
             const AiModelTurnCompleted(
               text: '',
+              reasoningText: '需要先搜索书内人物。',
               toolCalls: [
                 AiModelToolCall(
                   id: 'call-1',
@@ -406,9 +409,13 @@ void main() {
           ],
         ]);
         final host = _FakeHost();
+        bool? requestedDeepThinking;
         final service = AiChatService(
           isAvailable: () => true,
-          openModelAdapter: () => adapter,
+          openModelAdapter: ({reasoningEnabled}) {
+            requestedDeepThinking = reasoningEnabled;
+            return adapter;
+          },
         );
 
         final events = await service
@@ -419,10 +426,12 @@ void main() {
               context: const AiChatContextBundle(),
               bookTitle: '万历十五年',
               tools: host,
+              reasoningEnabled: true,
             )
             .toList();
 
         expect(host.calls, ['search_book']);
+        expect(requestedDeepThinking, isTrue);
         expect(adapter.requests.first.tools, hasLength(5));
         expect(
           adapter.requests[1].messages.where(
@@ -430,7 +439,17 @@ void main() {
           ),
           hasLength(1),
         );
+        expect(
+          adapter.requests[1].messages
+              .singleWhere((message) => message.role == AiModelRole.assistant)
+              .reasoningText,
+          '需要先搜索书内人物。',
+        );
         expect((events.last as AiRunCompleted).text, '张居正是内阁首辅。');
+        expect(
+          events.whereType<AiRunReasoningSnapshot>().last.text,
+          '需要先搜索书内人物。',
+        );
         final usage = events.whereType<AiRunUsageUpdated>().last.usage;
         expect(usage.modelCalls, 2);
         expect(usage.toolRounds, 1);
@@ -454,7 +473,7 @@ void main() {
       ]);
       final service = AiChatService(
         isAvailable: () => true,
-        openModelAdapter: () => adapter,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
       );
 
       final events = await service
@@ -480,7 +499,7 @@ void main() {
       () async {
         final service = AiChatService(
           isAvailable: () => true,
-          openModelAdapter: _PartialThenFailAdapter.new,
+          openModelAdapter: ({reasoningEnabled}) => _PartialThenFailAdapter(),
         );
 
         final events = await service
@@ -518,7 +537,7 @@ void main() {
       final host = _FakeHost();
       final service = AiChatService(
         isAvailable: () => true,
-        openModelAdapter: () => adapter,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
       );
 
       final events = await service
@@ -546,7 +565,7 @@ void main() {
         );
         final service = AiChatService(
           isAvailable: () => true,
-          openModelAdapter: () => adapter,
+          openModelAdapter: ({reasoningEnabled}) => adapter,
         );
 
         final events = await service
@@ -690,6 +709,23 @@ void main() {
       );
 
       expect(restored.suggestedQuestions, ['接下来人物会如何选择？']);
+    });
+
+    test('session JSON preserves reasoning separately from answer text', () {
+      const message = AiChatMessage(
+        role: AiMessageRole.assistant,
+        content: '回答',
+        reasoningContent: '先查目录，再核对正文。',
+        reasoningKind: AiReasoningContentKind.summary,
+      );
+
+      final restored = AiChatMessage.fromJson(
+        Map<String, dynamic>.from(message.toJson()),
+      );
+
+      expect(restored.content, '回答');
+      expect(restored.reasoningContent, '先查目录，再核对正文。');
+      expect(restored.reasoningKind, AiReasoningContentKind.summary);
     });
 
     test('session JSON preserves turn identity and status', () {

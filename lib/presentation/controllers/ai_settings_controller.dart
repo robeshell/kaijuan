@@ -151,6 +151,14 @@ class AiSettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setReasoningEnabled(bool value) async {
+    if (_settings.reasoningEnabled == value) return;
+    _settings = _settings.copyWith(reasoningEnabled: value);
+    await settingsStore.write(_settings);
+    _clearTest();
+    notifyListeners();
+  }
+
   Future<void> setAllowUnreadContext(bool value) async {
     if (_settings.allowUnreadContext == value) return;
     _settings = _settings.copyWith(allowUnreadContext: value);
@@ -308,7 +316,7 @@ class AiSettingsController extends ChangeNotifier {
   }
 
   /// Opens the isolated native tool-calling adapter for the selected protocol.
-  AiModelAdapter? openModelAdapter() {
+  AiModelAdapter? openModelAdapter({bool? reasoningEnabled}) {
     if (!_settings.enabled) return null;
     if (_settings.resolvedModel.isEmpty) return null;
     return modelAdapterFactory.create(
@@ -316,6 +324,7 @@ class AiSettingsController extends ChangeNotifier {
       baseUrl: _settings.resolvedBaseUrl,
       apiKey: _apiKey,
       model: _settings.resolvedModel,
+      reasoningEnabled: reasoningEnabled ?? _settings.reasoningEnabled,
     );
   }
 
@@ -410,6 +419,7 @@ class AiSettingsController extends ChangeNotifier {
       baseUrl: _settings.resolvedBaseUrl,
       apiKey: key,
       model: _settings.resolvedModel,
+      reasoningEnabled: _settings.reasoningEnabled,
     );
     if (adapter == null) {
       final result = const AiConnectionTestResult.failure('无法创建连接，请检查配置');
@@ -426,8 +436,8 @@ class AiSettingsController extends ChangeNotifier {
 
     final sw = Stopwatch()..start();
     try {
-      // maxTokens must leave room beyond any residual reasoning; DeepSeek
-      // thinking is disabled in the OpenAI-compatible body for deepseek hosts.
+      // maxTokens must leave room beyond any provider-visible reasoning when
+      // the configured default enables it for the probe.
       AiModelTurnCompleted? completion;
       await for (final event in adapter.streamTurn(
         const AiModelTurnRequest(
@@ -437,7 +447,7 @@ class AiSettingsController extends ChangeNotifier {
               text: 'Reply with exactly: ok',
             ),
           ],
-          maxTokens: 64,
+          maxTokens: 1024,
           temperature: 0,
         ),
       )) {

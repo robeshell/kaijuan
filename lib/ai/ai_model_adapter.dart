@@ -43,12 +43,19 @@ class AiModelMessage {
   const AiModelMessage({
     required this.role,
     this.text = '',
+    this.reasoningText = '',
+    this.reasoningMetadata = const {},
     this.toolCalls = const [],
     this.toolResults = const [],
   });
 
   final AiModelRole role;
   final String text;
+
+  /// Provider reasoning required to continue some native tool turns.
+  /// It is never answer text; supported products may surface it separately.
+  final String reasoningText;
+  final Map<String, Object?> reasoningMetadata;
   final List<AiModelToolCall> toolCalls;
   final List<AiModelToolResult> toolResults;
 }
@@ -107,9 +114,27 @@ final class AiModelTextDelta extends AiModelTurnEvent {
   final String text;
 }
 
+/// Provider-supplied visible reasoning, kept separate from answer text.
+///
+/// Only adapters whose protocol exposes reasoning emit this event. Consumers
+/// may present it as an optional disclosure but must never append it to the
+/// answer or ordinary conversation history.
+final class AiModelReasoningDelta extends AiModelTurnEvent {
+  const AiModelReasoningDelta(
+    this.text, {
+    this.kind = AiReasoningContentKind.process,
+  });
+
+  final String text;
+  final AiReasoningContentKind kind;
+}
+
 final class AiModelTurnCompleted extends AiModelTurnEvent {
   const AiModelTurnCompleted({
     required this.text,
+    this.reasoningText = '',
+    this.reasoningKind = AiReasoningContentKind.process,
+    this.reasoningMetadata = const {},
     required this.toolCalls,
     required this.truncated,
     this.inputTokens,
@@ -117,6 +142,9 @@ final class AiModelTurnCompleted extends AiModelTurnEvent {
   });
 
   final String text;
+  final String reasoningText;
+  final AiReasoningContentKind reasoningKind;
+  final Map<String, Object?> reasoningMetadata;
   final List<AiModelToolCall> toolCalls;
   final bool truncated;
   final int? inputTokens;
@@ -149,5 +177,6 @@ abstract interface class AiModelAdapterFactory {
     required String baseUrl,
     required String apiKey,
     required String model,
+    bool reasoningEnabled = false,
   });
 }

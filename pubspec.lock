@@ -18,7 +18,7 @@ packages:
     source: hosted
     version: "13.0.0"
   anthropic_sdk_dart:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: anthropic_sdk_dart
       sha256: c6156e106927eea40b75c4a97f193ea93e12adb033c41d51742b61b7ea122f17

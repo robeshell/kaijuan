@@ -12,6 +12,7 @@ import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_family_tree.dart';
 import '../../../ai/ai_graph_service.dart';
 import '../../../ai/ai_models.dart';
+import '../../../ai/ai_provider_kind.dart';
 import '../../../ai/ai_run.dart';
 import '../../../ai/ai_search.dart';
 import '../../../ai/ai_user_error.dart';
@@ -152,6 +153,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   /// In-panel toggle: when on, fetch web hits before each reply.
   bool _webSearchOn = false;
+  late bool _deepThinkingOn;
   bool _searchingWeb = false;
 
   /// Last completed search hit count (null = no search this turn yet).
@@ -168,6 +170,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   StreamSubscription<AiRunEvent>? _sub;
   AiRunState? _runState;
   String _streaming = '';
+  String _streamingReasoning = '';
+  AiReasoningContentKind _streamingReasoningKind =
+      AiReasoningContentKind.process;
 
   /// Work key of the in-flight turn, captured at send time so a mid-stream
   /// page flip doesn't reroute a stop/partial commit into the new work.
@@ -207,6 +212,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _activeTurnVisible &&
       _sending &&
       _streaming.isEmpty &&
+      _streamingReasoning.isEmpty &&
       !_searchingWeb &&
       _toolStatus == null;
 
@@ -262,6 +268,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       vsync: this,
     )..addListener(_onTabChanged);
     _c.addListener(_onReaderControllerChanged);
+    _deepThinkingOn = _c.defaultDeepThinkingEnabled;
     final sel = widget.initialSelection?.trim() ?? '';
     _selection = sel.isEmpty ? null : sel;
     unawaited(_bootstrap());
@@ -362,7 +369,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<void> _persist() => _c.saveChatSession(_session);
 
   void _scheduleStreamingCheckpoint() {
-    if (!_sending || _activeTurnId == null || _streaming.trim().isEmpty) return;
+    if (!_sending ||
+        _activeTurnId == null ||
+        (_streaming.trim().isEmpty && _streamingReasoning.trim().isEmpty)) {
+      return;
+    }
     if (_streamCheckpointTimer?.isActive ?? false) return;
     final now = DateTime.now();
     final elapsed = _lastStreamCheckpointAt == null
@@ -383,13 +394,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _streamCheckpointTimer = null;
     final turnId = _activeTurnId;
     final body = _streaming.trim();
-    if (!_sending || turnId == null || body.isEmpty) return;
+    final reasoning = _streamingReasoning.trim();
+    if (!_sending || turnId == null || (body.isEmpty && reasoning.isEmpty)) {
+      return;
+    }
     _lastStreamCheckpointAt = DateTime.now();
     final snapshot = AiChatSessionOps.appendBounded(
       _session,
       AiChatMessage(
         role: AiMessageRole.assistant,
         content: body,
+        reasoningContent: reasoning,
+        reasoningKind: _streamingReasoningKind,
         createdAt: DateTime.now(),
         turnId: turnId,
         status: AiChatTurnStatus.pending,
@@ -472,6 +488,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _suggestionCancel = null;
 
     final wantWeb = _webSearchOn;
+    final wantDeepThinking = _c.supportsDeepThinking ? _deepThinkingOn : null;
     final retrying = preset != null && preset == _retryText;
     if (wantWeb && !_canWebSearch) {
       showAppSnackBar(context, '请先在设置中填写联网搜索 Key');
@@ -554,6 +571,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _retryText = null;
       _retryTurnId = null;
       _streaming = '';
+      _streamingReasoning = '';
+      _streamingReasoningKind = AiReasoningContentKind.process;
       _toolStatus = null;
       _runState = null;
     });
@@ -631,6 +650,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       context: chatContext,
       workScope: turnWork,
       webHits: webHits,
+      reasoningEnabled: wantDeepThinking,
       cancelToken: turnCancel,
       runId: turnId,
     );
@@ -665,15 +685,20 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _error = aiUserErrorMessage(error, operation: AiUserOperation.chat);
         _retryText = text;
         _retryTurnId = turnId;
-        if (_streaming.trim().isNotEmpty) {
+        if (_streaming.trim().isNotEmpty ||
+            _streamingReasoning.trim().isNotEmpty) {
           _commitAssistant(
             _streaming,
+            reasoningContent: _streamingReasoning,
+            reasoningKind: _streamingReasoningKind,
             workKey: turnWorkKey,
             turnId: turnId,
             status: AiChatTurnStatus.failed,
           );
         }
         _streaming = '';
+        _streamingReasoning = '';
+        _streamingReasoningKind = AiReasoningContentKind.process;
         _activeTurnId = null;
         _activeTurnWorkKey = null;
         _runState = null;
@@ -694,9 +719,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         setState(() {
           _runState = next;
           _streaming = next.text;
+          _streamingReasoning = next.reasoningText;
+          _streamingReasoningKind = next.reasoningKind;
           _toolStatus = next.status;
         });
-        if (event is AiRunTextSnapshot) {
+        if (event is AiRunTextSnapshot || event is AiRunReasoningSnapshot) {
           _scheduleStreamingCheckpoint();
           _scrollToEnd();
         } else if (event case AiRunFailed(:final error)) {
@@ -710,6 +737,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         if (!mounted || endedWithFailure) return;
         _cancelStreamingCheckpoint();
         final body = _streaming.trim();
+        final reasoning = _streamingReasoning.trim();
         int? assistantIndex;
         setState(() {
           _sending = false;
@@ -721,7 +749,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               AiChatTurnStatus.completed,
               workKey: turnWorkKey,
             );
-            _commitAssistant(body, workKey: turnWorkKey, turnId: turnId);
+            _commitAssistant(
+              body,
+              reasoningContent: reasoning,
+              reasoningKind: _streamingReasoningKind,
+              workKey: turnWorkKey,
+              turnId: turnId,
+            );
             assistantIndex = _session.messagesFor(turnWorkKey).length - 1;
           } else {
             _setTurnStatus(
@@ -738,6 +772,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             _retryTurnId = null;
           }
           _streaming = '';
+          _streamingReasoning = '';
+          _streamingReasoningKind = AiReasoningContentKind.process;
           _activeTurnId = null;
           _activeTurnWorkKey = null;
           _runState = null;
@@ -781,6 +817,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   void _commitAssistant(
     String body, {
+    String reasoningContent = '',
+    AiReasoningContentKind reasoningKind = AiReasoningContentKind.process,
     String? workKey,
     required String turnId,
     AiChatTurnStatus status = AiChatTurnStatus.completed,
@@ -789,6 +827,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       AiChatMessage(
         role: AiMessageRole.assistant,
         content: body,
+        reasoningContent: reasoningContent,
+        reasoningKind: reasoningKind,
         createdAt: DateTime.now(),
         turnId: turnId,
         status: status,
@@ -869,6 +909,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final cancellation = sub?.cancel();
     if (!mounted) return;
     final body = _streaming.trim();
+    final reasoning = _streamingReasoning.trim();
     setState(() {
       _sending = false;
       _searchingWeb = false;
@@ -881,15 +922,21 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           workKey: turnWorkKey,
         );
       }
-      if (commitPartial && body.isNotEmpty && turnId != null) {
+      if (commitPartial &&
+          (body.isNotEmpty || reasoning.isNotEmpty) &&
+          turnId != null) {
         _commitAssistant(
           body,
+          reasoningContent: reasoning,
+          reasoningKind: _streamingReasoningKind,
           workKey: turnWorkKey,
           turnId: turnId,
           status: AiChatTurnStatus.cancelled,
         );
       }
       _streaming = '';
+      _streamingReasoning = '';
+      _streamingReasoningKind = AiReasoningContentKind.process;
       _cancel = CancelToken();
       _activeTurnId = null;
       _activeTurnWorkKey = null;
@@ -917,9 +964,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final workKey = _activeTurnWorkKey;
     _setTurnStatus(turnId, AiChatTurnStatus.cancelled, workKey: workKey);
     final body = _streaming.trim();
-    if (body.isNotEmpty) {
+    final reasoning = _streamingReasoning.trim();
+    if (body.isNotEmpty || reasoning.isNotEmpty) {
       _commitAssistant(
         body,
+        reasoningContent: reasoning,
+        reasoningKind: _streamingReasoningKind,
         workKey: workKey,
         turnId: turnId,
         status: AiChatTurnStatus.cancelled,
@@ -967,6 +1017,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _error = null;
         _retryText = null;
         _streaming = '';
+        _streamingReasoning = '';
+        _streamingReasoningKind = AiReasoningContentKind.process;
         _toolStatus = null;
         _generatingFollowUp = false;
       });
@@ -2843,6 +2895,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         !_generatingFollowUp &&
         !_searchingWeb &&
         _streaming.isEmpty &&
+        _streamingReasoning.isEmpty &&
         _error == null &&
         _messages.isNotEmpty &&
         _messages.last.role == AiMessageRole.assistant &&
@@ -3029,6 +3082,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       ),
                       if (_messages.isEmpty &&
                           _streaming.isEmpty &&
+                          _streamingReasoning.isEmpty &&
                           !_searchingWeb)
                         Padding(
                           padding: EdgeInsets.fromLTRB(
@@ -3080,11 +3134,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                             state: _statusOrbState,
                           ),
                         ),
-                      if (_activeTurnVisible && _streaming.isNotEmpty)
+                      if (_activeTurnVisible &&
+                          (_streaming.isNotEmpty ||
+                              _streamingReasoning.isNotEmpty))
                         _Bubble(
                           message: AiChatMessage(
                             role: AiMessageRole.assistant,
                             content: _streaming,
+                            reasoningContent: _streamingReasoning,
+                            reasoningKind: _streamingReasoningKind,
                           ),
                           streaming: true,
                         ),
@@ -3130,6 +3188,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       onPressed: () =>
                           unawaited(_onWebSearchChanged(!_webSearchOn)),
                     ),
+                    if (_c.supportsDeepThinking) ...[
+                      const SizedBox(width: 8),
+                      _DeepThinkingToggle(
+                        enabled: !_sending,
+                        selected: _deepThinkingOn,
+                        onPressed: () =>
+                            setState(() => _deepThinkingOn = !_deepThinkingOn),
+                      ),
+                    ],
                     if (hasSelection) ...[
                       const SizedBox(width: 8),
                       Expanded(
@@ -3398,6 +3465,55 @@ class _WebSearchToggle extends StatelessWidget {
   }
 }
 
+class _DeepThinkingToggle extends StatelessWidget {
+  const _DeepThinkingToggle({
+    required this.enabled,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final bool enabled;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final foreground = selected ? colors.primary : context.appSecondaryText;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: '深度思考',
+      value: selected ? '已开启' : '已关闭',
+      toggled: selected,
+      child: Tooltip(
+        message: selected ? '深度思考已开启' : '开启深度思考',
+        child: ExcludeSemantics(
+          child: IconButton(
+            key: const ValueKey<String>('ai-chat-deep-thinking-toggle'),
+            onPressed: enabled ? onPressed : null,
+            icon: const Icon(KaijuanIcons.aiChat, size: 18),
+            style: IconButton.styleFrom(
+              foregroundColor: foreground,
+              backgroundColor: selected
+                  ? colors.primary.withValues(alpha: 0.14)
+                  : colors.surfaceContainerHighest.withValues(alpha: 0.42),
+              disabledForegroundColor: context.appSecondaryText.withValues(
+                alpha: 0.5,
+              ),
+              minimumSize: Size.square(context.appIsCompact ? 44 : 40),
+              padding: const EdgeInsets.all(8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SuggestedQuestionList extends StatelessWidget {
   const _SuggestedQuestionList({
     required this.shortcuts,
@@ -3514,12 +3630,23 @@ class _Bubble extends StatelessWidget {
                 ),
               ),
             )
-          else
-            AiResultBody(
-              text: message.content,
-              compact: compact,
-              streaming: streaming,
-            ),
+          else ...[
+            if (message.reasoningContent.trim().isNotEmpty)
+              _ReasoningDisclosure(
+                text: message.reasoningContent,
+                streaming: streaming,
+                kind: message.reasoningKind,
+              ),
+            if (message.reasoningContent.trim().isNotEmpty &&
+                message.content.trim().isNotEmpty)
+              const SizedBox(height: 8),
+            if (message.content.trim().isNotEmpty)
+              AiResultBody(
+                text: message.content,
+                compact: compact,
+                streaming: streaming,
+              ),
+          ],
           if (isUser && webHits != null) ...[
             const SizedBox(height: 6),
             Text(
@@ -3579,6 +3706,113 @@ class _Bubble extends StatelessWidget {
               child: IntrinsicWidth(child: bubble),
             )
           : SizedBox(width: maxWidth, child: bubble),
+    );
+  }
+}
+
+class _ReasoningDisclosure extends StatefulWidget {
+  const _ReasoningDisclosure({
+    required this.text,
+    required this.streaming,
+    required this.kind,
+  });
+
+  final String text;
+  final bool streaming;
+  final AiReasoningContentKind kind;
+
+  @override
+  State<_ReasoningDisclosure> createState() => _ReasoningDisclosureState();
+}
+
+class _ReasoningDisclosureState extends State<_ReasoningDisclosure> {
+  late bool _expanded = widget.streaming;
+
+  @override
+  void didUpdateWidget(covariant _ReasoningDisclosure oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.streaming != oldWidget.streaming) {
+      _expanded = widget.streaming;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final label = widget.streaming
+        ? '正在思考'
+        : widget.kind == AiReasoningContentKind.summary
+        ? '思考摘要'
+        : '思考过程';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.32),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            button: true,
+            label: label,
+            value: _expanded ? '已展开' : '已折叠',
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      KaijuanIcons.aiChat,
+                      size: 15,
+                      color: context.appSecondaryText,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: context.appCaptionSize,
+                          fontWeight: FontWeight.w600,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.25 : 0,
+                      duration: const Duration(milliseconds: 160),
+                      child: Icon(
+                        KaijuanIcons.chevronRight,
+                        size: 15,
+                        color: context.appSecondaryText,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: SelectionArea(
+                child: Text(
+                  widget.text,
+                  style: TextStyle(
+                    fontSize: context.appCaptionSize,
+                    height: 1.55,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

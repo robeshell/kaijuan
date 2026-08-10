@@ -697,6 +697,31 @@ Genkit adapter 将 OpenAI Compatible Function Calling 与 Anthropic Tool Use 归
 
 迁移完成后，`dart run build_runner build`、`flutter analyze` 和完整 `flutter test` 均通过，测试结果为 **559 / 559**；Genkit CLI smoke 同时验证了纯文本、结构化输出与 trace span。
 
+### 7.13 阶段六：从单一厂商开关到跨 Provider 推理能力层
+
+最初的深度思考只是 DeepSeek 专用增强。设置保存一个布尔偏好，OpenAI Compatible adapter 向 DeepSeek 请求体注入 `thinking.type`，再从 SSE 的 `reasoning_content` 中分离思考过程。这条链路验证了交互价值，也暴露出一个新的抽象问题：产品概念叫“深度思考”，供应商协议却并不统一。
+
+下一步没有把 DeepSeek 字段复制到每个 controller，而是在 App 自有模型契约中建立 Provider 中立的推理能力：
+
+| Provider | 开启 | 关闭 | 可见内容 |
+|----------|------|------|----------|
+| DeepSeek | `thinking.type=enabled` | `thinking.type=disabled` | `reasoning_content`，标为思考过程 |
+| Anthropic | 新模型 adaptive thinking，旧模型 manual budget | disabled | summarized display，标为思考摘要 |
+| OpenAI | `reasoning_effort=high` | 新模型 none，旧推理模型 low | Chat Completions 未返回时不显示空面板 |
+| xAI Grok | high | low，不能承诺彻底关闭 | `reasoning_content` 等公开摘要 |
+| Ollama | high | none 或模型支持的最低档 | 读取 `reasoning` / `thinking` 等兼容字段 |
+| 自定义 OpenAI Compatible | 尽力发送 high | 完全省略扩展字段 | 只展示端点实际返回的兼容字段 |
+
+这个抽象同时包含三类信息：当前模型能否控制推理、开关如何映射成供应商参数、返回内容应标为“过程”还是“摘要”。UI 只依赖能力描述，不再判断供应商名称；设置中的默认值会初始化每个对话面板，面板开关只临时覆盖当前面板。
+
+这一步也纠正了“显示思维链”的产品表述。部分供应商只返回摘要，部分模型完全不公开推理内容，最新 Anthropic 模型甚至可以只返回加密思考块。开卷只展示供应商明确返回并允许展示的内容，不用等待动画或模型正文伪造思考过程，也不承诺取得完整的隐藏推理。
+
+Anthropic 是这一阶段最能说明框架边界的案例。锁定的 `genkit_anthropic 0.2.11` 可以把响应 thinking block 转成 `ReasoningPart`，却会在下一轮出站转换时丢掉它。普通单轮回答不受影响，但带工具的对话必须把原 thinking、签名以及不可见的 `redacted_thinking` 按原顺序回传，否则第二轮可能收到 400。开卷因此在 adapter 内增加一个局部插件补丁，仍复用 Genkit 模型、schema、trace 和 Anthropic SDK，只修复消息往返缺口。签名与加密块只存在于当前运行，不进入 UI、会话 JSON 或 WebDAV。
+
+确定性 Workflow 还有另一项协议边界。Anthropic 的 Genkit constrained output 通过强制 `return_output` 工具保证 schema，而官方协议并不稳定保证强制工具与 thinking 可组合。大纲和知识图谱的该次结构化调用会显式关闭 Anthropic thinking，优先保住 schema 和一次成功率；普通对话、词典和翻译仍服从用户开关。这不是静默降级模型协议，而是 adapter 在发请求前按已知组合约束选择可验证路径。
+
+阶段六完成后，新增协议测试覆盖六类 Provider 的请求映射、三种 OpenAI Compatible 推理字段、Anthropic adaptive summarized display、签名与加密思考块连续性、结构化输出冲突规避、设置与会话持久化。`flutter analyze` 与完整 `flutter test` 通过，结果为 **569 / 569**；Genkit CLI trace ID 为 `d17903e125ae40415121b4a1247e3eb7`。
+
 ---
 
 ## 8. 三组容易混淆的概念
@@ -810,6 +835,7 @@ Agent 框架提供模型、工具、状态、事件、追踪与持久化抽象�
 | 模型契约 | `lib/ai/ai_model_adapter.dart` | 单回合流式生成、原生工具与结构化输出的 App 自有类型 |
 | Adapter 工厂 | `lib/ai/ai_model_adapter_factory.dart` | Provider 配置到 Genkit adapter 的唯一装配入口 |
 | Genkit adapters | `lib/ai/adapters/genkit_*_model_adapter.dart` | OpenAI Compatible / Anthropic 归一化、流式、工具与结构化输出 |
+| Anthropic 局部补丁 | `lib/ai/adapters/kaijuan_anthropic_plugin.dart` | 保留 thinking 签名、`redacted_thinking` 与 summarized display，不向业务层泄漏 SDK 类型 |
 | 对话服务 | `lib/ai/ai_chat_service.dart` | Prompt、原生工具循环、正文流与自动续写 |
 | 工具定义 | `lib/ai/ai_chat_tools.dart` | 五个只读工具的 schema、白名单、预算与执行 |
 | 工具宿主 | `lib/ai/ai_book_chat_tool_host.dart` | 目录、章节、搜索、取样与二次范围收窄 |
@@ -840,9 +866,10 @@ Agent 框架提供模型、工具、状态、事件、追踪与持久化抽象�
 - 阶段三“多轮 Tool Agent”仍由开卷确定性控制，不引入多 Agent 或自由自治；
 - 阶段四“开卷统一 AiRun Runtime”已完成；
 - 阶段五“Genkit adapter 与全工作流迁移”已完成；
+- 阶段六“跨 Provider 推理能力与可见摘要”已完成；
 - 词典、选区翻译、大纲、知识图谱和连接测试已迁移到统一模型契约；
 - 旧 Provider 生成双栈与协议回退已删除；
-- `dart run build_runner build`、`flutter analyze` 与完整 `flutter test` 已通过，测试结果为 **559 / 559**；
+- `dart run build_runner build`、`flutter analyze` 与完整 `flutter test` 已通过，当前测试结果为 **569 / 569**；
 - Genkit CLI 本地 smoke 已验证纯文本、结构化输出与 trace span。
 
 后续工作应从“框架能否工作”转向真实阅读质量评估：用固定书目、固定问题和固定模型，分别记录 scope、工具证据、最终答案、延迟与失败恢复，避免只凭一次主观体验判断模型或框架质量。

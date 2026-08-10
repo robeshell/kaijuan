@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_run.dart';
+import 'package:kaijuan/ai/ai_provider_kind.dart';
 
 void main() {
   const scope = AiRunScope(
@@ -69,9 +70,16 @@ void main() {
         occurredAt: time,
         text: '完整回答',
       ),
-      AiRunCompleted(
+      AiRunReasoningSnapshot(
         runId: descriptor.runId,
         sequence: 8,
+        occurredAt: time,
+        text: '先核对章节，再组织回答。',
+        kind: AiReasoningContentKind.process,
+      ),
+      AiRunCompleted(
+        runId: descriptor.runId,
+        sequence: 9,
         occurredAt: time,
         text: '完整回答',
       ),
@@ -85,11 +93,12 @@ void main() {
     expect(state.phase, AiRunPhase.completed);
     expect(state.scope.contentHash, 'hash-1');
     expect(state.text, '完整回答');
+    expect(state.reasoningText, '先核对章节，再组织回答。');
     expect(state.modelCallCount, 1);
     expect(state.toolRound, 1);
     expect(state.continuationRound, 1);
     expect(state.usage.toolResultChars, 200);
-    expect(state.lastSequence, 8);
+    expect(state.lastSequence, 9);
     expect(state.isTerminal, isTrue);
   });
 

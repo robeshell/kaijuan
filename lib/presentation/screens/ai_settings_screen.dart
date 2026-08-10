@@ -616,6 +616,29 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                     ),
                   ),
                 ],
+                if (settings.providerKind
+                    .reasoningCapabilities(settings.resolvedModel)
+                    .supported) ...[
+                  const SizedBox(height: AppSettingsMetrics.sectionGap),
+                  const _SectionLabel('生成'),
+                  const SizedBox(height: 10),
+                  AppSettingsGroup(
+                    children: [
+                      AppSettingsSwitchRow(
+                        title: '默认开启深度思考',
+                        subtitle: settings.reasoningEnabled
+                            ? '${settings.providerKind.reasoningCapabilities(settings.resolvedModel).enabledLabel}；可在对话中临时调整'
+                            : '${settings.providerKind.reasoningCapabilities(settings.resolvedModel).disabledLabel}；可在对话中临时调整',
+                        value: settings.reasoningEnabled,
+                        onChanged: fieldsEnabled
+                            ? (value) => unawaited(
+                                controller.setReasoningEnabled(value),
+                              )
+                            : null,
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: AppSettingsMetrics.sectionGap),
                 const _SectionLabel('联网搜索'),
                 const SizedBox(height: 10),

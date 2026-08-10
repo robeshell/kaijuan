@@ -1,19 +1,17 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:genkit/genkit.dart' as genkit;
 import 'package:genkit_anthropic/genkit_anthropic.dart';
-// The public plugin handle does not expose transport shutdown. This Preview
-// implementation type is contained in this adapter so cancellation can abort
-// the request instead of merely hiding its output.
-// ignore: implementation_imports
-import 'package:genkit_anthropic/src/plugin_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:schemantic/schemantic.dart';
 
 import '../ai_cancel.dart';
 import '../ai_model_adapter.dart';
 import '../ai_models.dart';
+import '../ai_provider_kind.dart';
+import 'kaijuan_anthropic_plugin.dart';
 
 /// Isolated official Genkit Anthropic plugin integration.
 ///
@@ -25,6 +23,7 @@ class GenkitAnthropicModelAdapter
     required String baseUrl,
     required this._apiKey,
     required String model,
+    this.reasoningEnabled = false,
     this.requestTimeout = const Duration(seconds: 45),
     this.retryDelay = const Duration(milliseconds: 700),
     this.maxAttempts = 2,
@@ -37,10 +36,11 @@ class GenkitAnthropicModelAdapter
   final String _baseUrl;
   final String _apiKey;
   final String _modelName;
+  final bool reasoningEnabled;
   final Duration requestTimeout;
   final Duration retryDelay;
   final int maxAttempts;
-  late AnthropicPluginImpl _plugin;
+  late KaijuanAnthropicPlugin _plugin;
   late genkit.Genkit _ai;
   final Map<String, genkit.Tool> _tools = {};
   var _closed = false;
@@ -49,7 +49,7 @@ class GenkitAnthropicModelAdapter
   String get runtimeName => 'genkit-anthropic/0.2.11';
 
   void _createRuntime() {
-    _plugin = AnthropicPluginImpl(apiKey: _apiKey, baseUrl: _baseUrl);
+    _plugin = KaijuanAnthropicPlugin(apiKey: _apiKey, baseUrl: _baseUrl);
     _ai = genkit.Genkit(plugins: [_plugin], promptDir: null);
   }
 
@@ -77,6 +77,11 @@ class GenkitAnthropicModelAdapter
           cancelToken: cancelToken,
         )) {
           if (event case AiModelTextDelta(
+            text: final text,
+          ) when text.isNotEmpty) {
+            emittedText = true;
+          }
+          if (event case AiModelReasoningDelta(
             text: final text,
           ) when text.isNotEmpty) {
             emittedText = true;
@@ -117,8 +122,11 @@ class GenkitAnthropicModelAdapter
         returnToolRequests: true,
         maxTurns: 1,
         config: AnthropicOptions(
-          maxTokens: request.maxTokens < 1 ? 1 : request.maxTokens,
-          temperature: request.temperature.clamp(0.0, 1.0),
+          maxTokens: _effectiveMaxTokens(request.maxTokens),
+          temperature: reasoningEnabled
+              ? null
+              : request.temperature.clamp(0.0, 1.0),
+          thinking: _thinkingConfig,
         ),
       );
       final chunks = stream.timeout(
@@ -132,7 +140,19 @@ class GenkitAnthropicModelAdapter
       );
       await for (final chunk in chunks) {
         cancelToken?.throwIfCancelled();
-        if (chunk.text.isNotEmpty) yield AiModelTextDelta(chunk.text);
+        for (final part in chunk.content) {
+          if (part.isReasoning) {
+            final reasoning = part.reasoning?.trim();
+            if (reasoning != null && reasoning.isNotEmpty) {
+              yield AiModelReasoningDelta(
+                part.reasoning!,
+                kind: AiReasoningContentKind.summary,
+              );
+            }
+          } else if (part.isText && part.text?.isNotEmpty == true) {
+            yield AiModelTextDelta(part.text!);
+          }
+        }
       }
       if (timedOut) return;
       cancelToken?.throwIfCancelled();
@@ -180,8 +200,12 @@ class GenkitAnthropicModelAdapter
         throw AiProviderException('工具调用响应被截断，未执行任何工具');
       }
       final usage = response.usage;
+      final reasoning = _extractReasoning(response.message);
       yield AiModelTurnCompleted(
         text: response.text,
+        reasoningText: reasoning.text,
+        reasoningKind: AiReasoningContentKind.summary,
+        reasoningMetadata: reasoning.metadata,
         toolCalls: List.unmodifiable(calls),
         truncated: finishReason == genkit.FinishReason.length,
         inputTokens: usage?.inputTokens?.round(),
@@ -243,6 +267,10 @@ class GenkitAnthropicModelAdapter
             config: AnthropicOptions(
               maxTokens: request.maxTokens < 1 ? 1 : request.maxTokens,
               temperature: request.temperature.clamp(0.0, 1.0),
+              // Genkit constrained output forces the synthetic return_output
+              // tool. Anthropic rejects forced tool choice with thinking on,
+              // so structured workflows prioritize schema guarantees.
+              thinking: ThinkingConfig(type: 'disabled'),
             ),
           )
           .timeout(
@@ -292,6 +320,7 @@ class GenkitAnthropicModelAdapter
 
   static genkit.Message _toGenkitMessage(AiModelMessage message) {
     final parts = <genkit.Part>[
+      ..._reasoningParts(message),
       if (message.text.isNotEmpty) genkit.TextPart(text: message.text),
       for (final call in message.toolCalls)
         genkit.ToolRequestPart(
@@ -323,6 +352,107 @@ class GenkitAnthropicModelAdapter
       },
       content: parts,
     );
+  }
+
+  static List<genkit.Part> _reasoningParts(AiModelMessage message) {
+    final rawBlocks = message.reasoningMetadata['blocks'];
+    if (rawBlocks is List) {
+      final parts = <genkit.Part>[];
+      for (final raw in rawBlocks) {
+        if (raw is! Map) continue;
+        final redactedData = raw['redactedData'];
+        if (redactedData is String && redactedData.isNotEmpty) {
+          parts.add(
+            genkit.ReasoningPart(
+              reasoning: '',
+              metadata: {'redactedData': redactedData},
+            ),
+          );
+          continue;
+        }
+        final text = raw['text'];
+        final signature = raw['signature'];
+        if (text is String &&
+            text.isNotEmpty &&
+            signature is String &&
+            signature.isNotEmpty) {
+          parts.add(
+            genkit.ReasoningPart(
+              reasoning: text,
+              metadata: {'signature': signature},
+            ),
+          );
+        }
+      }
+      if (parts.isNotEmpty) return parts;
+    }
+    if (message.reasoningText.isEmpty) return const [];
+    final signature = message.reasoningMetadata['signature'];
+    return [
+      genkit.ReasoningPart(
+        reasoning: message.reasoningText,
+        metadata: signature is String && signature.isNotEmpty
+            ? {'signature': signature}
+            : null,
+      ),
+    ];
+  }
+
+  _AnthropicReasoning _extractReasoning(genkit.Message? message) {
+    if (message == null) return const _AnthropicReasoning();
+    final blocks = <Map<String, Object?>>[];
+    for (final part in message.content) {
+      if (!part.isReasoning) continue;
+      final text = part.reasoning?.trim();
+      final signature = part.metadata?['signature'];
+      final redactedData = part.metadata?['redactedData'];
+      if (redactedData is String && redactedData.isNotEmpty) {
+        blocks.add({'redactedData': redactedData});
+        continue;
+      }
+      if (text == null || text.isEmpty) continue;
+      blocks.add({
+        'text': part.reasoning!,
+        if (signature is String && signature.isNotEmpty) 'signature': signature,
+      });
+    }
+    return _AnthropicReasoning(
+      text: blocks
+          .map((block) => block['text'])
+          .whereType<String>()
+          .join('\n\n'),
+      metadata: blocks.isEmpty ? const {} : {'blocks': blocks},
+    );
+  }
+
+  ThinkingConfig get _thinkingConfig {
+    if (!reasoningEnabled) return ThinkingConfig(type: 'disabled');
+    if (_supportsAdaptiveThinking(_modelName)) {
+      return ThinkingConfig(type: 'adaptive');
+    }
+    return ThinkingConfig(type: 'enabled', budgetTokens: 1024);
+  }
+
+  int _effectiveMaxTokens(int requested) {
+    final normalized = requested < 1 ? 1 : requested;
+    if (reasoningEnabled && !_supportsAdaptiveThinking(_modelName)) {
+      return math.max(normalized, 2048);
+    }
+    return normalized;
+  }
+
+  static bool _supportsAdaptiveThinking(String value) {
+    final model = value.toLowerCase();
+    if (model.contains('claude-3') ||
+        model.contains('4-0') ||
+        model.contains('4.0') ||
+        model.contains('4-1') ||
+        model.contains('4.1') ||
+        model.contains('4-5') ||
+        model.contains('4.5')) {
+      return false;
+    }
+    return true;
   }
 
   static String _escapeUntrustedToolOutput(Object? output) {
@@ -398,4 +528,11 @@ class GenkitAnthropicModelAdapter
     _plugin.close();
     await _ai.shutdown();
   }
+}
+
+final class _AnthropicReasoning {
+  const _AnthropicReasoning({this.text = '', this.metadata = const {}});
+
+  final String text;
+  final Map<String, Object?> metadata;
 }

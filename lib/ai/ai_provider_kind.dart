@@ -64,4 +64,85 @@ enum AiProviderKind {
     // Local models depend on what the user has pulled; resolve via 获取模型.
     AiProviderKind.ollama => '',
   };
+
+  /// Product-level reasoning capability for the selected provider/model.
+  ///
+  /// This deliberately describes behavior rather than exposing vendor request
+  /// fields to controllers or widgets.
+  AiReasoningCapabilities reasoningCapabilities(String model) => switch (this) {
+    AiProviderKind.openai => AiReasoningCapabilities(
+      supported: _isOpenAiReasoningModel(model),
+      visibleKind: AiReasoningContentKind.summary,
+      disabledLabel: '关闭或使用最低推理强度',
+      enabledLabel: '使用高推理强度',
+    ),
+    AiProviderKind.anthropic => const AiReasoningCapabilities(
+      supported: true,
+      visibleKind: AiReasoningContentKind.summary,
+      disabledLabel: '关闭扩展思考',
+      enabledLabel: '使用自适应思考',
+    ),
+    AiProviderKind.deepseek => const AiReasoningCapabilities(
+      supported: true,
+      visibleKind: AiReasoningContentKind.process,
+      disabledLabel: '关闭思考模式',
+      enabledLabel: '开启思考模式',
+    ),
+    AiProviderKind.xai => const AiReasoningCapabilities(
+      supported: true,
+      visibleKind: AiReasoningContentKind.summary,
+      disabledLabel: '使用低推理强度',
+      enabledLabel: '使用高推理强度',
+    ),
+    AiProviderKind.custom => const AiReasoningCapabilities(
+      supported: true,
+      visibleKind: AiReasoningContentKind.process,
+      disabledLabel: '不发送兼容扩展字段',
+      enabledLabel: '尝试使用高推理强度',
+    ),
+    AiProviderKind.ollama => const AiReasoningCapabilities(
+      supported: true,
+      visibleKind: AiReasoningContentKind.process,
+      disabledLabel: '关闭或使用模型最低强度',
+      enabledLabel: '使用高推理强度',
+    ),
+  };
+
+  static bool _isOpenAiReasoningModel(String value) {
+    final model = value.trim().toLowerCase();
+    return RegExp(
+      r'^(gpt-5(?:[.-]|$)|o1(?:[.-]|$)|o3(?:[.-]|$)|o4(?:[.-]|$))',
+    ).hasMatch(model);
+  }
+}
+
+/// What a provider actually exposes for optional display.
+///
+/// `summary` is not a hidden chain of thought. It is a provider-authored,
+/// user-visible synopsis and must be labelled accordingly.
+enum AiReasoningContentKind {
+  process,
+  summary;
+
+  String get storageValue => name;
+
+  static AiReasoningContentKind fromStorage(Object? value) =>
+      AiReasoningContentKind.values.firstWhere(
+        (kind) => kind.storageValue == value,
+        orElse: () => AiReasoningContentKind.process,
+      );
+}
+
+class AiReasoningCapabilities {
+  const AiReasoningCapabilities({
+    required this.supported,
+    required this.visibleKind,
+    required this.disabledLabel,
+    required this.enabledLabel,
+  });
+
+  final bool supported;
+  final AiReasoningContentKind visibleKind;
+  final String disabledLabel;
+  final String enabledLabel;
 }

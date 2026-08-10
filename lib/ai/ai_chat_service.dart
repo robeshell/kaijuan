@@ -8,9 +8,13 @@ import 'ai_cancel.dart';
 import 'ai_log.dart';
 import 'ai_model_adapter.dart';
 import 'ai_models.dart';
+import 'ai_provider_kind.dart';
 import 'ai_run.dart';
 import 'ai_run_orchestrator.dart';
 import 'ai_search.dart';
+
+typedef AiChatModelAdapterOpener =
+    AiModelAdapter? Function({bool? reasoningEnabled});
 
 /// Book-scoped chat: **light tools** for body text, not a full-book dump.
 ///
@@ -21,12 +25,12 @@ import 'ai_search.dart';
 class AiChatService {
   AiChatService({
     required bool Function() isAvailable,
-    required AiModelAdapter? Function() openModelAdapter,
+    required AiChatModelAdapterOpener openModelAdapter,
   }) : isAvailableFn = isAvailable,
        openModelAdapterFn = openModelAdapter;
 
   final bool Function() isAvailableFn;
-  final AiModelAdapter? Function() openModelAdapterFn;
+  final AiChatModelAdapterOpener openModelAdapterFn;
 
   /// Corpus budget when tools load book text from the engine. This is the
   /// **whole-book** cap (covers typical novels ~300–700k chars), NOT the
@@ -181,6 +185,7 @@ class AiChatService {
     String? bookAuthor,
     List<AiWebSearchHit>? webHits,
     required AiChatToolHost tools,
+    bool? reasoningEnabled,
     CancelToken? cancelToken,
   }) => const AiRunOrchestrator().run(
     descriptor: run,
@@ -201,6 +206,7 @@ class AiChatService {
         bookAuthor: bookAuthor,
         webHits: webHits,
         tools: tools,
+        reasoningEnabled: reasoningEnabled,
         execution: execution,
       )) {
         execution.textSnapshot(snapshot);
@@ -216,6 +222,7 @@ class AiChatService {
     String? bookAuthor,
     List<AiWebSearchHit>? webHits,
     required AiChatToolHost tools,
+    required bool? reasoningEnabled,
     required AiRunExecution execution,
   }) async* {
     final trimmed = userText.trim();
@@ -225,7 +232,7 @@ class AiChatService {
     if (!isAvailable) {
       throw AiProviderException('AI 未启用或未配置');
     }
-    final adapter = openModelAdapterFn();
+    final adapter = openModelAdapterFn(reasoningEnabled: reasoningEnabled);
     if (adapter == null) {
       throw AiProviderException('当前模型配置不支持新 AI 运行时');
     }
@@ -270,11 +277,13 @@ class AiChatService {
       ),
     );
     var remainingToolChars = maxToolContextChars;
+    final reasoning = _AiReasoningCollector(execution);
 
     for (var round = 0; round < maxToolRounds; round++) {
       execution.ensureActive();
       if (remainingToolChars <= 0) break;
       execution.modelStarted(AiRunModelPurpose.toolDecision);
+      reasoning.startTurn();
       final streamed = StringBuffer();
       AiModelTurnCompleted? completed;
       await for (final event in adapter.streamTurn(
@@ -292,12 +301,15 @@ class AiChatService {
               streamed.write(event.text);
               yield streamed.toString();
             }
+          case AiModelReasoningDelta():
+            reasoning.addDelta(event.text, kind: event.kind);
           case AiModelTurnCompleted():
             completed = event;
         }
       }
       final result = completed;
       if (result == null) throw AiProviderException('模型响应未完整结束');
+      reasoning.completeTurn(result.reasoningText, kind: result.reasoningKind);
       execution.reportTokens(
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
@@ -317,6 +329,7 @@ class AiChatService {
             baseMessages: working,
             partial: answer,
             execution: execution,
+            reasoning: reasoning,
           );
         }
         return;
@@ -361,6 +374,8 @@ class AiChatService {
           AiModelMessage(
             role: AiModelRole.assistant,
             text: resultText,
+            reasoningText: result.reasoningText,
+            reasoningMetadata: result.reasoningMetadata,
             toolCalls: calls,
           ),
         )
@@ -372,6 +387,7 @@ class AiChatService {
       adapter: adapter,
       messages: working,
       execution: execution,
+      reasoning: reasoning,
     );
   }
 
@@ -379,8 +395,10 @@ class AiChatService {
     required AiModelAdapter adapter,
     required List<AiModelMessage> messages,
     required AiRunExecution execution,
+    required _AiReasoningCollector reasoning,
   }) async* {
     execution.modelStarted(AiRunModelPurpose.answer);
+    reasoning.startTurn();
     final buffer = StringBuffer();
     AiModelTurnCompleted? result;
     await for (final event in adapter.streamTurn(
@@ -397,12 +415,18 @@ class AiChatService {
             buffer.write(event.text);
             yield buffer.toString();
           }
+        case AiModelReasoningDelta():
+          reasoning.addDelta(event.text, kind: event.kind);
         case AiModelTurnCompleted():
           result = event;
       }
     }
     final completed = result;
     if (completed == null) throw AiProviderException('模型响应未完整结束');
+    reasoning.completeTurn(
+      completed.reasoningText,
+      kind: completed.reasoningKind,
+    );
     execution.reportTokens(
       inputTokens: completed.inputTokens,
       outputTokens: completed.outputTokens,
@@ -422,6 +446,7 @@ class AiChatService {
         baseMessages: messages,
         partial: answer,
         execution: execution,
+        reasoning: reasoning,
       );
     }
   }
@@ -431,12 +456,14 @@ class AiChatService {
     required List<AiModelMessage> baseMessages,
     required String partial,
     required AiRunExecution execution,
+    required _AiReasoningCollector reasoning,
   }) async* {
     var assembled = partial;
     try {
       for (var round = 1; round <= maxAnswerContinuationRounds; round++) {
         execution.continuationStarted(round: round);
         execution.modelStarted(AiRunModelPurpose.continuation);
+        reasoning.startTurn();
         final raw = StringBuffer();
         AiModelTurnCompleted? result;
         await for (final event in adapter.streamTurn(
@@ -464,12 +491,18 @@ class AiChatService {
                 raw.write(event.text);
                 yield _stitchContinuation(assembled, raw.toString());
               }
+            case AiModelReasoningDelta():
+              reasoning.addDelta(event.text, kind: event.kind);
             case AiModelTurnCompleted():
               result = event;
           }
         }
         final completed = result;
         if (completed == null) throw AiProviderException('自动续写响应未完整结束');
+        reasoning.completeTurn(
+          completed.reasoningText,
+          kind: completed.reasoningKind,
+        );
         execution.reportTokens(
           inputTokens: completed.inputTokens,
           outputTokens: completed.outputTokens,
@@ -762,4 +795,48 @@ class AiChatService {
       AiLog.d('chat model adapter close failed: $error');
     }
   }
+}
+
+final class _AiReasoningCollector {
+  _AiReasoningCollector(this.execution);
+
+  final AiRunExecution execution;
+  final List<String> _completedTurns = [];
+  var _currentTurn = '';
+  var _kind = AiReasoningContentKind.process;
+
+  void startTurn() => _currentTurn = '';
+
+  void addDelta(String text, {required AiReasoningContentKind kind}) {
+    if (text.isEmpty) return;
+    _kind = _mergeKind(_kind, kind);
+    _currentTurn += text;
+    _publish();
+  }
+
+  void completeTurn(String fullText, {required AiReasoningContentKind kind}) {
+    _kind = _mergeKind(_kind, kind);
+    if (fullText.isNotEmpty) _currentTurn = fullText;
+    if (_currentTurn.isEmpty) return;
+    _completedTurns.add(_currentTurn);
+    _currentTurn = '';
+    _publish();
+  }
+
+  void _publish() {
+    final parts = [
+      ..._completedTurns,
+      if (_currentTurn.isNotEmpty) _currentTurn,
+    ];
+    execution.reasoningSnapshot(parts.join('\n\n'), kind: _kind);
+  }
+
+  static AiReasoningContentKind _mergeKind(
+    AiReasoningContentKind current,
+    AiReasoningContentKind incoming,
+  ) =>
+      current == AiReasoningContentKind.summary ||
+          incoming == AiReasoningContentKind.summary
+      ? AiReasoningContentKind.summary
+      : AiReasoningContentKind.process;
 }

@@ -7,10 +7,133 @@ import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
+import 'package:kaijuan/ai/ai_provider_kind.dart';
 
 import 'support/anthropic_test_server.dart';
 
 void main() {
+  test(
+    'adaptive thinking streams a summary and preserves signed tool history',
+    () async {
+      final requests = <Map<String, dynamic>>[];
+      var call = 0;
+      final server = await AnthropicTestServer.start((request, body) async {
+        requests.add(body);
+        call++;
+        if (call == 1) {
+          await sendAnthropicSse(request, r'''
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_thinking","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":20,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"先查找书内证据。"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed-thinking-1"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"opaque-thinking-1"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_reasoning","name":"search_book","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"张居正\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":18}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+''');
+          return;
+        }
+        await sendAnthropicSse(request, anthropicTextSse('完成'));
+      });
+      final adapter = _adapter(server, reasoningEnabled: true);
+
+      try {
+        final firstEvents = await adapter
+            .streamTurn(
+              const AiModelTurnRequest(
+                messages: [AiModelMessage(role: AiModelRole.user, text: '问题')],
+                tools: AiChatTools.nativeDefinitions,
+              ),
+            )
+            .toList();
+        final delta = firstEvents.whereType<AiModelReasoningDelta>().single;
+        final first = firstEvents.whereType<AiModelTurnCompleted>().single;
+        expect(delta.text, '先查找书内证据。');
+        expect(delta.kind, AiReasoningContentKind.summary);
+        expect(first.reasoningText, '先查找书内证据。');
+        expect(first.reasoningKind, AiReasoningContentKind.summary);
+        expect(first.toolCalls.single.id, 'toolu_reasoning');
+
+        await adapter
+            .streamTurn(
+              AiModelTurnRequest(
+                messages: [
+                  const AiModelMessage(role: AiModelRole.user, text: '问题'),
+                  AiModelMessage(
+                    role: AiModelRole.assistant,
+                    reasoningText: first.reasoningText,
+                    reasoningMetadata: first.reasoningMetadata,
+                    toolCalls: first.toolCalls,
+                  ),
+                  const AiModelMessage(
+                    role: AiModelRole.tool,
+                    toolResults: [
+                      AiModelToolResult(
+                        callId: 'toolu_reasoning',
+                        name: 'search_book',
+                        output: '书内证据',
+                      ),
+                    ],
+                  ),
+                ],
+                tools: AiChatTools.nativeDefinitions,
+              ),
+            )
+            .drain<void>();
+
+        expect(requests, hasLength(2));
+        expect(requests[0]['thinking'], {
+          'type': 'adaptive',
+          'display': 'summarized',
+        });
+        expect(requests[0].containsKey('temperature'), isFalse);
+        final assistant = (requests[1]['messages'] as List)
+            .cast<Map>()
+            .singleWhere((message) => message['role'] == 'assistant');
+        final content = (assistant['content'] as List).cast<Map>();
+        expect(content.first['type'], 'thinking');
+        expect(content.first['thinking'], '先查找书内证据。');
+        expect(content.first['signature'], 'signed-thinking-1');
+        expect(content[1], {
+          'type': 'redacted_thinking',
+          'data': 'opaque-thinking-1',
+        });
+        expect(content[2]['type'], 'tool_use');
+      } finally {
+        await adapter.close();
+        await server.close();
+      }
+    },
+  );
+
   test(
     'Genkit Anthropic streams native tool use with usage and schema',
     () async {
@@ -128,7 +251,7 @@ void main() {
         'usage': {'input_tokens': 8, 'output_tokens': 4},
       });
     });
-    final adapter = _adapter(server);
+    final adapter = _adapter(server, reasoningEnabled: true);
 
     try {
       final result = await adapter.completeJson(
@@ -154,6 +277,7 @@ void main() {
         hasLength(1),
       );
       expect(captured!['tool_choice'], isA<Map>());
+      expect(captured!['thinking'], {'type': 'disabled'});
     } finally {
       await adapter.close();
       await server.close();
@@ -267,10 +391,12 @@ GenkitAnthropicModelAdapter _adapter(
   AnthropicTestServer server, {
   Duration retryDelay = const Duration(milliseconds: 700),
   int maxAttempts = 2,
+  bool reasoningEnabled = false,
 }) => GenkitAnthropicModelAdapter(
   baseUrl: '${server.baseUrl}/v1',
   apiKey: 'test-key',
   model: 'claude-sonnet-5',
+  reasoningEnabled: reasoningEnabled,
   retryDelay: retryDelay,
   maxAttempts: maxAttempts,
 );

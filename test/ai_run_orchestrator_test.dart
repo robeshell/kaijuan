@@ -40,6 +40,7 @@ void main() {
             );
             await run.checkpoint({'covered': 1});
             run.modelStarted(AiRunModelPurpose.answer);
+            run.reasoningSnapshot('先判断证据。');
             run.textSnapshot('回答');
           },
         )
@@ -54,6 +55,7 @@ void main() {
     );
     final completed = events.last as AiRunCompleted;
     expect(completed.text, '回答');
+    expect(events.whereType<AiRunReasoningSnapshot>().single.text, '先判断证据。');
     final usage = events.whereType<AiRunUsageUpdated>().last.usage;
     expect(usage.modelCalls, 2);
     expect(usage.toolRounds, 1);

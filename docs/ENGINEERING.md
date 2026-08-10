@@ -101,7 +101,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - `BookReaderController` 暂时作为兼容门面暴露 AI 命令，并持有阅读引擎回调；正文抽取缓存由 `AiBookCorpusCache` 独立负责，作品识别及“当前位置属于哪部作品”由 `AiBookStructureSession` 作为对话/大纲/图谱的唯一结构事实源。
 - `AiBookChatToolHost` 只依赖正文缓存、本轮冻结上下文和作品范围，不得依赖表现层 controller；即使阅读引擎忽略范围参数，也必须再次本地收窄，防止相邻作品正文泄漏。
 - `AiChatService` 把供应商的单次输出限制视为传输分段而非回答失败：收到 `length` / `max_tokens` 后以同一冻结上下文自动续写、去重拼接到同一回答，并设置有界保护。流式传输只允许在首个可见文字前重试瞬时故障；首字后失败保留部分正文，不得从头静默重跑。表现层按节流频率保存 pending 回答检查点，终态写入必须排在检查点之后并覆盖它。
-- AI 运行时采用“开卷确定性编排器 + 可替换模型适配层”。`AiRunState` / `AiRunEvent` 是 App 自有的纯 Dart 契约；事件文本采用**回答快照**而非不可回退 delta，支持自动续写去重拼接和消费者幂等重放。本书对话只暴露事件流，UI 不得自行推测运行阶段。
+- AI 运行时采用“开卷确定性编排器 + 可替换模型适配层”。`AiRunState` / `AiRunEvent` 是 App 自有的纯 Dart 契约；回答正文与供应商可见思考过程分别采用**完整快照**而非不可回退 delta，支持自动续写去重拼接和消费者幂等重放。本书对话只暴露事件流，UI 不得自行推测运行阶段或把思考过程拼入回答正文。
 - 对话、图谱与设置的模型和文件存储分别放置；JSON 原子写入、备份恢复与安全凭据不得混入模型类。生成数据面只经 `AiModelAdapter`，模型目录是独立只读 `AiModelCatalog`；旧 Provider 双栈不得重建。
 - 下一阶段再把对话发送状态和大纲/图谱任务状态迁入独立 workspace/conversation controller；迁移前先补 Widget 流程测试，不以 `part` 或跨文件私有字段制造形式拆分。
 - 图谱模型、文件存储、抽取、合并消歧、质量门和描述润色是独立职责。管线 orchestrator 只编排这些组件，拆分不得改变提示词、算法阈值、缓存 schema 或 checkpoint 时机。
@@ -122,13 +122,13 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 
 | 层 | 当前实现 | 保持不变 / 禁止越界 |
 |----|----------|----------------------|
-| 事件与状态 | `AiRunEvent` 带稳定 `runId`、单调序号、冻结作用域、进度、回答快照、usage 与唯一终态；`AiRunState` 纯 reducer 可幂等重放；controller 保留最近 20 个 run 状态 | 回答事件是可替换快照，不是 token delta；事件不直接成为 Drift / WebDAV schema |
+| 事件与状态 | `AiRunEvent` 带稳定 `runId`、单调序号、冻结作用域、进度、回答快照、可选思考过程快照、usage 与唯一终态；`AiRunState` 纯 reducer 可幂等重放；controller 保留最近 20 个 run 状态 | 回答与思考过程事件均是可替换快照，不是 token delta；事件不直接成为 Drift / WebDAV schema |
 | 开卷编排器 | `AiRunOrchestrator` 统一预算、取消、超时、模型/工具/续写计数、checkpoint hook 与错误分类；对话为最多四轮的受控 Tool Agent | 不把作品定位、权限、持久化或 UI 状态交给模型框架；不做多 Agent |
-| 模型适配层 | `lib/ai/adapters/` 隔离 `GenkitOpenAiModelAdapter` 与 `GenkitAnthropicModelAdapter`；精确固定 `genkit 0.15.1`、`genkit_openai 0.3.7`、`genkit_anthropic 0.2.11`。App 自有 `AiModelAdapter` 只表达单次回合、原生工具请求和结构化 JSON；Anthropic 模型列表仍走只读 `GET /v1/models` transport；可重试 transport/HTTP 错误只允许在首个可见文本前自动重试一次 | Genkit、插件 SDK 与供应商协议类型不得进入 UI、controller、数据库和备份 schema；插件升级必须重新跑对应适配器协议、取消和异常终态测试 |
+| 模型适配层 | `lib/ai/adapters/` 隔离 `GenkitOpenAiModelAdapter` 与 `GenkitAnthropicModelAdapter`；精确固定 `genkit 0.15.1`、`genkit_openai 0.3.7`、`genkit_anthropic 0.2.11`。App 自有 `AiModelAdapter` 只表达单次回合、原生工具请求、可选推理 delta、推理展示类型、工具连续性元数据和结构化 JSON；Anthropic 模型列表仍走只读 `GET /v1/models` transport；可重试 transport/HTTP 错误只允许在首个可见文本或推理输出前自动重试一次。Provider 推理字段由 adapter 内的能力策略映射：DeepSeek `thinking.type`，Anthropic `thinking` adaptive/disabled，OpenAI / xAI / Ollama `reasoning_effort`，自定义兼容端点开启时尽力发送通用字段、关闭时完全省略。OpenAI Compatible 返回的 `reasoning_content` / `reasoning` / `thinking` 与 Anthropic `ReasoningPart` 统一映射为 App 事件；供应商要求跨工具回合保留的推理内容、签名和不可见 `redacted_thinking` 必须按原顺序回传 | Genkit、插件 SDK 与供应商协议类型不得进入 UI、controller、数据库和备份 schema；不得声称展示完整思维链；插件或供应商协议升级必须重新跑对应适配器协议、取消和异常终态测试 |
 | 协议选择 | OpenAI / DeepSeek / Grok / 自定义 / Ollama 使用 Genkit OpenAI Compatible adapter；Anthropic 使用 Genkit Anthropic adapter；适配器缺失或端点不支持时本轮明确失败 | 不做跨协议隐式回退、手写 Messages 对话 adapter、fenced JSON 或旧 Provider 对话回退；不放宽五个只读工具、冻结作品范围和本地参数预算 |
-| 确定性工作流 | 词典/选区翻译使用无工具 `streamTurn`；大纲和图谱的每类输出使用独立 Schemantic schema + `completeJson`；所有模型调用由 `AiWorkflowModelSession` 报告调用次数/usage 并统一关闭 adapter，图谱 checkpoint 保持原存储格式 | 不把批处理改造成自由 Agent，不改抽取/合并算法、缓存格式或 checkpoint 语义；Workflow 不得自行解 fence、正则恢复 JSON 或引入第二套生成 transport |
+| 确定性工作流 | 词典/选区翻译使用无工具 `streamTurn`；大纲和图谱的每类输出使用独立 Schemantic schema + `completeJson`；所有模型调用由 `AiWorkflowModelSession` 报告调用次数/usage 并统一关闭 adapter，图谱 checkpoint 保持原存储格式。Anthropic constrained output 会强制 `return_output` 工具，与 thinking 的官方组合边界不稳定，因此 adapter 对结构化调用固定发送 disabled thinking，普通流式调用仍服从用户偏好 | 不把批处理改造成自由 Agent，不改抽取/合并算法、缓存格式或 checkpoint 语义；Workflow 不得自行解 fence、正则恢复 JSON 或引入第二套生成 transport |
 
-`AiRunEvent` 只表达运行事实，不是持久化 schema。`AiRunCheckpoint` 自身带版本，但 payload 仍由既有工作流存储负责；当前图谱继续写原有 `AiBookGraph` 快照，不把临时事件写入 `ai_chat` / Drift / WebDAV。Genkit 内部 trace 只允许留在 adapter 边界，产品运行事实以 `AiRunEvent` 为准。
+`AiRunEvent` 只表达运行事实，不是持久化 schema。`AiRunCheckpoint` 自身带版本，但 payload 仍由既有工作流存储负责；当前图谱继续写原有 `AiBookGraph` 快照，不把临时事件写入 `ai_chat` / Drift / WebDAV。对话终态可把供应商公开的推理过程或推理摘要写入 `AiChatMessage.reasoningContent`，并以 `reasoningKind` 区分展示文案，随同一会话 JSON 和 WebDAV 快照保存；它与回答正文分栏、默认折叠，不参与回答复制和后续普通消息历史。签名等协议连续性元数据只存活于当前运行，不写入会话或备份。Genkit 内部 trace 只允许留在 adapter 边界，产品运行事实以 `AiRunEvent` 为准。
 
 模型 I/O 收口完成后的唯一依赖方向为：业务 Workflow → App 自有 `AiModelAdapter` → 隔离的 Genkit Provider 插件。模型目录读取单独抽为只读 catalog transport；连接测试通过 adapter 发起无工具单回合。UI、controller 和业务 Workflow 不得再依赖 `AiProvider`、Genkit、Schemantic 生成类型或供应商 SDK。结构化 schema 定义集中在 AI 基础设施边界，使用 Schemantic 生成并由 adapter 消费；模型返回后仍执行既有业务语义校验，JSON Schema 不能代替来源覆盖、稳定 ID、证据定位等产品规则。
 

@@ -274,7 +274,7 @@
 
 | 能力 | 状态 | 说明 |
 |------|------|------|
-| AI 设置（云端 / 本地、Key / 端点 / 模型 / 总开关） | **已有** | 设置 → AI 助手；**云端**（OpenAI / Anthropic / DeepSeek / Grok / OpenAI Compatible 自定义）+ **本地 Ollama**（无需 Key，默认 `localhost:11434/v1`）；测试连接；见 [ai.md](./specs/ai.md) |
+| AI 设置（云端 / 本地、Key / 端点 / 模型 / 总开关） | **已有** | 设置 → AI 助手；**云端**（OpenAI / Anthropic / DeepSeek / Grok / OpenAI Compatible 自定义）+ **本地 Ollama**（无需 Key，默认 `localhost:11434/v1`）；测试连接；所有预设服务商与兼容端点统一提供「默认开启深度思考」偏好，本书对话可在「联网」旁按当前面板临时覆盖。App 按服务商协议映射为开关、adaptive 或高低推理强度，并把服务商实际返回的可见过程或摘要作为独立、可折叠内容展示；见 [ai.md](./specs/ai.md) |
 | 联网搜索 BYOK | **已有（MVP）** | 设置 → 联网搜索（Tavily / Brave + 独立 Key）；本书 AI 面板「联网」开关；见 [ai.md](./specs/ai.md) |
 | AI 词典（应用内结果） | **已有（MVP）** | 选区菜单；AI 就绪时应用内流式结果，否则系统词典；可复制/写入笔记 |
 | AI 选区翻译 | **已有（MVP）** | 应用内流式；可回落系统翻译；深化见 [ai-translation.md](./specs/ai-translation.md) |

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'ai_cancel.dart';
 import 'ai_run.dart';
+import 'ai_provider_kind.dart';
 
 /// Deterministic limits enforced independently of the selected model SDK.
 class AiRunBudget {
@@ -177,6 +178,7 @@ class AiRunExecution {
   var _sequence = 0;
   var _usage = const AiRunUsage();
   var _latestText = '';
+  var _latestReasoningText = '';
 
   AiRunState get state => _state;
   AiRunUsage get usage => _usage;
@@ -312,6 +314,24 @@ class AiRunExecution {
         sequence: _nextSequence(),
         occurredAt: _clock(),
         text: text,
+      ),
+    );
+  }
+
+  void reasoningSnapshot(
+    String text, {
+    AiReasoningContentKind kind = AiReasoningContentKind.process,
+  }) {
+    ensureActive();
+    if (text == _latestReasoningText) return;
+    _latestReasoningText = text;
+    _emit(
+      AiRunReasoningSnapshot(
+        runId: descriptor.runId,
+        sequence: _nextSequence(),
+        occurredAt: _clock(),
+        text: text,
+        kind: kind,
       ),
     );
   }

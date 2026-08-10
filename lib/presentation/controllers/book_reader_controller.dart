@@ -141,7 +141,8 @@ class BookReaderController extends ChangeNotifier {
         ? null
         : AiChatService(
             isAvailable: () => aiSettings.isReadyForRequests,
-            openModelAdapter: () => aiSettings.openModelAdapter(),
+            openModelAdapter: ({reasoningEnabled}) =>
+                aiSettings.openModelAdapter(reasoningEnabled: reasoningEnabled),
           );
     _aiOutline = aiSettings == null
         ? null
@@ -168,6 +169,17 @@ class BookReaderController extends ChangeNotifier {
 
   /// Search API key configured (chat 联网 switch).
   bool get canUseWebSearch => _aiSettings?.isSearchReady ?? false;
+
+  bool get supportsDeepThinking {
+    final settings = _aiSettings?.settings;
+    return settings != null &&
+        settings.providerKind
+            .reasoningCapabilities(settings.resolvedModel)
+            .supported;
+  }
+
+  bool get defaultDeepThinkingEnabled =>
+      _aiSettings?.settings.reasoningEnabled ?? false;
 
   AiSettingsController? get aiSettingsController => _aiSettings;
 
@@ -1933,6 +1945,7 @@ class BookReaderController extends ChangeNotifier {
     required AiChatContextBundle context,
     required AiGraphWorkCandidate? workScope,
     List<AiWebSearchHit>? webHits,
+    bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
   }) {
@@ -1945,6 +1958,7 @@ class BookReaderController extends ChangeNotifier {
       context: context,
       workScope: workScope,
       webHits: webHits,
+      reasoningEnabled: reasoningEnabled,
       cancelToken: cancelToken,
       runId: runId,
     );
@@ -1957,6 +1971,7 @@ class BookReaderController extends ChangeNotifier {
     required AiChatContextBundle context,
     required AiGraphWorkCandidate? workScope,
     List<AiWebSearchHit>? webHits,
+    bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
   }) async* {
@@ -1977,6 +1992,7 @@ class BookReaderController extends ChangeNotifier {
       bookTitle: item.title,
       bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
       webHits: webHits,
+      reasoningEnabled: reasoningEnabled,
       tools: AiBookChatToolHost(
         corpus: _aiCorpus,
         work: workScope,

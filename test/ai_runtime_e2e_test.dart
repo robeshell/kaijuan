@@ -9,6 +9,7 @@ import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_service.dart';
 import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_run.dart';
+import 'package:kaijuan/ai/ai_provider_kind.dart';
 
 import 'support/anthropic_test_server.dart';
 
@@ -50,12 +51,13 @@ data: [DONE]
         baseUrl: 'https://api.deepseek.com/v1',
         apiKey: 'test-key',
         model: 'deepseek-chat',
+        providerKind: AiProviderKind.deepseek,
         httpClient: client,
       );
       final host = _E2eToolHost();
       final service = AiChatService(
         isAvailable: () => true,
-        openModelAdapter: () => adapter,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
       );
 
       final events = await service
@@ -153,7 +155,7 @@ data: {"type":"message_stop"}
     final host = _E2eToolHost();
     final service = AiChatService(
       isAvailable: () => true,
-      openModelAdapter: () => adapter,
+      openModelAdapter: ({reasoningEnabled}) => adapter,
     );
 
     late List<AiRunEvent> events;

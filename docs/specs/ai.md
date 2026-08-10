@@ -89,7 +89,7 @@
 设置
   └─ AI（或「智能助手」）
        ├─ 启用 AI（总开关）
-       ├─ API Key / 接口地址 / 模型 / 测试连接
+       ├─ API Key / 接口地址 / 模型 / 测试连接 / 默认开启深度思考
        ├─ 联网搜索（可选）：Tavily / Brave + 搜索 API Key（与模型 Key 分开）
        └─ 翻译偏好 / 阅读偏好
 
@@ -98,7 +98,7 @@
   │    ├─ 词典  → AI 结果卡（有 Key）/ 系统词典（fallback）
   │    └─ 翻译  → AI 结果卡（有 Key）/ 系统翻译（fallback）
   ├─ 顶栏入口「本书 AI」→ 对话 / 知识图谱工作区
-  │    └─ 顶区「联网」开关（需已配置搜索 Key；开则本轮检索网页）
+  │    └─ 输入区「联网」与「深度思考」开关；后者以设置偏好为初值，可在当前面板临时覆盖
   └─（中后期）大纲 / 任务进度 / 导出
 ```
 
@@ -131,6 +131,8 @@
    - API Key（仅云端服务商显示）：安全输入（可显隐）；保存进平台安全存储。  
    - 接口地址：默认占位如 `https://api.x.ai/v1` 或留空提示「兼容 OpenAI 的 Base URL」；本地服务商默认 Ollama 地址。  
    - 模型：文本框或近期列表；不内置付费套餐 UI。  
+   - 所有预设服务商、自定义 OpenAI Compatible 与 Ollama 都显示「默认开启深度思考」，默认关闭。它是词典、翻译、大纲、图谱等确定性工作流的运行默认值，也是每次打开本书对话面板时「深度思考」临时开关的初值；面板内调整只影响该面板随后发送的轮次，不回写设置。App 不根据问题内容偷偷自动切换。
+   - 开关由 adapter 按当前服务商与模型能力映射，不假设所有协议都能彻底关闭推理：DeepSeek 为 enabled/disabled；Anthropic 为 adaptive/disabled；OpenAI 为 high 与 none/low；Grok 为 high/low；Ollama 为 high/none；自定义兼容端点只在开启时尽力发送 `reasoning_effort=high`，关闭时省略扩展字段。Anthropic 的 Genkit constrained output 依赖强制 `return_output` 工具，而官方协议不保证强制工具与 thinking 可组合，因此大纲、图谱等结构化调用固定关闭该次 thinking，优先保证 schema；普通对话、词典和翻译仍服从开关。模型不支持或端点拒绝扩展字段时，本轮明确失败并给出可读错误，不跨协议回退。
    - 「测试连接」：发最小 completion；成功 SnackBar「连接正常」；失败展示可读错误。  
 
 4. **联网搜索（可选，BYOK）**  
@@ -146,6 +148,8 @@
 | 开关 | 关闭时 | 开启时 | 作用域 |
 |------|--------|--------|--------|
 | 启用 AI | 词典/翻译走系统能力；模型连接测试、搜索测试与新的 AI 请求均不得发出 | 按服务商、端点、模型和密钥完整性决定具体功能是否可用 | 全局持久化 |
+| 默认开启深度思考 | Provider 能关闭时关闭；只能调强度时使用低强度；自定义端点省略扩展字段 | 使用 Provider 支持的 adaptive 或高推理强度；新打开的对话面板继承为开启 | 全局持久化；面板开关可临时覆盖 |
+| 深度思考（对话面板） | 当前面板随后发送的轮次使用关闭/低强度/省略字段策略 | 当前面板随后发送的轮次使用 adaptive/高强度，并在供应商返回可见内容时展示独立过程或摘要 | 对话面板临时状态；初值来自全局偏好，不回写设置 |
 | 携带选区上下文 | 翻译只发送当前选区 | 翻译可附带受长度限制的同章上下文 | 全局持久化，仅选区翻译 |
 | 分析未读内容 | 确认窗初始建议当前进度以前的内容 | 确认窗初始允许所选范围内的未读内容 | 全局持久化，仅影响后续图谱范围建议；用户最终勾选优先，不隐藏已有缓存 |
 | 联网 | 本轮对话仅使用书内内容 | 先搜索再回答；未配置搜索 Key 时拒绝发送并引导设置 | 对话面板临时状态，默认关闭 |
@@ -194,17 +198,19 @@
        · medium / wide：右侧侧栏，宽度随窗口变（约 40–48% 宽，有 min/max）
   → 顶栏：本书 AI 与关闭 / 清空操作；Tab：对话 / 知识图谱
   → 书名、当前章不在面板顶部重复展示；阅读器本身已提供该上下文
-  → 输入工具栏：紧凑「联网」图标（关=仅书内；开且已配搜索 Key=先搜再答）；开启时保留搜索图标，以主题色高亮和轻量底色表示状态，不替换为勾选图标；另有可去掉的选区附件
+  → 输入工具栏：紧凑「联网」图标（关=仅书内；开且已配搜索 Key=先搜再答）；其旁显示「深度思考」图标，初值来自设置且可在当前面板临时切换；开启态保留原图标，以主题色高亮和轻量底色表示状态，不替换为勾选图标；另有可去掉的选区附件
   → 推荐问题（每处至多 3 个）：空对话给阅读入口，其中包含「生成本书大纲」；点击即发送优化后的正常对话提示词，不弹范围选择。有选区时改为解释选段 / 联系上下文等；每条助手回答完成后生成两条稳定追问和一条内容发散追问，并在生成完成后一次性显示；失败时一次性回退三条稳定问题，不先展示再替换。显示后消息列表自动滚至底部。左对齐纵向排列，文字尾端以箭头提示可直接提问
   → 等待态：消息列表内同一时刻只展示一个小尺寸思考球与一行状态；优先级为联网搜索、工具执行、模型思考。联网完成后更新为「联网完成，思考中」，不叠加第二个等待提示
   → 消息列表 + 输入框
-  → 流式助手气泡；工具状态；停止；复制；清空
+  → 流式助手气泡；服务商返回可见推理时在回答上方显示独立、可折叠的「思考过程」或「思考摘要」；工具状态；停止；复制；清空
 ```
 
 - 模型以 `finish_reason=length` / `stop_reason=max_tokens` 结束时，不把已显示正文直接标记为失败，也不要求读者更换模型。客户端自动把当前正文作为 assistant 历史，请模型只从中断处续写，并对首尾重叠文本去重后拼接到同一条流式回答。续写必须有次数上限；达到保护上限仍未结束时保留全部已生成内容，并提示缩小问题范围后重试。
 - 自动续写复用原问题、冻结的作品范围与同一轮工具结果，不重新执行书内工具，也不把续写拆成多条对话消息。续写期间继续显示生成状态，停止按钮取消整轮请求。
 - 流式请求在首个可见文字到达前遇到 408 / 409 / 425 / 429、服务端 5xx、超时或网络中断时，可自动重试一次；一旦已有可见正文，禁止从头静默重试，以免重复内容、重复工具调用和不可控计费。中途失败保留部分正文并进入可重试状态。
 - 长回答生成期间按节流频率保存 pending 助手快照；正常完成、停止或失败时由终态原子覆盖。App 被系统终止后，恢复逻辑保留最后一份正文并将 pending 标记为已停止，且不把未完成内容加入后续模型历史。
+- 服务商公开返回的推理内容只进入独立展示，不拼进 Markdown 回答。DeepSeek、部分 Ollama/兼容模型返回的过程标为「思考过程」；Anthropic 与 Grok 等只公开摘要的服务商标为「思考摘要」；OpenAI Chat Completions 或不公开推理内容的模型仍可按开关调整推理强度，但不显示空面板。App 不把等待状态、自己生成的说明或模型普通正文冒充思维链。
+- 推理内容生成中可增量展开查看，完成后默认折叠；终态随 `AiChatMessage` 和 WebDAV 会话快照保存，但不进入“复制回答”、追问 prompt 或后续普通聊天历史。同一次原生工具循环仍须按供应商协议把 DeepSeek `reasoning_content` 或 Anthropic thinking block 与签名原样回传给模型；签名只属于当前运行，不落盘。
 
 **定位：整本书的阅读伴侣（不设剧透策略）**
 
@@ -435,14 +441,14 @@ AI 对话备份规则：
 当前 App 自有运行契约：
 
 - 每次运行拥有稳定 `runId`、任务类型和冻结的 `contentHash` / `workKey` 作用域描述；同一事件流的序号必须单调递增。
-- `AiRunEvent` 至少表达 started、scope resolved、model started、tool started/completed、continuation started、text snapshot、completed、failed、cancelled；`AiRunState` 由事件 reducer 确定性投影，终态后忽略后续事件。
+- `AiRunEvent` 至少表达 started、scope resolved、model started、tool started/completed、continuation started、text snapshot、reasoning snapshot、completed、failed、cancelled；`AiRunState` 由事件 reducer 确定性投影，终态后忽略后续事件。回答与思考过程必须使用两条独立快照通道。
 - 文本事件携带“当前完整回答快照”。这是现有 UI 的权威语义：原生工具请求前若模型流出说明性前缀可撤回，自动续写可去重重组；消费者不得把它误当 token delta 追加。
 - 本书对话只暴露 `Stream<AiRunEvent>`；聊天面板消费结构化运行事件，会话 JSON、pending checkpoint 与 WebDAV 格式不依赖模型协议。
 - `RunFailed` / `RunCancelled` 保留最后回答快照供 UI 决定是否落为未完成消息；事件本身不直接写 Drift 或文件。
 - 编排器强制模型调用、工具轮数、续写轮数、工具结果字符数与可选运行时长预算；模型 token usage 只有 adapter 可靠返回时才记录，不作为唯一硬预算。
 - controller 用同一 reducer 跟踪本书对话、词典/选区翻译、大纲与图谱；图谱逐节 checkpoint 仍写原有快照格式。
 
-协议边界：本书对话按服务商选择 OpenAI Compatible 原生 Function Calling 或 Anthropic Messages API 原生 Tool Use；失败直接进入 `RunFailed`，不得跨协议重试，也不得回退 fenced JSON 或旧 Provider 对话 transport。五个工具仍由 App 白名单执行且全为只读。Anthropic assistant `tool_use` 与后续 user `tool_result` 必须保留 call ID 和内容块顺序；工具参数只在完整 `content_block_stop` 且 JSON 对象解析成功后交给 App。
+协议边界：本书对话按服务商选择 OpenAI Compatible 原生 Function Calling 或 Anthropic Messages API 原生 Tool Use；失败直接进入 `RunFailed`，不得跨协议重试，也不得回退 fenced JSON 或旧 Provider 对话 transport。五个工具仍由 App 白名单执行且全为只读。Anthropic assistant `tool_use` 与后续 user `tool_result` 必须保留 call ID 和内容块顺序；工具参数只在完整 `content_block_stop` 且 JSON 对象解析成功后交给 App。DeepSeek 思考模式与工具调用并用时，adapter 必须流式映射并在终态提取 `reasoning_content`，在对应 assistant tool-call message 中原样回传给下一轮。Anthropic thinking block 必须携带原签名并保持在对应 assistant tool-use 之前；不可见 `redacted_thinking` 也必须作为不透明块按原顺序回传，但不进入 UI 或存储。当前锁版插件的出站转换缺口只能在隔离的本地插件补丁中修复，禁止由业务层伪造。业务层只投影供应商可见的过程/摘要，终态可写入会话独立字段，但不得进入回答快照、回答复制或后续普通聊天历史。
 
 ---
 
@@ -572,6 +578,8 @@ AiBookLanguageProvider（或 Composite）
 ## 10. Provider 约定（实现备忘）
 
 - OpenAI / DeepSeek / Grok / 自定义 / Ollama 兼容 **OpenAI 风格** Base URL（当前 `/chat/completions`）；Anthropic 使用 `POST /v1/messages` 与 `GET /v1/models`，system prompt 置于顶层，消息仅使用 user / assistant 角色。
+- 推理协议映射以当前供应商官方能力为准：DeepSeek 每次显式发送 `thinking.type`；Anthropic 现代 Claude 开启时发送 adaptive thinking + summarized display、关闭时 disabled，旧模型必要时才使用至少 1024 token 的 manual budget；OpenAI 识别出的推理模型发送 `reasoning_effort` high 与 none/low；Grok 发送 high/low；Ollama OpenAI Compatible 发送 high/none；自定义兼容端点仅在开启时发送 high，关闭时省略。Anthropic constrained output 的强制工具冲突由 adapter 对该次调用显式关闭 thinking，不能等首个 400 后重试。锁版插件未建模的字段只能在隔离 adapter 内装饰最终 HTTP JSON，不得扩散到 UI 或业务 Workflow。
+- OpenAI Compatible adapter 只读取供应商实际返回的 `reasoning_content`、`reasoning` 或 `thinking`；Anthropic adapter 读取 Genkit `ReasoningPart`。推理展示类型由 adapter 指明为过程或摘要。未返回可见推理内容时只保留普通回答，不补写、不推断。
 - 流式：SSE；可取消（关闭 panel / dispose）。  
 - Anthropic SSE 的解析与累积由锁版插件承担；adapter 仍须检查 Genkit 完成终态、重复 tool ID、工具参数对象及长度截断，任何不完整工具调用均不得执行。结构化输出使用 Genkit constrained output，不使用提示词伪 JSON；取消必须关闭本次插件 transport，不能只停止 UI 消费。
 - 超时与重试：短请求 1 次重试；长任务按章重试，不整本重来。  

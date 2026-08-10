@@ -1,3 +1,5 @@
+import 'ai_provider_kind.dart';
+
 /// App-owned task categories. Provider/framework-specific concepts must not
 /// leak into this contract.
 enum AiRunTask { bookChat, bookOutline, bookGraph, bookTranslation, language }
@@ -207,6 +209,23 @@ final class AiRunTextSnapshot extends AiRunEvent {
   final String text;
 }
 
+/// The complete provider-visible reasoning available at this point.
+///
+/// This is deliberately independent from [AiRunTextSnapshot], so UI and
+/// persistence cannot accidentally treat reasoning as answer Markdown.
+final class AiRunReasoningSnapshot extends AiRunEvent {
+  const AiRunReasoningSnapshot({
+    required super.runId,
+    required super.sequence,
+    required super.occurredAt,
+    required this.text,
+    required this.kind,
+  });
+
+  final String text;
+  final AiReasoningContentKind kind;
+}
+
 final class AiRunCompleted extends AiRunEvent {
   const AiRunCompleted({
     required super.runId,
@@ -254,6 +273,8 @@ class AiRunState {
     required this.phase,
     required this.scope,
     required this.text,
+    required this.reasoningText,
+    required this.reasoningKind,
     required this.status,
     required this.modelCallCount,
     required this.toolRound,
@@ -271,6 +292,8 @@ class AiRunState {
     phase: AiRunPhase.preparing,
     scope: descriptor.scope,
     text: '',
+    reasoningText: '',
+    reasoningKind: AiReasoningContentKind.process,
     status: null,
     modelCallCount: 0,
     toolRound: 0,
@@ -285,6 +308,8 @@ class AiRunState {
   final AiRunPhase phase;
   final AiRunScope scope;
   final String text;
+  final String reasoningText;
+  final AiReasoningContentKind reasoningKind;
   final String? status;
   final int modelCallCount;
   final int toolRound;
@@ -312,6 +337,8 @@ class AiRunState {
     var nextPhase = phase;
     var nextScope = scope;
     var nextText = text;
+    var nextReasoningText = reasoningText;
+    var nextReasoningKind = reasoningKind;
     String? nextStatus = status;
     var nextModelCallCount = modelCallCount;
     var nextToolRound = toolRound;
@@ -350,6 +377,10 @@ class AiRunState {
         nextPhase = AiRunPhase.generating;
         nextText = event.text;
         nextStatus = null;
+      case AiRunReasoningSnapshot():
+        nextReasoningText = event.text;
+        nextReasoningKind = event.kind;
+        if (nextText.isEmpty) nextStatus = '正在思考…';
       case AiRunCompleted():
         nextPhase = AiRunPhase.completed;
         nextText = event.text;
@@ -373,6 +404,8 @@ class AiRunState {
       phase: nextPhase,
       scope: nextScope,
       text: nextText,
+      reasoningText: nextReasoningText,
+      reasoningKind: nextReasoningKind,
       status: nextStatus,
       modelCallCount: nextModelCallCount,
       toolRound: nextToolRound,

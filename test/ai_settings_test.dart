@@ -91,6 +91,7 @@ void main() {
         providerKind: AiProviderKind.deepseek,
         baseUrl: 'https://api.deepseek.com/v1',
         model: 'deepseek-chat',
+        reasoningEnabled: true,
         allowUnreadContext: true,
       );
       final encoded = jsonEncode(settings.toJson());
@@ -100,7 +101,37 @@ void main() {
       );
       expect(restored.enabled, isTrue);
       expect(restored.providerKind, AiProviderKind.deepseek);
+      expect(restored.reasoningEnabled, isTrue);
       expect(restored.allowUnreadContext, isTrue);
+    });
+
+    test('deep thinking defaults off for existing settings files', () {
+      final restored = AiSettings.fromJson(const {'providerKind': 'deepseek'});
+      expect(restored.reasoningEnabled, isFalse);
+    });
+
+    test('reasoning capability follows provider and selected model', () {
+      expect(
+        AiProviderKind.openai.reasoningCapabilities('gpt-5.4-mini').supported,
+        isTrue,
+      );
+      expect(
+        AiProviderKind.openai.reasoningCapabilities('gpt-4o-mini').supported,
+        isFalse,
+      );
+      for (final provider in [
+        AiProviderKind.anthropic,
+        AiProviderKind.deepseek,
+        AiProviderKind.xai,
+        AiProviderKind.custom,
+        AiProviderKind.ollama,
+      ]) {
+        expect(
+          provider.reasoningCapabilities('provider-model').supported,
+          isTrue,
+          reason: provider.name,
+        );
+      }
     });
 
     test('json round-trip keeps translation preferences', () {
@@ -335,6 +366,7 @@ void main() {
         await controller.load();
 
         await controller.setAllowUnreadContext(true);
+        await controller.setReasoningEnabled(true);
         await controller.updateTranslation(
           (translation) => translation.copyWith(includeContext: true),
         );
@@ -345,6 +377,7 @@ void main() {
         );
         await reloaded.load();
         expect(reloaded.settings.allowUnreadContext, isTrue);
+        expect(reloaded.settings.reasoningEnabled, isTrue);
         expect(reloaded.settings.translation.includeContext, isTrue);
       },
     );
@@ -494,6 +527,33 @@ void main() {
       // Default openai model resolves even when model field empty.
       expect(controller.openModelAdapter(), same(adapter));
     });
+
+    test(
+      'openModelAdapter forwards the provider-neutral reasoning preference',
+      () async {
+        final adapter = _ConnectionAdapter();
+        final factory = _FakeModelAdapterFactory(adapter);
+        final controller = AiSettingsController(
+          settingsStore: MemoryAiSettingsStore(),
+          credentialStore: MemoryAiCredentialStore(),
+          modelAdapterFactory: factory,
+        );
+        await controller.load();
+        await controller.setProviderKind(AiProviderKind.deepseek);
+        await controller.setApiKey('k');
+        await controller.setEnabled(true);
+        await controller.setReasoningEnabled(true);
+
+        expect(controller.openModelAdapter(), same(adapter));
+        expect(factory.lastDeepThinkingEnabled, isTrue);
+
+        expect(
+          controller.openModelAdapter(reasoningEnabled: false),
+          same(adapter),
+        );
+        expect(factory.lastDeepThinkingEnabled, isFalse);
+      },
+    );
   });
 
   group('DefaultAiModelAdapterFactory', () {
@@ -510,10 +570,12 @@ void main() {
         baseUrl: 'https://api.deepseek.com/v1',
         apiKey: 'k',
         model: 'deepseek-v4-flash',
+        reasoningEnabled: true,
       );
 
       expect(anthropic, isA<GenkitAnthropicModelAdapter>());
       expect(deepseek, isA<GenkitOpenAiModelAdapter>());
+      expect((deepseek as GenkitOpenAiModelAdapter).reasoningEnabled, isTrue);
     });
 
     test('does not construct Anthropic adapter without a key', () {
@@ -532,9 +594,10 @@ void main() {
 }
 
 final class _FakeModelAdapterFactory implements AiModelAdapterFactory {
-  const _FakeModelAdapterFactory(this.adapter);
+  _FakeModelAdapterFactory(this.adapter);
 
   final AiModelAdapter adapter;
+  bool? lastDeepThinkingEnabled;
 
   @override
   AiModelAdapter? create({
@@ -542,7 +605,11 @@ final class _FakeModelAdapterFactory implements AiModelAdapterFactory {
     required String baseUrl,
     required String apiKey,
     required String model,
-  }) => adapter;
+    bool reasoningEnabled = false,
+  }) {
+    lastDeepThinkingEnabled = reasoningEnabled;
+    return adapter;
+  }
 }
 
 final class _ConnectionAdapter implements AiModelAdapter {

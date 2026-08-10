@@ -1,5 +1,6 @@
 import 'ai_models.dart';
 import 'ai_outline.dart';
+import 'ai_provider_kind.dart';
 
 enum AiChatTurnStatus {
   pending,
@@ -21,6 +22,8 @@ class AiChatMessage {
   const AiChatMessage({
     required this.role,
     required this.content,
+    this.reasoningContent = '',
+    this.reasoningKind = AiReasoningContentKind.process,
     this.pinned = false,
     this.createdAt,
     this.webHitCount,
@@ -31,6 +34,11 @@ class AiChatMessage {
 
   final AiMessageRole role;
   final String content;
+
+  /// Optional provider-supplied reasoning shown in a separate disclosure.
+  /// It is excluded from answer copy and future model history.
+  final String reasoningContent;
+  final AiReasoningContentKind reasoningKind;
   final bool pinned;
   final DateTime? createdAt;
 
@@ -52,6 +60,8 @@ class AiChatMessage {
   AiChatMessage copyWith({
     AiMessageRole? role,
     String? content,
+    String? reasoningContent,
+    AiReasoningContentKind? reasoningKind,
     bool? pinned,
     DateTime? createdAt,
     int? webHitCount,
@@ -63,6 +73,8 @@ class AiChatMessage {
     return AiChatMessage(
       role: role ?? this.role,
       content: content ?? this.content,
+      reasoningContent: reasoningContent ?? this.reasoningContent,
+      reasoningKind: reasoningKind ?? this.reasoningKind,
       pinned: pinned ?? this.pinned,
       createdAt: createdAt ?? this.createdAt,
       webHitCount: clearWebHitCount ? null : (webHitCount ?? this.webHitCount),
@@ -75,6 +87,9 @@ class AiChatMessage {
   Map<String, Object?> toJson() => {
     'role': role.name,
     'content': content,
+    if (reasoningContent.isNotEmpty) 'reasoningContent': reasoningContent,
+    if (reasoningContent.isNotEmpty)
+      'reasoningKind': reasoningKind.storageValue,
     'pinned': pinned,
     if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
     if (webHitCount != null) 'webHitCount': webHitCount,
@@ -95,6 +110,8 @@ class AiChatMessage {
     return AiChatMessage(
       role: role,
       content: json['content'] as String? ?? '',
+      reasoningContent: json['reasoningContent'] as String? ?? '',
+      reasoningKind: AiReasoningContentKind.fromStorage(json['reasoningKind']),
       pinned: json['pinned'] as bool? ?? false,
       createdAt: createdRaw == null ? null : DateTime.tryParse(createdRaw),
       webHitCount: rawHits is int ? rawHits : int.tryParse('$rawHits'),

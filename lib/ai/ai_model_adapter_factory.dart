@@ -12,6 +12,7 @@ class DefaultAiModelAdapterFactory implements AiModelAdapterFactory {
     required String baseUrl,
     required String apiKey,
     required String model,
+    bool reasoningEnabled = false,
   }) {
     if (baseUrl.trim().isEmpty || model.trim().isEmpty) return null;
     if (providerKind == AiProviderKind.anthropic) {
@@ -20,12 +21,15 @@ class DefaultAiModelAdapterFactory implements AiModelAdapterFactory {
         baseUrl: baseUrl,
         apiKey: apiKey,
         model: model,
+        reasoningEnabled: reasoningEnabled,
       );
     }
     return GenkitOpenAiModelAdapter(
       baseUrl: baseUrl,
       apiKey: apiKey.trim().isEmpty ? 'local-byok' : apiKey,
       model: model,
+      providerKind: providerKind,
+      reasoningEnabled: reasoningEnabled,
     );
   }
 }

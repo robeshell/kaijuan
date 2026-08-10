@@ -512,6 +512,7 @@ class AiSettings {
     this.providerKind = AiProviderKind.openai,
     this.baseUrl = '',
     this.model = '',
+    this.reasoningEnabled = false,
     this.allowUnreadContext = false,
     this.translation = const AiTranslationPreferences(),
     this.searchProviderKind = AiSearchProviderKind.tavily,
@@ -526,6 +527,10 @@ class AiSettings {
 
   /// Model id. Empty means "use the preset default".
   final String model;
+
+  /// Provider-neutral default mapped to each vendor's supported reasoning
+  /// mode or effort by the isolated model adapter.
+  final bool reasoningEnabled;
 
   /// When true, knowledge-graph generation/display may include unread sections.
   /// Chat and outline always use their explicit whole-work scopes.
@@ -585,6 +590,7 @@ class AiSettings {
     AiProviderKind? providerKind,
     String? baseUrl,
     String? model,
+    bool? reasoningEnabled,
     bool? allowUnreadContext,
     AiTranslationPreferences? translation,
     AiSearchProviderKind? searchProviderKind,
@@ -595,6 +601,7 @@ class AiSettings {
       providerKind: providerKind ?? this.providerKind,
       baseUrl: baseUrl ?? this.baseUrl,
       model: model ?? this.model,
+      reasoningEnabled: reasoningEnabled ?? this.reasoningEnabled,
       allowUnreadContext: allowUnreadContext ?? this.allowUnreadContext,
       translation: translation ?? this.translation,
       searchProviderKind: searchProviderKind ?? this.searchProviderKind,
@@ -607,6 +614,7 @@ class AiSettings {
     'providerKind': providerKind.storageValue,
     'baseUrl': baseUrl,
     'model': model,
+    'reasoningEnabled': reasoningEnabled,
     'allowUnreadContext': allowUnreadContext,
     'translation': translation.toJson(),
     'searchProviderKind': searchProviderKind.storageValue,
@@ -620,6 +628,7 @@ class AiSettings {
       providerKind: AiProviderKind.fromStorage(json['providerKind'] as String?),
       baseUrl: json['baseUrl'] as String? ?? '',
       model: json['model'] as String? ?? '',
+      reasoningEnabled: json['reasoningEnabled'] as bool? ?? false,
       allowUnreadContext: json['allowUnreadContext'] as bool? ?? false,
       translation: AiTranslationPreferences.fromJson(
         translationRaw is Map

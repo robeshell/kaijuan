@@ -32,6 +32,7 @@ dependencies:
   # Genkit Dart is Preview: keep exact versions behind lib/ai/adapters/ so a
   # breaking minor can be upgraded or removed without touching product state.
   genkit: 0.15.1
+  anthropic_sdk_dart: 2.2.0
   genkit_anthropic: 0.2.11
   genkit_openai: 0.3.7
   schemantic: 0.2.2
