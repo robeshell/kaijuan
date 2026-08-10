@@ -1244,27 +1244,29 @@ void main() {
       },
     );
 
-    test('mind map scope removes metadata and title-only containers', () async {
-      final item = await insertBook(id: 'mind-map-substantive-scope');
-      final controller = BookReaderController(database: database, item: item);
-      var corpusReads = 0;
-      controller.attachAnnotationBridge(
-        renderAll: (_) {},
-        add: (_) {},
-        remove: (_) {},
-        clearSelection: () {},
-        getSelectedText: () async => '',
-        setMenuCursorZone: (_) {},
-        setMenuOpen: (_) {},
-        getBookPlainText:
-            (
-              maxChars, {
-              bool toc = true,
-              int? startSection,
-              int? endSectionExclusive,
-            }) async {
-              corpusReads++;
-              return '''
+    test(
+      'mind map scope removes publishing extras but keeps author framing',
+      () async {
+        final item = await insertBook(id: 'mind-map-substantive-scope');
+        final controller = BookReaderController(database: database, item: item);
+        var corpusReads = 0;
+        controller.attachAnnotationBridge(
+          renderAll: (_) {},
+          add: (_) {},
+          remove: (_) {},
+          clearSelection: () {},
+          getSelectedText: () async => '',
+          setMenuCursorZone: (_) {},
+          setMenuOpen: (_) {},
+          getBookPlainText:
+              (
+                maxChars, {
+                bool toc = true,
+                int? startSection,
+                int? endSectionExclusive,
+              }) async {
+                corpusReads++;
+                return '''
 [§1@1 版权信息]
 版权所有 出版社 ISBN
 [§2@2 第一篇 就业冲击]
@@ -1275,17 +1277,48 @@ void main() {
 作者最后总结短期稳定与长期发展的关系。
 [§5@5 参考文献]
 参考资料一
+[§6@6 前言]
+作者解释写作缘起与全书的观察方法。
+[§7@7 附录一 万历十五年大事纪]
+附录资料与时间表。
+[§8@8 名家推荐]
+名家对本书的推荐文字。
+[§9@9 《万历十五年》出版始末]
+编辑回顾本书的出版过程。
+[§10@10 两声欢呼，一声倒彩 ——《万历十五年》三十载印象记]
+评论者回顾三十年来的社会反响。
+[§11@11 《万历十五年》的读法]
+编辑提供阅读指南。
+[§12@12 《万历十五年》纪事]
+本书版本流转纪事。
+[§13@13 前沿点评]
+外围点评文章。
+[§14@14 后记]
+作者回顾全书结论及写作限制。
+[§15@15 附录 A 统计口径]
+补充统计资料。
+[§16@16 出版说明：修订版]
+出版社说明修订过程。
+[§17@17 自序]
+作者说明自己的核心问题意识。
 ''';
-            },
-      );
+              },
+        );
 
-      final sections = await controller.bookMindMapSections(
-        useFrozenWork: true,
-      );
+        final sections = await controller.bookMindMapSections(
+          useFrozenWork: true,
+        );
 
-      expect(sections.map((section) => section.label), ['第一章 保就业还是保发展', '结语']);
-      expect(corpusReads, 1);
-      controller.dispose();
-    });
+        expect(sections.map((section) => section.label), [
+          '第一章 保就业还是保发展',
+          '结语',
+          '前言',
+          '后记',
+          '自序',
+        ]);
+        expect(corpusReads, 1);
+        controller.dispose();
+      },
+    );
   });
 }

@@ -2032,11 +2032,30 @@ class BookReaderController extends ChangeNotifier {
   static bool _isMindMapAutomaticSupplement(AiBookSectionSlice section) {
     final label = section.label.trim().replaceAll(RegExp(r'\s+'), '');
     if (RegExp(
-      r'^(?:封面|扉页|版权信息|版权页|目录|目次|参考文献|参考资料|索引|数据引用说明|图书在版编目数据|出版信息|作者简介)$',
+      r'^(?:封面|扉页|版权信息|版权页|目录|目次|参考文献|参考资料|索引|数据引用说明|图书在版编目数据|出版信息|作者简介|内容简介|本书简介)$',
     ).hasMatch(label)) {
       return true;
     }
-    if (RegExp(r'^(?:参考文献|参考资料|索引|数据引用说明)(?:[：:]|$)').hasMatch(label)) {
+    if (RegExp(
+      r'^(?:(?:参考文献|参考资料|索引|数据引用说明)(?:[：:].*|$)|(?:附录|附表|附图).*)',
+    ).hasMatch(label)) {
+      return true;
+    }
+    if (RegExp(
+      r'^(?:(?:名家|专家|学者|媒体|编辑|编者|译者)(?:推荐|推荐语|点评|评论|评介|书评|导读).*|(?:推荐语|书评|导读)(?:[：:].*|$))',
+    ).hasMatch(label)) {
+      return true;
+    }
+    if (RegExp(r'^(?:前沿点评|前言点评|阅读指南|推荐序|名家序|专家序|编者序|译者序).*').hasMatch(label)) {
+      return true;
+    }
+    if (RegExp(
+      r'(?:出版说明|编辑说明|编校说明|再版说明|重印说明|修订说明|版本说明|出版始末|出版纪事|版本纪事|出版后记|编后记)(?:[：:].*)?$',
+    ).hasMatch(label)) {
+      return true;
+    }
+    if (RegExp(r'(?:印象记|阅读指南|的读法)(?:[：:].*)?$').hasMatch(label) ||
+        RegExp(r'^《[^》]+》纪事$').hasMatch(label)) {
       return true;
     }
     final text = section.text.trim();
