@@ -38,6 +38,7 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
   late AiMindMapLayout _layout;
   bool _fitAfterLayoutChange = false;
   bool _revealScheduled = false;
+  ({String nodeId, Offset viewportPoint})? _pendingCollapseAnchor;
 
   @override
   void initState() {
@@ -222,7 +223,11 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
             builder: (context, constraints) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted) return;
-                if (_fitAfterLayoutChange) {
+                final collapseAnchor = _pendingCollapseAnchor;
+                if (collapseAnchor != null) {
+                  _pendingCollapseAnchor = null;
+                  _preserveCollapseAnchor(layout, collapseAnchor);
+                } else if (_fitAfterLayoutChange) {
                   _fitAfterLayoutChange = false;
                   _fit(layout.size);
                 } else if (_transformation.value.isIdentity()) {
@@ -281,11 +286,8 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                                         context.appColors.primary,
                                     childCount: children[node.nodeId] ?? 0,
                                     collapsed: _collapsed.contains(node.nodeId),
-                                    onToggleCollapsed: () => setState(() {
-                                      if (!_collapsed.add(node.nodeId)) {
-                                        _collapsed.remove(node.nodeId);
-                                      }
-                                    }),
+                                    onToggleCollapsed: () =>
+                                        _toggleCollapsed(node.nodeId, layout),
                                     onTap: () => _showNode(node),
                                   ),
                                 ),
@@ -315,6 +317,38 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
       ..setEntry(0, 0, scale)
       ..setEntry(1, 1, scale)
       ..setTranslationRaw(dx, dy, 0);
+  }
+
+  void _toggleCollapsed(String nodeId, AiMindMapLayoutResult layout) {
+    final rect = layout.nodeRects[nodeId];
+    if (rect == null) return;
+    final viewportPoint = MatrixUtils.transformPoint(
+      _transformation.value,
+      rect.center,
+    );
+    setState(() {
+      if (!_collapsed.add(nodeId)) _collapsed.remove(nodeId);
+      _pendingCollapseAnchor = (nodeId: nodeId, viewportPoint: viewportPoint);
+    });
+  }
+
+  void _preserveCollapseAnchor(
+    AiMindMapLayoutResult layout,
+    ({String nodeId, Offset viewportPoint}) anchor,
+  ) {
+    final rect = layout.nodeRects[anchor.nodeId];
+    if (rect == null) return;
+    final matrix = _transformation.value.clone();
+    final currentPoint = MatrixUtils.transformPoint(matrix, rect.center);
+    final delta = anchor.viewportPoint - currentPoint;
+    if (delta.distanceSquared < 0.01) return;
+    final translation = matrix.getTranslation();
+    matrix.setTranslationRaw(
+      translation.x + delta.dx,
+      translation.y + delta.dy,
+      translation.z,
+    );
+    _transformation.value = matrix;
   }
 
   Future<void> _showAccessibleList() async {

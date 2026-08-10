@@ -388,6 +388,53 @@ void main() {
     expect((sceneAfter - sceneBefore).distance, lessThan(0.01));
   });
 
+  testWidgets('collapsing a branch keeps the toggled node in place', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 600,
+            child: BookAiMindMapView(
+              map: styledMap,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final branch = find.byKey(const ValueKey('mind-map-node-surface-branch-a'));
+    final collapse = find.descendant(
+      of: branch,
+      matching: find.byTooltip('折叠分支'),
+    );
+    final before = tester.getCenter(branch);
+
+    await tester.tap(collapse);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('事实依据'), findsNothing);
+    expect((tester.getCenter(branch) - before).distance, lessThan(0.5));
+
+    final expand = find.descendant(
+      of: branch,
+      matching: find.byTooltip('展开分支'),
+    );
+    await tester.tap(expand);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('事实依据'), findsOneWidget);
+    expect((tester.getCenter(branch) - before).distance, lessThan(0.5));
+  });
+
   testWidgets('canvas has no nearby pan wall and supports wide zoom range', (
     tester,
   ) async {
