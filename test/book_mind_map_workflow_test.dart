@@ -108,6 +108,106 @@ void main() {
     ],
   };
 
+  Map<String, dynamic> longChapterBatch() => {
+    'batchId': 'm001',
+    'coveredSections': [6],
+    'branches': [
+      {
+        'title': '背景判断',
+        'summary': '本章从开篇背景判断展开第一组论证和事实依据。',
+        'evidence': [
+          {'sectionId': 6, 'quote': '开篇标记'},
+        ],
+      },
+      {
+        'title': '政策过程',
+        'summary': '本章中部梳理政策过程及其连续发生的影响。',
+        'evidence': [
+          {'sectionId': 6, 'quote': '第一处遗漏标记'},
+        ],
+      },
+      {
+        'title': '结果代价',
+        'summary': '本章后部归纳最终结果与长期代价之间的关系。',
+        'evidence': [
+          {'sectionId': 6, 'quote': '第二处遗漏标记'},
+        ],
+      },
+    ],
+  };
+
+  Map<String, dynamic> longChapterTree() => {
+    'contentKind': 'argumentative',
+    'nodes': [
+      {
+        'tempId': 'root',
+        'parentTempId': null,
+        'order': 0,
+        'title': '章节论证',
+        'summary': '章节完整论证结构。',
+        'evidence': [],
+      },
+      for (final branch in [
+        ('background', '背景判断', '开篇标记'),
+        ('process', '政策过程', '第一处遗漏标记'),
+        ('cost', '结果代价', '第二处遗漏标记'),
+      ].indexed) ...[
+        {
+          'tempId': branch.$2.$1,
+          'parentTempId': 'root',
+          'order': branch.$1,
+          'title': branch.$2.$2,
+          'summary': '${branch.$2.$2}的主要内容。',
+          'evidence': [
+            {'sectionId': 6, 'quote': branch.$2.$3},
+          ],
+        },
+        for (var detail = 0; detail < 2; detail++)
+          {
+            'tempId': '${branch.$2.$1}-$detail',
+            'parentTempId': branch.$2.$1,
+            'order': detail,
+            'title': '${branch.$2.$2}${detail + 1}',
+            'summary': '${branch.$2.$2}的第 ${detail + 1} 层细节。',
+            'evidence': [
+              {'sectionId': 6, 'quote': branch.$2.$3},
+            ],
+          },
+      ],
+    ],
+  };
+
+  Map<String, dynamic> minimalLongChapterTree() => {
+    'contentKind': 'argumentative',
+    'nodes': [
+      {
+        'tempId': 'root',
+        'parentTempId': null,
+        'order': 0,
+        'title': '章节论证',
+        'summary': '章节论证结构。',
+        'evidence': [],
+      },
+      for (final node in [
+        ('a', '背景判断', 'root', 0),
+        ('a1', '背景细节', 'a', 0),
+        ('b', '政策过程', 'root', 1),
+        ('b1', '过程细节', 'b', 0),
+        ('b2', '结果代价', 'b', 1),
+      ])
+        {
+          'tempId': node.$1,
+          'parentTempId': node.$3,
+          'order': node.$4,
+          'title': node.$2,
+          'summary': '${node.$2}的具体内容。',
+          'evidence': [
+            {'sectionId': 6, 'quote': '开篇标记'},
+          ],
+        },
+    ],
+  };
+
   BookMindMapWorkflow workflow(_FakeMindMapAdapter adapter) {
     return BookMindMapWorkflow(
       isAvailable: () => true,
@@ -142,6 +242,68 @@ void main() {
       expect(checkpoints.single.completedBatches.single['batchId'], 'm001');
     },
   );
+
+  test('keeps a single chapter intact within the batch budget', () async {
+    final body =
+        '开篇标记'
+        '${List.filled(2400, '甲').join()}'
+        '第一处遗漏标记'
+        '${List.filled(2400, '乙').join()}'
+        '中段标记'
+        '${List.filled(2400, '丙').join()}'
+        '第二处遗漏标记'
+        '${List.filled(2400, '丁').join()}'
+        '尾部标记';
+    final adapter = _FakeMindMapAdapter([
+      longChapterBatch(),
+      longChapterTree(),
+    ]);
+
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '长章节测试',
+      sections: [
+        AiBookSectionSlice(
+          index: 6,
+          sourceSectionIndex: 6,
+          label: '第一章',
+          text: body,
+        ),
+      ],
+    );
+
+    final batchInput = adapter.requests.first.messages.last.text;
+    expect(batchInput, contains('第一处遗漏标记'));
+    expect(batchInput, contains('第二处遗漏标记'));
+    expect(result.nodes, hasLength(10));
+  });
+
+  test('rejects a schema-minimum tree for a long chapter', () async {
+    final body = '开篇标记第一处遗漏标记第二处遗漏标记${List.filled(4000, '正文').join()}';
+    final adapter = _FakeMindMapAdapter([
+      longChapterBatch(),
+      minimalLongChapterTree(),
+      longChapterTree(),
+    ]);
+
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '长章节测试',
+      sections: [
+        AiBookSectionSlice(
+          index: 6,
+          sourceSectionIndex: 6,
+          label: '第一章',
+          text: body,
+        ),
+      ],
+    );
+
+    expect(result.nodes, hasLength(10));
+    expect(adapter.requests.last.messages.first.text, contains('至少需要 10 个节点'));
+  });
 
   test(
     'matching checkpoint resumes without repeating completed batch',

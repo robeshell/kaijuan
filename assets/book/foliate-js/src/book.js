@@ -1664,7 +1664,17 @@ class Reader {
   }
 
   getChapterContent = () => {
-    return this.#doc.body.textContent
+    const body = this.#doc.body
+    if (!body) return ''
+    // `textContent` concatenates adjacent block elements in many EPUBs, so a
+    // heading followed by paragraphs reaches AI as one structureless string.
+    // `innerText` follows the rendered reading order and preserves block/list
+    // boundaries. Normalize only whitespace around those boundaries.
+    return String(body.innerText || body.textContent || '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
   }
 
   getChapterContentByHref = async (target, options = {}) => {

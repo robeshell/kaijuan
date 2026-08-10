@@ -212,6 +212,14 @@ void main() {
     );
   });
 
+  test('current chapter AI text preserves rendered block boundaries', () {
+    final bookSource = File(
+      'assets/book/foliate-js/src/book.js',
+    ).readAsStringSync();
+    expect(bookSource, contains('body.innerText || body.textContent'));
+    expect(bookSource, contains(".replace(/\\n{3,}/g, '\\n\\n')"));
+  });
+
   test('illustrated reflow EPUB metrics classify as book once probe succeeds', () async {
     final bookFile = await _writeReflowEpubWithCover(tempRoot, 'illustrated.epub');
     final snapshot = reflowProbeSnapshot(
