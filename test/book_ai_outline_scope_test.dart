@@ -78,6 +78,8 @@ class _AmbiguousOutlineController extends BookReaderController {
   bool? lastDeepThinkingEnabled;
   String? lastChatRunId;
   int? lastMindMapSourceSectionIndex;
+  AiGraphWorkCandidate? lastMindMapWork;
+  bool? lastMindMapUseFrozenWork;
   int mindMapFailuresRemaining = 0;
 
   @override
@@ -96,6 +98,8 @@ class _AmbiguousOutlineController extends BookReaderController {
     AiBookSectionSlice? frozenCurrentChapter,
     bool useFrozenWork = false,
   }) async {
+    lastMindMapWork = work;
+    lastMindMapUseFrozenWork = useFrozenWork;
     lastMindMapSourceSectionIndex = frozenCurrentChapter?.originSectionIndex;
     if (mindMapFailuresRemaining > 0) {
       mindMapFailuresRemaining--;
@@ -533,6 +537,8 @@ void main() {
     await tester.tap(find.byTooltip('发送'));
     await tester.pumpAndSettle();
     expect(controller.lastMindMapSourceSectionIndex, isNull);
+    expect(controller.lastMindMapWork, isNull);
+    expect(controller.lastMindMapUseFrozenWork, isTrue);
     // The conversation ListView lazily builds only the visible artifact card.
     expect(find.byType(BookAiMindMapView), findsWidgets);
     expect(find.text('已根据这本书生成思维导图。'), findsOneWidget);

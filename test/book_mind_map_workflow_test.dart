@@ -167,7 +167,7 @@ void main() {
         'parentTempId': null,
         'order': 0,
         'title': '章节论证',
-        'summary': '章节论证结构。',
+        'summary': '本章围绕政策背景与执行过程，说明不同选择如何改变最终代价。',
         'evidence': [],
       },
       for (final node in [
@@ -182,7 +182,7 @@ void main() {
           'parentTempId': node.$3,
           'order': node.$4,
           'title': node.$2,
-          'summary': '${node.$2}的具体内容。',
+          'summary': '${node.$2}提炼正文中实际存在的原因、过程或结果，并说明它与核心主张的关系。',
           'evidence': [
             {'sectionId': 6, 'quote': '开篇标记'},
           ],
@@ -195,13 +195,13 @@ void main() {
       index: 1,
       sourceSectionIndex: 1,
       label: '第一章',
-      text: List.filled(450, '第一章证据说明问题。第一章继续展开论据。').join(),
+      text: List.filled(1200, '第一章证据说明问题。第一章继续展开论据。').join(),
     ),
     AiBookSectionSlice(
       index: 2,
       sourceSectionIndex: 2,
       label: '第二章',
-      text: List.filled(450, '第二章证据回应问题。第二章给出结论。').join(),
+      text: List.filled(1200, '第二章证据回应问题。第二章给出结论。').join(),
     ),
   ];
 
@@ -333,12 +333,9 @@ void main() {
     expect(adapter.calls, 1);
   });
 
-  test('rejects a schema-minimum tree for a long chapter', () async {
+  test('accepts a compact substantive tree without density quotas', () async {
     final body = '开篇标记第一处遗漏标记第二处遗漏标记${List.filled(4000, '正文').join()}';
-    final adapter = _FakeMindMapAdapter([
-      minimalLongChapterTree(),
-      longChapterTree(),
-    ]);
+    final adapter = _FakeMindMapAdapter([minimalLongChapterTree()]);
 
     final result = await workflow(adapter).generate(
       contentHash: 'a' * 64,
@@ -354,8 +351,58 @@ void main() {
       ],
     );
 
-    expect(result.nodes, hasLength(10));
-    expect(adapter.requests.last.messages.first.text, contains('至少需要 10 个节点'));
+    expect(result.nodes, hasLength(6));
+    expect(adapter.calls, 1);
+    expect(
+      adapter.requests.single.messages.first.text,
+      contains('有多少有效主题就生成多少节点'),
+    );
+  });
+
+  test('accepts more than twelve direct branches', () async {
+    final tree = {
+      'contentKind': 'reference',
+      'coveredSections': [1, 2],
+      'nodes': [
+        {
+          'tempId': 'root',
+          'parentTempId': null,
+          'order': 0,
+          'title': '全书主题',
+          'summary': '全书系统整理了多个并列主题，每个主题都有独立的正文内容。',
+          'evidence': [],
+        },
+        for (var index = 0; index < 13; index++)
+          {
+            'tempId': 'branch-$index',
+            'parentTempId': 'root',
+            'order': index,
+            'title': '主题 ${index + 1}',
+            'summary': '该主题根据正文归纳一组独立观点与具体结论。',
+            'evidence': [
+              {
+                'sectionId': index.isEven ? 1 : 2,
+                'quote': index.isEven ? '第一章证据' : '第二章证据',
+              },
+            ],
+          },
+      ],
+    };
+    final adapter = _FakeMindMapAdapter([tree]);
+
+    final result = await workflow(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '多分支测试',
+      sections: sections,
+    );
+
+    expect(result.nodes, hasLength(14));
+    expect(
+      result.nodes.where((node) => node.parentId == 'mm001'),
+      hasLength(13),
+    );
+    expect(adapter.calls, 1);
   });
 
   test(
@@ -458,6 +505,60 @@ void main() {
     expect(adapter.calls, 2);
     expect(checkpoints.single.completedBatches.single['batchId'], 'm001');
   });
+
+  test(
+    'whole-book input uses larger batches to reduce model round trips',
+    () async {
+      final wholeBookSections = [
+        for (var index = 1; index <= 8; index++)
+          AiBookSectionSlice(
+            index: index,
+            sourceSectionIndex: index,
+            label: '第 $index 章',
+            text: List.filled(400, '每节正文内容用于跨章综合。').join(),
+          ),
+      ];
+      final covered = [for (var index = 1; index <= 8; index++) index];
+      final adapter = _FakeMindMapAdapter([
+        {
+          'batchId': 'm001',
+          'coveredSections': covered,
+          'branches': [
+            {
+              'title': '跨章主题',
+              'summary': '八个章节共同展开了一组相互关联的观点与结论。',
+              'evidence': [],
+            },
+          ],
+        },
+        {
+          'contentKind': 'mixed',
+          'coveredSections': covered,
+          'nodes': [
+            {
+              'tempId': 'root',
+              'parentTempId': null,
+              'order': 0,
+              'title': '全书主题',
+              'summary': '全书通过八个章节整体说明了主题的展开过程与最终结论。',
+              'evidence': [],
+            },
+          ],
+        },
+      ]);
+
+      final result = await workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '整书批次测试',
+        sections: wholeBookSections,
+      );
+
+      expect(result.scopeSectionIndices, covered);
+      expect(result.nodes, hasLength(1));
+      expect(adapter.calls, 2);
+    },
+  );
 
   test('final output must cover every frozen section', () async {
     final incomplete = finalTree()..['coveredSections'] = [1];

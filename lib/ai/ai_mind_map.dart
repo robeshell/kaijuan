@@ -261,7 +261,7 @@ String aiMindMapScopeFingerprint({
 }
 
 bool validateAiBookMindMapNodes(List<AiBookMindMapNode> nodes) {
-  if (nodes.length < 2 || nodes.length > 160) return false;
+  if (nodes.isEmpty) return false;
   final byId = <String, AiBookMindMapNode>{};
   final childrenByParent = <String?, List<AiBookMindMapNode>>{};
   for (final node in nodes) {
@@ -269,8 +269,6 @@ bool validateAiBookMindMapNodes(List<AiBookMindMapNode> nodes) {
         node.nodeId.trim().isEmpty ||
         node.title.trim().isEmpty ||
         node.summary.trim().isEmpty ||
-        node.title.runes.length > 32 ||
-        node.summary.runes.length > 220 ||
         node.level < 0 ||
         node.order < 0) {
       return false;

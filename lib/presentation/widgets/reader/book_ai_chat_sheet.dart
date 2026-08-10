@@ -1254,8 +1254,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     AiMindMapRequestScope scope, {
     String? retryTurnId,
   }) async {
-    final work = _c.currentReadingWork;
-    final workKey = work == null ? null : BookReaderController.workKeyFor(work);
+    // Keep the artifact in the conversation where the user requested it, while
+    // independently freezing the generation scope. “This book / whole book”
+    // means the complete publication and must not be scoped back to the current
+    // recognized work.
+    final chatWork = _c.currentReadingWork;
+    final workKey = chatWork == null
+        ? null
+        : BookReaderController.workKeyFor(chatWork);
+    final generationWork = scope == AiMindMapRequestScope.wholeBook
+        ? null
+        : chatWork;
     final turnId = _newTurnId();
     _activeTurnId = turnId;
     _activeTurnWorkKey = workKey;
@@ -1302,7 +1311,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         localError = '当前章节正文尚未就绪，请稍后重试';
       } else {
         result = await _c.generateBookMindMap(
-          work: work,
+          work: generationWork,
           useFrozenWork: true,
           frozenCurrentChapter: frozenChapter,
         );

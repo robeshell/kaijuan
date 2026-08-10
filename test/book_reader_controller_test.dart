@@ -1247,6 +1247,7 @@ void main() {
     test('mind map scope removes metadata and title-only containers', () async {
       final item = await insertBook(id: 'mind-map-substantive-scope');
       final controller = BookReaderController(database: database, item: item);
+      var corpusReads = 0;
       controller.attachAnnotationBridge(
         renderAll: (_) {},
         add: (_) {},
@@ -1261,7 +1262,9 @@ void main() {
               bool toc = true,
               int? startSection,
               int? endSectionExclusive,
-            }) async => '''
+            }) async {
+              corpusReads++;
+              return '''
 [§1@1 版权信息]
 版权所有 出版社 ISBN
 [§2@2 第一篇 就业冲击]
@@ -1272,12 +1275,16 @@ void main() {
 作者最后总结短期稳定与长期发展的关系。
 [§5@5 参考文献]
 参考资料一
-''',
+''';
+            },
       );
 
-      final sections = await controller.bookMindMapSections();
+      final sections = await controller.bookMindMapSections(
+        useFrozenWork: true,
+      );
 
       expect(sections.map((section) => section.label), ['第一章 保就业还是保发展', '结语']);
+      expect(corpusReads, 1);
       controller.dispose();
     });
   });

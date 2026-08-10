@@ -1308,7 +1308,7 @@ class BookReaderController extends ChangeNotifier {
     AiBookWork? work,
     bool useFrozenWork = false,
   }) async {
-    await resolveBookStructure();
+    if (!useFrozenWork) await resolveBookStructure();
     final target = useFrozenWork ? work : work ?? currentReadingWork;
     return _mindMapSectionsForWork(target);
   }
@@ -1389,7 +1389,7 @@ class BookReaderController extends ChangeNotifier {
     _bookMindMapCancel = cancel;
     if (!_disposed) notifyListeners();
     try {
-      if (frozenCurrentChapter == null || !useFrozenWork) {
+      if (!useFrozenWork) {
         await resolveBookStructure(cancel: cancel);
       }
       final target = useFrozenWork ? work : work ?? currentReadingWork;
