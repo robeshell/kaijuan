@@ -16,9 +16,9 @@ class AiMindMapLayoutResult {
 }
 
 abstract final class AiMindMapLayoutEngine {
-  static const nodeSize = Size(176, 64);
-  static const horizontalGap = 72.0;
-  static const verticalGap = 24.0;
+  static const nodeSize = Size(224, 108);
+  static const horizontalGap = 80.0;
+  static const verticalGap = 28.0;
   static const canvasPadding = 80.0;
 
   static AiMindMapLayoutResult layout(

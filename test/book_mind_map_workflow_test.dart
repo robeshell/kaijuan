@@ -29,14 +29,14 @@ void main() {
     'branches': [
       {
         'title': '问题提出',
-        'summary': '第一章提出核心问题并展开论据。',
+        'summary': '第一章提出就业取舍的核心问题，并从政策背景展开具体论据。',
         'evidence': [
           {'sectionId': 1, 'quote': '第一章证据'},
         ],
       },
       {
         'title': '回应结论',
-        'summary': '第二章回应问题并给出结论。',
+        'summary': '第二章结合现实后果回应取舍问题，并给出全书的明确结论。',
         'evidence': [
           {'sectionId': 2, 'quote': '第二章证据'},
         ],
@@ -52,7 +52,7 @@ void main() {
         'parentTempId': null,
         'order': 0,
         'title': '全书',
-        'summary': '全书结构',
+        'summary': '全书先提出就业取舍问题，再用两章论证政策选择及其最终代价。',
         'evidence': [],
       },
       {
@@ -60,7 +60,7 @@ void main() {
         'parentTempId': 'root',
         'order': 0,
         'title': '问题提出',
-        'summary': '提出核心问题。',
+        'summary': '第一章提出就业与发展如何取舍的核心问题，并交代争议背景。',
         'evidence': [
           {'sectionId': 1, 'quote': '第一章证据'},
         ],
@@ -70,7 +70,7 @@ void main() {
         'parentTempId': 'question',
         'order': 0,
         'title': '论据展开',
-        'summary': '围绕问题展开论据。',
+        'summary': '作者从政策目标与现实约束两方面展开论据，解释取舍为何困难。',
         'evidence': [
           {'sectionId': 1, 'quote': '展开论据'},
         ],
@@ -80,7 +80,7 @@ void main() {
         'parentTempId': 'root',
         'order': 1,
         'title': '回应结论',
-        'summary': '回应问题并形成结论。',
+        'summary': '第二章回应前述问题，并把政策选择带来的影响归纳为明确结论。',
         'evidence': [
           {'sectionId': 2, 'quote': '第二章证据'},
         ],
@@ -90,7 +90,7 @@ void main() {
         'parentTempId': 'reply',
         'order': 0,
         'title': '回应过程',
-        'summary': '逐步回应核心问题。',
+        'summary': '章节通过事实与因果分析逐步回应核心问题，说明不同选择的后果。',
         'evidence': [
           {'sectionId': 2, 'quote': '回应问题'},
         ],
@@ -100,7 +100,7 @@ void main() {
         'parentTempId': 'reply',
         'order': 1,
         'title': '最终结论',
-        'summary': '给出全书结论。',
+        'summary': '作者最终指出短期保就业会伴随长期发展代价，需要重新权衡政策目标。',
         'evidence': [
           {'sectionId': 2, 'quote': '给出结论'},
         ],
@@ -116,7 +116,7 @@ void main() {
         'parentTempId': null,
         'order': 0,
         'title': '章节论证',
-        'summary': '章节完整论证结构。',
+        'summary': '本章从背景判断、政策推进和结果代价三个阶段完整说明核心主张。',
         'evidence': [],
       },
       for (final branch in [
@@ -129,7 +129,7 @@ void main() {
           'parentTempId': 'root',
           'order': branch.$1,
           'title': branch.$2.$2,
-          'summary': '${branch.$2.$2}的主要内容。',
+          'summary': '${branch.$2.$2}围绕章节主张补充具体原因、事实与阶段性结论。',
           'evidence': [
             {'sectionId': 6, 'quote': branch.$2.$3},
           ],
@@ -140,7 +140,7 @@ void main() {
             'parentTempId': branch.$2.$1,
             'order': detail,
             'title': '${branch.$2.$2}${detail + 1}',
-            'summary': '${branch.$2.$2}的第 ${detail + 1} 层细节。',
+            'summary': '${branch.$2.$2}第 ${detail + 1} 层进一步说明关键事实如何影响政策判断与结果。',
             'evidence': [
               {'sectionId': 6, 'quote': branch.$2.$3},
             ],
@@ -245,6 +245,7 @@ void main() {
     final batchInput = adapter.requests.first.messages.last.text;
     expect(batchInput, contains('第一处遗漏标记'));
     expect(batchInput, contains('第二处遗漏标记'));
+    expect(adapter.requests.first.messages.first.text, contains('不能只读取章节标题'));
     expect(result.nodes, hasLength(10));
     expect(adapter.calls, 1);
   });
@@ -273,6 +274,30 @@ void main() {
     expect(result.nodes, hasLength(10));
     expect(adapter.requests.last.messages.first.text, contains('至少需要 10 个节点'));
   });
+
+  test(
+    'rejects a title-only placeholder summary and retries with reason',
+    () async {
+      final invalid = finalTree();
+      final rows = invalid['nodes']! as List<Map<String, Object?>>;
+      rows.first['summary'] = '全书结构';
+      final adapter = _FakeMindMapAdapter([batch(), invalid, finalTree()]);
+
+      final result = await workflow(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '测试书',
+        sections: sections,
+      );
+
+      expect(result.nodes, hasLength(6));
+      expect(adapter.calls, 3);
+      expect(
+        adapter.requests.last.messages.first.text,
+        contains('根节点 summary 必须概括正文中心结论'),
+      );
+    },
+  );
 
   test(
     'matching checkpoint resumes without repeating completed batch',

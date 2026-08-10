@@ -68,6 +68,7 @@ void main() {
     await tester.pump();
     expect(find.text('向右'), findsOneWidget);
     expect(find.text('主题甲'), findsOneWidget);
+    expect(find.text('主题说明'), findsOneWidget);
 
     await tester.tap(find.byTooltip('全屏查看'));
     expect(openedFullscreen, isTrue);

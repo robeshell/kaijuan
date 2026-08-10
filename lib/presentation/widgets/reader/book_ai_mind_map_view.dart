@@ -414,7 +414,8 @@ class _MindMapNodeCard extends StatelessWidget {
     final root = node.level == 0;
     return Semantics(
       button: true,
-      label: '${node.title}，第 ${node.level + 1} 层',
+      label:
+          '${node.title}，第 ${node.level + 1} 层${node.summary.isEmpty ? '' : '，${node.summary}'}',
       child: Material(
         color: root
             ? colors.primary
@@ -429,20 +430,45 @@ class _MindMapNodeCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+            padding: const EdgeInsets.fromLTRB(12, 9, 6, 9),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
-                  child: Text(
-                    node.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.2,
-                      fontWeight: root ? FontWeight.w700 : FontWeight.w600,
-                      color: root ? colors.onPrimary : context.appPrimaryText,
-                    ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        node.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          height: 1.18,
+                          fontWeight: root ? FontWeight.w700 : FontWeight.w600,
+                          color: root
+                              ? colors.onPrimary
+                              : context.appPrimaryText,
+                        ),
+                      ),
+                      if (node.summary.isNotEmpty) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          node.summary,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.25,
+                            fontWeight: FontWeight.w400,
+                            color: root
+                                ? colors.onPrimary.withValues(alpha: 0.84)
+                                : context.appSecondaryText,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 if (childCount > 0)
