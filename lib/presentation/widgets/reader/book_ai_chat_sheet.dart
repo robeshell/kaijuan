@@ -153,6 +153,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool _loadingSession = true;
   String? _loadError;
   bool _sending = false;
+  bool _resolvingChatScope = false;
 
   /// Draft cleared for the active send. Restored only when the user has not
   /// entered a newer draft while the request was in flight.
@@ -335,12 +336,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       if (!identical(session, loadedSession)) {
         await _c.saveChatSession(session);
       }
-      // Resolve the work structure ONCE at panel open (collection or not —
-      // plain books resolve to null with no side effect). Doing it here means
-      // the graph tab and every 翻页 follow read a ready cache
-      // instead of each kicking off their own async resolve and flickering.
-      await _c.resolveGraphWorkCandidates();
-      if (!mounted) return;
       await _c.loadBookGraph();
       if (!mounted) return;
       setState(() {
@@ -490,13 +485,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _input.text).trim();
-    if (text.isEmpty || _sending) return;
+    if (text.isEmpty || _sending || _resolvingChatScope) return;
     if (!_ready) return;
     final retrying = preset != null && preset == _retryText;
     final retryTurnId = retrying ? _retryTurnId : null;
     final mindMapScope = resolveAiMindMapRequestScope(text);
     if (mindMapScope != null) {
-      if (preset == null && _input.text.trim() == text) _input.clear();
+      if (preset == null && _input.text.trim() == text) {
+        _clearComposerAfterFrame(text);
+      }
       await _generateMindMapInChat(
         text,
         mindMapScope,
@@ -505,8 +502,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       return;
     }
 
-    // Prefer the resolved work. Null deliberately means the whole
-    // publication: uncertain structure/front matter must not disable chat.
+    // Ordinary chat preserves the per-work scope of an omnibus, but structure
+    // recognition is deliberately lazy so an explicit mind-map request never
+    // pays this extraction cost.
+    _resolvingChatScope = true;
+    try {
+      await _c.resolveGraphWorkCandidates();
+    } finally {
+      _resolvingChatScope = false;
+    }
+    if (!mounted) return;
+
+    // Prefer the resolved work. Null deliberately means the whole publication:
+    // uncertain structure/front matter must not disable chat.
     final turnWork = _c.currentReadingWork;
 
     _suggestionCancel?.cancel();
@@ -542,7 +550,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // Clear a composer send as soon as the request is committed. Preset and
     // retry actions leave any separately typed draft untouched.
     if ((preset == null || retrying) && _input.text.trim() == text) {
-      _input.clear();
+      _clearComposerAfterFrame(text);
       _pendingDraft = text;
     }
 
@@ -822,6 +830,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       },
       cancelOnError: true,
     );
+  }
+
+  void _clearComposerAfterFrame(String submittedText) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _input.text.trim() != submittedText) return;
+      _input.clear();
+    });
   }
 
   KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
@@ -3536,7 +3551,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                             TextField(
                               controller: _input,
                               focusNode: _focus,
-                              autofocus: true,
+                              // Bootstrap requests focus after the first frame.
+                              // Synchronous autofocus can let an IME update the
+                              // controller during layout/semantics flushing.
+                              autofocus: false,
                               minLines: 1,
                               maxLines: 6,
                               keyboardType: TextInputType.multiline,

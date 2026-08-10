@@ -50,7 +50,10 @@ class _AmbiguousOutlineController extends BookReaderController {
   @override
   Future<List<AiGraphWorkCandidate>?> resolveGraphWorkCandidates({
     CancelToken? cancel,
-  }) async => null;
+  }) async {
+    structureResolveCalls++;
+    return null;
+  }
 
   @override
   Future<AiBookOutline?> loadBookOutline({AiChatSession? session}) async =>
@@ -80,6 +83,7 @@ class _AmbiguousOutlineController extends BookReaderController {
   int? lastMindMapSourceSectionIndex;
   AiGraphWorkCandidate? lastMindMapWork;
   bool? lastMindMapUseFrozenWork;
+  int structureResolveCalls = 0;
   int mindMapFailuresRemaining = 0;
 
   @override
@@ -375,6 +379,7 @@ void main() {
     );
     await tester.tap(find.text('打开 AI'));
     await tester.pumpAndSettle();
+    expect(controller.structureResolveCalls, 0);
 
     final composer = find.byKey(const ValueKey<String>('ai-chat-composer'));
     expect(composer, findsOneWidget);
@@ -534,8 +539,10 @@ void main() {
     );
 
     await tester.enterText(find.byType(TextField).last, '为这本书生成思维导图');
-    await tester.tap(find.byTooltip('发送'));
+    await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(controller.structureResolveCalls, 0);
     expect(controller.lastMindMapSourceSectionIndex, isNull);
     expect(controller.lastMindMapWork, isNull);
     expect(controller.lastMindMapUseFrozenWork, isTrue);
@@ -602,6 +609,7 @@ void main() {
     await tester.tap(find.byTooltip('发送'));
     await tester.pump();
     await tester.pump();
+    expect(controller.structureResolveCalls, 1);
     expect(controller.lastDeepThinkingEnabled, isFalse);
     expect(find.text('正在思考'), findsOneWidget);
     expect(find.text('先分析问题。'), findsOneWidget);
