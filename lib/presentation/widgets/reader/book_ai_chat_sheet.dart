@@ -647,6 +647,21 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       return;
     }
 
+    // "继续修改" is an explicit product attachment, not a hint for the
+    // language model. While the chip is visible, submit the reader's text
+    // directly as a revision instruction for that exact native artifact. A
+    // preset is excluded so retrying an unrelated chat turn cannot be
+    // captured by a currently attached map.
+    final attachedMindMap = preset == null ? _activeMindMap : null;
+    if (attachedMindMap != null) {
+      await _runMindMapRevision(
+        text,
+        attachedMindMap,
+        clearComposer: _input.text.trim() == text,
+      );
+      return;
+    }
+
     // Ordinary chat also preserves the resolved work of an omnibus. Mind-map
     // product actions are requested by this same model run and dispatched
     // only after the run emits its terminal action event.

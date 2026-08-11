@@ -705,13 +705,35 @@ void main() {
     editButton.onPressed!();
     await tester.pump();
     expect(find.textContaining('正在修改：'), findsOneWidget);
-    final actionCallsBeforeDiscussion = controller.productActionRequests;
-    await tester.enterText(find.byType(TextField).last, '我还是觉得不对');
+    final actionCallsBeforeRevision = controller.productActionRequests;
+    final generationsBeforeRevision = controller.generatedMindMapScopes.length;
+    await tester.enterText(find.byType(TextField).last, '再详细一点');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    expect(controller.productActionRequests, actionCallsBeforeDiscussion);
-    expect(controller.chatStreams, hasLength(1));
+    expect(controller.productActionRequests, actionCallsBeforeRevision);
+    expect(
+      controller.generatedMindMapScopes,
+      hasLength(generationsBeforeRevision + 1),
+    );
+    expect(controller.lastExistingMindMap, isNotNull);
+    expect(controller.chatStreams, isEmpty);
     expect(find.textContaining('正在修改：'), findsOneWidget);
+
+    final editAttachment = tester.widget<InputChip>(
+      find.byType(InputChip).first,
+    );
+    editAttachment.onDeleted!();
+    await tester.pump();
+    expect(find.textContaining('正在修改：'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).last, '为什么这样整理？');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(
+      controller.generatedMindMapScopes,
+      hasLength(generationsBeforeRevision + 1),
+    );
+    expect(controller.chatStreams, hasLength(1));
   });
 
   testWidgets(
