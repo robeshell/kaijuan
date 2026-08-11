@@ -57,6 +57,21 @@
 - 不引入多 Agent。运行时采用开卷自有的确定性 `AiRunOrchestrator`；任务路由、书籍/作品范围、权限、预算、取消、续写、checkpoint、存储与 UI 状态均由 App 持有。
 - Genkit Dart 及官方 OpenAI / Anthropic 插件精确固定版本并分别隔离在 adapter；两类 adapter 都只执行单次模型回合，映射原生工具请求、流式输出、usage 与结构化结果。本书对话不保留手写 Messages 对话 adapter、旧 Provider、fenced JSON 或跨协议回退。
 
+### 对话意图与 Workflow 路由（迁移边界）
+
+本书 AI 在普通回答之前增加 App 自有的类型化意图层。它只负责从用户输入和当前会话上下文得到 `object / action / scope / target / modifiers`，不读取正文、不调用模型，也不执行 Workflow。当前自然语言规则仍兼容生成思维导图的已有入口；后续逐步覆盖思维导图的创建、编辑、重新生成、导出，以及其他可明确建模的产品命令。
+
+```text
+用户输入 + 会话上下文
+  → AiConversationRouter
+  → OrdinaryChatRoute | WorkflowRoute | ClarificationRoute
+  → 普通受控 Tool Agent / 开卷 Workflow / 对话内补参
+```
+
+`AiConversationContext` 只提供当前 `contentHash`、章节/作品范围、最近结构化附件和活动 run 等可信事实。范围、权限、预算、取消、正文冻结和持久化继续由开卷拥有；模型不能通过意图层改变这些边界。意图解析失败或缺少必要槽位时必须普通回答或在对话内追问，不得猜测并启动高成本任务。
+
+意图层不引入第二套模型 transport，也不把 Genkit Agent 作为前置条件。未来若 Genkit Agent 稳定，可让它负责普通对话的历史、工具循环和 interrupt/resume，但它只能调用开卷定义并再次校验的业务 Tool；确定性 Workflow、范围预检、结构化校验、附件持久化和 WebDAV 边界不迁移给模型框架。
+
 ---
 
 ## 2. 目标与非目标

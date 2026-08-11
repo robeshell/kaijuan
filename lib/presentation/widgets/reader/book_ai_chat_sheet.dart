@@ -10,6 +10,8 @@ import '../../../ai/ai_book_structure.dart';
 import '../../../ai/ai_chat.dart';
 import '../../../ai/ai_chat_retrieve.dart';
 import '../../../ai/ai_chat_session_ops.dart';
+import '../../../ai/ai_conversation_intent.dart';
+import '../../../ai/ai_conversation_router.dart';
 import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_family_tree.dart';
 import '../../../ai/ai_graph_service.dart';
@@ -535,8 +537,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (!_ready) return;
     final retrying = preset != null && preset == _retryText;
     final retryTurnId = retrying ? _retryTurnId : null;
-    final mindMapScope = resolveAiMindMapRequestScope(text);
-    if (mindMapScope != null) {
+    final route = const AiConversationRouter().resolve(text);
+    if (route is AiWorkflowRoute &&
+        route.intent.object == AiIntentObject.mindMap) {
+      final mindMapScope = switch (route.intent.scope) {
+        AiIntentScope.currentChapter => AiMindMapRequestScope.currentChapter,
+        AiIntentScope.currentWork => AiMindMapRequestScope.currentWork,
+        AiIntentScope.wholeBook => AiMindMapRequestScope.wholeBook,
+        AiIntentScope.unspecified => AiMindMapRequestScope.unspecified,
+        AiIntentScope.namedWork || AiIntentScope.existingArtifact => null,
+      };
+      if (mindMapScope == null) return;
       await _routeMindMapRequest(
         text,
         mindMapScope,

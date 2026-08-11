@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_session_ops.dart';
+import 'package:kaijuan/ai/ai_conversation_intent.dart';
+import 'package:kaijuan/ai/ai_conversation_router.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
 
@@ -126,6 +128,40 @@ void main() {
     expect(resolveAiMindMapRequestScope('如何生成一本书的思维导图'), isNull);
     expect(resolveAiMindMapRequestScope('比较思维导图和知识图谱'), isNull);
   });
+
+  test(
+    'typed conversation routes preserve scope and distinguish edit intent',
+    () {
+      const router = AiConversationRouter();
+      final create = router.resolve('我需要这本书的思维导图');
+      expect(create, isA<AiWorkflowRoute>());
+      final createIntent = (create as AiWorkflowRoute).intent;
+      expect(createIntent.object, AiIntentObject.mindMap);
+      expect(createIntent.action, AiIntentAction.create);
+      expect(createIntent.scope, AiIntentScope.wholeBook);
+
+      final edit = router.classify('我需要修改这张思维导图');
+      expect(edit, isNotNull);
+      expect(edit!.object, AiIntentObject.mindMap);
+      expect(edit.action, AiIntentAction.edit);
+      expect(edit.scope, AiIntentScope.existingArtifact);
+      expect(router.resolve('我需要修改这张思维导图'), isA<AiOrdinaryChatRoute>());
+
+      final withArtifact = router.classify(
+        '把刚才那张思维导图改得更详细',
+        context: const AiConversationContext(
+          recentArtifacts: [
+            AiArtifactRef(
+              artifactId: 'map-1',
+              messageTurnId: 'turn-1',
+              object: AiIntentObject.mindMap,
+            ),
+          ],
+        ),
+      );
+      expect(withArtifact!.target!.artifactId, 'map-1');
+    },
+  );
 
   test('structured mind map survives chat message JSON round-trip', () {
     final map = AiBookMindMap(
