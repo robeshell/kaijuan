@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_structure.dart';
+import 'package:kaijuan/ai/ai_structure_supplements.dart';
 import 'package:kaijuan/domain/book_structure.dart';
 
 void main() {
@@ -36,7 +37,7 @@ void main() {
   AiBookStructureManifest classify(BookStructureIndex index) =>
       AiBookStructureResolver.resolveIndex(
         index: index,
-        isSupplementTitle: (title) => title == '版权信息',
+        isSupplementTitle: matchesAiStructureSupplementTitle,
       );
 
   test('bridge JSON preserves every section, heading and locator', () {
@@ -306,5 +307,100 @@ void main() {
 
     expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
     expect(manifest.works.map((work) => work.title), ['权力游戏', '列王纷争']);
+  });
+
+  test('hierarchical omnibus keeps work trees and drops leaf front matter', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '代表作品集套装共2册',
+        sections: [for (var index = 0; index < 8; index++) section(index)],
+        navigation: [
+          node(
+            id: 'publisher',
+            title: 'Digital Lab简介',
+            order: 0,
+            sectionIndex: 0,
+          ),
+          node(
+            id: 'work-a',
+            title: '作品甲',
+            order: 1,
+            sectionIndex: 1,
+            children: 3,
+          ),
+          node(
+            id: 'work-b',
+            title: '作品乙',
+            order: 2,
+            sectionIndex: 4,
+            children: 3,
+          ),
+          node(id: 'afterword', title: '后记', order: 3, sectionIndex: 7),
+        ],
+      ),
+    );
+
+    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
+    expect(manifest.works.last.endSectionExclusive, 8);
+  });
+
+  test(
+    'segmented work exposes only volume nodes and stops before back matter',
+    () {
+      final manifest = classify(
+        BookStructureIndex(
+          indexVersion: 1,
+          publicationTitle: '分部历史',
+          sections: [for (var index = 0; index < 7; index++) section(index)],
+          navigation: [
+            node(
+              id: 'recommendation',
+              title: '名人推荐',
+              order: 0,
+              sectionIndex: 0,
+            ),
+            node(id: 'intro', title: '引子', order: 1, sectionIndex: 1),
+            node(id: 'volume-a', title: '第壹部 起点', order: 2, sectionIndex: 2),
+            node(id: 'volume-b', title: '第贰部 转折', order: 3, sectionIndex: 4),
+            node(id: 'afterword', title: '后记', order: 4, sectionIndex: 6),
+          ],
+        ),
+      );
+
+      expect(manifest.kind, AiBookStructureKind.segmentedSingleWork);
+      expect(manifest.works.map((work) => work.title), ['第壹部 起点', '第贰部 转折']);
+      expect(manifest.works.last.endSectionExclusive, 7);
+    },
+  );
+
+  test('declared omnibus count mismatch fails closed without fake choices', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '代表作品集套装共3册',
+        sections: [section(0), section(2)],
+        navigation: [
+          node(
+            id: 'work-a',
+            title: '作品甲',
+            order: 0,
+            sectionIndex: 0,
+            children: 2,
+          ),
+          node(
+            id: 'work-b',
+            title: '作品乙',
+            order: 1,
+            sectionIndex: 2,
+            children: 2,
+          ),
+        ],
+      ),
+    );
+
+    expect(manifest.kind, AiBookStructureKind.uncertain);
+    expect(manifest.works, isEmpty);
   });
 }

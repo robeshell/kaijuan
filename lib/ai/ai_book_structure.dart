@@ -165,6 +165,7 @@ abstract final class AiBookStructureResolver {
       final children = index.childrenOf(candidates.single.nodeId);
       if (children.length >= 2) candidates = children;
     }
+    final allCandidates = candidates;
     candidates = candidates
         .where((node) => !isSupplementTitle(node.title))
         .toList(growable: false);
@@ -193,17 +194,22 @@ abstract final class AiBookStructureResolver {
       );
     }
 
-    final ranges = _rangesFromIndexCandidates(candidates);
-    final volumeCount = candidates
+    final volumeCandidates = candidates
         .where((node) => isVolumeTitle(node.title))
-        .length;
-    if (volumeCount * 2 >= candidates.length) {
+        .toList(growable: false);
+    if (volumeCandidates.length >= 2 &&
+        volumeCandidates.length * 2 >= candidates.length) {
       return AiBookStructureManifest(
         kind: AiBookStructureKind.segmentedSingleWork,
         source: AiBookStructureSource.navigationHierarchy,
         confidence: 0.95,
         reason: 'indexed top-level ranges are parts or volumes',
-        works: ranges,
+        works: _rangesFromIndexCandidates(
+          volumeCandidates,
+          trailingBoundaries: allCandidates.where(
+            (node) => isSupplementTitle(node.title),
+          ),
+        ),
       );
     }
 
@@ -213,11 +219,11 @@ abstract final class AiBookStructureResolver {
     final hasOmnibusTitleEvidence = _omnibusTitlePattern.hasMatch(
       index.publicationTitle,
     );
-    final omnibusCandidates = _mergeSplitInstallments(candidates);
+    final mergedCandidates = _mergeSplitInstallments(candidates);
     final hasRepeatedInstallmentEvidence =
         candidates.length >= 4 &&
-        omnibusCandidates.length >= 2 &&
-        omnibusCandidates.length * 2 <= candidates.length;
+        mergedCandidates.length >= 2 &&
+        mergedCandidates.length * 2 <= candidates.length;
     if (!hasOmnibusTitleEvidence && !hasRepeatedInstallmentEvidence) {
       return const AiBookStructureManifest(
         kind: AiBookStructureKind.singleWork,
@@ -227,59 +233,60 @@ abstract final class AiBookStructureResolver {
       );
     }
 
-    final omnibusRanges = _rangesFromIndexCandidates(omnibusCandidates);
-
-    final independentCount = candidates
+    final treeCandidates = candidates
         .where(
           (node) =>
               node.directChildCount >= 2 ||
               index.childrenOf(node.nodeId).length >= 2,
         )
-        .length;
-    if (independentCount * 2 >= candidates.length) {
-      if (omnibusRanges.length < 2) {
-        return const AiBookStructureManifest(
-          kind: AiBookStructureKind.uncertain,
-          source: AiBookStructureSource.navigationHierarchy,
-          confidence: 0.6,
-          reason: 'independent indexed ranges lack resolved anchors',
-        );
-      }
-      final starts = omnibusRanges.map((work) => work.startSection).toSet();
-      if (starts.length != omnibusRanges.length) {
-        return const AiBookStructureManifest(
-          kind: AiBookStructureKind.uncertain,
-          source: AiBookStructureSource.navigationHierarchy,
-          confidence: 0.72,
-          reason: 'independent indexed ranges share one spine',
-        );
-      }
+        .toList(growable: false);
+    final workCandidates = _mergeSplitInstallments(
+      treeCandidates.length >= 2 ? treeCandidates : candidates,
+    );
+    final expectedCount = _expectedOmnibusCount(index.publicationTitle);
+    if (expectedCount != null && workCandidates.length != expectedCount) {
       return AiBookStructureManifest(
-        kind: AiBookStructureKind.multiWorkOmnibus,
+        kind: AiBookStructureKind.uncertain,
         source: AiBookStructureSource.navigationHierarchy,
-        confidence: 0.97,
-        reason: 'indexed top-level ranges own chapter subtrees',
-        works: omnibusRanges,
+        confidence: 0.65,
+        reason:
+            'publication expects $expectedCount works but indexed ${workCandidates.length}',
       );
     }
 
-    if (omnibusRanges.length >= 2) {
-      return AiBookStructureManifest(
-        kind: AiBookStructureKind.multiWorkOmnibus,
+    final omnibusRanges = _rangesFromIndexCandidates(
+      workCandidates,
+      trailingBoundaries: allCandidates.where(
+        (node) => isSupplementTitle(node.title),
+      ),
+    );
+    if (omnibusRanges.length < 2) {
+      return const AiBookStructureManifest(
+        kind: AiBookStructureKind.uncertain,
         source: AiBookStructureSource.navigationHierarchy,
-        confidence: 0.92,
-        reason: hasOmnibusTitleEvidence
-            ? 'publication metadata corroborates indexed work ranges'
-            : 'repeated split installments corroborate indexed work ranges',
-        works: omnibusRanges,
+        confidence: 0.6,
+        reason: 'independent indexed ranges lack resolved anchors',
       );
     }
-
-    return const AiBookStructureManifest(
-      kind: AiBookStructureKind.singleWork,
-      source: AiBookStructureSource.heuristic,
-      confidence: 0.72,
-      reason: 'indexed flat ranges have no independent-work evidence',
+    final starts = omnibusRanges.map((work) => work.startSection).toSet();
+    if (starts.length != omnibusRanges.length) {
+      return const AiBookStructureManifest(
+        kind: AiBookStructureKind.uncertain,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: 0.72,
+        reason: 'independent indexed ranges share one spine',
+      );
+    }
+    return AiBookStructureManifest(
+      kind: AiBookStructureKind.multiWorkOmnibus,
+      source: AiBookStructureSource.navigationHierarchy,
+      confidence: treeCandidates.length >= 2 ? 0.97 : 0.92,
+      reason: treeCandidates.length >= 2
+          ? 'indexed work ranges own chapter subtrees'
+          : hasOmnibusTitleEvidence
+          ? 'publication metadata corroborates indexed work ranges'
+          : 'repeated split installments corroborate indexed work ranges',
+      works: omnibusRanges,
     );
   }
 
@@ -312,9 +319,47 @@ abstract final class AiBookStructureResolver {
     return merged;
   }
 
+  static int? _expectedOmnibusCount(String raw) {
+    final title = raw.replaceAll(RegExp(r'\s+'), '');
+    final arabic = RegExp(
+      r'(?:套装|全套|共)?([0-9]{1,3})(?:册|部曲)',
+    ).firstMatch(title);
+    if (arabic != null) return int.tryParse(arabic.group(1)!);
+    final chinese = RegExp(
+      r'(?:套装|全套|共)?([零一二三四五六七八九十两]{1,3})(?:册|部曲)',
+    ).firstMatch(title);
+    return chinese == null ? null : _parseChineseCount(chinese.group(1)!);
+  }
+
+  static int? _parseChineseCount(String raw) {
+    const digits = <String, int>{
+      '零': 0,
+      '一': 1,
+      '二': 2,
+      '两': 2,
+      '三': 3,
+      '四': 4,
+      '五': 5,
+      '六': 6,
+      '七': 7,
+      '八': 8,
+      '九': 9,
+    };
+    if (raw == '十') return 10;
+    final separator = raw.indexOf('十');
+    if (separator < 0) return digits[raw];
+    final tens = separator == 0 ? 1 : digits[raw.substring(0, separator)];
+    final ones = separator + 1 == raw.length
+        ? 0
+        : digits[raw.substring(separator + 1)];
+    if (tens == null || ones == null) return null;
+    return tens * 10 + ones;
+  }
+
   static List<AiBookWork> _rangesFromIndexCandidates(
-    List<BookStructureNavigationNode> candidates,
-  ) {
+    List<BookStructureNavigationNode> candidates, {
+    Iterable<BookStructureNavigationNode> trailingBoundaries = const [],
+  }) {
     final ordered =
         candidates
             .where((node) => node.sectionIndex != null)
@@ -323,19 +368,42 @@ abstract final class AiBookStructureResolver {
             final section = left.sectionIndex!.compareTo(right.sectionIndex!);
             return section != 0 ? section : left.order.compareTo(right.order);
           });
+    final boundarySections =
+        trailingBoundaries
+            .map((node) => node.sectionIndex)
+            .whereType<int>()
+            .toSet()
+            .toList()
+          ..sort();
     return [
       for (var index = 0; index < ordered.length; index++)
         AiBookWork(
           id: ordered[index].nodeId,
           title: ordered[index].title,
           startSection: ordered[index].sectionIndex! + 1,
-          endSectionExclusive:
-              index + 1 < ordered.length &&
-                  ordered[index + 1].sectionIndex != ordered[index].sectionIndex
-              ? ordered[index + 1].sectionIndex! + 1
-              : null,
+          endSectionExclusive: _nextRangeBoundary(
+            currentSection: ordered[index].sectionIndex!,
+            nextSelectedSection: index + 1 < ordered.length
+                ? ordered[index + 1].sectionIndex
+                : null,
+            trailingBoundarySections: boundarySections,
+          ),
         ),
     ];
+  }
+
+  static int? _nextRangeBoundary({
+    required int currentSection,
+    required int? nextSelectedSection,
+    required List<int> trailingBoundarySections,
+  }) {
+    int? boundary = nextSelectedSection;
+    for (final section in trailingBoundarySections) {
+      if (section <= currentSection) continue;
+      if (boundary == null || section < boundary) boundary = section;
+      break;
+    }
+    return boundary == null ? null : boundary + 1;
   }
 
   static AiBookStructureManifest resolve({

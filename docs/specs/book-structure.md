@@ -34,6 +34,8 @@ spine href / CFI ──────┘
 
 原始 nav 与 DOM heading 都保留来源。标题、物理 section 和 fragment/CFI 能对齐时合并为同一规范节点；无法对齐的 heading 作为补充章节存在，不能覆盖或删除原 nav。
 
+分类前先为顶层结构节点确定角色：`work`（独立作品）、`volume`（单本分部/分卷）、`chapter`（普通章节）或 `supplement`（封面、目录、简介、推荐、前后记等外围内容）。角色规则由共享结构层提供，运行时与本地审计不得各维护一套近似规则。
+
 分类采用保守先验：
 
 - 默认 `singleWork`。
@@ -42,6 +44,8 @@ spine href / CFI ──────┘
 - “作品（上）/作品（中）/作品（下）”先合并为一部作品；不得把物理拆册数量展示成作品数量。
 - 章/节/篇标题、破折号连续副标题、前后记与附录不能作为多作品证据。
 - 证据冲突时保持 `uncertain`；普通全书任务仍按单本出版物处理，只有作品级任务才请求用户确认。
+
+类型判定与范围构造必须分开：`segmentedSingleWork.works` 只能由 `volume` 节点建立；`multiWorkOmnibus.works` 只能由 `work` 节点建立。其他节点可以提供下一范围或尾部外围材料的边界，但不得成为独立生成单元。出版物标题中的“共 N 册/六部曲/套装 12 册”等数量只用于一致性校验；数量冲突时保持不确定，不按顺序硬删候选。
 
 用户确认按 `contentHash + indexVersion + structureFingerprint` 保存为 `BookStructureOverride`。本阶段先实现索引、分类与范围消费；持久化覆盖在索引稳定后接入，不把临时启发式写入数据库。
 

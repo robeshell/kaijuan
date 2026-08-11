@@ -30,6 +30,7 @@ import '../../ai/ai_run.dart';
 import '../../ai/ai_run_orchestrator.dart';
 import '../../ai/ai_search.dart';
 import '../../ai/ai_settings.dart';
+import '../../ai/ai_structure_supplements.dart';
 import '../../ai/ai_translation.dart';
 import '../../ai/ai_user_error.dart';
 import '../../app/book_reading_preferences.dart';
@@ -1119,72 +1120,26 @@ class BookReaderController extends ChangeNotifier {
         .toList(growable: false);
   }
 
-  /// Word lists come from AI settings (defaults = built-in lists). Compiled
-  /// once per word-list change; empty lists disable the rule entirely.
-  String? _appendixWordsKey;
-  RegExp? _appendixWordsRegExp;
-  String? _metadataWordsKey;
-  RegExp? _metadataWordsRegExp;
-
   AiContentRuleWords get _contentRuleWords =>
       _aiSettings?.settings.contentRuleWords ?? const AiContentRuleWords();
 
   /// Never-matches regex used when a word list is empty (rule disabled).
   static final RegExp _neverMatches = RegExp(r'$.^');
 
-  /// Lines are prefix-matched; a leading `!` turns a line into a negative
-  /// lookahead (e.g. `!序曲` keeps 序曲, a body opening, out of the rule).
-  static RegExp _prefixWordsRegExp(List<String> words) {
-    final positives = <String>[];
-    final negatives = <String>[];
-    for (final word in words) {
-      final t = word.trim();
-      if (t.isEmpty) continue;
-      if (t.startsWith('!')) {
-        final exclude = t.substring(1).trim();
-        if (exclude.isNotEmpty) negatives.add(RegExp.escape(exclude));
-      } else {
-        positives.add(RegExp.escape(t));
-      }
-    }
-    if (positives.isEmpty) return _neverMatches; // rule disabled
-    final candidates = positives.join('|');
-    if (negatives.isEmpty) return RegExp('^(?:$candidates)');
-    return RegExp('^(?!(?:${negatives.join('|')}))(?:$candidates)');
-  }
-
-  static RegExp _exactWordsRegExp(List<String> words) {
-    final escaped = <String>[
-      for (final word in words)
-        if (word.trim().isNotEmpty) RegExp.escape(word.trim()),
-    ];
-    if (escaped.isEmpty) return _neverMatches; // rule disabled
-    return RegExp('^(?:${escaped.join('|')})\$');
-  }
-
   bool _isGraphAppendixLabel(String raw) {
-    final label = raw.trim().replaceAll(RegExp(r'\s+'), '');
-    if (RegExp(r'^作者.{0,16}(?:小传|生平|简介)$').hasMatch(label)) {
-      return true;
-    }
-    final words = _contentRuleWords.appendixUnits;
-    final key = words.join('\u0001');
-    if (key != _appendixWordsKey) {
-      _appendixWordsKey = key;
-      _appendixWordsRegExp = _prefixWordsRegExp(words);
-    }
-    return _appendixWordsRegExp!.hasMatch(label);
+    final title = raw.trim().replaceAll(RegExp(r'\s+'), '');
+    final words = _contentRuleWords;
+    if (words.metadataUnits.any((word) => word.trim() == title)) return false;
+    return matchesAiStructureSupplementTitle(
+      raw,
+      appendixUnits: words.appendixUnits,
+      metadataUnits: words.metadataUnits,
+    );
   }
 
   bool _isOutlineMetadataTitle(String value) {
     final title = value.trim().replaceAll(RegExp(r'\s+'), '');
-    final words = _contentRuleWords.metadataUnits;
-    final key = words.join('\u0001');
-    if (key != _metadataWordsKey) {
-      _metadataWordsKey = key;
-      _metadataWordsRegExp = _exactWordsRegExp(words);
-    }
-    return _metadataWordsRegExp!.hasMatch(title);
+    return _contentRuleWords.metadataUnits.any((word) => word.trim() == title);
   }
 
   bool _isOutlineMetadataSection(AiBookSectionSlice section) {

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:kaijuan/ai/ai_book_structure.dart';
+import 'package:kaijuan/ai/ai_structure_supplements.dart';
 import 'package:kaijuan/domain/book_structure.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
@@ -90,14 +91,7 @@ Future<List<File>> _epubs(List<String> inputs) async {
 }
 
 bool _isSupplementTitle(String raw) {
-  final title = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
-  if (title.isEmpty) return true;
-  return RegExp(
-    r'^(封面|总封面|扉页|版权|目录|目次|出版信息|制作说明|画廊|内容简介|作者简介|'
-    r'参考文献|参考资料|索引|附录|附表|附图|致谢|谢辞|鸣谢|'
-    r'后记|跋|注释|年表|词汇表|术语表|勘误|出版说明|'
-    r'推荐语|书评|导读|前沿点评|前言点评)',
-  ).hasMatch(title);
+  return matchesAiStructureSupplementTitle(raw);
 }
 
 final class _EpubStructureReader {
