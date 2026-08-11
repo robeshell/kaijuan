@@ -79,12 +79,27 @@ void main() {
     );
   });
 
-  test('mind map intent uses narrow action commands and explicit scope', () {
+  test('mind map intent accepts creation and acquisition requests', () {
     expect(
       resolveAiMindMapRequestScope('给当前章生成一个思维导图'),
       AiMindMapRequestScope.currentChapter,
     );
-    expect(resolveAiMindMapRequestScope('我想看看这本书的思维导图'), isNull);
+    expect(
+      resolveAiMindMapRequestScope('我需要这本书的思维导图'),
+      AiMindMapRequestScope.wholeBook,
+    );
+    expect(
+      resolveAiMindMapRequestScope('我想看看这本书的思维导图'),
+      AiMindMapRequestScope.wholeBook,
+    );
+    expect(
+      resolveAiMindMapRequestScope('给我一份本章脑图'),
+      AiMindMapRequestScope.currentChapter,
+    );
+    expect(
+      resolveAiMindMapRequestScope('本书思维导图'),
+      AiMindMapRequestScope.wholeBook,
+    );
     expect(
       resolveAiMindMapRequestScope('生成思维导图'),
       AiMindMapRequestScope.unspecified,
@@ -100,6 +115,13 @@ void main() {
     expect(resolveAiMindMapRequestScope('用 Mermaid 画这本书的思维导图'), isNull);
     expect(resolveAiMindMapRequestScope('总结这一章'), isNull);
     expect(resolveAiMindMapRequestScope('这个思维导图不够详细'), isNull);
+    expect(resolveAiMindMapRequestScope('这个思维导图做得不专业'), isNull);
+    expect(resolveAiMindMapRequestScope('这张思维导图画得有点乱'), isNull);
+    expect(resolveAiMindMapRequestScope('我需要修改这本书的思维导图'), isNull);
+    expect(resolveAiMindMapRequestScope('不要生成这本书的思维导图'), isNull);
+    expect(resolveAiMindMapRequestScope('我不需要这本书的思维导图'), isNull);
+    expect(resolveAiMindMapRequestScope('我不想看这本书的思维导图'), isNull);
+    expect(resolveAiMindMapRequestScope('给我解释这本书的思维导图'), isNull);
     expect(resolveAiMindMapRequestScope('为什么生成的思维导图只有标题'), isNull);
     expect(resolveAiMindMapRequestScope('如何生成一本书的思维导图'), isNull);
     expect(resolveAiMindMapRequestScope('比较思维导图和知识图谱'), isNull);
