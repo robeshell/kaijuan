@@ -14,6 +14,63 @@ enum AiBookStructureKind {
 
 enum AiBookStructureSource { navigationHierarchy, spineHeadings, heuristic }
 
+enum AiBookStructureStrategy {
+  single,
+  volumes,
+  topLevelWorks,
+  workTrees,
+  intermediateGroups,
+  flatDirectories,
+}
+
+class AiBookStructureHypothesis {
+  const AiBookStructureHypothesis({
+    required this.strategy,
+    required this.kind,
+    required this.nodes,
+    required this.score,
+    required this.evidence,
+    required this.rejections,
+  });
+
+  final AiBookStructureStrategy strategy;
+  final AiBookStructureKind kind;
+  final List<BookStructureNavigationNode> nodes;
+  final int score;
+  final List<String> evidence;
+  final List<String> rejections;
+
+  bool get isValid => rejections.isEmpty;
+}
+
+class AiBookStructureAnalysis {
+  const AiBookStructureAnalysis({
+    required this.manifest,
+    required this.hypotheses,
+    this.selectedStrategy,
+  });
+
+  final AiBookStructureManifest manifest;
+  final List<AiBookStructureHypothesis> hypotheses;
+  final AiBookStructureStrategy? selectedStrategy;
+}
+
+abstract final class _StructureScore {
+  static const singleBase = 30;
+  static const sparseSingle = 45;
+  static const chapterMajority = 45;
+  static const noOmnibusMetadata = 20;
+  static const volumes = 72;
+  static const topLevelWorks = 42;
+  static const workTrees = 58;
+  static const intermediateGroups = 62;
+  static const flatDirectories = 54;
+  static const omnibusMetadata = 18;
+  static const declaredCountMatch = 35;
+  static const distinctAnchors = 18;
+  static const ambiguityMargin = 8;
+}
+
 class AiBookWork {
   const AiBookWork({
     required this.id,
@@ -158,6 +215,374 @@ abstract final class AiBookStructureResolver {
   /// The legacy [resolve] path remains only for engines that cannot expose the
   /// new bridge yet.
   static AiBookStructureManifest resolveIndex({
+    required BookStructureIndex index,
+    required bool Function(String title) isSupplementTitle,
+    String? fallbackPublicationTitle,
+  }) => analyzeIndex(
+    index: index,
+    isSupplementTitle: isSupplementTitle,
+    fallbackPublicationTitle: fallbackPublicationTitle,
+  ).manifest;
+
+  /// Generates complete competing segmentations before choosing one. Hard
+  /// structural conflicts reject a hypothesis; scores only rank legal ones.
+  static AiBookStructureAnalysis analyzeIndex({
+    required BookStructureIndex index,
+    required bool Function(String title) isSupplementTitle,
+    String? fallbackPublicationTitle,
+  }) {
+    if (!index.isUsable) {
+      return const AiBookStructureAnalysis(
+        manifest: AiBookStructureManifest(
+          kind: AiBookStructureKind.singleWork,
+          source: AiBookStructureSource.heuristic,
+          confidence: 0.5,
+          reason: 'structure index is unavailable',
+        ),
+        hypotheses: [],
+      );
+    }
+
+    final publicationEvidence = [
+      index.publicationTitle,
+      fallbackPublicationTitle ?? '',
+    ].where((part) => part.trim().isNotEmpty).join(' ');
+    final hasOmnibusTitleEvidence = _omnibusTitlePattern.hasMatch(
+      publicationEvidence,
+    );
+    final expectedCount = _expectedOmnibusCount(publicationEvidence);
+
+    var candidates = index.navigationRoots;
+    if (candidates.length == 1) {
+      final children = index.childrenOf(candidates.single.nodeId);
+      if (children.length >= 2) candidates = children;
+    }
+    final allCandidates = candidates;
+    candidates = candidates
+        .where(
+          (node) =>
+              !isSupplementTitle(node.title) &&
+              !_isPublicationContainer(
+                node.title,
+                index.publicationTitle,
+                publicationEvidence,
+              ),
+        )
+        .toList(growable: false);
+    if (expectedCount != null && candidates.length > expectedCount) {
+      final withoutCollectionHeaders = candidates
+          .where((node) => !_isCollectionHeaderTitle(node.title))
+          .toList(growable: false);
+      if (withoutCollectionHeaders.length == expectedCount) {
+        candidates = withoutCollectionHeaders;
+      }
+    }
+
+    final chapterLikeCount = candidates
+        .where(
+          (node) =>
+              isChapterTitle(node.title) ||
+              _continuationTitlePattern.hasMatch(node.title.trim()),
+        )
+        .length;
+    final volumeCandidates = candidates
+        .where((node) => isVolumeTitle(node.title))
+        .toList(growable: false);
+    final mergedTopCandidates = _mergeSplitInstallments(
+      candidates
+          .where(
+            (node) =>
+                _isIndependentWorkCandidateTitle(node.title) &&
+                !isVolumeTitle(node.title),
+          )
+          .toList(growable: false),
+    );
+    final mergedAllCandidates = _mergeSplitInstallments(candidates);
+    final hasRepeatedInstallmentEvidence =
+        candidates.length >= 4 &&
+        mergedAllCandidates.length >= 2 &&
+        mergedAllCandidates.length * 2 <= candidates.length;
+    final childCounts = <String, int>{};
+    for (final node in index.navigation) {
+      final parentId = node.parentId;
+      if (parentId == null) continue;
+      childCounts.update(parentId, (value) => value + 1, ifAbsent: () => 1);
+    }
+    final treeCandidates = _mergeSplitInstallments(
+      candidates
+          .where(
+            (node) =>
+                _isIndependentWorkCandidateTitle(node.title) &&
+                !isVolumeTitle(node.title) &&
+                (node.directChildCount >= 2 ||
+                    (childCounts[node.nodeId] ?? 0) >= 2),
+          )
+          .toList(growable: false),
+    );
+    final groupedCandidates = _mergeSplitInstallments(
+      expectedCount == null
+          ? const <BookStructureNavigationNode>[]
+          : _expandIntermediateGroups(
+              index: index,
+              roots: allCandidates,
+              isSupplementTitle: isSupplementTitle,
+            ),
+    );
+    final flatCandidates = _mergeSplitInstallments(
+      expectedCount == null
+          ? const <BookStructureNavigationNode>[]
+          : _flatDirectoryBoundaries(
+              index: index,
+              isSupplementTitle: isSupplementTitle,
+              publicationTitle: index.publicationTitle,
+              publicationEvidence: publicationEvidence,
+            ),
+    );
+
+    final hypotheses = <AiBookStructureHypothesis>[];
+    final singleEvidence = <String>[];
+    var singleScore = _StructureScore.singleBase;
+    if (candidates.length < 2) {
+      singleScore += _StructureScore.sparseSingle;
+      singleEvidence.add('fewer than two top-level content ranges');
+    }
+    if (chapterLikeCount * 2 >= candidates.length && candidates.isNotEmpty) {
+      singleScore += _StructureScore.chapterMajority;
+      singleEvidence.add('top-level ranges are mostly chapters');
+    }
+    if (!hasOmnibusTitleEvidence) {
+      singleScore += _StructureScore.noOmnibusMetadata;
+      singleEvidence.add('publication lacks omnibus metadata');
+    }
+    hypotheses.add(
+      AiBookStructureHypothesis(
+        strategy: AiBookStructureStrategy.single,
+        kind: AiBookStructureKind.singleWork,
+        nodes: const [],
+        score: singleScore,
+        evidence: List.unmodifiable(singleEvidence),
+        rejections:
+            candidates.length >= 2 &&
+                (expectedCount != null ||
+                    (hasOmnibusTitleEvidence && treeCandidates.length >= 2) ||
+                    hasRepeatedInstallmentEvidence)
+            ? ['publication structure evidence remains unresolved']
+            : const [],
+      ),
+    );
+
+    void addHypothesis({
+      required AiBookStructureStrategy strategy,
+      required AiBookStructureKind kind,
+      required List<BookStructureNavigationNode> nodes,
+      required int strategyScore,
+      required bool hasRequiredEvidence,
+      required String evidenceLabel,
+    }) {
+      final evidence = <String>[];
+      final rejections = <String>[];
+      if (nodes.length < 2) rejections.add('fewer than two candidate ranges');
+      if (!hasRequiredEvidence) {
+        rejections.add('missing required structural evidence');
+      }
+      if (expectedCount != null &&
+          kind == AiBookStructureKind.multiWorkOmnibus &&
+          nodes.length != expectedCount) {
+        rejections.add('expected $expectedCount works, found ${nodes.length}');
+      }
+      final anchored = nodes.where((node) => node.sectionIndex != null).length;
+      final distinctAnchors = nodes
+          .map((node) => node.sectionIndex)
+          .whereType<int>()
+          .toSet()
+          .length;
+      if (anchored != nodes.length) {
+        rejections.add('candidate anchor is missing');
+      }
+      if (distinctAnchors != nodes.length) {
+        rejections.add('candidate ranges share a spine anchor');
+      }
+      if (nodes.any((node) => isChapterTitle(node.title))) {
+        rejections.add('chapter-like node cannot become a work boundary');
+      }
+
+      var score = strategyScore;
+      if (hasOmnibusTitleEvidence &&
+          kind == AiBookStructureKind.multiWorkOmnibus) {
+        score += _StructureScore.omnibusMetadata;
+        evidence.add('publication metadata indicates an omnibus');
+      }
+      if (expectedCount != null && nodes.length == expectedCount) {
+        score += _StructureScore.declaredCountMatch;
+        evidence.add('candidate count matches declared $expectedCount');
+      }
+      if (nodes.length >= 2 && distinctAnchors == nodes.length) {
+        score += _StructureScore.distinctAnchors;
+        evidence.add('all candidate ranges have distinct anchors');
+      }
+      evidence.add(evidenceLabel);
+      hypotheses.add(
+        AiBookStructureHypothesis(
+          strategy: strategy,
+          kind: kind,
+          nodes: List.unmodifiable(nodes),
+          score: score,
+          evidence: List.unmodifiable(evidence),
+          rejections: List.unmodifiable(rejections),
+        ),
+      );
+    }
+
+    addHypothesis(
+      strategy: AiBookStructureStrategy.volumes,
+      kind: AiBookStructureKind.segmentedSingleWork,
+      nodes: volumeCandidates,
+      strategyScore: _StructureScore.volumes,
+      hasRequiredEvidence:
+          volumeCandidates.length >= 2 &&
+          volumeCandidates.length * 2 >= candidates.length,
+      evidenceLabel: 'top-level ranges are mostly volumes',
+    );
+    final omnibusEvidence =
+        hasOmnibusTitleEvidence || hasRepeatedInstallmentEvidence;
+    addHypothesis(
+      strategy: AiBookStructureStrategy.topLevelWorks,
+      kind: AiBookStructureKind.multiWorkOmnibus,
+      nodes: mergedTopCandidates,
+      strategyScore: _StructureScore.topLevelWorks,
+      hasRequiredEvidence: omnibusEvidence,
+      evidenceLabel: 'top-level independent ranges form works',
+    );
+    addHypothesis(
+      strategy: AiBookStructureStrategy.workTrees,
+      kind: AiBookStructureKind.multiWorkOmnibus,
+      nodes: treeCandidates,
+      strategyScore: _StructureScore.workTrees,
+      hasRequiredEvidence: omnibusEvidence,
+      evidenceLabel: 'work candidates own chapter subtrees',
+    );
+    addHypothesis(
+      strategy: AiBookStructureStrategy.intermediateGroups,
+      kind: AiBookStructureKind.multiWorkOmnibus,
+      nodes: groupedCandidates,
+      strategyScore: _StructureScore.intermediateGroups,
+      hasRequiredEvidence: omnibusEvidence && expectedCount != null,
+      evidenceLabel: 'intermediate groups expand into work ranges',
+    );
+    addHypothesis(
+      strategy: AiBookStructureStrategy.flatDirectories,
+      kind: AiBookStructureKind.multiWorkOmnibus,
+      nodes: flatCandidates,
+      strategyScore: _StructureScore.flatDirectories,
+      hasRequiredEvidence: omnibusEvidence && expectedCount != null,
+      evidenceLabel: 'repeated title-directory boundaries form works',
+    );
+
+    final valid = hypotheses.where((item) => item.isValid).toList()
+      ..sort((left, right) {
+        final score = right.score.compareTo(left.score);
+        return score != 0
+            ? score
+            : left.strategy.index.compareTo(right.strategy.index);
+      });
+    if (valid.isEmpty) {
+      return AiBookStructureAnalysis(
+        manifest: AiBookStructureManifest(
+          kind: AiBookStructureKind.uncertain,
+          source: AiBookStructureSource.navigationHierarchy,
+          confidence: 0.6,
+          reason: _unresolvedReason(expectedCount, hypotheses),
+        ),
+        hypotheses: List.unmodifiable(hypotheses),
+      );
+    }
+
+    final selected = valid.first;
+    final selectedSignature = _hypothesisSignature(selected.nodes);
+    final competing = valid
+        .skip(1)
+        .where(
+          (item) =>
+              item.kind == selected.kind &&
+              _hypothesisSignature(item.nodes) != selectedSignature &&
+              selected.score - item.score < _StructureScore.ambiguityMargin,
+        );
+    if (competing.isNotEmpty) {
+      return AiBookStructureAnalysis(
+        manifest: const AiBookStructureManifest(
+          kind: AiBookStructureKind.uncertain,
+          source: AiBookStructureSource.navigationHierarchy,
+          confidence: 0.55,
+          reason: 'similarly scored structure candidates disagree on ranges',
+        ),
+        hypotheses: List.unmodifiable(hypotheses),
+      );
+    }
+
+    if (selected.kind == AiBookStructureKind.singleWork) {
+      return AiBookStructureAnalysis(
+        manifest: AiBookStructureManifest(
+          kind: AiBookStructureKind.singleWork,
+          source: AiBookStructureSource.navigationHierarchy,
+          confidence: singleScore >= 90 ? 0.98 : 0.92,
+          reason: selected.evidence.join('; '),
+        ),
+        hypotheses: List.unmodifiable(hypotheses),
+        selectedStrategy: selected.strategy,
+      );
+    }
+
+    final ranges = _rangesFromIndexCandidates(
+      selected.nodes,
+      trailingBoundaries: allCandidates.where(
+        (node) => isSupplementTitle(node.title),
+      ),
+    );
+    return AiBookStructureAnalysis(
+      manifest: AiBookStructureManifest(
+        kind: selected.kind,
+        source: AiBookStructureSource.navigationHierarchy,
+        confidence: selected.score >= 105 ? 0.97 : 0.92,
+        reason:
+            'selected ${selected.strategy.name}: ${selected.evidence.join('; ')}',
+        works: ranges,
+      ),
+      hypotheses: List.unmodifiable(hypotheses),
+      selectedStrategy: selected.strategy,
+    );
+  }
+
+  static String _hypothesisSignature(List<BookStructureNavigationNode> nodes) {
+    final parts =
+        nodes
+            .map(
+              (node) => '${node.sectionIndex}:${_normalizedTitle(node.title)}',
+            )
+            .toList()
+          ..sort();
+    return parts.join('|');
+  }
+
+  static String _unresolvedReason(
+    int? expectedCount,
+    List<AiBookStructureHypothesis> hypotheses,
+  ) {
+    final rejected = hypotheses
+        .where((item) => item.strategy != AiBookStructureStrategy.single)
+        .map(
+          (item) =>
+              '${item.strategy.name}=${item.nodes.length}'
+              '[${item.rejections.join(',')}]',
+        )
+        .join('; ');
+    final prefix = expectedCount == null
+        ? 'no legal structure hypothesis'
+        : 'publication expects $expectedCount works but no candidate matches';
+    return rejected.isEmpty ? prefix : '$prefix: $rejected';
+  }
+
+  /// Previous ordered heuristic retained only for offline shadow comparison.
+  static AiBookStructureManifest resolveIndexLegacy({
     required BookStructureIndex index,
     required bool Function(String title) isSupplementTitle,
     String? fallbackPublicationTitle,

@@ -99,7 +99,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 本书 AI 采用组合边界，新增职责不得继续堆入阅读器 god-controller：
 
 - `BookReaderController` 暂时作为兼容门面暴露 AI 命令，并持有阅读引擎回调；正文抽取缓存由 `AiBookCorpusCache` 独立负责，作品识别及“当前位置属于哪部作品”由 `AiBookStructureSession` 作为对话/大纲/图谱的唯一结构事实源。
-- `BookStructureIndex` 位于共享 domain：Foliate 惰性扫描出版物标题、完整 nav 与全部 spine heading，只返回标题、层级、顺序、字符计数及 href/fragment/CFI。`AiBookStructureSession` 优先消费该索引并保守分类；多作品必须由出版物级合集信号、可定位范围和目录形态交叉佐证，拆成上/中/下的同一作品先合并。旧 `[§]` 正文标记只保留为兼容 fallback；结构索引与正文预算、AI 内容排除规则互不依赖。详见 [book-structure.md](./specs/book-structure.md)。
+- `BookStructureIndex` 位于共享 domain：Foliate 惰性扫描出版物标题、完整 nav 与全部 spine heading，只返回标题、层级、顺序、字符计数及 href/fragment/CFI。`AiBookStructureSession` 优先消费该索引；结构分类由纯 Dart 的候选生成器与全局求解器组成，并行比较单本、分卷、顶层作品树、中间分组和扁平目录方案。数量冲突、锚点缺失、范围交叉是不可被分数覆盖的硬拒绝；软分数只决定合法方案之间的优先级，近分异构方案保持不确定。多作品仍必须由出版物级合集信号、可定位范围和目录形态交叉佐证，拆成上/中/下的同一作品先合并。旧 `[§]` 正文标记只保留为兼容 fallback；结构索引与正文预算、AI 内容排除规则互不依赖。详见 [book-structure.md](./specs/book-structure.md)。
 - `AiBookChatToolHost` 只依赖正文缓存、本轮冻结上下文和作品范围，不得依赖表现层 controller；即使阅读引擎忽略范围参数，也必须再次本地收窄，防止相邻作品正文泄漏。
 - `AiChatService` 把供应商的单次输出限制视为传输分段而非回答失败：收到 `length` / `max_tokens` 后以同一冻结上下文自动续写、去重拼接到同一回答，并设置有界保护。流式传输只允许在首个可见文字前重试瞬时故障；首字后失败保留部分正文，不得从头静默重跑。表现层按节流频率保存 pending 回答检查点，终态写入必须排在检查点之后并覆盖它。
 - AI 运行时采用“开卷确定性编排器 + 可替换模型适配层”。`AiRunState` / `AiRunEvent` 是 App 自有的纯 Dart 契约；回答正文与供应商可见思考过程分别采用**完整快照**而非不可回退 delta，支持自动续写去重拼接和消费者幂等重放。本书对话只暴露事件流，UI 不得自行推测运行阶段或把思考过程拼入回答正文。

@@ -511,28 +511,40 @@ void main() {
   });
 
   test('flat title-directory boundaries recover a declared omnibus', () {
-    final manifest = classify(
-      BookStructureIndex(
-        indexVersion: 1,
-        publicationTitle: '科幻经典共2册',
-        sections: [for (var index = 0; index < 8; index++) section(index)],
-        navigation: [
-          node(id: 'set', title: '科幻经典套装共2册', order: 0, sectionIndex: 0),
-          node(id: 'set-toc', title: '目录', order: 1, sectionIndex: 0),
-          node(id: 'work-a', title: '作品甲', order: 2, sectionIndex: 1),
-          node(id: 'toc-a', title: '目录', order: 3, sectionIndex: 1),
-          node(id: 'a-1', title: '第一章', order: 4, sectionIndex: 2),
-          node(id: 'a-2', title: '第二章', order: 5, sectionIndex: 3),
-          node(id: 'work-b', title: '作品乙', order: 6, sectionIndex: 4),
-          node(id: 'toc-b', title: '总目录', order: 7, sectionIndex: 4),
-          node(id: 'b-1', title: '第一章', order: 8, sectionIndex: 5),
-          node(id: 'b-2', title: '第二章', order: 9, sectionIndex: 6),
-        ],
-      ),
+    final index = BookStructureIndex(
+      indexVersion: 1,
+      publicationTitle: '科幻经典共2册',
+      sections: [for (var index = 0; index < 8; index++) section(index)],
+      navigation: [
+        node(id: 'set', title: '科幻经典套装共2册', order: 0, sectionIndex: 0),
+        node(id: 'set-toc', title: '目录', order: 1, sectionIndex: 0),
+        node(id: 'work-a', title: '作品甲', order: 2, sectionIndex: 1),
+        node(id: 'toc-a', title: '目录', order: 3, sectionIndex: 1),
+        node(id: 'a-1', title: '第一章', order: 4, sectionIndex: 2),
+        node(id: 'a-2', title: '第二章', order: 5, sectionIndex: 3),
+        node(id: 'work-b', title: '作品乙', order: 6, sectionIndex: 4),
+        node(id: 'toc-b', title: '总目录', order: 7, sectionIndex: 4),
+        node(id: 'b-1', title: '第一章', order: 8, sectionIndex: 5),
+        node(id: 'b-2', title: '第二章', order: 9, sectionIndex: 6),
+      ],
     );
+    final analysis = AiBookStructureResolver.analyzeIndex(
+      index: index,
+      isSupplementTitle: matchesAiStructureSupplementTitle,
+    );
+    final manifest = analysis.manifest;
 
     expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
     expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
+    expect(analysis.selectedStrategy, AiBookStructureStrategy.flatDirectories);
+    expect(
+      analysis.hypotheses
+          .singleWhere(
+            (item) => item.strategy == AiBookStructureStrategy.workTrees,
+          )
+          .isValid,
+      isFalse,
+    );
   });
 
   test('declared numbered set expands intermediate season groups', () {
@@ -627,5 +639,55 @@ void main() {
 
     expect(manifest.kind, AiBookStructureKind.uncertain);
     expect(manifest.works, isEmpty);
+  });
+
+  test('navigation input order does not change the selected structure', () {
+    final navigation = [
+      node(id: 'work-a', title: '作品甲', order: 0, sectionIndex: 0, children: 2),
+      node(id: 'work-b', title: '作品乙', order: 3, sectionIndex: 3, children: 2),
+    ];
+    BookStructureIndex index(List<BookStructureNavigationNode> nodes) =>
+        BookStructureIndex(
+          indexVersion: 1,
+          publicationTitle: '作品合集共2册',
+          sections: [for (var index = 0; index < 6; index++) section(index)],
+          navigation: nodes,
+        );
+
+    final forward = classify(index(navigation));
+    final reversed = classify(index(navigation.reversed.toList()));
+
+    expect(reversed.kind, forward.kind);
+    expect(
+      reversed.works.map((work) => '${work.title}:${work.startSection}'),
+      forward.works.map((work) => '${work.title}:${work.startSection}'),
+    );
+  });
+
+  test('large flat navigation stays linear enough for interactive use', () {
+    final navigation = [
+      for (var index = 0; index < 5000; index++)
+        node(
+          id: 'chapter-$index',
+          title: '第${index + 1}章',
+          order: index,
+          sectionIndex: index,
+        ),
+    ];
+    final stopwatch = Stopwatch()..start();
+    final analysis = AiBookStructureResolver.analyzeIndex(
+      index: BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '超长单本',
+        sections: [for (var index = 0; index < 5000; index++) section(index)],
+        navigation: navigation,
+      ),
+      isSupplementTitle: matchesAiStructureSupplementTitle,
+    );
+    stopwatch.stop();
+
+    expect(analysis.manifest.kind, AiBookStructureKind.singleWork);
+    expect(analysis.hypotheses, hasLength(6));
+    expect(stopwatch.elapsed, lessThan(const Duration(seconds: 2)));
   });
 }

@@ -13,15 +13,18 @@ import 'package:xml/xml.dart';
 /// It prints counts and deterministic classification only. No body text is
 /// emitted or persisted, so real user books can safely be used as samples.
 Future<void> main(List<String> args) async {
-  if (args.isEmpty) {
+  final shadow = args.contains('--shadow');
+  final inputs = args.where((arg) => !arg.startsWith('--')).toList();
+  if (inputs.isEmpty) {
     stderr.writeln(
-      'usage: dart run tool/epub_structure_audit.dart <file-or-directory> ...',
+      'usage: dart run tool/epub_structure_audit.dart [--shadow] '
+      '<file-or-directory> ...',
     );
     exitCode = 64;
     return;
   }
 
-  final files = await _epubs(args);
+  final files = await _epubs(inputs);
   if (files.isEmpty) {
     stderr.writeln('No EPUB files found.');
     exitCode = 66;
@@ -29,15 +32,37 @@ Future<void> main(List<String> args) async {
   }
 
   var failures = 0;
+  var shadowChanges = 0;
+  var totalSolveMicros = 0;
+  var maxSolveMicros = 0;
   final kinds = <AiBookStructureKind, int>{};
   for (final file in files) {
     try {
       final index = await _EpubStructureReader.read(file.path);
-      final manifest = AiBookStructureResolver.resolveIndex(
+      final solveWatch = Stopwatch()..start();
+      final analysis = AiBookStructureResolver.analyzeIndex(
         index: index,
         isSupplementTitle: _isSupplementTitle,
         fallbackPublicationTitle: p.basenameWithoutExtension(file.path),
       );
+      solveWatch.stop();
+      totalSolveMicros += solveWatch.elapsedMicroseconds;
+      if (solveWatch.elapsedMicroseconds > maxSolveMicros) {
+        maxSolveMicros = solveWatch.elapsedMicroseconds;
+      }
+      final manifest = analysis.manifest;
+      final legacy = shadow
+          ? AiBookStructureResolver.resolveIndexLegacy(
+              index: index,
+              isSupplementTitle: _isSupplementTitle,
+              fallbackPublicationTitle: p.basenameWithoutExtension(file.path),
+            )
+          : null;
+      final changed =
+          legacy != null &&
+          (legacy.kind != manifest.kind ||
+              legacy.works.length != manifest.works.length);
+      if (changed) shadowChanges++;
       kinds.update(manifest.kind, (value) => value + 1, ifAbsent: () => 1);
       final navAnchored = index.navigation
           .where((node) => node.sectionIndex != null)
@@ -54,6 +79,11 @@ Future<void> main(List<String> args) async {
         'chars=${index.bodyCharCount}\t'
         'kind=${manifest.kind.name}\t'
         'works=${manifest.works.length}\t'
+        'strategy=${analysis.selectedStrategy?.name ?? '-'}\t'
+        'hypotheses=${analysis.hypotheses.where((item) => item.isValid).length}'
+        '/${analysis.hypotheses.length}\t'
+        'solveUs=${solveWatch.elapsedMicroseconds}\t'
+        '${legacy == null ? '' : 'legacy=${legacy.kind.name}/${legacy.works.length}\tchanged=$changed\t'}'
         'reason=${manifest.reason}',
       );
     } catch (error) {
@@ -64,7 +94,10 @@ Future<void> main(List<String> args) async {
 
   stdout.writeln(
     'SUMMARY\tfiles=${files.length}\tfailures=$failures\t'
-    '${kinds.entries.map((entry) => '${entry.key.name}=${entry.value}').join('\t')}',
+    '${kinds.entries.map((entry) => '${entry.key.name}=${entry.value}').join('\t')}'
+    '\tavgSolveUs=${files.isEmpty ? 0 : totalSolveMicros ~/ files.length}'
+    '\tmaxSolveUs=$maxSolveMicros'
+    '${shadow ? '\tshadowChanges=$shadowChanges' : ''}',
   );
   if (failures > 0) exitCode = 1;
 }
