@@ -30,12 +30,14 @@ void main() {
   test('promotion requires both a runtime factory and every capability', () {
     final missingFactory = AiAgentRuntimeGate.decide(
       requested: AiAgentRuntimeKind.genkitAgent,
-      genkitCapabilities: AiAgentRuntimeCapabilities.productionReady,
+      genkitCapabilities:
+          AiAgentRuntimeCapabilities.allRequirementsSatisfiedForTesting,
       hasGenkitRuntimeFactory: false,
     );
     final ready = AiAgentRuntimeGate.decide(
       requested: AiAgentRuntimeKind.genkitAgent,
-      genkitCapabilities: AiAgentRuntimeCapabilities.productionReady,
+      genkitCapabilities:
+          AiAgentRuntimeCapabilities.allRequirementsSatisfiedForTesting,
       hasGenkitRuntimeFactory: true,
     );
 

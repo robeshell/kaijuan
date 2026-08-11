@@ -22,7 +22,6 @@ import '../../../ai/ai_product_action.dart';
 import '../../../ai/ai_rich_content_inspector.dart';
 import '../../../ai/ai_user_error.dart';
 import '../../../core/kaijuan_icons.dart';
-import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../../controllers/book_ai_conversation_controller.dart';
@@ -33,13 +32,15 @@ import '../app_components.dart';
 import '../app_overlays.dart';
 import 'book_ai_chat_components.dart';
 import 'book_ai_entity_sheet.dart';
+import 'book_ai_graph_components.dart';
+import 'book_ai_graph_content_view.dart';
 import 'book_ai_graph_family_tree_fullscreen.dart';
 import 'book_ai_graph_family_tree_view.dart';
 import 'book_ai_graph_sort.dart';
 import 'book_ai_graph_tiles.dart';
 import 'book_ai_graph_fullscreen.dart';
-import 'book_ai_graph_view.dart';
 import 'book_ai_mind_map_fullscreen.dart';
+import 'book_ai_mind_map_scope_card.dart';
 import 'book_ai_narration_dialog.dart';
 
 /// Book-scoped AI chat (M2). Session is isolated by contentHash.
@@ -95,31 +96,6 @@ typedef _NarrationConfirmation = ({
   Set<int> excludedSections,
 });
 
-typedef _MindMapScopeChoice = ({int value, String label, String subtitle});
-
-class _MindMapScopePrompt {
-  _MindMapScopePrompt({required this.title, required this.choices});
-
-  final String title;
-  final List<_MindMapScopeChoice> choices;
-  final Completer<int?> completer = Completer<int?>();
-  int? selectedValue;
-}
-
-/// Default view is the person card list (Kindle X-Ray style); the force
-/// layout stays available as a secondary「关系图」view. Each entity type gets
-/// its own chapter-ordered list so「谁是谁 / 在哪里 / 发生了哪些事」are
-/// readable without the graph.
-enum _GraphViewMode {
-  persons,
-  locations,
-  events,
-  organizations,
-  things,
-  graph,
-  familyTree,
-}
-
 class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
@@ -130,7 +106,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   late final TabController _tabs;
   _BookAiWorkspaceTab _activeTab = _BookAiWorkspaceTab.chat;
 
-  _GraphViewMode _graphViewMode = _GraphViewMode.persons;
+  BookAiGraphViewMode _graphViewMode = BookAiGraphViewMode.persons;
 
   /// Plan whose default view has been applied; applying again is skipped so
   /// the user's manual view choice survives unrelated controller updates.
@@ -138,7 +114,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool _familyTreeDetailExpanded = false;
 
   /// Per-view selection: changing 人物 never changes 地点/事件/组织.
-  final _graphSortOrders = <_GraphViewMode, GraphEntitySortOrder>{};
+  final _graphSortOrders = <BookAiGraphViewMode, GraphEntitySortOrder>{};
 
   GraphEntitySortOrder get _graphSortOrder =>
       _graphSortOrders[_graphViewMode] ?? defaultGraphSortOrder(_graphListKind);
@@ -202,7 +178,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String? _retryTurnId;
   int _turnSerial = 0;
   String? _mindMapTurnId;
-  _MindMapScopePrompt? _mindMapScopePrompt;
+  BookAiMindMapScopePrompt? _mindMapScopePrompt;
   BookReaderController get _c => widget.controller;
 
   BookAiConversationController get _conversation => _c.aiWorkspace.conversation;
@@ -1502,9 +1478,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   Future<int?> _showMindMapScopePrompt({
     required String title,
-    required List<_MindMapScopeChoice> choices,
+    required List<BookAiMindMapScopeChoice> choices,
   }) async {
-    final prompt = _MindMapScopePrompt(title: title, choices: choices);
+    final prompt = BookAiMindMapScopePrompt(title: title, choices: choices);
     setState(() => _mindMapScopePrompt = prompt);
     _scrollToEnd();
     final selected = await prompt.completer.future;
@@ -1899,192 +1875,41 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// view (no list rendered there). The persons view also folds in
   /// `organization` has its own index; it must not inflate the person list.
   Set<AiGraphEntityType> get _graphListEntityTypes => switch (_graphViewMode) {
-    _GraphViewMode.persons => {AiGraphEntityType.person},
-    _GraphViewMode.locations => {AiGraphEntityType.location},
-    _GraphViewMode.events => {AiGraphEntityType.event},
-    _GraphViewMode.organizations => {AiGraphEntityType.organization},
-    _GraphViewMode.things => {
+    BookAiGraphViewMode.persons => {AiGraphEntityType.person},
+    BookAiGraphViewMode.locations => {AiGraphEntityType.location},
+    BookAiGraphViewMode.events => {AiGraphEntityType.event},
+    BookAiGraphViewMode.organizations => {AiGraphEntityType.organization},
+    BookAiGraphViewMode.things => {
       AiGraphEntityType.item,
       AiGraphEntityType.concept,
       AiGraphEntityType.creature,
     },
-    _GraphViewMode.graph => const {},
-    _GraphViewMode.familyTree => const {},
+    BookAiGraphViewMode.graph => const {},
+    BookAiGraphViewMode.familyTree => const {},
   };
 
   GraphEntityListKind get _graphListKind => switch (_graphViewMode) {
-    _GraphViewMode.persons => GraphEntityListKind.persons,
-    _GraphViewMode.locations => GraphEntityListKind.locations,
-    _GraphViewMode.events => GraphEntityListKind.events,
-    _GraphViewMode.organizations => GraphEntityListKind.organizations,
-    _GraphViewMode.things => GraphEntityListKind.things,
+    BookAiGraphViewMode.persons => GraphEntityListKind.persons,
+    BookAiGraphViewMode.locations => GraphEntityListKind.locations,
+    BookAiGraphViewMode.events => GraphEntityListKind.events,
+    BookAiGraphViewMode.organizations => GraphEntityListKind.organizations,
+    BookAiGraphViewMode.things => GraphEntityListKind.things,
     // Sorting controls are not rendered for exploration views. This fallback
     // only keeps the shared build path total while those views are active.
-    _GraphViewMode.graph ||
-    _GraphViewMode.familyTree => GraphEntityListKind.persons,
+    BookAiGraphViewMode.graph ||
+    BookAiGraphViewMode.familyTree => GraphEntityListKind.persons,
   };
 
-  /// Stable information architecture. AI may choose the initial view, but it
-  /// never rearranges navigation between books.
-  List<_GraphViewMode> _orderedGraphViewModes(AiNarrationPlan? plan) {
-    final essayHigh = (plan?.feature('essay') ?? 0) >= 0.5;
-    return [
-      _GraphViewMode.persons,
-      _GraphViewMode.locations,
-      _GraphViewMode.events,
-      _GraphViewMode.organizations,
-      _GraphViewMode.things,
-      _GraphViewMode.graph,
-      if (!essayHigh) _GraphViewMode.familyTree,
-    ];
-  }
-
-  _GraphViewMode? _viewModeFor(String view) => switch (view) {
-    'persons' => _GraphViewMode.persons,
-    'locations' => _GraphViewMode.locations,
-    'events' => _GraphViewMode.events,
-    'organizations' || 'org_tree' => _GraphViewMode.organizations,
-    'things' => _GraphViewMode.things,
-    'graph' => _GraphViewMode.graph,
-    'family_tree' => _GraphViewMode.familyTree,
+  BookAiGraphViewMode? _viewModeFor(String view) => switch (view) {
+    'persons' => BookAiGraphViewMode.persons,
+    'locations' => BookAiGraphViewMode.locations,
+    'events' => BookAiGraphViewMode.events,
+    'organizations' || 'org_tree' => BookAiGraphViewMode.organizations,
+    'things' => BookAiGraphViewMode.things,
+    'graph' => BookAiGraphViewMode.graph,
+    'family_tree' => BookAiGraphViewMode.familyTree,
     _ => null,
   };
-
-  static const _graphViewLabels = <_GraphViewMode, String>{
-    _GraphViewMode.persons: '人物',
-    _GraphViewMode.locations: '地点',
-    _GraphViewMode.events: '事件',
-    _GraphViewMode.organizations: '组织',
-    _GraphViewMode.things: '事物',
-    _GraphViewMode.graph: '关系图',
-    _GraphViewMode.familyTree: '家族树',
-  };
-
-  Widget _buildGraphViewNavigation(
-    BuildContext context,
-    AiBookGraph graph,
-    AiNarrationPlan? plan,
-  ) {
-    final modes = _orderedGraphViewModes(plan);
-    final primary = modes
-        .where(
-          (mode) =>
-              mode != _GraphViewMode.graph && mode != _GraphViewMode.familyTree,
-        )
-        .toList(growable: false);
-    final explore = modes
-        .where(
-          (mode) =>
-              mode == _GraphViewMode.graph || mode == _GraphViewMode.familyTree,
-        )
-        .toList(growable: false);
-
-    Widget selector(List<_GraphViewMode> choices) {
-      int? countFor(_GraphViewMode mode) => switch (mode) {
-        _GraphViewMode.persons =>
-          graph.entities
-              .where((entity) => entity.type == AiGraphEntityType.person)
-              .length,
-        _GraphViewMode.locations =>
-          graph.entities
-              .where((entity) => entity.type == AiGraphEntityType.location)
-              .length,
-        _GraphViewMode.events =>
-          graph.entities
-              .where((entity) => entity.type == AiGraphEntityType.event)
-              .length,
-        _GraphViewMode.organizations =>
-          graph.entities
-              .where((entity) => entity.type == AiGraphEntityType.organization)
-              .length,
-        _GraphViewMode.things =>
-          graph.entities
-              .where(
-                (entity) =>
-                    entity.type == AiGraphEntityType.item ||
-                    entity.type == AiGraphEntityType.concept ||
-                    entity.type == AiGraphEntityType.creature,
-              )
-              .length,
-        _GraphViewMode.graph => graph.relations.length,
-        // A family tree is one derived view, not a countable entity kind.
-        _GraphViewMode.familyTree => null,
-      };
-
-      Widget labelFor(_GraphViewMode mode) {
-        final count = countFor(mode);
-        return Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(text: _graphViewLabels[mode]!),
-              if (count != null)
-                TextSpan(
-                  text: ' $count',
-                  style: TextStyle(
-                    fontSize: context.appCaptionSmallSize,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
-            ],
-          ),
-          maxLines: 1,
-          softWrap: false,
-        );
-      }
-
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SegmentedButton<_GraphViewMode>(
-          segments: [
-            for (final mode in choices)
-              ButtonSegment(value: mode, label: labelFor(mode)),
-          ],
-          selected: choices.contains(_graphViewMode)
-              ? {_graphViewMode}
-              : const <_GraphViewMode>{},
-          emptySelectionAllowed: true,
-          onSelectionChanged: (selection) {
-            if (selection.isNotEmpty) {
-              setState(() => _graphViewMode = selection.first);
-            }
-          },
-          showSelectedIcon: false,
-          style: ButtonStyle(
-            textStyle: WidgetStatePropertyAll(
-              TextStyle(fontSize: context.appCaptionSize),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '索引',
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: context.appSecondaryText,
-          ),
-        ),
-        const SizedBox(height: 4),
-        selector(primary),
-        if (explore.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Text(
-            '探索',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
-            ),
-          ),
-          const SizedBox(height: 4),
-          selector(explore),
-        ],
-      ],
-    );
-  }
 
   Widget _buildGraphTab(BuildContext context) {
     if (_c.hasCollectionWorks && !_c.hasActiveWorkGraph) {
@@ -2106,109 +1931,24 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final generatingWork = _c.generatingGraphWork;
     final progress = _c.bookGraphProgress;
     final error = _c.bookGraphError;
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-      itemCount: works.length + 1,
-      separatorBuilder: (_, index) =>
-          index == 0 ? const SizedBox(height: 10) : const Divider(height: 1),
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '选择作品',
-                style: TextStyle(
-                  fontSize: _panelTitleSize(context),
-                  fontWeight: FontWeight.w600,
-                  color: context.appPrimaryText,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '这份文件包含 ${works.length} 部作品。选择一部后，再确认参与生成的具体内容。',
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  color: context.appSecondaryText,
-                ),
-              ),
-              if (_graphPreparing) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '正在准备图谱…',
-                      style: TextStyle(
-                        fontSize: context.appCaptionSize,
-                        color: context.appSecondaryText,
-                      ),
-                    ),
-                  ],
-                ),
-              ] else if (error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  error,
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                ),
-              ],
-            ],
-          );
+    return BookAiGraphWorkList(
+      works: works,
+      readingWork: reading,
+      generatingWork: generatingWork,
+      preparing: _graphPreparing,
+      preparingWorkId: _graphPreparingWorkId,
+      busy: _graphBusy,
+      error: error,
+      progressLabel: progress?.label,
+      titleSize: _panelTitleSize(context),
+      isReady: _c.hasWorkGraph,
+      onCancelGeneration: _c.cancelBookGraphGeneration,
+      onSelect: (work) {
+        if (_c.hasWorkGraph(work)) {
+          _c.openWorkGraph(work);
+        } else {
+          unawaited(_generateGraph(work: work));
         }
-        final work = works[index - 1];
-        final ready = _c.hasWorkGraph(work);
-        final isGenerating = identical(generatingWork, work);
-        final isPreparing = _graphPreparing && _graphPreparingWorkId == work.id;
-        final isReading = identical(reading, work);
-        final status = isPreparing
-            ? '正在准备…'
-            : isGenerating
-            ? (progress?.label ?? '正在生成…')
-            : ready
-            ? '已生成'
-            : '未生成';
-        return ListTile(
-          key: ValueKey('graph-work-${work.id}'),
-          minTileHeight: 56,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: Text(work.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-          subtitle: Text(isReading ? '$status · 正在阅读' : status),
-          trailing: isPreparing
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : isGenerating
-              ? TextButton.icon(
-                  onPressed: _c.cancelBookGraphGeneration,
-                  icon: const Icon(KaijuanIcons.stop, size: 16),
-                  label: const Text('停止'),
-                )
-              : Icon(
-                  ready ? Icons.chevron_right : KaijuanIcons.graph,
-                  size: 20,
-                  color: context.appSecondaryText,
-                ),
-          onTap: _graphBusy
-              ? null
-              : () {
-                  if (ready) {
-                    _c.openWorkGraph(work);
-                  } else {
-                    unawaited(_generateGraph(work: work));
-                  }
-                },
-        );
       },
     );
   }
@@ -2416,315 +2156,95 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final orderedMain = ordered(mainEntities);
     final orderedIsolated = ordered(isolatedEntities);
 
-    return ListView(
-      key: ValueKey<int>(_graphListEpoch),
-      controller: _graphScrollController,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      children: [
-        Row(
-          children: [
-            if (_c.activeGraphWork != null)
-              IconButton(
-                tooltip: '全部作品',
-                onPressed: busy ? null : _c.closeActiveWorkGraph,
-                icon: const Icon(Icons.arrow_back, size: 20),
-              ),
-            Expanded(
-              child: Text(
-                _c.activeGraphWork != null
-                    ? '《${_c.activeGraphWork!.title}》图谱'
-                    : (graph.includesUnread ? '全书图谱' : '已读章节图谱'),
-                style: TextStyle(
-                  fontSize: _panelTitleSize(context),
-                  fontWeight: FontWeight.w600,
-                  color: context.appPrimaryText,
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip: '重新生成图谱',
-              onPressed: busy
-                  ? null
-                  : () => unawaited(
-                      _generateGraph(
-                        force: true,
-                        // Regenerate the range being viewed: the detail
-                        // header is shared by whole-book and per-work graphs,
-                        // and a per-work regeneration must reopen the dialog
-                        // scoped to that work (not the whole collection).
-                        work: _c.activeGraphWork,
-                      ),
-                    ),
-              icon: const Icon(KaijuanIcons.refresh, size: 20),
-            ),
-            PopupMenuButton<_OutlineAction>(
-              tooltip: '更多',
-              enabled: !busy,
-              onSelected: (action) {
-                if (action == _OutlineAction.delete) {
-                  unawaited(_deleteGraph());
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: _OutlineAction.delete,
-                  child: Text('删除图谱'),
-                ),
-              ],
-            ),
-          ],
-        ),
-        if (shouldShowGraphViewNavigation(graph: graph, generating: busy)) ...[
-          const SizedBox(height: 10),
-          _buildGraphViewNavigation(context, graph, graph.narration),
-        ],
-        if (!busy && error != null) ...[
-          const SizedBox(height: 10),
-          Text(
-            error,
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: colors.error,
-            ),
-          ),
-        ],
-        if (!busy && _graphViewMode == _GraphViewMode.graph) ...[
-          const SizedBox(height: 12),
-          if (graph.relations.isEmpty)
-            Text(
-              '本书暂无可展示的实体关系。',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: _panelBodySize(context),
-                color: context.appSecondaryText,
-              ),
-            )
-          else ...[
-            Semantics(
-              label: '关系图说明：连线文字是关系类型，单箭头表示关系方向，双向符号表示对等关系。点击节点查看关系和出处。',
-              child: Text(
-                '连线文字为关系类型 · 箭头为方向 · 点击节点查看出处',
-                style: TextStyle(
-                  fontSize: context.appCaptionSize,
-                  color: context.appSecondaryText,
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Stack(
-              children: [
-                BookAiGraphView(
-                  entities: graph.entities
-                      .where((entity) => connectedIds.contains(entity.id))
-                      .toList(growable: false),
-                  // Same spoiler gate as the family tree: hide edges whose
-                  // evidence is entirely in unread chapters.
-                  relations: graph.relations,
-                  onVertexTap: _onGraphVertexTap,
-                  height: 300,
-                ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Material(
-                    color: context.appColors.surfaceContainerHighest.withValues(
-                      alpha: 0.9,
-                    ),
-                    shape: const CircleBorder(),
-                    child: IconButton(
-                      tooltip: '全屏查看',
-                      iconSize: 18,
-                      icon: const Icon(KaijuanIcons.maximize),
-                      onPressed: _openGraphFullscreen,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            BookAiGraphEntityNavigator(
-              entities: graph.entities
-                  .where((entity) => connectedIds.contains(entity.id))
-                  .toList(growable: false),
-              onEntityTap: _onGraphVertexTap,
-            ),
-          ],
-          const SizedBox(height: 10),
-        ],
-        if (!busy && _graphViewMode == _GraphViewMode.familyTree) ...[
-          const SizedBox(height: 12),
+    return BookAiGraphContentView(
+      graph: graph,
+      listEpoch: _graphListEpoch,
+      scrollController: _graphScrollController,
+      activeWorkTitle: _c.activeGraphWork?.title,
+      busy: busy,
+      error: error,
+      viewMode: _graphViewMode,
+      connectedEntities: graph.entities
+          .where((entity) => connectedIds.contains(entity.id))
+          .toList(growable: false),
+      visibleEntities: visibleEntities,
+      orderedMain: orderedMain,
+      orderedIsolated: orderedIsolated,
+      foldIsolated: foldIsolated,
+      queryController: _graphQueryController,
+      query: _graphQuery,
+      sortOrder: _graphSortOrder,
+      listKind: _graphListKind,
+      titleSize: _panelTitleSize(context),
+      bodySize: _panelBodySize(context),
+      onCloseWork: _c.closeActiveWorkGraph,
+      onRegenerate: () =>
+          unawaited(_generateGraph(force: true, work: _c.activeGraphWork)),
+      onDelete: () => unawaited(_deleteGraph()),
+      onViewModeChanged: (mode) => setState(() => _graphViewMode = mode),
+      onQueryChanged: (value) => setState(() => _graphQuery = value),
+      onClearQuery: () {
+        _graphQueryController.clear();
+        setState(() => _graphQuery = '');
+      },
+      onSortChanged: (order) =>
+          setState(() => _graphSortOrders[_graphViewMode] = order),
+      onGraphVertexTap: _onGraphVertexTap,
+      onOpenGraphFullscreen: _openGraphFullscreen,
+      buildFamilyTree: () =>
           _buildFamilyTreeView(context, graph, gateByProgress, readThrough),
-          const SizedBox(height: 10),
-        ],
-        if (_graphViewMode != _GraphViewMode.graph &&
-            _graphViewMode != _GraphViewMode.familyTree) ...[
-          const SizedBox(height: 12),
-          Row(
-            // Stable key: the filtered results below churn on every
-            // keystroke — this row must never be re-matched mid-composition.
-            key: const ValueKey<String>('graphEntitySearch'),
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _graphQueryController,
-                  onChanged: (value) => setState(() => _graphQuery = value),
-                  style: context.appInputTextStyle.copyWith(
-                    color: context.appPrimaryText,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: '搜索',
-                    hintStyle: context.appInputTextStyle.copyWith(
-                      color: context.appMutedText,
-                    ),
-                    isDense: true,
-                    filled: true,
-                    fillColor: context.appColors.surfaceContainerHighest
-                        .withValues(alpha: 0.42),
-                    constraints: BoxConstraints(
-                      minHeight: context.appIsCompact ? 44 : 40,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 7),
-                    prefixIcon: const Icon(KaijuanIcons.search, size: 16),
-                    prefixIconConstraints: const BoxConstraints(
-                      minWidth: 36,
-                      minHeight: 36,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
+      buildLocationChain: () =>
+          _buildLocationChain(context, graph, gateByProgress, readThrough),
+      buildMainEntities: (entities) {
+        if (_graphViewMode == BookAiGraphViewMode.events) {
+          return _buildGraphEventTimeline(
+            context,
+            entities,
+            gateByProgress,
+            readThrough,
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final entity in entities)
+              KeyedSubtree(
+                key: _graphEntityKeys.putIfAbsent(entity.id, () => GlobalKey()),
+                child: _buildGraphEntityTile(
+                  context,
+                  entity,
+                  gateByProgress,
+                  readThrough,
                 ),
               ),
-              const SizedBox(width: 8),
-              PopupMenuButton<GraphEntitySortOrder>(
-                tooltip: '排序',
-                initialValue: _graphSortOrder,
-                onSelected: (order) =>
-                    setState(() => _graphSortOrders[_graphViewMode] = order),
-                itemBuilder: (_) => [
-                  for (final order in graphSortOrdersFor(_graphListKind))
-                    PopupMenuItem(
-                      value: order,
-                      child: Text(graphSortOrderLabel(order, _graphListKind)),
-                    ),
-                ],
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: context.appColors.surfaceContainerHighest.withValues(
-                      alpha: 0.42,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        KaijuanIcons.sort,
-                        size: 18,
-                        color: context.appSecondaryText,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        graphSortOrderLabel(_graphSortOrder, _graphListKind),
-                        style: TextStyle(
-                          fontSize: context.appCaptionSize,
-                          color: context.appSecondaryText,
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(
-                        KaijuanIcons.chevronDown,
-                        size: 16,
-                        color: context.appMutedText,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_graphViewMode == _GraphViewMode.locations &&
-              (graph.narration?.feature('geography') ?? 0) >= 0.5)
-            _buildLocationChain(context, graph, gateByProgress, readThrough),
-          if (visibleEntities.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Column(
-                children: [
-                  Text(
-                    _graphQuery.trim().isEmpty
-                        ? '本书暂无${_graphViewLabels[_graphViewMode]}实体。'
-                        : '没有匹配“${_graphQuery.trim()}”的实体。',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: _panelBodySize(context),
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                  if (_graphQuery.trim().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    TextButton(
-                      onPressed: () {
-                        _graphQueryController.clear();
-                        setState(() => _graphQuery = '');
-                      },
-                      child: const Text('清除搜索'),
-                    ),
-                  ],
-                ],
-              ),
-            )
-          else ...[
-            if (_graphViewMode == _GraphViewMode.events)
-              _buildGraphEventTimeline(
-                context,
-                orderedMain,
-                gateByProgress,
-                readThrough,
-              )
-            else
-              for (final entity in orderedMain)
-                KeyedSubtree(
-                  key: _graphEntityKeys.putIfAbsent(
-                    entity.id,
-                    () => GlobalKey(),
-                  ),
-                  child: _buildGraphEntityTile(
-                    context,
-                    entity,
-                    gateByProgress,
-                    readThrough,
-                  ),
-                ),
-            if (foldIsolated)
-              _buildIsolatedRow(
-                context,
-                orderedIsolated,
-                gateByProgress,
-                readThrough,
-              )
-            else
-              for (final entity in orderedIsolated)
-                KeyedSubtree(
-                  key: _graphEntityKeys.putIfAbsent(
-                    entity.id,
-                    () => GlobalKey(),
-                  ),
-                  child: _buildGraphEntityTile(
-                    context,
-                    entity,
-                    gateByProgress,
-                    readThrough,
-                  ),
-                ),
           ],
-        ],
-      ],
+        );
+      },
+      buildIsolatedEntities: (entities) {
+        if (foldIsolated) {
+          return _buildIsolatedRow(
+            context,
+            entities,
+            gateByProgress,
+            readThrough,
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final entity in entities)
+              KeyedSubtree(
+                key: _graphEntityKeys.putIfAbsent(entity.id, () => GlobalKey()),
+                child: _buildGraphEntityTile(
+                  context,
+                  entity,
+                  gateByProgress,
+                  readThrough,
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -2970,8 +2490,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final graph = _c.visibleBookGraph;
     final entity = graph?.entityById(entityId);
     if (entity == null) return;
-    if (_graphViewMode == _GraphViewMode.graph ||
-        _graphViewMode == _GraphViewMode.familyTree) {
+    if (_graphViewMode == BookAiGraphViewMode.graph ||
+        _graphViewMode == BookAiGraphViewMode.familyTree) {
       _showEntityDetails(entity);
       return;
     }
@@ -3295,57 +2815,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final label = _graphPreparing
         ? '正在准备知识图谱…'
         : progress?.label ?? '正在生成知识图谱…';
-    final total = progress?.total ?? 0;
-    final completed = progress?.completed ?? 0;
-    final value = total > 0 ? (completed / total).clamp(0.0, 1.0) : null;
-    final compact = context.appIsCompact;
-
-    return Semantics(
-      container: true,
-      liveRegion: true,
-      label: total > 0 ? '$label，$completed / $total' : label,
-      child: Container(
-        key: const ValueKey<String>('graph-operation-status'),
-        margin: EdgeInsets.fromLTRB(compact ? 12 : 16, 0, compact ? 12 : 16, 8),
-        padding: const EdgeInsets.fromLTRB(12, 9, 8, 7),
-        decoration: BoxDecoration(
-          color: context.appColors.surfaceContainerHighest.withValues(
-            alpha: 0.48,
-          ),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                _thinkingOrb(context),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    total > 0 ? '$label  $completed / $total' : label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      fontWeight: FontWeight.w500,
-                      color: context.appPrimaryText,
-                    ),
-                  ),
-                ),
-                if (generating)
-                  TextButton.icon(
-                    onPressed: _c.cancelBookGraphGeneration,
-                    icon: const Icon(KaijuanIcons.stop, size: 16),
-                    label: const Text('停止'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 5),
-            LinearProgressIndicator(value: value, minHeight: 3),
-          ],
-        ),
-      ),
+    return BookAiGraphOperationStatus(
+      label: label,
+      completed: progress?.completed ?? 0,
+      total: progress?.total ?? 0,
+      generating: generating,
+      onCancel: _c.cancelBookGraphGeneration,
     );
   }
 
@@ -3397,7 +2872,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final size = MediaQuery.sizeOf(context);
-    final colors = context.appColors;
     final compact = context.appIsCompact;
     final bottomInset = compact
         ? math.max(keyboardInset, MediaQuery.viewPaddingOf(context).bottom)
@@ -3586,331 +3060,75 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       ),
                     ),
                   )
-                : NotificationListener<ScrollStartNotification>(
-                    onNotification: (notification) {
-                      if (notification.dragDetails != null) {
-                        // A real user drag owns the viewport from this point.
-                        // Cancel both delayed initial reveals and streaming
-                        // tail-follow callbacks so they cannot snap it back.
-                        _scrollRequestEpoch++;
-                        _streamTailFollowEpoch++;
-                      }
-                      return false;
+                : BookAiChatTimeline(
+                    scrollController: _scroll,
+                    compact: compact,
+                    pointerActive: _mindMapPointerActive,
+                    liveStatus: _liveStatus,
+                    messages: _messages,
+                    openingShortcuts: openingShortcuts,
+                    followUpShortcuts: followUpShortcuts,
+                    showFollowUpShortcuts: showFollowUpShortcuts,
+                    showStatusIndicator: _showStatusIndicator,
+                    statusIndicatorLabel: _statusIndicatorLabel,
+                    statusOrbState: _statusOrbState,
+                    activeTurnVisible: _activeTurnVisible,
+                    streamingText: _streaming,
+                    streamingReasoning: _streamingReasoning,
+                    streamingReasoningKind: _streamingReasoningKind,
+                    searchingWeb: _searchingWeb,
+                    error: _error,
+                    canRetry: _canRetry,
+                    mindMapRevealTurnId: _mindMapRevealTurnId,
+                    scopePrompt: _mindMapScopePrompt,
+                    onScopeSelected: _selectMindMapScope,
+                    onScopeCancelled: _cancelMindMapScopePrompt,
+                    onUserDrag: () {
+                      _scrollRequestEpoch++;
+                      _streamTailFollowEpoch++;
                     },
-                    child: ListView(
-                      key: const ValueKey<String>('ai-chat-message-list'),
-                      controller: _scroll,
-                      physics: _mindMapPointerActive
-                          ? const NeverScrollableScrollPhysics()
-                          : null,
-                      padding: EdgeInsets.fromLTRB(
-                        16,
-                        compact ? 0 : 4,
-                        16,
-                        compact ? 8 : 12,
-                      ),
-                      children: [
-                        Semantics(
-                          container: true,
-                          liveRegion: true,
-                          label: _liveStatus,
-                          child: const SizedBox.shrink(),
-                        ),
-                        if (_messages.isEmpty &&
-                            _streaming.isEmpty &&
-                            _streamingReasoning.isEmpty &&
-                            !_searchingWeb)
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              4,
-                              compact ? 12 : 20,
-                              4,
-                              compact ? 16 : 24,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '围绕这本书聊聊：总结、人物，或你想到的问题。',
-                                  style: TextStyle(
-                                    fontSize: _panelBodySize(context),
-                                    height: 1.6,
-                                    color: context.appSecondaryText,
-                                  ),
-                                ),
-                                if (_mindMapScopePrompt == null &&
-                                    openingShortcuts.isNotEmpty) ...[
-                                  SizedBox(height: compact ? 12 : 16),
-                                  BookAiSuggestedQuestionList(
-                                    shortcuts: openingShortcuts,
-                                    onSelected: (shortcut) => unawaited(
-                                      _handleOpeningShortcut(shortcut),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        for (final msg in _messages)
-                          BookAiBubble(
-                            key: ValueKey<String>(
-                              '${msg.turnId ?? msg.createdAt?.microsecondsSinceEpoch ?? msg.hashCode}:'
-                              '${msg.mindMap?.scopeFingerprint ?? ''}',
-                            ),
-                            message: msg,
-                            onCopy: () => unawaited(_copy(msg.content)),
-                            onMindMapLayoutChanged: msg.mindMap == null
-                                ? null
-                                : (layout) => _updateMindMapLayout(msg, layout),
-                            onOpenMindMapEvidence: msg.mindMap == null
-                                ? null
-                                : _goToMindMapEvidence,
-                            onOpenMindMapFullscreen: msg.mindMap == null
-                                ? null
-                                : () => _openMindMapFullscreen(msg),
-                            onContinueEditingMindMap: msg.mindMap == null
-                                ? null
-                                : () => _beginEditingMindMap(msg),
-                            revealMindMapOnMount:
-                                msg.mindMap != null &&
-                                msg.turnId == _mindMapRevealTurnId,
-                            onMindMapRevealed: msg.turnId == null
-                                ? null
-                                : () {
-                                    if (_mindMapRevealTurnId == msg.turnId) {
-                                      _mindMapRevealTurnId = null;
-                                    }
-                                  },
-                            onMindMapPointerHoverChanged: (active) {
-                              if (_mindMapPointerActive == active) return;
-                              setState(() => _mindMapPointerActive = active);
-                            },
-                          ),
-                        if (_mindMapScopePrompt case final prompt?)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              left: 4,
-                              right: 4,
-                              bottom: 14,
-                            ),
-                            child: _MindMapScopeChoiceCard(
-                              prompt: prompt,
-                              onSelected: _selectMindMapScope,
-                              onCancel: _cancelMindMapScopePrompt,
-                            ),
-                          ),
-                        if (showFollowUpShortcuts)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2, bottom: 12),
-                            child: BookAiSuggestedQuestionList(
-                              shortcuts: followUpShortcuts,
-                              onSelected: (shortcut) =>
-                                  unawaited(_handleOpeningShortcut(shortcut)),
-                            ),
-                          ),
-                        if (_showStatusIndicator)
-                          ExcludeSemantics(
-                            child: BookAiThinkingIndicator(
-                              label: _statusIndicatorLabel,
-                              state: _statusOrbState,
-                            ),
-                          ),
-                        if (_activeTurnVisible &&
-                            (_streaming.isNotEmpty ||
-                                _streamingReasoning.isNotEmpty))
-                          BookAiBubble(
-                            message: AiChatMessage(
-                              role: AiMessageRole.assistant,
-                              content: _streaming,
-                              reasoningContent: _streamingReasoning,
-                              reasoningKind: _streamingReasoningKind,
-                            ),
-                            streaming: true,
-                          ),
-                        if (_error != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _error!,
-                                    style: TextStyle(
-                                      color: colors.error,
-                                      fontSize: _panelBodySize(context),
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                ),
-                                if (_canRetry) ...[
-                                  const SizedBox(width: 8),
-                                  OutlinedButton(
-                                    onPressed: () =>
-                                        unawaited(_send(_retryText)),
-                                    child: const Text('重试'),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
+                    onShortcutSelected: (shortcut) =>
+                        unawaited(_handleOpeningShortcut(shortcut)),
+                    onCopy: (message) => unawaited(_copy(message.content)),
+                    onMindMapLayoutChanged: _updateMindMapLayout,
+                    onOpenMindMapEvidence: _goToMindMapEvidence,
+                    onOpenMindMapFullscreen: _openMindMapFullscreen,
+                    onContinueEditingMindMap: _beginEditingMindMap,
+                    onMindMapRevealed: (message) {
+                      if (_mindMapRevealTurnId == message.turnId) {
+                        _mindMapRevealTurnId = null;
+                      }
+                    },
+                    onMindMapPointerChanged: (active) {
+                      if (_mindMapPointerActive == active) return;
+                      setState(() => _mindMapPointerActive = active);
+                    },
+                    onRetry: () => unawaited(_send(_retryText)),
                   ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 12, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_activeMindMap case final activeMap?) ...[
-                  InputChip(
-                    avatar: const Icon(Icons.account_tree_outlined, size: 16),
-                    label: Text(
-                      '正在修改：${activeMap.root.title} · 修订 ${activeMap.revision}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onDeleted: conversationInputLocked
-                        ? null
-                        : _mindMapConversation.detachArtifact,
-                    deleteIcon: const Icon(KaijuanIcons.close, size: 16),
-                  ),
-                  const SizedBox(height: 6),
-                ],
-                Row(
-                  children: [
-                    BookAiWebSearchToggle(
-                      enabled: !conversationInputLocked,
-                      selected: _webSearchOn,
-                      onPressed: () =>
-                          unawaited(_onWebSearchChanged(!_webSearchOn)),
-                    ),
-                    if (_c.supportsDeepThinking) ...[
-                      const SizedBox(width: 8),
-                      BookAiDeepThinkingToggle(
-                        enabled: !conversationInputLocked,
-                        selected: _deepThinkingOn,
-                        onPressed: () =>
-                            setState(() => _deepThinkingOn = !_deepThinkingOn),
-                      ),
-                    ],
-                    if (hasSelection) ...[
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: InputChip(
-                          avatar: const Icon(KaijuanIcons.quote, size: 16),
-                          label: Text(
-                            _attachedSelection.length > 28
-                                ? '${_attachedSelection.substring(0, 28)}…'
-                                : _attachedSelection,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: _panelDetailSize(context),
-                            ),
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          onDeleted: conversationInputLocked
-                              ? null
-                              : () => setState(() => _selection = null),
-                          deleteIcon: const Icon(KaijuanIcons.close, size: 16),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  key: const ValueKey<String>('ai-chat-composer'),
-                  constraints: BoxConstraints(minHeight: composerControlSize),
-                  padding: const EdgeInsets.only(left: 12, right: 4),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceContainerHighest.withValues(
-                      alpha: 0.42,
-                    ),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Row(
-                    // Center send/stop against the multiline field (not bottom-stuck).
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: withDesktopTextEditingShortcuts(
-                          controller: _input,
-                          TextField(
-                            controller: _input,
-                            focusNode: _focus,
-                            enabled: !conversationInputLocked,
-                            // Bootstrap requests focus after the first frame.
-                            // Synchronous autofocus can let an IME update the
-                            // controller during layout/semantics flushing.
-                            autofocus: false,
-                            minLines: 1,
-                            maxLines: 6,
-                            keyboardType: TextInputType.multiline,
-                            textInputAction: TextInputAction.send,
-                            textCapitalization: TextCapitalization.sentences,
-                            enableInteractiveSelection: true,
-                            onTap: conversationInputLocked
-                                ? null
-                                : () => unawaited(_focusComposer()),
-                            onSubmitted: (_) {
-                              if (!_sending) unawaited(_send());
-                            },
-                            style: context.appInputTextStyle.copyWith(
-                              color: context.appPrimaryText,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: '问这本书…',
-                              hintStyle: context.appInputTextStyle.copyWith(
-                                color: context.appSecondaryText,
-                              ),
-                              isDense: true,
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                vertical: 6,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      if (_sending)
-                        IconButton.filledTonal(
-                          tooltip: '停止',
-                          onPressed: _stop,
-                          style: IconButton.styleFrom(
-                            fixedSize: Size.square(composerControlSize),
-                            padding: const EdgeInsets.all(10),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          icon: Icon(
-                            KaijuanIcons.stopFilled,
-                            size: 18,
-                            color: colors.error,
-                          ),
-                        )
-                      else
-                        IconButton.filled(
-                          tooltip: '发送',
-                          onPressed: conversationInputLocked
-                              ? null
-                              : () => unawaited(_send()),
-                          style: IconButton.styleFrom(
-                            fixedSize: Size.square(composerControlSize),
-                            padding: const EdgeInsets.all(10),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          icon: const Icon(KaijuanIcons.sendFilled, size: 18),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          BookAiComposer(
+            controller: _input,
+            focusNode: _focus,
+            locked: conversationInputLocked,
+            sending: _sending,
+            webSearchSelected: _webSearchOn,
+            deepThinkingSupported: _c.supportsDeepThinking,
+            deepThinkingSelected: _deepThinkingOn,
+            selection: _attachedSelection,
+            controlSize: composerControlSize,
+            activeMindMapTitle: _activeMindMap == null
+                ? null
+                : '正在修改：${_activeMindMap!.root.title}',
+            activeMindMapRevision: _activeMindMap?.revision,
+            onMindMapDetached: _mindMapConversation.detachArtifact,
+            onFocusRequested: () => unawaited(_focusComposer()),
+            onSend: () => unawaited(_send()),
+            onStop: () => unawaited(_stop()),
+            onWebSearchChanged: (value) =>
+                unawaited(_onWebSearchChanged(value)),
+            onDeepThinkingChanged: (value) =>
+                setState(() => _deepThinkingOn = value),
+            onSelectionRemoved: () => setState(() => _selection = null),
           ),
         ],
       ],
@@ -3975,171 +3193,6 @@ class _AiUnavailable extends StatelessWidget {
           const SizedBox(height: 12),
           FilledButton(onPressed: onOpenSettings, child: const Text('去设置')),
         ],
-      ),
-    );
-  }
-}
-
-class _MindMapScopeChoiceCard extends StatelessWidget {
-  const _MindMapScopeChoiceCard({
-    required this.prompt,
-    required this.onSelected,
-    required this.onCancel,
-  });
-
-  final _MindMapScopePrompt prompt;
-  final ValueChanged<int> onSelected;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appColors;
-    final selectedValue = prompt.selectedValue;
-    return Material(
-      key: const ValueKey<String>('ai-mind-map-scope-choice-card'),
-      color: colors.surfaceContainerHighest.withValues(alpha: 0.34),
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '选择思维导图范围',
-                    style: TextStyle(
-                      color: context.appPrimaryText,
-                      fontSize: context.aiBodySize,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    prompt.title,
-                    style: TextStyle(
-                      color: context.appSecondaryText,
-                      fontSize: context.aiDetailSize,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            for (var index = 0; index < prompt.choices.length; index++) ...[
-              _MindMapScopeChoiceRow(
-                choice: prompt.choices[index],
-                selected: selectedValue == prompt.choices[index].value,
-                enabled: selectedValue == null,
-                onTap: () => onSelected(prompt.choices[index].value),
-              ),
-              if (index < prompt.choices.length - 1) const SizedBox(height: 6),
-            ],
-            if (selectedValue == null)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(onPressed: onCancel, child: const Text('取消')),
-              )
-            else
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-                child: Text(
-                  '已选择，正在准备正文…',
-                  style: TextStyle(
-                    color: context.appSecondaryText,
-                    fontSize: context.appCaptionSize,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MindMapScopeChoiceRow extends StatelessWidget {
-  const _MindMapScopeChoiceRow({
-    required this.choice,
-    required this.selected,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  final _MindMapScopeChoice choice;
-  final bool selected;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appColors;
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      selected: selected,
-      label: choice.label,
-      value: choice.subtitle,
-      child: Material(
-        color: selected
-            ? colors.primary.withValues(alpha: 0.12)
-            : colors.surface.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          key: ValueKey<String>('ai-mind-map-scope-${choice.value}'),
-          borderRadius: BorderRadius.circular(10),
-          onTap: enabled ? onTap : null,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 52),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: selected ? colors.primary : context.appDivider,
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        choice.label,
-                        style: TextStyle(
-                          color: context.appPrimaryText,
-                          fontSize: context.aiBodySize,
-                          fontWeight: selected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        choice.subtitle,
-                        style: TextStyle(
-                          color: context.appSecondaryText,
-                          fontSize: context.appCaptionSize,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Icon(
-                  selected
-                      ? KaijuanIcons.checkCircleFilled
-                      : KaijuanIcons.chevronRight,
-                  size: 18,
-                  color: selected ? colors.primary : context.appSecondaryText,
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

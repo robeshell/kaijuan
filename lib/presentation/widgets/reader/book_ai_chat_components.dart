@@ -6,9 +6,11 @@ import '../../../ai/ai_mind_map.dart';
 import '../../../ai/ai_models.dart';
 import '../../../ai/ai_provider_kind.dart';
 import '../../../core/kaijuan_icons.dart';
+import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
 import '../ai_typography.dart';
 import 'ai_result_body.dart';
+import 'book_ai_mind_map_scope_card.dart';
 import 'book_ai_mind_map_view.dart';
 
 class BookAiThinkingIndicator extends StatelessWidget {
@@ -227,6 +229,403 @@ class BookAiSuggestedQuestionList extends StatelessWidget {
           if (index < shortcuts.length - 1) const SizedBox(height: 8),
         ],
       ],
+    );
+  }
+}
+
+class BookAiComposer extends StatelessWidget {
+  const BookAiComposer({
+    required this.controller,
+    required this.focusNode,
+    required this.locked,
+    required this.sending,
+    required this.webSearchSelected,
+    required this.deepThinkingSupported,
+    required this.deepThinkingSelected,
+    required this.selection,
+    required this.controlSize,
+    required this.onFocusRequested,
+    required this.onSend,
+    required this.onStop,
+    required this.onWebSearchChanged,
+    required this.onDeepThinkingChanged,
+    required this.onSelectionRemoved,
+    this.activeMindMapTitle,
+    this.activeMindMapRevision,
+    this.onMindMapDetached,
+    super.key,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool locked;
+  final bool sending;
+  final bool webSearchSelected;
+  final bool deepThinkingSupported;
+  final bool deepThinkingSelected;
+  final String selection;
+  final double controlSize;
+  final VoidCallback onFocusRequested;
+  final VoidCallback onSend;
+  final VoidCallback onStop;
+  final ValueChanged<bool> onWebSearchChanged;
+  final ValueChanged<bool> onDeepThinkingChanged;
+  final VoidCallback onSelectionRemoved;
+  final String? activeMindMapTitle;
+  final int? activeMindMapRevision;
+  final VoidCallback? onMindMapDetached;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final hasSelection = selection.trim().isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (activeMindMapTitle case final title?) ...[
+            InputChip(
+              avatar: const Icon(Icons.account_tree_outlined, size: 16),
+              label: Text(
+                '$title · 修订 ${activeMindMapRevision ?? 1}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onDeleted: locked ? null : onMindMapDetached,
+              deleteIcon: const Icon(KaijuanIcons.close, size: 16),
+            ),
+            const SizedBox(height: 6),
+          ],
+          Row(
+            children: [
+              BookAiWebSearchToggle(
+                enabled: !locked,
+                selected: webSearchSelected,
+                onPressed: () => onWebSearchChanged(!webSearchSelected),
+              ),
+              if (deepThinkingSupported) ...[
+                const SizedBox(width: 8),
+                BookAiDeepThinkingToggle(
+                  enabled: !locked,
+                  selected: deepThinkingSelected,
+                  onPressed: () => onDeepThinkingChanged(!deepThinkingSelected),
+                ),
+              ],
+              if (hasSelection) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: InputChip(
+                    avatar: const Icon(KaijuanIcons.quote, size: 16),
+                    label: Text(
+                      selection.length > 28
+                          ? '${selection.substring(0, 28)}…'
+                          : selection,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: context.aiDetailSize),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    onDeleted: locked ? null : onSelectionRemoved,
+                    deleteIcon: const Icon(KaijuanIcons.close, size: 16),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Container(
+            key: const ValueKey<String>('ai-chat-composer'),
+            constraints: BoxConstraints(minHeight: controlSize),
+            padding: const EdgeInsets.only(left: 12, right: 4),
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest.withValues(alpha: 0.42),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: withDesktopTextEditingShortcuts(
+                    controller: controller,
+                    TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      enabled: !locked,
+                      autofocus: false,
+                      minLines: 1,
+                      maxLines: 6,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.send,
+                      textCapitalization: TextCapitalization.sentences,
+                      enableInteractiveSelection: true,
+                      onTap: locked ? null : onFocusRequested,
+                      onSubmitted: (_) {
+                        if (!sending) onSend();
+                      },
+                      style: context.appInputTextStyle.copyWith(
+                        color: context.appPrimaryText,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: '问这本书…',
+                        hintStyle: context.appInputTextStyle.copyWith(
+                          color: context.appSecondaryText,
+                        ),
+                        isDense: true,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                if (sending)
+                  IconButton.filledTonal(
+                    tooltip: '停止',
+                    onPressed: onStop,
+                    style: IconButton.styleFrom(
+                      fixedSize: Size.square(controlSize),
+                      padding: const EdgeInsets.all(10),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: Icon(
+                      KaijuanIcons.stopFilled,
+                      size: 18,
+                      color: colors.error,
+                    ),
+                  )
+                else
+                  IconButton.filled(
+                    tooltip: '发送',
+                    onPressed: locked ? null : onSend,
+                    style: IconButton.styleFrom(
+                      fixedSize: Size.square(controlSize),
+                      padding: const EdgeInsets.all(10),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: const Icon(KaijuanIcons.sendFilled, size: 18),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class BookAiChatTimeline extends StatelessWidget {
+  const BookAiChatTimeline({
+    required this.scrollController,
+    required this.compact,
+    required this.pointerActive,
+    required this.liveStatus,
+    required this.messages,
+    required this.openingShortcuts,
+    required this.followUpShortcuts,
+    required this.showFollowUpShortcuts,
+    required this.showStatusIndicator,
+    required this.statusIndicatorLabel,
+    required this.statusOrbState,
+    required this.activeTurnVisible,
+    required this.streamingText,
+    required this.streamingReasoning,
+    required this.streamingReasoningKind,
+    required this.searchingWeb,
+    required this.error,
+    required this.canRetry,
+    required this.mindMapRevealTurnId,
+    required this.onUserDrag,
+    required this.onShortcutSelected,
+    required this.onCopy,
+    required this.onMindMapLayoutChanged,
+    required this.onOpenMindMapEvidence,
+    required this.onOpenMindMapFullscreen,
+    required this.onContinueEditingMindMap,
+    required this.onMindMapRevealed,
+    required this.onMindMapPointerChanged,
+    required this.onRetry,
+    this.scopePrompt,
+    this.onScopeSelected,
+    this.onScopeCancelled,
+    super.key,
+  });
+
+  final ScrollController scrollController;
+  final bool compact;
+  final bool pointerActive;
+  final String liveStatus;
+  final List<AiChatMessage> messages;
+  final List<AiChatShortcut> openingShortcuts;
+  final List<AiChatShortcut> followUpShortcuts;
+  final bool showFollowUpShortcuts;
+  final bool showStatusIndicator;
+  final String statusIndicatorLabel;
+  final OrbState statusOrbState;
+  final bool activeTurnVisible;
+  final String streamingText;
+  final String streamingReasoning;
+  final AiReasoningContentKind streamingReasoningKind;
+  final bool searchingWeb;
+  final String? error;
+  final bool canRetry;
+  final String? mindMapRevealTurnId;
+  final VoidCallback onUserDrag;
+  final ValueChanged<AiChatShortcut> onShortcutSelected;
+  final ValueChanged<AiChatMessage> onCopy;
+  final void Function(AiChatMessage, AiMindMapLayout) onMindMapLayoutChanged;
+  final ValueChanged<AiMindMapEvidence> onOpenMindMapEvidence;
+  final ValueChanged<AiChatMessage> onOpenMindMapFullscreen;
+  final ValueChanged<AiChatMessage> onContinueEditingMindMap;
+  final ValueChanged<AiChatMessage> onMindMapRevealed;
+  final ValueChanged<bool> onMindMapPointerChanged;
+  final VoidCallback onRetry;
+  final BookAiMindMapScopePrompt? scopePrompt;
+  final ValueChanged<int>? onScopeSelected;
+  final VoidCallback? onScopeCancelled;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return NotificationListener<ScrollStartNotification>(
+      onNotification: (notification) {
+        if (notification.dragDetails != null) onUserDrag();
+        return false;
+      },
+      child: ListView(
+        key: const ValueKey<String>('ai-chat-message-list'),
+        controller: scrollController,
+        physics: pointerActive ? const NeverScrollableScrollPhysics() : null,
+        padding: EdgeInsets.fromLTRB(16, compact ? 0 : 4, 16, compact ? 8 : 12),
+        children: [
+          Semantics(
+            container: true,
+            liveRegion: true,
+            label: liveStatus,
+            child: const SizedBox.shrink(),
+          ),
+          if (messages.isEmpty &&
+              streamingText.isEmpty &&
+              streamingReasoning.isEmpty &&
+              !searchingWeb)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                4,
+                compact ? 12 : 20,
+                4,
+                compact ? 16 : 24,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '围绕这本书聊聊：总结、人物，或你想到的问题。',
+                    style: TextStyle(
+                      fontSize: context.aiBodySize,
+                      height: 1.6,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                  if (scopePrompt == null && openingShortcuts.isNotEmpty) ...[
+                    SizedBox(height: compact ? 12 : 16),
+                    BookAiSuggestedQuestionList(
+                      shortcuts: openingShortcuts,
+                      onSelected: onShortcutSelected,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          for (final message in messages)
+            BookAiBubble(
+              key: ValueKey<String>(
+                '${message.turnId ?? message.createdAt?.microsecondsSinceEpoch ?? message.hashCode}:'
+                '${message.mindMap?.scopeFingerprint ?? ''}',
+              ),
+              message: message,
+              onCopy: () => onCopy(message),
+              onMindMapLayoutChanged: message.mindMap == null
+                  ? null
+                  : (layout) => onMindMapLayoutChanged(message, layout),
+              onOpenMindMapEvidence: message.mindMap == null
+                  ? null
+                  : onOpenMindMapEvidence,
+              onOpenMindMapFullscreen: message.mindMap == null
+                  ? null
+                  : () => onOpenMindMapFullscreen(message),
+              onContinueEditingMindMap: message.mindMap == null
+                  ? null
+                  : () => onContinueEditingMindMap(message),
+              revealMindMapOnMount:
+                  message.mindMap != null &&
+                  message.turnId == mindMapRevealTurnId,
+              onMindMapRevealed: message.turnId == null
+                  ? null
+                  : () => onMindMapRevealed(message),
+              onMindMapPointerHoverChanged: onMindMapPointerChanged,
+            ),
+          if (scopePrompt case final prompt?)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
+              child: BookAiMindMapScopeChoiceCard(
+                prompt: prompt,
+                onSelected: onScopeSelected!,
+                onCancel: onScopeCancelled!,
+              ),
+            ),
+          if (showFollowUpShortcuts)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 12),
+              child: BookAiSuggestedQuestionList(
+                shortcuts: followUpShortcuts,
+                onSelected: onShortcutSelected,
+              ),
+            ),
+          if (showStatusIndicator)
+            ExcludeSemantics(
+              child: BookAiThinkingIndicator(
+                label: statusIndicatorLabel,
+                state: statusOrbState,
+              ),
+            ),
+          if (activeTurnVisible &&
+              (streamingText.isNotEmpty || streamingReasoning.isNotEmpty))
+            BookAiBubble(
+              message: AiChatMessage(
+                role: AiMessageRole.assistant,
+                content: streamingText,
+                reasoningContent: streamingReasoning,
+                reasoningKind: streamingReasoningKind,
+              ),
+              streaming: true,
+            ),
+          if (error case final message?)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      message,
+                      style: TextStyle(
+                        color: colors.error,
+                        fontSize: context.aiBodySize,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  if (canRetry) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton(onPressed: onRetry, child: const Text('重试')),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

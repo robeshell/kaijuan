@@ -593,6 +593,8 @@ AiBookLanguageProvider（或 Composite）
 - [x] `AiAgentRuntime` 契约落地，现有行为经 `LegacyAiAgentRuntime` 兼容，阅读 controller 不再直接依赖 `AiChatService`。
 - [x] `BookAiReaderGateway` 接管阅读快照、书内工具宿主、普通 Agent turn、联网和追问桥接；聊天纯展示组件从主 Sheet 物理拆分且不共享私有状态。
 - [x] `AiAgentRuntimeGate` 对 Genkit 默认切换执行 runtime factory、真实取消、模型矩阵、工具恢复、Trace/Snapshot 与契约测试门禁；当前锁版会确定性回退兼容 Runtime。
+- [x] 聊天消息时间线、输入区、导图选择与图谱展示继续从主 Sheet 物理拆分；系统 TTS 从 `BookReaderController` 拆入独立 Controller，兼容门面行为不变。
+- [x] headless Runtime Harness 同时提供离线确定性验收与显式 BYOK live 模式，覆盖回答、读工具、产品行动、结构化思维导图、续写、transport 取消和脱敏报告。
 - [ ] Genkit Agent 经功能开关、真实 HTTP 取消、模型矩阵和 Trace 验证后替换普通聊天循环。
 
 

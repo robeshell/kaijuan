@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 
 import '../../ai/ai_chat.dart';
 import '../../ai/ai_agent_runtime.dart';
@@ -49,9 +47,7 @@ import 'ai_settings_controller.dart';
 import 'book_ai_mind_map_controller.dart';
 import 'book_ai_reader_gateway.dart';
 import 'book_ai_workspace_controller.dart';
-
-/// Listen-to-book playback state (system TTS).
-enum BookTtsStatus { idle, playing, paused }
+import 'book_tts_controller.dart';
 
 typedef BookMindMapRevisionInput = ({
   AiBookWork? work,
@@ -382,30 +378,17 @@ class BookReaderController extends ChangeNotifier {
   );
   void Function(String query)? _runSearch;
   VoidCallback? _clearSearch;
-  Future<String?> Function()? _ttsHere;
-  Future<String?> Function()? _ttsNext;
-  Future<String?> Function()? _ttsPrev;
-  Future<void> Function()? _ttsStopEngine;
-
-  FlutterTts? _flutterTts;
-  BookTtsStatus _ttsStatus = BookTtsStatus.idle;
-  double _ttsRate = 1.0;
-  String? _ttsCurrentText;
-  int _ttsGeneration = 0;
-
-  /// Completes when the active play loop exits.
-  Completer<void>? _ttsLoopIdle;
-
-  /// Completes when the armed utterance ends (complete / cancel).
-  Completer<void>? _ttsUtteranceDone;
-
-  /// Only accept engine complete/cancel after [setStartHandler] for this speak.
-  /// Prevents a stale `stop()` cancel from closing the *next* utterance gate
-  /// (that race was advancing Foliate on rate change).
-  bool _ttsUtteranceArmed = false;
+  late final BookTtsController _tts = BookTtsController(
+    isReaderDisposed: () => _disposed,
+    isReaderReady: () => _ready,
+    beforeStart: clearSelectionMenu,
+    onPlaybackStarted: showChrome,
+    onChanged: notifyListeners,
+  );
 
   /// Optional one-shot message for UI snackbars (cleared by screen).
-  String? ttsUserMessage;
+  String? get ttsUserMessage => _tts.userMessage;
+  set ttsUserMessage(String? value) => _tts.userMessage = value;
   String? _renditionCfi;
   double? _renditionProgress;
   String? _chapterTitle;
@@ -499,13 +482,13 @@ class BookReaderController extends ChangeNotifier {
   String? get imageViewerDataUrl => _imageViewerDataUrl;
   bool get imageViewerOpen => _imageViewerDataUrl != null;
 
-  BookTtsStatus get ttsStatus => _ttsStatus;
-  bool get ttsActive => _ttsStatus != BookTtsStatus.idle;
-  bool get ttsPlaying => _ttsStatus == BookTtsStatus.playing;
-  bool get ttsPaused => _ttsStatus == BookTtsStatus.paused;
-  double get ttsRate => _ttsRate;
+  BookTtsStatus get ttsStatus => _tts.status;
+  bool get ttsActive => _tts.active;
+  bool get ttsPlaying => _tts.playing;
+  bool get ttsPaused => _tts.paused;
+  double get ttsRate => _tts.rate;
 
-  static const ttsRatePresets = <double>[0.8, 1.0, 1.25, 1.5];
+  static const ttsRatePresets = BookTtsController.ratePresets;
 
   /// Opens the note editor (list / note bubble). Set by [BookReaderScreen].
   void Function(BookAnnotation note)? onOpenNoteEditor;
@@ -730,18 +713,10 @@ class BookReaderController extends ChangeNotifier {
     required Future<String?> Function() prev,
     required Future<void> Function() stop,
   }) {
-    _ttsHere = here;
-    _ttsNext = next;
-    _ttsPrev = prev;
-    _ttsStopEngine = stop;
+    _tts.attachBridge(here: here, next: next, previous: prev, stop: stop);
   }
 
-  void detachTtsBridge() {
-    _ttsHere = null;
-    _ttsNext = null;
-    _ttsPrev = null;
-    _ttsStopEngine = null;
-  }
+  void detachTtsBridge() => _tts.detachBridge();
 
   void detachAnnotationBridge() {
     _renderAnnotations = null;
@@ -3364,11 +3339,10 @@ class BookReaderController extends ChangeNotifier {
     _bookOutlineCancel?.cancel();
     _bookGraphCancel?.cancel();
     _attachGeneration++;
-    _ttsGeneration++;
     _prefs?.fontStore.removeListener(_onFontStoreChanged);
     _saveDebounce?.cancel();
     _selectionClearLockTimer?.cancel();
-    unawaited(_tearDownTts());
+    unawaited(_tts.dispose());
     _externalNextPage = null;
     _externalPreviousPage = null;
     _externalSeek = null;
@@ -3381,322 +3355,25 @@ class BookReaderController extends ChangeNotifier {
     super.dispose();
   }
 
-  // ------------------------------------------------------------------
-  // TTS (听书) — 对齐 Anx SystemTts 模型
-  //
-  // Foliate = 句游标 + 高亮；Dart = 发声。
-  // Apple 连续播：speak 完 → 仅当仍 playing 才 ttsNext（Anx 同款门槛）。
-  // 改速 = Anx restart：停音频后重读；我们保留当前句文本（不 here+next），
-  //   避免 Foliate 高亮跳句。
-  // Apple didCancel 不结束 speak Future → 用 completion/cancel 门闩；
-  //   门闩只在 setStartHandler 之后 arm，防止 stop 的迟到 cancel 误关下一句。
-  // ------------------------------------------------------------------
+  // System TTS compatibility facade. Engine state and playback loops live in
+  // [BookTtsController]; Foliate navigation remains attached through the
+  // reader bridge above.
 
-  Future<FlutterTts> _ensureTts() async {
-    final existing = _flutterTts;
-    if (existing != null) return existing;
-    final tts = FlutterTts();
-    _flutterTts = tts;
-    if (!kIsWeb && Platform.isIOS) {
-      await tts.setSharedInstance(true);
-      await tts.setIosAudioCategory(
-        IosTextToSpeechAudioCategory.playback,
-        [
-          IosTextToSpeechAudioCategoryOptions.allowBluetooth,
-          IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
-          IosTextToSpeechAudioCategoryOptions.mixWithOthers,
-        ],
-        IosTextToSpeechAudioMode.voicePrompt,
-      );
-    }
-    // Apple: awaitSpeakCompletion(true) + stop() 会挂死 speak Future。
-    await tts.awaitSpeakCompletion(false);
-    await _applyTtsRate(tts);
-    tts.setStartHandler(() {
-      _ttsUtteranceArmed = true;
-    });
-    tts.setCompletionHandler(_onUtteranceEngineSignal);
-    tts.setCancelHandler(_onUtteranceEngineSignal);
-    tts.setErrorHandler((message) {
-      _onUtteranceEngineSignal();
-      debugPrint('[TTS] error: $message');
-    });
-    return tts;
-  }
+  Future<void> startTts() => _tts.start();
 
-  void _onUtteranceEngineSignal() {
-    if (!_ttsUtteranceArmed) return;
-    _ttsUtteranceArmed = false;
-    final gate = _ttsUtteranceDone;
-    if (gate != null && !gate.isCompleted) gate.complete();
-  }
+  Future<void> pauseTts() => _tts.pause();
 
-  void _forceUnblockUtteranceWait() {
-    _ttsUtteranceArmed = false;
-    final gate = _ttsUtteranceDone;
-    if (gate != null && !gate.isCompleted) gate.complete();
-  }
+  Future<void> resumeTts() => _tts.resume();
 
-  Future<void> _applyTtsRate(FlutterTts tts) async {
-    // UI 1.0 = 正常。flutter_tts 全平台 0.5 ≈ normal。
-    await tts.setSpeechRate(_mapSpeechRate(_ttsRate));
-  }
+  Future<void> toggleTtsPlayPause() => _tts.togglePlayPause();
 
-  static double _mapSpeechRate(double uiRate) {
-    return (uiRate * 0.5).clamp(0.1, 1.0);
-  }
+  Future<void> stopTts() => _tts.stop();
 
-  /// Speaks [text]; returns true only if this generation still owns playback
-  /// after the utterance ends (Anx: state still playing → may advance).
-  Future<bool> _speakSentence(
-    FlutterTts tts,
-    String text,
-    int generation,
-  ) async {
-    if (text.isEmpty) return false;
-    _ttsUtteranceArmed = false;
-    final gate = Completer<void>();
-    _ttsUtteranceDone = gate;
-    try {
-      await tts.speak(text);
-      await gate.future;
-    } finally {
-      if (identical(_ttsUtteranceDone, gate)) _ttsUtteranceDone = null;
-      _ttsUtteranceArmed = false;
-    }
-    if (_disposed || generation != _ttsGeneration) return false;
-    if (_ttsStatus != BookTtsStatus.playing) return false;
-    return true;
-  }
+  Future<void> setTtsRate(double rate) => _tts.setRate(rate);
 
-  Future<void> _drainTtsLoop() async {
-    final idle = _ttsLoopIdle?.future;
-    if (idle == null) return;
-    try {
-      await idle.timeout(const Duration(milliseconds: 800));
-    } catch (_) {}
-  }
+  Future<void> ttsSkipNext() => _tts.skipNext();
 
-  /// Stop audio without moving Foliate. Bumps generation so in-flight loops
-  /// cannot ttsNext (Anx: stop → state stopped → speak 后不前进).
-  Future<void> _interruptAudio({required bool bumpGeneration}) async {
-    if (bumpGeneration) _ttsGeneration++;
-    _forceUnblockUtteranceWait();
-    try {
-      await _flutterTts?.stop();
-    } catch (_) {}
-    await _drainTtsLoop();
-  }
-
-  Future<void> _tearDownTts() async {
-    _ttsGeneration++;
-    _forceUnblockUtteranceWait();
-    final tts = _flutterTts;
-    _flutterTts = null;
-    _ttsStatus = BookTtsStatus.idle;
-    _ttsCurrentText = null;
-    if (tts == null) return;
-    try {
-      await tts.stop();
-    } catch (_) {}
-  }
-
-  Future<void> startTts() async {
-    if (_disposed || !_ready) return;
-    clearSelectionMenu();
-    await _interruptAudio(bumpGeneration: true);
-    final generation = _ttsGeneration;
-    final here = _ttsHere;
-    if (here == null) {
-      ttsUserMessage = '听书引擎未就绪';
-      notifyListeners();
-      return;
-    }
-    final text = (await here())?.trim();
-    if (_disposed || generation != _ttsGeneration) return;
-    if (text == null || text.isEmpty) {
-      ttsUserMessage = '当前位置没有可读文本';
-      notifyListeners();
-      return;
-    }
-    _ttsCurrentText = text;
-    _ttsStatus = BookTtsStatus.playing;
-    showChrome();
-    notifyListeners();
-    unawaited(_runTtsLoop(generation));
-  }
-
-  /// Anx Apple loop: speak → if still playing → ttsNext → speak …
-  Future<void> _runTtsLoop(int generation) async {
-    final idle = Completer<void>();
-    _ttsLoopIdle = idle;
-    try {
-      final tts = await _ensureTts();
-      if (_disposed || generation != _ttsGeneration) return;
-
-      while (!_disposed &&
-          generation == _ttsGeneration &&
-          _ttsStatus == BookTtsStatus.playing) {
-        final text = _ttsCurrentText?.trim() ?? '';
-        if (text.isEmpty) {
-          ttsUserMessage = '已读完';
-          await stopTts();
-          return;
-        }
-
-        final finishedCleanly = await _speakSentence(tts, text, generation);
-        // Anx: `if (ttsStateNotifier.value == playing) getNext…`
-        if (!finishedCleanly) return;
-        if (_disposed || generation != _ttsGeneration) return;
-        if (_ttsStatus != BookTtsStatus.playing) return;
-
-        final fetch = _ttsNext;
-        if (fetch == null) {
-          await stopTts();
-          return;
-        }
-        String? nextText;
-        try {
-          nextText = (await fetch())?.trim();
-        } catch (error) {
-          debugPrint('[TTS] ttsNext failed: $error');
-          nextText = null;
-        }
-
-        if (_disposed || generation != _ttsGeneration) {
-          if (nextText != null && nextText.isNotEmpty) {
-            try {
-              await _ttsPrev?.call();
-            } catch (_) {}
-          }
-          return;
-        }
-        if (nextText == null || nextText.isEmpty) {
-          ttsUserMessage = '已读完';
-          await stopTts();
-          return;
-        }
-        _ttsCurrentText = nextText;
-        notifyListeners();
-        if (_ttsStatus != BookTtsStatus.playing) return;
-      }
-    } finally {
-      if (!idle.isCompleted) idle.complete();
-      if (identical(_ttsLoopIdle, idle)) _ttsLoopIdle = null;
-    }
-  }
-
-  Future<void> pauseTts() async {
-    if (_disposed || _ttsStatus != BookTtsStatus.playing) return;
-    // Anx pause: stop audio, keep _currentVoiceText, state=paused.
-    _ttsStatus = BookTtsStatus.paused;
-    notifyListeners();
-    await _interruptAudio(bumpGeneration: true);
-  }
-
-  Future<void> resumeTts() async {
-    if (_disposed || _ttsStatus != BookTtsStatus.paused) return;
-    final text = _ttsCurrentText?.trim();
-    if (text == null || text.isEmpty) {
-      await startTts();
-      return;
-    }
-    // Anx Apple resume: speak(content: _currentVoiceText) from sentence start.
-    final generation = ++_ttsGeneration;
-    _ttsStatus = BookTtsStatus.playing;
-    notifyListeners();
-    unawaited(_runTtsLoop(generation));
-  }
-
-  Future<void> toggleTtsPlayPause() async {
-    switch (_ttsStatus) {
-      case BookTtsStatus.idle:
-        await startTts();
-      case BookTtsStatus.playing:
-        await pauseTts();
-      case BookTtsStatus.paused:
-        await resumeTts();
-    }
-  }
-
-  Future<void> stopTts() async {
-    if (_disposed) return;
-    await _interruptAudio(bumpGeneration: true);
-    await _ttsStopEngine?.call();
-    if (_disposed) return;
-    _ttsStatus = BookTtsStatus.idle;
-    _ttsCurrentText = null;
-    notifyListeners();
-  }
-
-  /// Anx `rate` setter → `restart()`，但保留当前句（不 here+next）。
-  Future<void> setTtsRate(double rate) async {
-    final next = rate.clamp(0.5, 2.0);
-    if ((next - _ttsRate).abs() < 0.001) return;
-    _ttsRate = next;
-    notifyListeners();
-
-    if (_ttsStatus == BookTtsStatus.idle) {
-      final tts = _flutterTts;
-      if (tts != null) await _applyTtsRate(tts);
-      return;
-    }
-
-    final keep = _ttsCurrentText;
-    final wasPaused = _ttsStatus == BookTtsStatus.paused;
-    // Invalidate loop first (Anx stop → state stopped → 旧 speak 不会前进).
-    await _interruptAudio(bumpGeneration: true);
-    if (_disposed) return;
-
-    final tts = await _ensureTts();
-    await _applyTtsRate(tts);
-    if (_disposed) return;
-
-    _ttsCurrentText = keep;
-    if (wasPaused || keep == null || keep.trim().isEmpty) {
-      _ttsStatus = wasPaused ? BookTtsStatus.paused : BookTtsStatus.idle;
-      notifyListeners();
-      return;
-    }
-
-    final generation = _ttsGeneration;
-    _ttsStatus = BookTtsStatus.playing;
-    notifyListeners();
-    unawaited(_runTtsLoop(generation));
-  }
-
-  Future<void> ttsSkipNext() async {
-    if (_disposed || !ttsActive) return;
-    await _skipTts(next: true);
-  }
-
-  Future<void> ttsSkipPrevious() async {
-    if (_disposed || !ttsActive) return;
-    await _skipTts(next: false);
-  }
-
-  Future<void> _skipTts({required bool next}) async {
-    await _interruptAudio(bumpGeneration: true);
-    if (_disposed) return;
-    final generation = _ttsGeneration;
-
-    final fetch = next ? _ttsNext : _ttsPrev;
-    if (fetch == null) {
-      await stopTts();
-      return;
-    }
-    final text = (await fetch())?.trim();
-    if (_disposed || generation != _ttsGeneration) return;
-    if (text == null || text.isEmpty) {
-      ttsUserMessage = next ? '已读完' : '已到开头';
-      await stopTts();
-      return;
-    }
-    _ttsCurrentText = text;
-    _ttsStatus = BookTtsStatus.playing;
-    notifyListeners();
-    unawaited(_runTtsLoop(generation));
-  }
+  Future<void> ttsSkipPrevious() => _tts.skipPrevious();
 }
 
 /// Test seam for verifying the controller-backed tool contract without

@@ -132,7 +132,8 @@ void main() {
     final workspace = BookAiWorkspaceController(
       saveChatSession: (_) async {},
       requestedAgentRuntime: AiAgentRuntimeKind.genkitAgent,
-      genkitAgentCapabilities: AiAgentRuntimeCapabilities.productionReady,
+      genkitAgentCapabilities:
+          AiAgentRuntimeCapabilities.allRequirementsSatisfiedForTesting,
       agentRuntimeFactory:
           ({required isAvailable, required openModelAdapter}) => compatible,
       genkitAgentRuntimeFactory:

@@ -31,7 +31,7 @@ Genkit OpenAI Compatible / Anthropic adapter
 设置页连接测试 → AiModelAdapter 无工具单回合
 ```
 
-不采用 Genkit Agent、Genkit session、远程 flow 或强制后端。开卷继续拥有任务路由、书籍/作品范围、工具权限、预算、取消、checkpoint、持久化、WebDAV 和 UI 状态。Genkit 只负责 Provider 归一化、流式传输、原生工具、结构化输出和 trace。
+该阶段不采用 Genkit Agent、Genkit session、远程 flow 或强制后端。后续普通对话运行时的可替换 Agent 边界与发布门禁见 [AI Agent 运行时就绪性](./ai-agent-runtime-readiness.md)。开卷继续拥有任务路由、书籍/作品范围、工具权限、预算、取消、checkpoint、持久化、WebDAV 和 UI 状态；确定性产品 Workflow 不迁移给 Agent 框架。
 
 ## 3. 迁移边界
 

@@ -18,7 +18,12 @@ class AiAgentRuntimeCapabilities {
     contractSuitePassed: false,
   );
 
-  static const productionReady = AiAgentRuntimeCapabilities(
+  /// Synthetic all-green fixture for gate contract tests.
+  ///
+  /// Production code must use a version-specific capability record backed by
+  /// the checked-in readiness evidence; this value is not a certification of
+  /// the currently locked SDK.
+  static const allRequirementsSatisfiedForTesting = AiAgentRuntimeCapabilities(
     attachedRequestCancellation: true,
     providerMatrixValidated: true,
     toolAndResumeValidated: true,

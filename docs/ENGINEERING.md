@@ -132,6 +132,8 @@ BookAiChatView
 - 对话、图谱与设置的模型和文件存储分别放置；JSON 原子写入、备份恢复与安全凭据不得混入模型类。生成数据面只经 `AiModelAdapter`，模型目录是独立只读 `AiModelCatalog`；旧 Provider 双栈不得重建。
 - 对话发送状态和大纲/图谱任务状态按上面的目标运行时迁入独立 workspace/conversation controller；迁移前后均用 Widget 流程测试守住行为，不以 `part` 或跨文件私有字段制造形式拆分。
 - `BookAiReaderGateway` 承担阅读快照到 Agent turn 的上下文、工具宿主、联网与追问桥接；`book_ai_chat_components.dart` 只放无业务状态的对话展示组件。`BookReaderController` 与 `book_ai_chat_sheet.dart` 不再通过 `part` 共享私有状态来伪装拆分。
+- 大文件继续按可独立验证的职责拆分：聊天消息时间线、输入区、导图范围选择和图谱展示使用公开 Widget 输入/回调，不读取主 Sheet 私有字段；系统听书由独立 `BookTtsController` 持有引擎、句游标、速率与播放循环，`BookReaderController` 只保留兼容门面和阅读引擎 bridge。拆分不得改变 UI、系统 TTS 行为、持久化格式或 AI 提示词。
+- `tool/ai_runtime_harness.dart` 是运行时验收入口，通过 `flutter test tool/ai_runtime_harness.dart --reporter expanded` 运行：默认启动进程内伪 OpenAI Compatible 端点，验证普通回答、书内工具、产品行动、结构化思维导图、续写和真实 transport 取消；只有显式设置 `AI_HARNESS_MODE=live` 及 BYOK 环境变量时才访问真实端点。Harness 不读取 Keychain、不打印正文/Key，输出机器可读 JSON 报告；通过 Genkit CLI 包装运行时还必须保留 Trace ID 供人工复核。
 - 图谱模型、文件存储、抽取、合并消歧、质量门和描述润色是独立职责。管线 orchestrator 只编排这些组件，拆分不得改变提示词、算法阈值、缓存 schema 或 checkpoint 时机。
 
 - 产品范围见 [PRODUCT.md §6](./PRODUCT.md) 与 [specs/ai.md](./specs/ai.md)。
