@@ -7,6 +7,7 @@ import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme.dart';
+import '../../../ai/ai_rich_content_inspector.dart';
 import '../ai_typography.dart';
 import 'ai_rich_blocks.dart';
 
@@ -452,23 +453,18 @@ class _AiPreElementBuilder extends MarkdownElementBuilder {
   }
 
   static String _diagramLabel(String source) {
-    final first = source
-        .trimLeft()
-        .split(RegExp(r'\s+'))
-        .firstOrNull
-        ?.toLowerCase();
-    return switch (first) {
-      'mindmap' => '思维导图',
-      'sequencediagram' => '时序图',
-      'classdiagram' => '类图',
-      'statediagram' || 'statediagram-v2' => '状态图',
-      'erdiagram' => '实体关系图',
-      'gantt' => '甘特图',
-      'timeline' => '时间线',
-      'gitgraph' => 'Git 分支图',
-      'journey' => '旅程图',
-      'pie' || 'xychart-beta' => '数据图表',
-      _ => '图表',
+    return switch (inspectAiMermaidDiagram(source)) {
+      AiMermaidDiagramKind.mindMap => '思维导图',
+      AiMermaidDiagramKind.sequence => '时序图',
+      AiMermaidDiagramKind.classDiagram => '类图',
+      AiMermaidDiagramKind.stateDiagram => '状态图',
+      AiMermaidDiagramKind.entityRelationship => '实体关系图',
+      AiMermaidDiagramKind.gantt => '甘特图',
+      AiMermaidDiagramKind.timeline => '时间线',
+      AiMermaidDiagramKind.gitGraph => 'Git 分支图',
+      AiMermaidDiagramKind.journey => '旅程图',
+      AiMermaidDiagramKind.chart => '数据图表',
+      AiMermaidDiagramKind.other => '图表',
     };
   }
 }

@@ -1,10 +1,10 @@
 import 'ai_models.dart';
 import 'ai_book_structure.dart';
 import 'ai_conversation_intent.dart';
-import 'ai_conversation_router.dart';
 import 'ai_mind_map.dart';
 import 'ai_outline.dart';
 import 'ai_provider_kind.dart';
+import 'ai_rich_content_inspector.dart';
 
 enum AiChatTurnStatus {
   pending,
@@ -45,20 +45,6 @@ AiMindMapStructureRoute resolveAiMindMapStructureRoute(
   };
 }
 
-/// Routes only product mind-map requests. Explicit Mermaid requests remain
-/// ordinary rich chat content even when they mention a mind map.
-AiMindMapRequestScope? resolveAiMindMapRequestScope(String text) {
-  final route = const AiConversationRouter().resolve(text);
-  if (route is! AiWorkflowRoute) return null;
-  return switch (route.intent.scope) {
-    AiIntentScope.currentChapter => AiMindMapRequestScope.currentChapter,
-    AiIntentScope.currentWork => AiMindMapRequestScope.currentWork,
-    AiIntentScope.wholeBook => AiMindMapRequestScope.wholeBook,
-    AiIntentScope.unspecified => AiMindMapRequestScope.unspecified,
-    AiIntentScope.namedWork || AiIntentScope.existingArtifact => null,
-  };
-}
-
 /// One user or assistant bubble in the book chat.
 class AiChatMessage {
   const AiChatMessage({
@@ -73,6 +59,8 @@ class AiChatMessage {
     this.turnId,
     this.status = AiChatTurnStatus.completed,
     this.mindMap,
+    this.command,
+    this.richArtifactKind,
   });
 
   final AiMessageRole role;
@@ -104,6 +92,17 @@ class AiChatMessage {
   /// It is never sent back to the chat model as Mermaid or prompt text.
   final AiBookMindMap? mindMap;
 
+  /// App-accepted product command. This is execution metadata, not model
+  /// history, and freezes artifact identity for retries.
+  final AiConversationCommand? command;
+
+  /// Kind recorded when an ordinary assistant answer contains a rendered rich
+  /// artifact. Legacy messages without metadata are inspected on demand.
+  final AiRichArtifactKind? richArtifactKind;
+
+  AiRichArtifactKind? get resolvedRichArtifactKind =>
+      richArtifactKind ?? inspectAiRichArtifact(content);
+
   AiChatMessage copyWith({
     AiMessageRole? role,
     String? content,
@@ -116,8 +115,12 @@ class AiChatMessage {
     String? turnId,
     AiChatTurnStatus? status,
     AiBookMindMap? mindMap,
+    AiConversationCommand? command,
+    AiRichArtifactKind? richArtifactKind,
     bool clearWebHitCount = false,
     bool clearMindMap = false,
+    bool clearCommand = false,
+    bool clearRichArtifactKind = false,
   }) {
     return AiChatMessage(
       role: role ?? this.role,
@@ -131,6 +134,10 @@ class AiChatMessage {
       turnId: turnId ?? this.turnId,
       status: status ?? this.status,
       mindMap: clearMindMap ? null : (mindMap ?? this.mindMap),
+      command: clearCommand ? null : (command ?? this.command),
+      richArtifactKind: clearRichArtifactKind
+          ? null
+          : (richArtifactKind ?? this.richArtifactKind),
     );
   }
 
@@ -147,6 +154,8 @@ class AiChatMessage {
     if (turnId != null) 'turnId': turnId,
     'status': status.name,
     if (mindMap != null) 'mindMap': mindMap!.toJson(),
+    if (command != null) 'command': command!.toJson(),
+    if (richArtifactKind != null) 'richArtifactKind': richArtifactKind!.name,
   };
 
   static AiChatMessage fromJson(Map<String, dynamic> json) {
@@ -176,6 +185,10 @@ class AiChatMessage {
       turnId: json['turnId'] as String?,
       status: AiChatTurnStatus.fromStorage(json['status']),
       mindMap: AiBookMindMap.fromJson(json['mindMap']),
+      command: AiConversationCommand.fromJson(json['command']),
+      richArtifactKind: AiRichArtifactKind.fromStorage(
+        json['richArtifactKind'],
+      ),
     );
   }
 }
@@ -218,11 +231,13 @@ class AiChatShortcut {
     required this.label,
     required this.prompt,
     this.needsSelection = false,
+    this.mindMapScope,
   });
 
   final String label;
   final String prompt;
   final bool needsSelection;
+  final AiMindMapRequestScope? mindMapScope;
 }
 
 /// Shortcuts for a whole-book companion (not progress-gated).
@@ -234,7 +249,11 @@ const kAiChatShortcuts = <AiChatShortcut>[
         '再按内容推进列出主要结构阶段；每一项包含简短标题和说明，并覆盖全书的重要部分。'
         '请直接基于书中内容回答。',
   ),
-  AiChatShortcut(label: '生成本章思维导图', prompt: '请为当前章生成思维导图'),
+  AiChatShortcut(
+    label: '生成本章思维导图',
+    prompt: '请为当前章生成思维导图',
+    mindMapScope: AiMindMapRequestScope.currentChapter,
+  ),
   AiChatShortcut(label: '总结这一章', prompt: '请总结我正在读的这一章：主线、关键转折，尽量简短。'),
   AiChatShortcut(
     label: '这本书在讲什么',

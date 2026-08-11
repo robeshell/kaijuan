@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'ai_cancel.dart';
+import 'ai_product_action.dart';
 import 'ai_run.dart';
 import 'ai_provider_kind.dart';
 
@@ -355,6 +356,18 @@ class AiRunExecution {
     _emitUsage();
   }
 
+  void productActionRequested(AiProductActionRequest request) {
+    ensureActive();
+    _emit(
+      AiRunProductActionRequested(
+        runId: descriptor.runId,
+        sequence: _nextSequence(),
+        occurredAt: _clock(),
+        request: request,
+      ),
+    );
+  }
+
   Future<void> checkpoint(Object? payload, {int version = 1}) async {
     ensureActive();
     final writer = _checkpointWriter;
@@ -383,6 +396,7 @@ class AiRunExecution {
   }
 
   void _complete() {
+    if (_state.isTerminal) return;
     _emit(
       AiRunCompleted(
         runId: descriptor.runId,
@@ -394,6 +408,7 @@ class AiRunExecution {
   }
 
   void _fail(Object error, StackTrace stackTrace) {
+    if (_state.isTerminal) return;
     _emit(
       AiRunFailed(
         runId: descriptor.runId,
@@ -407,6 +422,7 @@ class AiRunExecution {
   }
 
   void _cancel() {
+    if (_state.isTerminal) return;
     _emit(
       AiRunCancelled(
         runId: descriptor.runId,

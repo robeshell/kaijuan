@@ -5,11 +5,58 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/core/theme.dart';
+import 'package:kaijuan/ai/ai_rich_content_inspector.dart';
 import 'package:kaijuan/presentation/widgets/reader/ai_result_body.dart';
 import 'package:kaijuan/presentation/widgets/reader/ai_rich_blocks.dart';
 import 'package:xml/xml.dart';
 
 void main() {
+  group('AI rich content inspection', () {
+    test('recognizes the same complete Mermaid mind maps the UI renders', () {
+      expect(
+        inspectAiRichArtifact('''
+说明文字
+
+```mermaid
+%%{init: {"theme": "base"}}%%
+mindmap
+  root((阅读))
+```
+'''),
+        AiRichArtifactKind.mermaidMindMap,
+      );
+      expect(
+        inspectAiRichArtifact('''
+~~~MERMAID
+---
+title: 阅读
+---
+%% 生成说明
+mindmap
+  root((阅读))
+~~~
+'''),
+        AiRichArtifactKind.mermaidMindMap,
+      );
+    });
+
+    test(
+      'does not confuse prose or another Mermaid diagram with a mind map',
+      () {
+        expect(inspectAiRichArtifact('正文里提到了 mindmap'), isNull);
+        expect(
+          inspectAiRichArtifact('''
+```mermaid
+flowchart LR
+  A --> B
+```
+'''),
+          isNull,
+        );
+      },
+    );
+  });
+
   group('AI rich content', () {
     testWidgets(
       'dispatches fenced code, diff, ASCII tree, and callout blocks',

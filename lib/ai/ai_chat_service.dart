@@ -9,6 +9,7 @@ import 'ai_log.dart';
 import 'ai_model_adapter.dart';
 import 'ai_models.dart';
 import 'ai_provider_kind.dart';
+import 'ai_product_action.dart';
 import 'ai_run.dart';
 import 'ai_run_orchestrator.dart';
 import 'ai_search.dart';
@@ -185,6 +186,7 @@ class AiChatService {
     String? bookAuthor,
     List<AiWebSearchHit>? webHits,
     required AiChatToolHost tools,
+    AiChatProductContext productContext = const AiChatProductContext(),
     bool? reasoningEnabled,
     CancelToken? cancelToken,
   }) => const AiRunOrchestrator().run(
@@ -206,6 +208,7 @@ class AiChatService {
         bookAuthor: bookAuthor,
         webHits: webHits,
         tools: tools,
+        productContext: productContext,
         reasoningEnabled: reasoningEnabled,
         execution: execution,
       )) {
@@ -222,6 +225,7 @@ class AiChatService {
     String? bookAuthor,
     List<AiWebSearchHit>? webHits,
     required AiChatToolHost tools,
+    required AiChatProductContext productContext,
     required bool? reasoningEnabled,
     required AiRunExecution execution,
   }) async* {
@@ -246,6 +250,7 @@ class AiChatService {
         bookAuthor: bookAuthor,
         webHits: webHits,
         tools: tools,
+        productContext: productContext,
         execution: execution,
       )) {
         yield snapshot;
@@ -264,6 +269,7 @@ class AiChatService {
     String? bookAuthor,
     List<AiWebSearchHit>? webHits,
     required AiChatToolHost tools,
+    required AiChatProductContext productContext,
     required AiRunExecution execution,
   }) async* {
     final working = _toNativeMessages(
@@ -274,6 +280,7 @@ class AiChatService {
         bookTitle: bookTitle,
         bookAuthor: bookAuthor,
         webHits: webHits,
+        productContext: productContext,
       ),
     );
     var remainingToolChars = maxToolContextChars;
@@ -289,7 +296,10 @@ class AiChatService {
       await for (final event in adapter.streamTurn(
         AiModelTurnRequest(
           messages: working,
-          tools: AiChatTools.nativeDefinitions,
+          tools: [
+            ...AiChatTools.nativeDefinitions,
+            ...productContext.toolDefinitions,
+          ],
           maxTokens: toolIntentProbeMaxTokens,
           temperature: 0.2,
         ),
@@ -343,6 +353,79 @@ class AiChatService {
         throw AiProviderException('工具调用响应被截断，未执行任何工具');
       }
       final calls = result.toolCalls;
+      final productCalls = calls
+          .where((call) => AiProductToolNames.all.contains(call.name))
+          .toList(growable: false);
+      if (productCalls.length == 1 && calls.length == 1) {
+        try {
+          final request = productContext.parse(productCalls.single);
+          execution.productActionRequested(request);
+          return;
+        } on FormatException catch (error) {
+          working
+            ..add(
+              AiModelMessage(
+                role: AiModelRole.assistant,
+                text: resultText,
+                reasoningText: result.reasoningText,
+                reasoningMetadata: result.reasoningMetadata,
+                toolCalls: calls,
+              ),
+            )
+            ..add(
+              AiModelMessage(
+                role: AiModelRole.tool,
+                toolResults: [
+                  AiModelToolResult(
+                    callId: productCalls.single.id,
+                    name: productCalls.single.name,
+                    output:
+                        'Error: ${error.message}. Ask the reader a concise '
+                        'clarifying question instead of inventing a target.',
+                  ),
+                ],
+              ),
+            )
+            ..add(
+              AiModelMessage(
+                role: AiModelRole.user,
+                text: _responseContractMessage(userText),
+              ),
+            );
+          continue;
+        }
+      }
+      if (productCalls.isNotEmpty) {
+        final results = [
+          for (final call in calls)
+            AiModelToolResult(
+              callId: call.id,
+              name: call.name,
+              output:
+                  'Error: a product action must be the only tool call in its '
+                  'response. Retry with exactly one product tool, or answer '
+                  'normally.',
+            ),
+        ];
+        working
+          ..add(
+            AiModelMessage(
+              role: AiModelRole.assistant,
+              text: resultText,
+              reasoningText: result.reasoningText,
+              reasoningMetadata: result.reasoningMetadata,
+              toolCalls: calls,
+            ),
+          )
+          ..add(AiModelMessage(role: AiModelRole.tool, toolResults: results))
+          ..add(
+            AiModelMessage(
+              role: AiModelRole.user,
+              text: _responseContractMessage(userText),
+            ),
+          );
+        continue;
+      }
       final chatCalls = [
         for (final call in calls)
           AiChatToolCall(name: call.name, args: call.arguments),
@@ -570,6 +653,7 @@ class AiChatService {
     required String bookTitle,
     String? bookAuthor,
     List<AiWebSearchHit>? webHits,
+    AiChatProductContext productContext = const AiChatProductContext(),
   }) {
     final hasWebHits = webHits != null && webHits.isNotEmpty;
     final wholeBookHint = AiChatRetrieve.isWholeBookQuery(userText);
@@ -645,6 +729,30 @@ class AiChatService {
 
     system
       ..writeln()
+      ..writeln('Native product actions:')
+      ..writeln(
+        '- For a request to create a native book mind map, call '
+        'create_book_mind_map directly. The App workflow will load the body; '
+        'do not fetch or sample book text first.',
+      )
+      ..writeln(
+        '- For a requested content revision to an existing native map, call '
+        'revise_book_mind_map with one listed artifact alias.',
+      )
+      ..writeln(
+        '- A product action must be the sole tool call in that response and '
+        'ends this model run. Do not mix it with read tools.',
+      )
+      ..writeln(
+        '- Questions, critique, comparisons, tutorials, and explicit Mermaid '
+        'requests are normal conversation, not product actions.',
+      )
+      ..writeln('<trusted_product_context>')
+      ..writeln(productContext.trustedPrompt)
+      ..writeln('</trusted_product_context>');
+
+    system
+      ..writeln()
       ..writeln('Web search:')
       ..writeln(
         '- If <web_search_results> is present in the quoted context, do not claim search is unavailable.',
@@ -661,7 +769,7 @@ class AiChatService {
         '- Use GitHub-flavored Markdown when structure helps: headings, lists, tables, task lists, quotes, footnotes, and fenced code.',
       )
       ..writeln(
-        '- When the user asks for a mind map or another diagram, output one complete standalone ```mermaid fenced block. Use Mermaid mindmap syntax for a mind map; do not imitate one with box-drawing characters.',
+        '- The App handles book/current-chapter mind maps through a dedicated product workflow. Do not output a Mermaid mindmap for those requests. Only use a standalone ```mermaid mindmap block when the user explicitly asks for Mermaid source or a general ad-hoc Mermaid diagram; other requested diagram types may still use Mermaid.',
       )
       ..writeln(
         '- Put math in LaTeX delimiters: inline \$...\$ or display \$\$...\$\$.',

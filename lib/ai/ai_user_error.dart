@@ -118,6 +118,8 @@ String aiUserErrorMessage(Object error, {required AiUserOperation operation}) {
     '所选章节都被排除',
     '所选著作没有可用正文',
     '当前无法可靠判断',
+    '导图对应的作品范围已经变化',
+    '导图对应的正文范围当前无法读取',
     '翻到某部作品',
     '这是一本合订书',
     '请输入问题',

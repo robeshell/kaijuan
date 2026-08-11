@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
+import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_run_orchestrator.dart';
 
@@ -82,6 +83,36 @@ void main() {
     expect(events.whereType<AiRunFailed>(), hasLength(1));
     expect(events.whereType<AiRunCompleted>(), isEmpty);
   });
+
+  test(
+    'product action is terminal and is not followed by completion',
+    () async {
+      final events = await const AiRunOrchestrator()
+          .run(
+            descriptor: descriptor,
+            budget: const AiRunBudget(maxModelCalls: 1),
+            body: (run) async {
+              run.modelStarted(AiRunModelPurpose.toolDecision);
+              run.productActionRequested(
+                const AiCreateBookMindMapAction(
+                  instruction: '生成本章导图',
+                  scope: AiBookMindMapActionScope.currentChapter,
+                ),
+              );
+            },
+          )
+          .toList();
+
+      expect(events.last, isA<AiRunProductActionRequested>());
+      expect(events.whereType<AiRunCompleted>(), isEmpty);
+      var state = AiRunState.initial(descriptor);
+      for (final event in events) {
+        state = state.apply(event);
+      }
+      expect(state.phase, AiRunPhase.actionRequested);
+      expect(state.isTerminal, isTrue);
+    },
+  );
 
   test(
     'terminal failure does not mark the caller token as cancelled',

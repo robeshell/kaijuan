@@ -8,15 +8,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
+import 'package:kaijuan/ai/ai_chat_store.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_graph.dart';
 import 'package:kaijuan/ai/ai_graph_scope.dart';
 import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
+import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
+import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
@@ -68,19 +71,23 @@ class _AmbiguousOutlineController extends BookReaderController {
   Future<List<AiBookSectionSlice>> bookMindMapSections({
     AiGraphWorkCandidate? work,
     bool useFrozenWork = false,
-  }) async => work == null
-      ? const [
-          AiBookSectionSlice(index: 1, label: '第一章', text: '正文一'),
-          AiBookSectionSlice(index: 2, label: '第二章', text: '正文二'),
-        ]
-      : [
-          AiBookSectionSlice(
-            index: work.startSection,
-            sourceSectionIndex: work.startSection,
-            label: '${work.title}第一章',
-            text: '${work.title}正文',
-          ),
-        ];
+  }) async {
+    mindMapSectionCalls++;
+    await mindMapSectionsGate?.future;
+    return work == null
+        ? const [
+            AiBookSectionSlice(index: 1, label: '第一章', text: '正文一'),
+            AiBookSectionSlice(index: 2, label: '第二章', text: '正文二'),
+          ]
+        : [
+            AiBookSectionSlice(
+              index: work.startSection,
+              sourceSectionIndex: work.startSection,
+              label: '${work.title}第一章',
+              text: '${work.title}正文',
+            ),
+          ];
+  }
 
   @override
   Future<AiBookOutline?> loadBookOutline({AiChatSession? session}) async =>
@@ -114,10 +121,19 @@ class _AmbiguousOutlineController extends BookReaderController {
   int structureResolveCalls = 0;
   int mindMapFailuresRemaining = 0;
   Completer<void>? mindMapGate;
+  Completer<void>? mindMapSectionsGate;
+  int mindMapSectionCalls = 0;
+  AiBookWork? currentWorkOverride;
+  AiBookMindMap? lastExistingMindMap;
   final generatedMindMapScopes = <String>[];
+  AiProductActionRequest? productActionOverride;
+  int productActionRequests = 0;
 
   @override
   AiBookStructureManifest? get bookStructureManifest => manifestOverride;
+
+  @override
+  AiBookWork? get currentReadingWork => currentWorkOverride;
 
   @override
   Future<AiBookSectionSlice?> captureCurrentBookMindMapChapter() async {
@@ -141,6 +157,7 @@ class _AmbiguousOutlineController extends BookReaderController {
     String? progressLabel,
   }) async {
     generatedMindMapScopes.add(scopeLabel ?? '');
+    lastExistingMindMap = existingMindMap;
     lastMindMapWork = work;
     lastMindMapUseFrozenWork = useFrozenWork;
     lastMindMapSourceSectionIndex =
@@ -206,12 +223,37 @@ class _AmbiguousOutlineController extends BookReaderController {
     required String userText,
     required List<AiChatMessage> history,
     required AiChatContextBundle context,
-    required AiGraphWorkCandidate? workScope,
+    required AiBookWork? workScope,
     List<AiWebSearchHit>? webHits,
+    AiChatProductContext productContext = const AiChatProductContext(),
     bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
   }) {
+    final requestedAction =
+        productActionOverride ??
+        _defaultProductAction(userText, productContext);
+    if (requestedAction != null) {
+      productActionRequests++;
+      final descriptor = AiRunDescriptor(
+        runId: runId ?? 'test-product-action-$productActionRequests',
+        task: AiRunTask.bookChat,
+        scope: AiRunScope(contentHash: item.contentHash),
+      );
+      return Stream<AiRunEvent>.fromIterable([
+        AiRunStarted(
+          descriptor: descriptor,
+          sequence: 0,
+          occurredAt: DateTime.now(),
+        ),
+        AiRunProductActionRequested(
+          runId: descriptor.runId,
+          sequence: 1,
+          occurredAt: DateTime.now(),
+          request: requestedAction,
+        ),
+      ]);
+    }
     lastDeepThinkingEnabled = reasoningEnabled;
     final gate = Completer<void>();
     chatCancelGates.add(gate);
@@ -267,6 +309,40 @@ class _AmbiguousOutlineController extends BookReaderController {
     );
     chatStreams.add(stream);
     return stream.stream;
+  }
+
+  AiProductActionRequest? _defaultProductAction(
+    String text,
+    AiChatProductContext context,
+  ) {
+    if (text.contains('思维导图') && (text.contains('生成') || text.contains('需要'))) {
+      return AiCreateBookMindMapAction(
+        instruction: text,
+        scope: text.contains('本章') || text.contains('当前章')
+            ? AiBookMindMapActionScope.currentChapter
+            : text.contains('这本书') ||
+                  text.contains('整本书') ||
+                  text.contains('全书')
+            ? AiBookMindMapActionScope.wholePublication
+            : AiBookMindMapActionScope.unspecified,
+      );
+    }
+    if (text.contains('再丰富') ||
+        text.contains('增加更多') ||
+        text.contains('修改上一张')) {
+      final artifacts = context.artifacts;
+      if (artifacts.isEmpty) return null;
+      final target =
+          artifacts.where((artifact) => artifact.isPreferred).firstOrNull ??
+          artifacts.where((artifact) => artifact.isAdjacent).firstOrNull ??
+          artifacts.last;
+      return AiReviseBookMindMapAction(
+        instruction: text,
+        artifactAlias: target.alias,
+        artifactId: target.artifactId,
+      );
+    }
+    return null;
   }
 
   void releaseChatCancellations() {
@@ -344,8 +420,9 @@ class _CompletedChatController extends _AmbiguousOutlineController {
     required String userText,
     required List<AiChatMessage> history,
     required AiChatContextBundle context,
-    required AiGraphWorkCandidate? workScope,
+    required AiBookWork? workScope,
     List<AiWebSearchHit>? webHits,
+    AiChatProductContext productContext = const AiChatProductContext(),
     bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
@@ -589,18 +666,396 @@ void main() {
       AiMindMapLayout.rightFacing,
     );
 
+    final structureCallsBeforeWholeBook = controller.structureResolveCalls;
     await tester.enterText(find.byType(TextField).last, '为这本书生成思维导图');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(controller.structureResolveCalls, 1);
+    expect(controller.structureResolveCalls, structureCallsBeforeWholeBook + 2);
     expect(controller.lastMindMapSourceSectionIndex, isNull);
     expect(controller.lastMindMapWork, isNull);
     expect(controller.lastMindMapUseFrozenWork, isTrue);
     // The conversation ListView lazily builds only the visible artifact card.
     expect(find.byType(BookAiMindMapView), findsWidgets);
     expect(find.text('已根据《思维导图测试》的 2 章内容生成思维导图。'), findsOneWidget);
+    final editButton = tester.widget<TextButton>(
+      find
+          .ancestor(
+            of: find.text('继续修改').last,
+            matching: find.byType(TextButton),
+          )
+          .last,
+    );
+    editButton.onPressed!();
+    await tester.pump();
+    expect(find.textContaining('正在修改：'), findsOneWidget);
+    final actionCallsBeforeDiscussion = controller.productActionRequests;
+    await tester.enterText(find.byType(TextField).last, '我还是觉得不对');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(controller.productActionRequests, actionCallsBeforeDiscussion);
+    expect(controller.chatStreams, hasLength(1));
+    expect(find.textContaining('正在修改：'), findsOneWidget);
   });
+
+  testWidgets('a follow-up to a Mermaid map remains ordinary rich conversation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(820, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final now = DateTime.utc(2026, 8, 11);
+    await database.upsertReadingItem(
+      ReadingItemsCompanion.insert(
+        id: 'legacy-mermaid-map',
+        kind: ReaderKind.book.storageValue,
+        format: ReaderFormat.epub.storageValue,
+        title: '旧导图迁移测试',
+        filePath: '/tmp/legacy-mermaid-map.epub',
+        contentHash: 'hash-legacy-mermaid-map',
+        pageCount: const Value(2),
+        addedAt: now,
+        updatedAt: now,
+      ),
+    );
+    final store = MemoryAiChatHistoryStore();
+    await store.write(
+      const AiChatSession(
+        contentHash: 'hash-legacy-mermaid-map',
+        itemId: 'legacy-mermaid-map',
+        messages: [
+          AiChatMessage(
+            role: AiMessageRole.user,
+            content: '我需要这本书的思维导图',
+            turnId: 'legacy-turn',
+          ),
+          AiChatMessage(
+            role: AiMessageRole.assistant,
+            content:
+                '''好的。\n```mermaid\n%%{init: {'theme': 'base'}}%%\nmindmap\n  root((全书))\n    主题\n```''',
+            turnId: 'legacy-turn',
+          ),
+        ],
+      ),
+    );
+    final controller = _AmbiguousOutlineController(
+      database: database,
+      item: (await database.readingItemById('legacy-mermaid-map'))!,
+    )..attachChatHistoryStore(store);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () =>
+                  showBookAiChatSheet(context, controller: controller),
+              child: const Text('打开 AI'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开 AI'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.enterText(find.byType(TextField).last, '再丰富点内容');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    for (var frame = 0; frame < 20; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(controller.generatedMindMapScopes, isEmpty);
+    expect(controller.productActionRequests, 0);
+    expect(controller.chatStreams, hasLength(1));
+    expect(find.byType(BookAiMindMapView), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'a concise follow-up edits the adjacent native map without edit mode',
+    (tester) async {
+      tester.view.physicalSize = const Size(820, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final database = AppDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final now = DateTime.utc(2026, 8, 11);
+      await database.upsertReadingItem(
+        ReadingItemsCompanion.insert(
+          id: 'adjacent-native-map',
+          kind: ReaderKind.book.storageValue,
+          format: ReaderFormat.epub.storageValue,
+          title: '相邻导图测试',
+          filePath: '/tmp/adjacent-native-map.epub',
+          contentHash: 'hash-adjacent-native-map',
+          pageCount: const Value(2),
+          addedAt: now,
+          updatedAt: now,
+        ),
+      );
+      final store = MemoryAiChatHistoryStore();
+      await store.write(
+        AiChatSession(
+          contentHash: 'hash-adjacent-native-map',
+          itemId: 'adjacent-native-map',
+          messages: [
+            AiChatMessage(
+              role: AiMessageRole.assistant,
+              content: '已生成思维导图。',
+              turnId: 'native-turn',
+              mindMap: AiBookMindMap(
+                contentHash: 'hash-adjacent-native-map',
+                workKey: null,
+                createdAt: now,
+                model: 'test',
+                artifactId: 'native-map',
+                scopeSectionIndices: const [1, 2],
+                scopeFingerprint: 'whole-book',
+                contentKind: AiMindMapContentKind.narrative,
+                layout: AiMindMapLayout.bidirectional,
+                nodes: const [
+                  AiBookMindMapNode(
+                    nodeId: 'mm001',
+                    parentId: null,
+                    order: 0,
+                    level: 0,
+                    title: '原始主题',
+                    summary: '原始摘要',
+                  ),
+                  AiBookMindMapNode(
+                    nodeId: 'mm002',
+                    parentId: 'mm001',
+                    order: 0,
+                    level: 1,
+                    title: '原始分支',
+                    summary: '原始分支摘要',
+                    evidence: [
+                      AiMindMapEvidence(
+                        sectionIndex: 1,
+                        quote: '正文一',
+                        progressInSection: 0,
+                        spanResolved: true,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+      final controller = _AmbiguousOutlineController(
+        database: database,
+        item: (await database.readingItemById('adjacent-native-map'))!,
+      )..attachChatHistoryStore(store);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: FilledButton(
+                onPressed: () =>
+                    showBookAiChatSheet(context, controller: controller),
+                child: const Text('打开 AI'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开 AI'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('正在修改：'), findsNothing);
+
+      await tester.enterText(find.byType(TextField).last, '再丰富点');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+
+      expect(controller.generatedMindMapScopes, ['原始主题']);
+      expect(controller.lastExistingMindMap?.artifactId, 'native-map');
+      expect(controller.productActionRequests, 1);
+      expect(controller.chatStreams, isEmpty);
+      expect(find.byType(BookAiMindMapView), findsWidgets);
+
+      await tester.enterText(find.byType(TextField).last, '为什么这样整理？');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+      expect(controller.generatedMindMapScopes, hasLength(1));
+      expect(controller.productActionRequests, 1);
+      expect(controller.chatStreams, hasLength(1));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'mind map revision locks preflight and restores the artifact scope exactly',
+    (tester) async {
+      tester.view.physicalSize = const Size(820, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final database = AppDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final now = DateTime.utc(2026, 8, 11);
+      await database.upsertReadingItem(
+        ReadingItemsCompanion.insert(
+          id: 'mind-map-revision',
+          kind: ReaderKind.book.storageValue,
+          format: ReaderFormat.epub.storageValue,
+          title: '导图修订测试',
+          filePath: '/tmp/mind-map-revision.epub',
+          contentHash: 'hash-mind-map-revision',
+          pageCount: const Value(2),
+          addedAt: now,
+          updatedAt: now,
+        ),
+      );
+      const work = AiBookWork(
+        id: 'work-1',
+        title: '当前作品',
+        startSection: 1,
+        endSectionExclusive: 3,
+      );
+      AiBookMindMap map({required String artifactId, String? workKey}) =>
+          AiBookMindMap(
+            contentHash: 'hash-mind-map-revision',
+            workKey: workKey,
+            createdAt: now,
+            model: 'test',
+            artifactId: artifactId,
+            scopeSectionIndices: const [1],
+            scopeFingerprint: '$artifactId-scope',
+            contentKind: AiMindMapContentKind.narrative,
+            layout: AiMindMapLayout.bidirectional,
+            nodes: const [
+              AiBookMindMapNode(
+                nodeId: 'mm001',
+                parentId: null,
+                order: 0,
+                level: 0,
+                title: '原始主题',
+                summary: '原始摘要',
+              ),
+            ],
+          );
+
+      final store = MemoryAiChatHistoryStore();
+      await store.write(
+        AiChatSession(
+          contentHash: 'hash-mind-map-revision',
+          itemId: 'mind-map-revision',
+          workMessages: {
+            work.id: [
+              AiChatMessage(
+                role: AiMessageRole.assistant,
+                content: '整本范围导图',
+                turnId: 'turn-whole',
+                mindMap: map(artifactId: 'map-whole'),
+              ),
+              AiChatMessage(
+                role: AiMessageRole.assistant,
+                content: '失效作品导图',
+                turnId: 'turn-missing',
+                mindMap: map(
+                  artifactId: 'map-missing',
+                  workKey: 'missing-work',
+                ),
+              ),
+            ],
+          },
+        ),
+      );
+      final sectionsGate = Completer<void>();
+      final controller =
+          _AmbiguousOutlineController(
+              database: database,
+              item: (await database.readingItemById('mind-map-revision'))!,
+            )
+            ..attachChatHistoryStore(store)
+            ..currentWorkOverride = work
+            ..manifestOverride = const AiBookStructureManifest(
+              kind: AiBookStructureKind.multiWorkOmnibus,
+              source: AiBookStructureSource.navigationHierarchy,
+              confidence: 0.9,
+              reason: 'test',
+              works: [work],
+            )
+            ..mindMapSectionsGate = sectionsGate;
+      addTearDown(() {
+        if (!sectionsGate.isCompleted) sectionsGate.complete();
+        controller.dispose();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: FilledButton(
+                onPressed: () =>
+                    showBookAiChatSheet(context, controller: controller),
+                child: const Text('打开 AI'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开 AI'));
+      await tester.pumpAndSettle();
+
+      controller.productActionOverride = const AiReviseBookMindMapAction(
+        instruction: '修改这张思维导图',
+        artifactAlias: 'artifact_2',
+        artifactId: 'map-missing',
+      );
+      await tester.enterText(find.byType(TextField).last, '修改这张思维导图');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('作品范围已经变化'), findsOneWidget);
+      expect(controller.mindMapSectionCalls, 0);
+      expect(controller.generatedMindMapScopes, isEmpty);
+
+      controller.productActionOverride = const AiReviseBookMindMapAction(
+        instruction: '修改上一张思维导图',
+        artifactAlias: 'artifact_1',
+        artifactId: 'map-whole',
+      );
+      await tester.enterText(find.byType(TextField).last, '修改上一张思维导图');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      expect(controller.mindMapSectionCalls, 1);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).last).enabled,
+        isFalse,
+      );
+
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      expect(controller.mindMapSectionCalls, 1);
+
+      sectionsGate.complete();
+      await tester.pumpAndSettle();
+      expect(controller.generatedMindMapScopes, hasLength(1));
+      expect(controller.lastMindMapWork, isNull);
+      expect(find.text('已根据《原始主题》的 1 章内容生成思维导图。'), findsOneWidget);
+      expect(find.textContaining('正在修改：'), findsNothing);
+      final revisedMapId = controller.lastExistingMindMap?.artifactId;
+      controller.productActionOverride = AiReviseBookMindMapAction(
+        instruction: '增加更多事实细节',
+        artifactAlias: 'artifact_3',
+        artifactId: revisedMapId ?? 'map-whole',
+      );
+      await tester.enterText(find.byType(TextField).last, '增加更多事实细节');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+      expect(controller.generatedMindMapScopes, hasLength(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('omnibus mind map explains scope and waits for a work choice', (
     tester,

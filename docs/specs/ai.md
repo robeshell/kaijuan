@@ -57,22 +57,24 @@
 - 不引入多 Agent。运行时采用开卷自有的确定性 `AiRunOrchestrator`；任务路由、书籍/作品范围、权限、预算、取消、续写、checkpoint、存储与 UI 状态均由 App 持有。
 - Genkit Dart 及官方 OpenAI / Anthropic 插件精确固定版本并分别隔离在 adapter；两类 adapter 都只执行单次模型回合，映射原生工具请求、流式输出、usage 与结构化结果。本书对话不保留手写 Messages 对话 adapter、旧 Provider、fenced JSON 或跨协议回退。
 
-### 对话意图与 Workflow 路由（迁移边界）
+### 对话产品工具与 Workflow 路由（迁移边界）
 
-本书 AI 在普通回答之前增加 App 自有的类型化意图层。它只负责从用户输入和当前会话上下文得到 `object / action / scope / target / modifiers`，不读取正文、不调用模型，也不执行 Workflow。当前自然语言规则仍兼容生成思维导图的已有入口；后续逐步覆盖思维导图的创建、编辑、重新生成、导出，以及其他可明确建模的产品命令。
+本书 AI 不在普通回答前运行第二次意图模型，也不维护自由文本关键词路由。用户输入只进入 `AiChatService` 的一次受控模型回合；App 除五个只读书内工具外，按本轮可信上下文动态声明两个产品工具：`create_book_mind_map` 与 `revise_book_mind_map`。模型可以直接回答，也可以在确实需要执行产品动作时调用其中一个工具。
 
 ```text
-用户输入 + 会话上下文
-  → AiConversationRouter
-  → OrdinaryChatRoute | WorkflowRoute | ClarificationRoute
-  → 普通受控 Tool Agent / 开卷 Workflow / 对话内补参
+用户输入
+  → 同一 AiChatService 模型回合
+    → 普通文字 / 只读书内工具循环
+    → 产品工具终止请求 → App 校验 → 确定性 Workflow
 ```
 
-`AiConversationContext` 只提供当前 `contentHash`、章节/作品范围、最近结构化附件和活动 run 等可信事实。每个结构化附件由 App 分配稳定 `artifactId`，编辑结果通过 `sourceArtifactId` 和 `revision` 形成可追踪谱系；布局变化不改变内容 artifact。范围、权限、预算、取消、正文冻结和持久化继续由开卷拥有；模型不能通过意图层改变这些边界。意图解析失败或缺少必要槽位时必须普通回答或在对话内追问，不得猜测并启动高成本任务。
+产品工具调用必须是该模型响应唯一的工具调用，并终止当前对话工具循环；它不会像读工具一样在模型回合内直接执行。`AiRunOrchestrator` 发出类型化行动事件，Controller 映射并校验本轮签发的临时别名、冻结范围、预算、取消和运行状态后，才可调用 `AiBookMindMapService`。产品工具与读工具混用、未知别名、跨会话产物或非法范围均不得执行，可把结构化错误返回模型做有界重试。
 
-当前编辑 Workflow 只接受已经存在于当前对话、且能映射回同一正文范围的思维导图附件。它复用 `AiBookMindMapService` 的一次结构化调用，输入上一版完整树与同范围正文，输出完整修订树；旧附件继续保留，新的附件通过 revision lineage 关联。Genkit Agent 若未来用于普通对话，不能绕过这一校验直接修改 artifact。
+本轮产物目录只包含当前会话的原生 `AiBookMindMap` 附件，并为每张附件分配不可持久化的 `artifact_1` 等别名，附带修订号、相邻和优先标记；模型不得提交数据库 ID。“继续修改”只设置优先产物上下文，不把后续任意输入直接改写成修订命令。没有点击时，“再丰富点”等省略式表达仍可由同一模型结合正常有限历史和相邻别名决定是否调用修订工具。存在歧义时模型应普通追问，App 也可在对话内纵向列出候选项。
 
-意图层不引入第二套模型 transport，也不把 Genkit Agent 作为前置条件。未来若 Genkit Agent 稳定，可让它负责普通对话的历史、工具循环和 interrupt/resume，但它只能调用开卷定义并再次校验的业务 Tool；确定性 Workflow、范围预检、结构化校验、附件持久化和 WebDAV 边界不迁移给模型框架。
+快捷按钮、范围卡片和失败重试不需要自然语言分类，直接携带 App 已知的结构化命令。已接受命令随用户 turn 保存真实目标 `artifactId`、动作和原始指令，失败重试复用冻结目标。修订预处理在异步结构/正文读取前锁定发送入口并冻结附件所在会话；`workKey == null` 表示整本出版物，非空时必须精确恢复对应作品，禁止退回当前阅读作品。上一版树和正文都是不可信引用材料，不能改变系统角色或工具权限。
+
+普通聊天 Mermaid 仍是通用富内容能力，但不进入原生导图产物目录，也不解析、导入或自动迁移为 `AiBookMindMap`。明确要求 Mermaid 时继续由普通回答生成富内容。未来若 Genkit Agent 稳定，可替换普通对话的单 Agent harness，但只能调用开卷定义并再次校验的业务工具；确定性 Workflow、范围预检、结构化校验、附件持久化和 WebDAV 边界不迁移给模型框架。
 
 ---
 

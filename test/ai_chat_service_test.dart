@@ -10,6 +10,7 @@ import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
+import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 
@@ -76,7 +77,8 @@ void main() {
       expect(system, contains('get_toc'));
       expect(system, contains('sample_book'));
       expect(system, contains('```mermaid'));
-      expect(system, contains('Mermaid mindmap syntax'));
+      expect(system, contains('dedicated product workflow'));
+      expect(system, contains('explicitly asks for Mermaid'));
       expect(system, contains('```chart'));
       expect(system, contains('Never emit raw HTML'));
       expect(prompt, contains('Question:\n这一章讲什么？'));
@@ -470,7 +472,7 @@ void main() {
 
         expect(host.calls, ['search_book']);
         expect(requestedDeepThinking, isTrue);
-        expect(adapter.requests.first.tools, hasLength(5));
+        expect(adapter.requests.first.tools, hasLength(6));
         expect(
           adapter.requests[1].messages.where(
             (message) => message.role == AiModelRole.tool,
@@ -540,6 +542,171 @@ void main() {
       ]);
       expect((events.last as AiRunCompleted).text, '第一段继续');
     });
+
+    test('emits a terminal product action from the same model turn', () async {
+      final adapter = _ScriptedModelAdapter([
+        [
+          const AiModelTurnCompleted(
+            text: '',
+            toolCalls: [
+              AiModelToolCall(
+                id: 'create-map',
+                name: AiProductToolNames.createBookMindMap,
+                arguments: {
+                  'scope': 'wholePublication',
+                  'instruction': '生成全书思维导图',
+                },
+              ),
+            ],
+            truncated: false,
+          ),
+        ],
+      ]);
+      final service = AiChatService(
+        isAvailable: () => true,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
+      );
+
+      final events = await service
+          .streamRun(
+            run: descriptor,
+            userText: '我需要这本书的思维导图',
+            history: const [],
+            context: const AiChatContextBundle(),
+            bookTitle: '书',
+            tools: _FakeHost(),
+          )
+          .toList();
+
+      expect(events.last, isA<AiRunProductActionRequested>());
+      final action =
+          (events.last as AiRunProductActionRequested).request
+              as AiCreateBookMindMapAction;
+      expect(action.scope, AiBookMindMapActionScope.wholePublication);
+      expect(events.whereType<AiRunCompleted>(), isEmpty);
+      expect(events.whereType<AiRunTextSnapshot>(), isEmpty);
+      expect(adapter.requests, hasLength(1));
+    });
+
+    test(
+      'resolves a temporary artifact alias before emitting revision',
+      () async {
+        final adapter = _ScriptedModelAdapter([
+          [
+            const AiModelTurnCompleted(
+              text: '',
+              toolCalls: [
+                AiModelToolCall(
+                  id: 'revise-map',
+                  name: AiProductToolNames.reviseBookMindMap,
+                  arguments: {
+                    'artifactRef': 'artifact_1',
+                    'instruction': '再丰富一些',
+                  },
+                ),
+              ],
+              truncated: false,
+            ),
+          ],
+        ]);
+        final service = AiChatService(
+          isAvailable: () => true,
+          openModelAdapter: ({reasoningEnabled}) => adapter,
+        );
+
+        final events = await service
+            .streamRun(
+              run: descriptor,
+              userText: '再丰富点',
+              history: const [],
+              context: const AiChatContextBundle(),
+              bookTitle: '书',
+              productContext: const AiChatProductContext(
+                artifacts: [
+                  AiProductArtifactAlias(
+                    alias: 'artifact_1',
+                    artifactId: 'real-map-id',
+                    title: '全书',
+                    revision: 1,
+                    isAdjacent: true,
+                  ),
+                ],
+              ),
+              tools: _FakeHost(),
+            )
+            .toList();
+
+        final action =
+            (events.last as AiRunProductActionRequested).request
+                as AiReviseBookMindMapAction;
+        expect(action.artifactId, 'real-map-id');
+        expect(
+          adapter.requests.single.messages.first.text,
+          isNot(contains('real-map-id')),
+        );
+        expect(
+          adapter.requests.single.messages.first.text,
+          contains('artifact_1'),
+        );
+      },
+    );
+
+    test(
+      'rejects mixed read and product calls without executing either',
+      () async {
+        final adapter = _ScriptedModelAdapter([
+          [
+            const AiModelTurnCompleted(
+              text: '',
+              toolCalls: [
+                AiModelToolCall(
+                  id: 'read',
+                  name: AiChatToolNames.getToc,
+                  arguments: {},
+                ),
+                AiModelToolCall(
+                  id: 'create',
+                  name: AiProductToolNames.createBookMindMap,
+                  arguments: {
+                    'scope': 'currentChapter',
+                    'instruction': '生成本章导图',
+                  },
+                ),
+              ],
+              truncated: false,
+            ),
+          ],
+          [
+            const AiModelTurnCompleted(
+              text: '请告诉我你希望生成哪一部分。',
+              toolCalls: [],
+              truncated: false,
+            ),
+          ],
+        ]);
+        final host = _FakeHost();
+        final service = AiChatService(
+          isAvailable: () => true,
+          openModelAdapter: ({reasoningEnabled}) => adapter,
+        );
+
+        final events = await service
+            .streamRun(
+              run: descriptor,
+              userText: '做个导图',
+              history: const [],
+              context: const AiChatContextBundle(),
+              bookTitle: '书',
+              tools: host,
+            )
+            .toList();
+
+        expect(host.calls, isEmpty);
+        expect(events.last, isA<AiRunCompleted>());
+        expect((events.last as AiRunCompleted).text, contains('哪一部分'));
+        expect(events.whereType<AiRunProductActionRequested>(), isEmpty);
+      },
+    );
 
     test('automatic continuation preserves the answer language', () async {
       final adapter = _ScriptedModelAdapter([

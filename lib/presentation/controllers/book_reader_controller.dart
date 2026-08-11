@@ -26,6 +26,7 @@ import '../../ai/ai_language_service.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_mind_map.dart';
 import '../../ai/ai_outline.dart';
+import '../../ai/ai_product_action.dart';
 import '../../ai/ai_run.dart';
 import '../../ai/ai_run_orchestrator.dart';
 import '../../ai/ai_search.dart';
@@ -45,6 +46,13 @@ import 'ai_settings_controller.dart';
 
 /// Listen-to-book playback state (system TTS).
 enum BookTtsStatus { idle, playing, paused }
+
+typedef BookMindMapRevisionInput = ({
+  AiBookWork? work,
+  String label,
+  List<AiBookSectionSlice> frozenSections,
+  int estimatedSections,
+});
 
 /// Owns reflow book session state, chrome, progress, and preferences.
 ///
@@ -1276,6 +1284,45 @@ class BookReaderController extends ChangeNotifier {
     );
   }
 
+  /// Restores and freezes the exact source range of an existing artifact.
+  /// Presentation must not duplicate this scope policy or fall back to the
+  /// reader's current work when an old artifact can no longer be resolved.
+  Future<BookMindMapRevisionInput> prepareBookMindMapRevision(
+    AiBookMindMap map,
+  ) async {
+    if (bookStructureManifest == null) await resolveBookStructure();
+    AiBookWork? targetWork;
+    final mapWorkKey = map.workKey;
+    if (mapWorkKey != null) {
+      for (final work in bookStructureManifest?.works ?? const <AiBookWork>[]) {
+        if (work.id == mapWorkKey) {
+          targetWork = work;
+          break;
+        }
+      }
+      if (targetWork == null) {
+        throw AiProviderException('这张导图对应的作品范围已经变化，请重新生成后再修改');
+      }
+    }
+    final allSections = await bookMindMapSections(
+      work: targetWork,
+      useFrozenWork: true,
+    );
+    final wanted = map.scopeSectionIndices.toSet();
+    final scoped = allSections
+        .where((section) => wanted.contains(section.index))
+        .toList(growable: false);
+    if (scoped.isEmpty || scoped.length != wanted.length) {
+      throw AiProviderException('这张导图对应的正文范围当前无法读取，请重新生成后再修改');
+    }
+    return (
+      work: targetWork,
+      label: map.root.title,
+      frozenSections: scoped,
+      estimatedSections: scoped.length,
+    );
+  }
+
   Future<AiBookMindMap?> generateBookMindMap({
     AiBookWork? work,
     AiBookSectionSlice? frozenCurrentChapter,
@@ -1287,7 +1334,11 @@ class BookReaderController extends ChangeNotifier {
     String? progressLabel,
   }) async {
     final active = _bookMindMapGeneration;
-    if (active != null) return await active;
+    if (active != null) {
+      _bookMindMapError = '已有思维导图正在生成，请稍后再试';
+      if (!_disposed) notifyListeners();
+      return null;
+    }
     final future = _generateBookMindMap(
       work: work,
       frozenCurrentChapter: frozenCurrentChapter,
@@ -1383,6 +1434,7 @@ class BookReaderController extends ChangeNotifier {
         ),
       );
       _bookMindMapProgress = null;
+      _bookMindMapError = null;
       if (!_disposed) notifyListeners();
       return result;
     } on AiProviderException catch (error) {
@@ -2212,6 +2264,7 @@ class BookReaderController extends ChangeNotifier {
     required AiChatContextBundle context,
     required AiBookWork? workScope,
     List<AiWebSearchHit>? webHits,
+    AiChatProductContext productContext = const AiChatProductContext(),
     bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
@@ -2225,6 +2278,7 @@ class BookReaderController extends ChangeNotifier {
       context: context,
       workScope: workScope,
       webHits: webHits,
+      productContext: productContext,
       reasoningEnabled: reasoningEnabled,
       cancelToken: cancelToken,
       runId: runId,
@@ -2238,11 +2292,11 @@ class BookReaderController extends ChangeNotifier {
     required AiChatContextBundle context,
     required AiBookWork? workScope,
     List<AiWebSearchHit>? webHits,
+    required AiChatProductContext productContext,
     bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
   }) async* {
-    await resolveGraphWorkCandidates(cancel: cancelToken);
     await for (final event in service.streamRun(
       run: AiRunDescriptor(
         runId: runId ?? AiRunIds.next(),
@@ -2259,6 +2313,7 @@ class BookReaderController extends ChangeNotifier {
       bookTitle: item.title,
       bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
       webHits: webHits,
+      productContext: productContext,
       reasoningEnabled: reasoningEnabled,
       tools: AiBookChatToolHost(
         corpus: _aiCorpus,

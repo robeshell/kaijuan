@@ -1,4 +1,5 @@
 import 'ai_provider_kind.dart';
+import 'ai_product_action.dart';
 
 /// App-owned task categories. Provider/framework-specific concepts must not
 /// leak into this contract.
@@ -43,6 +44,7 @@ enum AiRunPhase {
   runningTool,
   generating,
   continuing,
+  actionRequested,
   completed,
   failed,
   cancelled,
@@ -244,6 +246,22 @@ final class AiRunCompleted extends AiRunEvent {
   final String text;
 }
 
+/// A validated model request for an App-owned product action.
+///
+/// This is a terminal run event. The chat model does not execute the action;
+/// the controller must validate current scope and dispatch the deterministic
+/// workflow separately.
+final class AiRunProductActionRequested extends AiRunEvent {
+  const AiRunProductActionRequested({
+    required super.runId,
+    required super.sequence,
+    required super.occurredAt,
+    required this.request,
+  });
+
+  final AiProductActionRequest request;
+}
+
 final class AiRunFailed extends AiRunEvent {
   const AiRunFailed({
     required super.runId,
@@ -329,7 +347,10 @@ class AiRunState {
   final Object? error;
 
   bool get isTerminal => switch (phase) {
-    AiRunPhase.completed || AiRunPhase.failed || AiRunPhase.cancelled => true,
+    AiRunPhase.actionRequested ||
+    AiRunPhase.completed ||
+    AiRunPhase.failed ||
+    AiRunPhase.cancelled => true,
     _ => false,
   };
 
@@ -388,6 +409,10 @@ class AiRunState {
         nextReasoningText = event.text;
         nextReasoningKind = event.kind;
         if (nextText.isEmpty) nextStatus = '正在思考…';
+      case AiRunProductActionRequested():
+        nextPhase = AiRunPhase.actionRequested;
+        nextStatus = null;
+        nextFinishedAt = event.occurredAt;
       case AiRunCompleted():
         nextPhase = AiRunPhase.completed;
         nextText = event.text;

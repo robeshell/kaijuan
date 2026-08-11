@@ -2,10 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_session_ops.dart';
+import 'package:kaijuan/ai/ai_rich_content_inspector.dart';
 import 'package:kaijuan/ai/ai_conversation_intent.dart';
-import 'package:kaijuan/ai/ai_conversation_router.dart';
+import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
+import 'package:kaijuan/ai/ai_product_action.dart';
 
 void main() {
   const base = AiChatSession(contentHash: 'hash', itemId: 'book');
@@ -81,126 +83,50 @@ void main() {
     );
   });
 
-  test('mind map intent accepts creation and acquisition requests', () {
-    expect(
-      resolveAiMindMapRequestScope('给当前章生成一个思维导图'),
-      AiMindMapRequestScope.currentChapter,
+  test('product context exposes only temporary native artifact aliases', () {
+    const context = AiChatProductContext(
+      artifacts: [
+        AiProductArtifactAlias(
+          alias: 'artifact_1',
+          artifactId: 'private-map-id',
+          title: '全书主题',
+          revision: 2,
+          isAdjacent: true,
+        ),
+      ],
     );
-    expect(
-      resolveAiMindMapRequestScope('我需要这本书的思维导图'),
-      AiMindMapRequestScope.wholeBook,
+
+    expect(context.toolDefinitions.map((tool) => tool.name), [
+      AiProductToolNames.createBookMindMap,
+      AiProductToolNames.reviseBookMindMap,
+    ]);
+    expect(context.trustedPrompt, contains('artifact_1'));
+    expect(context.trustedPrompt, isNot(contains('private-map-id')));
+
+    final request = context.parse(
+      const AiModelToolCall(
+        id: 'call-1',
+        name: AiProductToolNames.reviseBookMindMap,
+        arguments: {'artifactRef': 'artifact_1', 'instruction': '增加更多事实细节'},
+      ),
     );
-    expect(
-      resolveAiMindMapRequestScope('我想看看这本书的思维导图'),
-      AiMindMapRequestScope.wholeBook,
-    );
-    expect(
-      resolveAiMindMapRequestScope('给我一份本章脑图'),
-      AiMindMapRequestScope.currentChapter,
-    );
-    expect(
-      resolveAiMindMapRequestScope('本书思维导图'),
-      AiMindMapRequestScope.wholeBook,
-    );
-    expect(
-      resolveAiMindMapRequestScope('生成思维导图'),
-      AiMindMapRequestScope.unspecified,
-    );
-    expect(
-      resolveAiMindMapRequestScope('生成当前作品思维导图'),
-      AiMindMapRequestScope.currentWork,
-    );
-    expect(
-      resolveAiMindMapRequestScope('生成整部合集思维导图'),
-      AiMindMapRequestScope.wholeBook,
-    );
-    expect(resolveAiMindMapRequestScope('用 Mermaid 画这本书的思维导图'), isNull);
-    expect(resolveAiMindMapRequestScope('总结这一章'), isNull);
-    expect(resolveAiMindMapRequestScope('这个思维导图不够详细'), isNull);
-    expect(resolveAiMindMapRequestScope('这个思维导图做得不专业'), isNull);
-    expect(resolveAiMindMapRequestScope('这张思维导图画得有点乱'), isNull);
-    expect(resolveAiMindMapRequestScope('我需要修改这本书的思维导图'), isNull);
-    expect(resolveAiMindMapRequestScope('不要生成这本书的思维导图'), isNull);
-    expect(resolveAiMindMapRequestScope('我不需要这本书的思维导图'), isNull);
-    expect(resolveAiMindMapRequestScope('我不想看这本书的思维导图'), isNull);
-    expect(resolveAiMindMapRequestScope('给我解释这本书的思维导图'), isNull);
-    expect(resolveAiMindMapRequestScope('为什么生成的思维导图只有标题'), isNull);
-    expect(resolveAiMindMapRequestScope('如何生成一本书的思维导图'), isNull);
-    expect(resolveAiMindMapRequestScope('比较思维导图和知识图谱'), isNull);
+    expect(request, isA<AiReviseBookMindMapAction>());
+    expect((request as AiReviseBookMindMapAction).artifactId, 'private-map-id');
   });
 
-  test(
-    'typed conversation routes preserve scope and distinguish edit intent',
-    () {
-      const router = AiConversationRouter();
-      final create = router.resolve('我需要这本书的思维导图');
-      expect(create, isA<AiWorkflowRoute>());
-      final createIntent = (create as AiWorkflowRoute).intent;
-      expect(createIntent.object, AiIntentObject.mindMap);
-      expect(createIntent.action, AiIntentAction.create);
-      expect(createIntent.scope, AiIntentScope.wholeBook);
-
-      final edit = router.classify('我需要修改这张思维导图');
-      expect(edit, isNotNull);
-      expect(edit!.object, AiIntentObject.mindMap);
-      expect(edit.action, AiIntentAction.edit);
-      expect(edit.scope, AiIntentScope.existingArtifact);
-      expect(router.resolve('我需要修改这张思维导图'), isA<AiOrdinaryChatRoute>());
-
-      final withArtifact = router.classify(
-        '把刚才那张思维导图改得更详细',
-        context: const AiConversationContext(
-          recentArtifacts: [
-            AiArtifactRef(
-              artifactId: 'map-1',
-              messageTurnId: 'turn-1',
-              object: AiIntentObject.mindMap,
-            ),
-          ],
+  test('product context rejects invented artifact aliases', () {
+    const context = AiChatProductContext();
+    expect(
+      () => context.parse(
+        const AiModelToolCall(
+          id: 'call-1',
+          name: AiProductToolNames.reviseBookMindMap,
+          arguments: {'artifactRef': 'artifact_99', 'instruction': '扩充'},
         ),
-      );
-      expect(withArtifact!.target!.artifactId, 'map-1');
-
-      const editRouter = AiConversationRouter(mindMapEditingEnabled: true);
-      final editRoute = editRouter.resolve(
-        '把刚才那张思维导图改得更详细',
-        context: const AiConversationContext(
-          recentArtifacts: [
-            AiArtifactRef(
-              artifactId: 'map-1',
-              messageTurnId: 'turn-1',
-              object: AiIntentObject.mindMap,
-            ),
-          ],
-        ),
-      );
-      expect(editRoute, isA<AiWorkflowRoute>());
-      expect((editRoute as AiWorkflowRoute).intent.action, AiIntentAction.edit);
-
-      final missingTarget = editRouter.resolve('请修改这张思维导图');
-      expect(missingTarget, isA<AiClarificationRoute>());
-      expect(
-        (missingTarget as AiClarificationRoute).missingSlots,
-        contains('targetArtifact'),
-      );
-
-      final regenerate = router.classify(
-        '重新生成刚才那张思维导图',
-        context: const AiConversationContext(
-          recentArtifacts: [
-            AiArtifactRef(
-              artifactId: 'map-1',
-              messageTurnId: 'turn-1',
-              object: AiIntentObject.mindMap,
-            ),
-          ],
-        ),
-      );
-      expect(regenerate!.action, AiIntentAction.regenerate);
-      expect(regenerate.scope, AiIntentScope.existingArtifact);
-      expect(regenerate.target!.artifactId, 'map-1');
-    },
-  );
+      ),
+      throwsFormatException,
+    );
+  });
 
   test('structured mind map survives chat message JSON round-trip', () {
     final map = AiBookMindMap(
@@ -240,9 +166,15 @@ void main() {
       ],
     );
     final source = AiChatMessage(
-      role: AiMessageRole.assistant,
-      content: '已生成。',
+      role: AiMessageRole.user,
+      content: '增加更多细节',
       mindMap: map,
+      command: const AiConversationCommand(
+        object: AiIntentObject.mindMap,
+        action: AiIntentAction.edit,
+        originalText: '增加更多细节',
+        targetArtifactId: 'map-1',
+      ),
     );
 
     final restored = AiChatMessage.fromJson(source.toJson());
@@ -250,6 +182,8 @@ void main() {
     expect(restored.mindMap, isNotNull);
     expect(restored.mindMap!.scopeSectionIndices, const [3]);
     expect(restored.mindMap!.nodes[1].evidence.single.quote, '原文证据');
+    expect(restored.command?.targetArtifactId, 'map-1');
+    expect(restored.command?.action, AiIntentAction.edit);
   });
 
   test('mind map structure route separates volumes from omnibus works', () {
@@ -306,4 +240,30 @@ void main() {
       AiMindMapStructureRoute.wholePublication,
     );
   });
+
+  test(
+    'rich artifact metadata persists and legacy messages remain detectable',
+    () {
+      const source = AiChatMessage(
+        role: AiMessageRole.assistant,
+        content: '```mermaid\nmindmap\n  root((书))\n```',
+        richArtifactKind: AiRichArtifactKind.mermaidMindMap,
+      );
+
+      final restored = AiChatMessage.fromJson(source.toJson());
+      final legacy = AiChatMessage.fromJson({
+        'role': 'assistant',
+        'content': '```mermaid\n%% config\nmindmap\n  root((书))\n```',
+      });
+
+      expect(
+        restored.resolvedRichArtifactKind,
+        AiRichArtifactKind.mermaidMindMap,
+      );
+      expect(
+        legacy.resolvedRichArtifactKind,
+        AiRichArtifactKind.mermaidMindMap,
+      );
+    },
+  );
 }
