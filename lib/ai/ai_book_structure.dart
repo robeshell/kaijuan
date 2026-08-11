@@ -131,6 +131,16 @@ abstract final class AiBookStructureResolver {
     r'\s*(?:[（(][上中下][）)]|[上中下](?:册|卷))\s*$',
   );
 
+  static final RegExp _intermediateGroupPattern = RegExp(
+    r'^(?:第[0-9零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾]+)?(?:季|辑|系列)$',
+    caseSensitive: false,
+  );
+
+  static final RegExp _directoryTitlePattern = RegExp(
+    r'^(?:主目录|总目录|目录|目次)$',
+    caseSensitive: false,
+  );
+
   static bool isChapterTitle(String raw) =>
       _chapterTitlePattern.hasMatch(raw.trim());
 
@@ -150,6 +160,7 @@ abstract final class AiBookStructureResolver {
   static AiBookStructureManifest resolveIndex({
     required BookStructureIndex index,
     required bool Function(String title) isSupplementTitle,
+    String? fallbackPublicationTitle,
   }) {
     if (!index.isUsable) {
       return const AiBookStructureManifest(
@@ -160,6 +171,15 @@ abstract final class AiBookStructureResolver {
       );
     }
 
+    final publicationEvidence = [
+      index.publicationTitle,
+      fallbackPublicationTitle ?? '',
+    ].where((part) => part.trim().isNotEmpty).join(' ');
+    final hasOmnibusTitleEvidence = _omnibusTitlePattern.hasMatch(
+      publicationEvidence,
+    );
+    final expectedCount = _expectedOmnibusCount(publicationEvidence);
+
     var candidates = index.navigationRoots;
     if (candidates.length == 1) {
       final children = index.childrenOf(candidates.single.nodeId);
@@ -167,8 +187,24 @@ abstract final class AiBookStructureResolver {
     }
     final allCandidates = candidates;
     candidates = candidates
-        .where((node) => !isSupplementTitle(node.title))
+        .where(
+          (node) =>
+              !isSupplementTitle(node.title) &&
+              !_isPublicationContainer(
+                node.title,
+                index.publicationTitle,
+                publicationEvidence,
+              ),
+        )
         .toList(growable: false);
+    if (expectedCount != null && candidates.length > expectedCount) {
+      final withoutCollectionHeaders = candidates
+          .where((node) => !_isCollectionHeaderTitle(node.title))
+          .toList(growable: false);
+      if (withoutCollectionHeaders.length == expectedCount) {
+        candidates = withoutCollectionHeaders;
+      }
+    }
     if (candidates.length < 2) {
       return const AiBookStructureManifest(
         kind: AiBookStructureKind.singleWork,
@@ -185,7 +221,7 @@ abstract final class AiBookStructureResolver {
               _continuationTitlePattern.hasMatch(node.title.trim()),
         )
         .length;
-    if (chapterLikeCount * 2 >= candidates.length) {
+    if (chapterLikeCount * 2 >= candidates.length && expectedCount == null) {
       return const AiBookStructureManifest(
         kind: AiBookStructureKind.singleWork,
         source: AiBookStructureSource.navigationHierarchy,
@@ -216,9 +252,6 @@ abstract final class AiBookStructureResolver {
     // A chapter owning several subsection nodes is normal and cannot prove an
     // omnibus. Require publication-level collection metadata before promoting
     // arbitrary titled roots to independent works.
-    final hasOmnibusTitleEvidence = _omnibusTitlePattern.hasMatch(
-      index.publicationTitle,
-    );
     final mergedCandidates = _mergeSplitInstallments(candidates);
     final hasRepeatedInstallmentEvidence =
         candidates.length >= 4 &&
@@ -233,6 +266,14 @@ abstract final class AiBookStructureResolver {
       );
     }
 
+    final groupedCandidates = expectedCount == null
+        ? const <BookStructureNavigationNode>[]
+        : _expandIntermediateGroups(
+            index: index,
+            roots: allCandidates,
+            isSupplementTitle: isSupplementTitle,
+          );
+    final mergedGroupedCandidates = _mergeSplitInstallments(groupedCandidates);
     final treeCandidates = candidates
         .where(
           (node) =>
@@ -240,17 +281,34 @@ abstract final class AiBookStructureResolver {
               index.childrenOf(node.nodeId).length >= 2,
         )
         .toList(growable: false);
+    final flatCandidates = expectedCount == null
+        ? const <BookStructureNavigationNode>[]
+        : _flatDirectoryBoundaries(
+            index: index,
+            isSupplementTitle: isSupplementTitle,
+            publicationTitle: index.publicationTitle,
+            publicationEvidence: publicationEvidence,
+          );
+    final mergedFlatCandidates = _mergeSplitInstallments(flatCandidates);
     final workCandidates = _mergeSplitInstallments(
-      treeCandidates.length >= 2 ? treeCandidates : candidates,
+      mergedGroupedCandidates.length == expectedCount
+          ? mergedGroupedCandidates
+          : treeCandidates.length >= 2
+          ? treeCandidates
+          : mergedFlatCandidates.length == expectedCount
+          ? mergedFlatCandidates
+          : candidates,
     );
-    final expectedCount = _expectedOmnibusCount(index.publicationTitle);
     if (expectedCount != null && workCandidates.length != expectedCount) {
       return AiBookStructureManifest(
         kind: AiBookStructureKind.uncertain,
         source: AiBookStructureSource.navigationHierarchy,
         confidence: 0.65,
         reason:
-            'publication expects $expectedCount works but indexed ${workCandidates.length}',
+            'publication expects $expectedCount works but indexed '
+            '${workCandidates.length} '
+            '(groups=${mergedGroupedCandidates.length}, '
+            'trees=${treeCandidates.length}, flat=${mergedFlatCandidates.length})',
       );
     }
 
@@ -290,6 +348,100 @@ abstract final class AiBookStructureResolver {
     );
   }
 
+  static bool _isPublicationContainer(
+    String raw,
+    String publicationTitle,
+    String publicationEvidence,
+  ) {
+    final title = _normalizedTitle(raw);
+    if (title.length < 4) return false;
+    final primary = _normalizedTitle(publicationTitle);
+    final evidence = _normalizedTitle(publicationEvidence);
+    final collectionLike = _isCollectionHeaderTitle(title);
+    return (primary.isNotEmpty && title == primary) ||
+        (collectionLike && evidence.contains(title));
+  }
+
+  static bool _isCollectionHeaderTitle(String raw) {
+    final title = _normalizedTitle(
+      raw,
+    ).replaceFirst(RegExp(r'共?[0-9零一二三四五六七八九十百千两]+册$'), '');
+    return const ['全集', '合集', '作品集', '大全集', '套装'].any(title.endsWith);
+  }
+
+  static String _normalizedTitle(String raw) => raw.toLowerCase().replaceAll(
+    RegExp(r'[\s·•:：,，。.!！?？—–_()（）\[\]【】《》]+'),
+    '',
+  );
+
+  static List<BookStructureNavigationNode> _expandIntermediateGroups({
+    required BookStructureIndex index,
+    required List<BookStructureNavigationNode> roots,
+    required bool Function(String title) isSupplementTitle,
+  }) {
+    final result = <BookStructureNavigationNode>[];
+
+    void collect(BookStructureNavigationNode group) {
+      for (final child in index.childrenOf(group.nodeId)) {
+        if (isSupplementTitle(child.title)) continue;
+        if (_intermediateGroupPattern.hasMatch(child.title.trim())) {
+          collect(child);
+        } else if (_isIndependentWorkCandidateTitle(child.title)) {
+          result.add(child);
+        }
+      }
+    }
+
+    for (final root in roots) {
+      if (_intermediateGroupPattern.hasMatch(root.title.trim())) collect(root);
+    }
+    return _deduplicateCandidates(result);
+  }
+
+  static List<BookStructureNavigationNode> _flatDirectoryBoundaries({
+    required BookStructureIndex index,
+    required bool Function(String title) isSupplementTitle,
+    required String publicationTitle,
+    required String publicationEvidence,
+  }) {
+    final ordered = [...index.navigation]
+      ..sort((left, right) => left.order.compareTo(right.order));
+    final result = <BookStructureNavigationNode>[];
+    for (var indexInList = 1; indexInList < ordered.length; indexInList++) {
+      if (!_directoryTitlePattern.hasMatch(ordered[indexInList].title.trim())) {
+        continue;
+      }
+      final candidate = ordered[indexInList - 1];
+      final title = candidate.title.trim();
+      if (candidate.sectionIndex == null ||
+          isSupplementTitle(title) ||
+          !_isIndependentWorkCandidateTitle(title) ||
+          _isPublicationContainer(
+            title,
+            publicationTitle,
+            publicationEvidence,
+          ) ||
+          _expectedOmnibusCount(title) != null) {
+        continue;
+      }
+      result.add(candidate);
+    }
+    return _deduplicateCandidates(result);
+  }
+
+  static List<BookStructureNavigationNode> _deduplicateCandidates(
+    List<BookStructureNavigationNode> candidates,
+  ) {
+    final result = <BookStructureNavigationNode>[];
+    final seen = <String>{};
+    for (final candidate in candidates) {
+      final key =
+          '${candidate.sectionIndex}:${_normalizedTitle(candidate.title)}';
+      if (seen.add(key)) result.add(candidate);
+    }
+    return result;
+  }
+
   static List<BookStructureNavigationNode> _mergeSplitInstallments(
     List<BookStructureNavigationNode> candidates,
   ) {
@@ -321,6 +473,15 @@ abstract final class AiBookStructureResolver {
 
   static int? _expectedOmnibusCount(String raw) {
     final title = raw.replaceAll(RegExp(r'\s+'), '');
+    final range = RegExp(
+      r'(?:卷([0-9]{1,3})[-—–~至]([0-9]{1,3})|'
+      r'([0-9]{1,3})[-—–~至]([0-9]{1,3})(?:全集|全套|套装))',
+    ).firstMatch(title);
+    if (range != null) {
+      final start = int.tryParse((range.group(1) ?? range.group(3))!);
+      final end = int.tryParse((range.group(2) ?? range.group(4))!);
+      if (start != null && end != null && end >= start) return end - start + 1;
+    }
     final arabic = RegExp(
       r'(?:套装|全套|共)?([0-9]{1,3})(?:册|部曲)',
     ).firstMatch(title);

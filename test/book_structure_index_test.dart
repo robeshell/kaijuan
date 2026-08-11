@@ -34,11 +34,14 @@ void main() {
     directChildCount: children,
   );
 
-  AiBookStructureManifest classify(BookStructureIndex index) =>
-      AiBookStructureResolver.resolveIndex(
-        index: index,
-        isSupplementTitle: matchesAiStructureSupplementTitle,
-      );
+  AiBookStructureManifest classify(
+    BookStructureIndex index, {
+    String? fallbackPublicationTitle,
+  }) => AiBookStructureResolver.resolveIndex(
+    index: index,
+    isSupplementTitle: matchesAiStructureSupplementTitle,
+    fallbackPublicationTitle: fallbackPublicationTitle,
+  );
 
   test('bridge JSON preserves every section, heading and locator', () {
     final index = BookStructureIndex.tryParse('''
@@ -396,6 +399,228 @@ void main() {
             sectionIndex: 2,
             children: 2,
           ),
+        ],
+      ),
+    );
+
+    expect(manifest.kind, AiBookStructureKind.uncertain);
+    expect(manifest.works, isEmpty);
+  });
+
+  test('publication collection container is not exposed as a work', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '推理作品集共2册',
+        sections: [for (var index = 0; index < 6; index++) section(index)],
+        navigation: [
+          node(
+            id: 'container',
+            title: '推理作品集',
+            order: 0,
+            sectionIndex: 0,
+            children: 2,
+          ),
+          node(
+            id: 'work-a',
+            title: '作品甲',
+            order: 1,
+            sectionIndex: 1,
+            children: 2,
+          ),
+          node(
+            id: 'work-b',
+            title: '作品乙',
+            order: 2,
+            sectionIndex: 4,
+            children: 2,
+          ),
+        ],
+      ),
+    );
+
+    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
+  });
+
+  test('declared count closes after dropping a generic collection header', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '珍藏共2册',
+        sections: [for (var index = 0; index < 6; index++) section(index)],
+        navigation: [
+          node(
+            id: 'container',
+            title: '作者作品集',
+            order: 0,
+            sectionIndex: 0,
+            children: 2,
+          ),
+          node(
+            id: 'work-a',
+            title: '作品甲',
+            order: 1,
+            sectionIndex: 1,
+            children: 2,
+          ),
+          node(
+            id: 'work-b',
+            title: '作品乙',
+            order: 2,
+            sectionIndex: 4,
+            children: 2,
+          ),
+        ],
+      ),
+    );
+
+    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
+  });
+
+  test('generic reader notes and chronology are excluded from an omnibus', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '侦探作品套装共2册',
+        sections: [for (var index = 0; index < 8; index++) section(index)],
+        navigation: [
+          node(id: 'chronology', title: '侦探作品年表', order: 0, sectionIndex: 0),
+          node(id: 'reader', title: '致中国读者', order: 1, sectionIndex: 1),
+          node(
+            id: 'work-a',
+            title: '作品甲',
+            order: 2,
+            sectionIndex: 2,
+            children: 2,
+          ),
+          node(
+            id: 'work-b',
+            title: '作品乙',
+            order: 3,
+            sectionIndex: 5,
+            children: 2,
+          ),
+        ],
+      ),
+    );
+
+    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
+  });
+
+  test('flat title-directory boundaries recover a declared omnibus', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '科幻经典共2册',
+        sections: [for (var index = 0; index < 8; index++) section(index)],
+        navigation: [
+          node(id: 'set', title: '科幻经典套装共2册', order: 0, sectionIndex: 0),
+          node(id: 'set-toc', title: '目录', order: 1, sectionIndex: 0),
+          node(id: 'work-a', title: '作品甲', order: 2, sectionIndex: 1),
+          node(id: 'toc-a', title: '目录', order: 3, sectionIndex: 1),
+          node(id: 'a-1', title: '第一章', order: 4, sectionIndex: 2),
+          node(id: 'a-2', title: '第二章', order: 5, sectionIndex: 3),
+          node(id: 'work-b', title: '作品乙', order: 6, sectionIndex: 4),
+          node(id: 'toc-b', title: '总目录', order: 7, sectionIndex: 4),
+          node(id: 'b-1', title: '第一章', order: 8, sectionIndex: 5),
+          node(id: 'b-2', title: '第二章', order: 9, sectionIndex: 6),
+        ],
+      ),
+    );
+
+    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
+  });
+
+  test('declared numbered set expands intermediate season groups', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '长篇系列',
+        sections: [for (var index = 0; index < 10; index++) section(index)],
+        navigation: [
+          node(
+            id: 'season-a',
+            title: '第一季',
+            order: 0,
+            sectionIndex: 0,
+            children: 2,
+          ),
+          node(
+            id: 'work-a',
+            parentId: 'season-a',
+            depth: 1,
+            title: '作品甲',
+            order: 1,
+            sectionIndex: 1,
+            children: 2,
+          ),
+          node(
+            id: 'work-b',
+            parentId: 'season-a',
+            depth: 1,
+            title: '作品乙',
+            order: 2,
+            sectionIndex: 3,
+            children: 2,
+          ),
+          node(
+            id: 'season-b',
+            title: '第二季',
+            order: 3,
+            sectionIndex: 5,
+            children: 2,
+          ),
+          node(
+            id: 'work-c',
+            parentId: 'season-b',
+            depth: 1,
+            title: '作品丙',
+            order: 4,
+            sectionIndex: 5,
+            children: 2,
+          ),
+          node(
+            id: 'work-d',
+            parentId: 'season-b',
+            depth: 1,
+            title: '作品丁',
+            order: 5,
+            sectionIndex: 7,
+            children: 2,
+          ),
+          node(id: 'special', title: '特别篇', order: 6, sectionIndex: 9),
+        ],
+      ),
+      fallbackPublicationTitle: '长篇系列1-4全集',
+    );
+
+    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(manifest.works.map((work) => work.title), [
+      '作品甲',
+      '作品乙',
+      '作品丙',
+      '作品丁',
+    ]);
+  });
+
+  test('declared collection with unrecovered chapter tree stays uncertain', () {
+    final manifest = classify(
+      BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '作品合集共3册',
+        sections: [for (var index = 0; index < 5; index++) section(index)],
+        navigation: [
+          for (var index = 0; index < 5; index++)
+            node(
+              id: 'chapter-$index',
+              title: '第${index + 1}章',
+              order: index,
+              sectionIndex: index,
+            ),
         ],
       ),
     );

@@ -14,11 +14,13 @@ class AiBookStructureSession {
   AiBookStructureSession({
     required this.corpus,
     required this.isSupplementTitle,
+    this.publicationTitle = '',
     this.loadIndex,
   });
 
   final AiBookCorpusCache corpus;
   final bool Function(String title) isSupplementTitle;
+  final String publicationTitle;
   final Future<BookStructureIndex?> Function()? loadIndex;
 
   AiBookStructureManifest? _manifest;
@@ -62,6 +64,7 @@ class AiBookStructureSession {
             AiBookStructureResolver.resolveIndex(
               index: index,
               isSupplementTitle: isSupplementTitle,
+              fallbackPublicationTitle: publicationTitle,
             ),
             detail:
                 'index sections=${index.sections.length} '

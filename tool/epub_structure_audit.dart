@@ -36,6 +36,7 @@ Future<void> main(List<String> args) async {
       final manifest = AiBookStructureResolver.resolveIndex(
         index: index,
         isSupplementTitle: _isSupplementTitle,
+        fallbackPublicationTitle: p.basenameWithoutExtension(file.path),
       );
       kinds.update(manifest.kind, (value) => value + 1, ifAbsent: () => 1);
       final navAnchored = index.navigation

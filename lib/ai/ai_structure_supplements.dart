@@ -100,6 +100,7 @@ const defaultAiStructureAppendixUnits = <String>[
 
 const defaultAiStructureMetadataUnits = <String>[
   '目录',
+  '主目录',
   '总目录',
   '全书目录',
   '章节目录',
@@ -135,6 +136,8 @@ bool matchesAiStructureSupplementTitle(
   if (RegExp(r'^作者.{0,16}(?:小传|生平|简介)$').hasMatch(title)) {
     return true;
   }
+  if (RegExp(r'^致.{0,16}读者$').hasMatch(title)) return true;
+  if (RegExp(r'.{1,24}(?:简介|年表)$').hasMatch(title)) return true;
   if (metadataUnits.any((word) => word.trim() == title)) return true;
   final exclusions = appendixUnits
       .where((word) => word.trim().startsWith('!'))

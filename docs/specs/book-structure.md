@@ -26,7 +26,7 @@ EPUB nav / landmarks ─┐
 spine href / CFI ──────┘
 ```
 
-索引同时记录出版物标题，作为合集分类的佐证，而不是单独作为结论。每个 spine 记录 `sectionIndex / href / documentTitle / bodyCharCount`；每个 heading 记录 `title / level / order / fragment / cfi`；每个 navigation 节点记录 `parentId / depth / order / href / fragment / resolvedSectionIndex / directChildCount`。
+索引同时记录出版物标题，App 条目标题/原文件名可作为 OPF 标题缺失集合信息时的补充证据，但都不能单独成为结论。每个 spine 记录 `sectionIndex / href / documentTitle / bodyCharCount`；每个 heading 记录 `title / level / order / fragment / cfi`；每个 navigation 节点记录 `parentId / depth / order / href / fragment / resolvedSectionIndex / directChildCount`。
 
 扫描不得按字符预算、正文长度或前 N 章截断。结构结果按打开的出版物实例缓存；正文仍按任务范围与模型上下文能力独立读取。
 
@@ -46,6 +46,8 @@ spine href / CFI ──────┘
 - 证据冲突时保持 `uncertain`；普通全书任务仍按单本出版物处理，只有作品级任务才请求用户确认。
 
 类型判定与范围构造必须分开：`segmentedSingleWork.works` 只能由 `volume` 节点建立；`multiWorkOmnibus.works` 只能由 `work` 节点建立。其他节点可以提供下一范围或尾部外围材料的边界，但不得成为独立生成单元。出版物标题中的“共 N 册/六部曲/套装 12 册”等数量只用于一致性校验；数量冲突时保持不确定，不按顺序硬删候选。
+
+目录层级不可靠时仍按结构证据恢复：标题等同于出版物总集名称的节点视为容器；“第 X 季/辑/系列”等中间分组递归展开后再取作品；完全扁平的 NCX 可利用重复的“作品标题 → 目录/目次 → 正文”边界提取作品起点。只有恢复数量与出版物声明数量一致时才能建立作品范围，否则保持 `uncertain`。章节占多数只能证明普通单本，不得覆盖已经存在的明确合集数量证据。
 
 用户确认按 `contentHash + indexVersion + structureFingerprint` 保存为 `BookStructureOverride`。本阶段先实现索引、分类与范围消费；持久化覆盖在索引稳定后接入，不把临时启发式写入数据库。
 

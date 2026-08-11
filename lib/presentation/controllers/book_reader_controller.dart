@@ -438,6 +438,7 @@ class BookReaderController extends ChangeNotifier {
   );
   late final AiBookStructureSession _aiStructure = AiBookStructureSession(
     corpus: _aiCorpus,
+    publicationTitle: item.title,
     loadIndex: () async => await _getBookStructureIndex?.call(),
     isSupplementTitle: (title) =>
         _isOutlineMetadataTitle(title) || _isGraphAppendixLabel(title),
