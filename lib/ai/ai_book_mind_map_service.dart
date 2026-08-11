@@ -121,7 +121,11 @@ final class AiBookMindMapService {
         cancelToken: cancelToken,
       );
       cancelToken?.throwIfCancelled();
-      final nodes = _parseNodes(result.value, usable);
+      final nodes = _parseNodes(
+        result.value,
+        usable,
+        rootTitle: _rootTitle(bookTitle: bookTitle, scopeLabel: scopeLabel),
+      );
       AiLog.d(
         'mind map output: nodes=${nodes.length} '
         'sections=${usable.length} chars=$bodyChars',
@@ -164,8 +168,9 @@ final class AiBookMindMapService {
 
   static List<AiBookMindMapNode> _parseNodes(
     Map<String, dynamic> raw,
-    List<AiBookSectionSlice> sections,
-  ) {
+    List<AiBookSectionSlice> sections, {
+    required String rootTitle,
+  }) {
     final rows = raw['nodes'];
     if (rows is! List || rows.isEmpty) {
       throw AiProviderException('模型没有返回可用的思维导图节点');
@@ -204,11 +209,12 @@ final class AiBookMindMapService {
         final resolved = _resolveEvidence(section, quote);
         if (resolved.spanResolved) evidence.add(resolved);
       }
+      final rawParentId = row['parentTempId'] is String
+          ? (row['parentTempId'] as String).trim()
+          : '';
       parsed[id] = _RawMindMapNode(
         id: id,
-        parentId: row['parentTempId'] is String
-            ? (row['parentTempId'] as String).trim()
-            : null,
+        parentId: rawParentId.isEmpty ? null : rawParentId,
         order: (row['order'] as num).toInt(),
         title: title,
         summary: summary,
@@ -216,15 +222,46 @@ final class AiBookMindMapService {
       );
     }
 
-    final roots = parsed.values.where((node) => node.parentId == null).toList();
-    if (roots.length != 1) throw AiProviderException('思维导图必须只有一个根节点');
-    roots.single.evidence.clear();
+    final roots = parsed.values.where((node) => node.parentId == null).toList()
+      ..sort((left, right) {
+        final order = left.order.compareTo(right.order);
+        return order != 0 ? order : left.title.compareTo(right.title);
+      });
+    if (roots.isEmpty) throw AiProviderException('思维导图没有根节点');
+    final effectiveParentById = <String, String?>{
+      for (final node in parsed.values) node.id: node.parentId,
+    };
+    _RawMindMapNode root;
+    if (roots.length == 1) {
+      root = roots.single;
+      root.evidence.clear();
+    } else {
+      var syntheticId = '__kaijuan_root__';
+      while (parsed.containsKey(syntheticId)) {
+        syntheticId = '_$syntheticId';
+      }
+      root = _RawMindMapNode(
+        id: syntheticId,
+        parentId: null,
+        order: 0,
+        title: rootTitle,
+        summary: _forestSummary(roots),
+        evidence: [],
+      );
+      parsed[syntheticId] = root;
+      effectiveParentById[syntheticId] = null;
+      for (final branch in roots) {
+        effectiveParentById[branch.id] = syntheticId;
+      }
+      AiLog.d('mind map normalized forest: roots=${roots.length}');
+    }
     final children = <String, List<_RawMindMapNode>>{};
-    for (final node in parsed.values.where((node) => node.parentId != null)) {
-      if (!parsed.containsKey(node.parentId)) {
+    for (final node in parsed.values.where((node) => node.id != root.id)) {
+      final parentId = effectiveParentById[node.id];
+      if (parentId == null || !parsed.containsKey(parentId)) {
         throw AiProviderException('思维导图包含无效的父节点引用');
       }
-      children.putIfAbsent(node.parentId!, () => []).add(node);
+      children.putIfAbsent(parentId, () => []).add(node);
     }
     for (final siblings in children.values) {
       siblings.sort((left, right) {
@@ -259,10 +296,38 @@ final class AiBookMindMapService {
       return true;
     }
 
-    if (!walk(roots.single, 0, null, 0) || visited.length != parsed.length) {
+    if (!walk(root, 0, null, 0) || visited.length != parsed.length) {
       throw AiProviderException('思维导图包含环或孤立节点');
     }
     return List.unmodifiable(result);
+  }
+
+  static String _rootTitle({
+    required String bookTitle,
+    required String scopeLabel,
+  }) {
+    final scope = scopeLabel.trim();
+    if (scope.isNotEmpty && scope != '全书' && scope != '整本书' && scope != '本书') {
+      return scope;
+    }
+    final book = bookTitle.trim();
+    return book.isEmpty ? '思维导图' : book;
+  }
+
+  static String _forestSummary(List<_RawMindMapNode> roots) {
+    const maxChars = 220;
+    final perRoot = (maxChars ~/ roots.length).clamp(24, 72);
+    final joined = roots
+        .map((node) {
+          final summary = node.summary.trim();
+          return summary.length <= perRoot
+              ? summary
+              : '${summary.substring(0, perRoot - 1)}…';
+        })
+        .join('；');
+    return joined.length <= maxChars
+        ? joined
+        : '${joined.substring(0, maxChars - 1)}…';
   }
 
   static AiMindMapEvidence _resolveEvidence(

@@ -167,6 +167,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   int _graphListEpoch = 0;
   String? _mindMapRevealTurnId;
   bool _mindMapPointerActive = false;
+  bool _committingComposer = false;
 
   /// Attached highlight; null when cleared by user.
   String? _selection;
@@ -505,6 +506,25 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _send([String? preset]) async {
+    if (_committingComposer) return;
+    if (preset == null) {
+      final composing = _input.value.composing;
+      if (composing.isValid && !composing.isCollapsed) {
+        // Clicking Send while a macOS IME still owns marked text used to lock
+        // and rebuild the composer before the platform committed that text.
+        // The delayed TextInput update then notified EditableText during the
+        // frame's semantics pass (`Build scheduled during frame`). Let the IME
+        // close its composing range before changing conversation state.
+        _committingComposer = true;
+        _focus.unfocus();
+        try {
+          await WidgetsBinding.instance.endOfFrame;
+          if (!mounted) return;
+        } finally {
+          _committingComposer = false;
+        }
+      }
+    }
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty ||
         _sending ||

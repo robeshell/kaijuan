@@ -105,6 +105,41 @@ void main() {
   });
 
   test(
+    'normalizes a valid multi-root forest without another model call',
+    () async {
+      final value = tree();
+      final nodes = (value['nodes']! as List)
+          .map((node) => Map<String, dynamic>.from(node as Map))
+          .toList();
+      value['nodes'] = nodes;
+      nodes.removeAt(0);
+      nodes[0]['parentTempId'] = null;
+      nodes[1]['parentTempId'] = '';
+      final adapter = _FakeAdapter(value);
+
+      final result = await service(adapter).generate(
+        contentHash: 'a' * 64,
+        workKey: null,
+        bookTitle: '测试书',
+        scopeLabel: '全书',
+        userInstruction: '生成思维导图',
+        sections: sections,
+      );
+
+      expect(adapter.calls, 1);
+      expect(result.nodes, hasLength(3));
+      expect(result.nodes.first.title, '测试书');
+      expect(result.nodes.first.parentId, isNull);
+      expect(result.nodes.skip(1).map((node) => node.parentId), [
+        'mm001',
+        'mm001',
+      ]);
+      expect(result.nodes.skip(1).map((node) => node.level), [1, 1]);
+      expect(result.nodes.first.summary, contains('短期保护能够稳定就业'));
+    },
+  );
+
+  test(
     'scales coverage guidance and output budget with the selected corpus',
     () async {
       final longSections = [

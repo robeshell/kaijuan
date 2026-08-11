@@ -220,6 +220,26 @@ void main() {
     expect(bookSource, contains(".replace(/\\n{3,}/g, '\\n\\n')"));
   });
 
+  test(
+    'logical AI sections initialize the full body range before headings',
+    () {
+      final bookSource = File(
+        'assets/book/foliate-js/src/book.js',
+      ).readAsStringSync();
+      final helperStart = bookSource.indexOf(
+        'const textBetween = (start, end) => {',
+      );
+      final helperEnd = bookSource.indexOf('\n  }', helperStart);
+      expect(helperStart, greaterThanOrEqualTo(0));
+      expect(helperEnd, greaterThan(helperStart));
+      final helper = bookSource.substring(helperStart, helperEnd);
+      expect(
+        helper.indexOf('range.selectNodeContents(body)'),
+        lessThan(helper.indexOf('range.setStartAfter(start)')),
+      );
+    },
+  );
+
   test('illustrated reflow EPUB metrics classify as book once probe succeeds', () async {
     final bookFile = await _writeReflowEpubWithCover(tempRoot, 'illustrated.epub');
     final snapshot = reflowProbeSnapshot(

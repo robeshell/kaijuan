@@ -3138,8 +3138,12 @@ const logicalSectionsFromDocument = (doc, fallbackLabel, tocLabels = []) => {
 
   const textBetween = (start, end) => {
     const range = doc.createRange()
+    // A fresh Range starts collapsed at the document root. Setting only its
+    // start (the last heading has no `end`) moves the end to that same point,
+    // silently returning an empty string and dropping the rest of the
+    // chapter. Cover the complete body first, then narrow either boundary.
+    range.selectNodeContents(body)
     if (start) range.setStartAfter(start)
-    else range.selectNodeContents(body)
     if (end) range.setEndBefore(end)
     return plainText(range.toString())
   }
