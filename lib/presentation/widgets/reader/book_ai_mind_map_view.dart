@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:flutter/material.dart';
 import '../../../ai/ai_mind_map.dart';
 import '../../../ai/ai_mind_map_layout.dart';
 import '../../../core/theme.dart';
+import '../app_overlays.dart';
+import 'book_ai_mind_map_export.dart';
 
 class BookAiMindMapView extends StatefulWidget {
   const BookAiMindMapView({
@@ -17,6 +20,7 @@ class BookAiMindMapView extends StatefulWidget {
     this.revealOnMount = false,
     this.onRevealed,
     this.onPointerHoverChanged,
+    this.saveImage,
   });
 
   final AiBookMindMap map;
@@ -26,6 +30,7 @@ class BookAiMindMapView extends StatefulWidget {
   final bool revealOnMount;
   final VoidCallback? onRevealed;
   final ValueChanged<bool>? onPointerHoverChanged;
+  final BookAiMindMapImageSaver? saveImage;
 
   @override
   State<BookAiMindMapView> createState() => _BookAiMindMapViewState();
@@ -35,9 +40,11 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
   final _transformation = TransformationController();
   final _collapsed = <String>{};
   final _viewportKey = GlobalKey();
+  final _exportBoundaryKey = GlobalKey();
   late AiMindMapLayout _layout;
   bool _fitAfterLayoutChange = false;
   bool _revealScheduled = false;
+  bool _exporting = false;
   ({String nodeId, Offset viewportPoint})? _pendingCollapseAnchor;
 
   @override
@@ -195,6 +202,16 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                 onPressed: () => _fit(layout.size),
                 icon: const Icon(Icons.center_focus_strong_outlined, size: 20),
               ),
+              IconButton(
+                tooltip: _exporting ? '正在导出' : '导出图片',
+                onPressed: _exporting ? null : _exportImage,
+                icon: _exporting
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download_outlined, size: 20),
+              ),
               if (widget.onOpenFullscreen != null)
                 IconButton(
                   tooltip: '全屏查看',
@@ -257,42 +274,53 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                       // independently keep the same gesture out of the outer
                       // conversation list.
                       trackpadScrollCausesScale: false,
-                      child: SizedBox.fromSize(
-                        size: layout.size,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Positioned.fill(
-                              child: CustomPaint(
-                                painter: _MindMapEdgePainter(
-                                  layout: layout,
-                                  branchAccents: branchAccents,
-                                  nodeLevels: nodeLevels,
-                                  fallbackColor: context.appColors.primary,
-                                  dark:
-                                      Theme.of(context).brightness ==
-                                      Brightness.dark,
-                                ),
-                              ),
-                            ),
-                            for (final node in widget.map.nodes)
-                              if (layout.nodeRects[node.nodeId]
-                                  case final rect?)
-                                Positioned.fromRect(
-                                  rect: rect,
-                                  child: _MindMapNodeCard(
-                                    node: node,
-                                    accent:
-                                        branchAccents[node.nodeId] ??
-                                        context.appColors.primary,
-                                    childCount: children[node.nodeId] ?? 0,
-                                    collapsed: _collapsed.contains(node.nodeId),
-                                    onToggleCollapsed: () =>
-                                        _toggleCollapsed(node.nodeId, layout),
-                                    onTap: () => _showNode(node),
+                      child: RepaintBoundary(
+                        key: _exportBoundaryKey,
+                        child: ColoredBox(
+                          color: Theme.of(context).colorScheme.surface,
+                          child: SizedBox.fromSize(
+                            size: layout.size,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Positioned.fill(
+                                  child: CustomPaint(
+                                    painter: _MindMapEdgePainter(
+                                      layout: layout,
+                                      branchAccents: branchAccents,
+                                      nodeLevels: nodeLevels,
+                                      fallbackColor: context.appColors.primary,
+                                      dark:
+                                          Theme.of(context).brightness ==
+                                          Brightness.dark,
+                                    ),
                                   ),
                                 ),
-                          ],
+                                for (final node in widget.map.nodes)
+                                  if (layout.nodeRects[node.nodeId]
+                                      case final rect?)
+                                    Positioned.fromRect(
+                                      rect: rect,
+                                      child: _MindMapNodeCard(
+                                        node: node,
+                                        accent:
+                                            branchAccents[node.nodeId] ??
+                                            context.appColors.primary,
+                                        childCount: children[node.nodeId] ?? 0,
+                                        collapsed: _collapsed.contains(
+                                          node.nodeId,
+                                        ),
+                                        onToggleCollapsed: () =>
+                                            _toggleCollapsed(
+                                              node.nodeId,
+                                              layout,
+                                            ),
+                                        onTap: () => _showNode(node),
+                                      ),
+                                    ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -304,6 +332,33 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
         ),
       ],
     );
+  }
+
+  Future<void> _exportImage() async {
+    setState(() => _exporting = true);
+    try {
+      final Uint8List? bytes = await BookAiMindMapExport.capturePng(
+        _exportBoundaryKey,
+      );
+      if (!mounted) return;
+      if (bytes == null || bytes.isEmpty) {
+        showAppSnackBar(context, '生成图片失败，请重试');
+        return;
+      }
+      final save = widget.saveImage;
+      final message = save == null
+          ? await BookAiMindMapExport.savePng(
+              bytes,
+              title: widget.map.root.title,
+            )
+          : await save(bytes, widget.map.root.title);
+      if (mounted) showAppSnackBar(context, message);
+    } catch (error, stackTrace) {
+      debugPrint('[MindMap] export failed: $error\n$stackTrace');
+      if (mounted) showAppSnackBar(context, '无法导出思维导图，请重试');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   void _fit(Size canvas) {

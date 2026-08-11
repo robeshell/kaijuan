@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
 import 'package:kaijuan/core/theme.dart';
+import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_export.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_fullscreen.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_view.dart';
 
@@ -128,6 +131,7 @@ void main() {
     expect(find.text('向右'), findsOneWidget);
     expect(find.text('主题甲'), findsOneWidget);
     expect(find.text('主题说明'), findsOneWidget);
+    expect(find.byTooltip('导出图片'), findsOneWidget);
 
     await tester.tap(find.byTooltip('全屏查看'));
     expect(openedFullscreen, isTrue);
@@ -189,6 +193,7 @@ void main() {
       expect(find.byType(Scaffold), findsOneWidget);
       expect(find.text('思维导图'), findsOneWidget);
       expect(find.byTooltip('全屏查看'), findsNothing);
+      expect(find.byTooltip('导出图片'), findsOneWidget);
 
       await tester.tap(find.text('双向'));
       await tester.pump();
@@ -255,6 +260,58 @@ void main() {
     await tester.tap(find.text('主题甲'));
     await tester.pumpAndSettle();
     expect(find.text('第 1 节 · 约 25% 处'), findsOneWidget);
+  });
+
+  testWidgets('exports the complete map canvas as PNG', (tester) async {
+    Uint8List? savedBytes;
+    String? savedTitle;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(AppColors.defaultAccent),
+        home: Scaffold(
+          body: SizedBox(
+            width: 800,
+            height: 600,
+            child: BookAiMindMapView(
+              map: map,
+              onLayoutChanged: (_) {},
+              onOpenEvidence: (_) {},
+              saveImage: (bytes, title) async {
+                savedBytes = bytes;
+                savedTitle = title;
+                return '测试已保存';
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('导出图片'));
+    await tester.pump();
+    await tester.runAsync(() async {
+      for (var attempt = 0; attempt < 100 && savedBytes == null; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(savedBytes, isNotNull);
+    expect(savedBytes, isNotEmpty);
+    expect(savedBytes!.take(8), [137, 80, 78, 71, 13, 10, 26, 10]);
+    expect(savedTitle, '全书');
+    expect(find.text('测试已保存'), findsOneWidget);
+  });
+
+  test('large canvas export stays inside raster safety budget', () {
+    final ratio = BookAiMindMapExport.pixelRatioForSize(
+      const Size(12000, 5000),
+    );
+    expect(12000 * ratio, lessThanOrEqualTo(7000));
+    expect(12000 * 5000 * ratio * ratio, lessThanOrEqualTo(24000000));
+    expect(BookAiMindMapExport.pixelRatioForSize(const Size(1000, 800)), 2.5);
   });
 
   testWidgets('branch colors are distinct, inherited and theme-derived', (
