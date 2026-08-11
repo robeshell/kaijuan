@@ -378,7 +378,7 @@ void main() {
     },
   );
 
-  test('declared omnibus count mismatch fails closed without fake choices', () {
+  test('editable title count cannot reject anchored work trees', () {
     final manifest = classify(
       BookStructureIndex(
         indexVersion: 1,
@@ -403,8 +403,8 @@ void main() {
       ),
     );
 
-    expect(manifest.kind, AiBookStructureKind.uncertain);
-    expect(manifest.works, isEmpty);
+    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
   });
 
   test('publication collection container is not exposed as a work', () {
@@ -417,42 +417,6 @@ void main() {
           node(
             id: 'container',
             title: '推理作品集',
-            order: 0,
-            sectionIndex: 0,
-            children: 2,
-          ),
-          node(
-            id: 'work-a',
-            title: '作品甲',
-            order: 1,
-            sectionIndex: 1,
-            children: 2,
-          ),
-          node(
-            id: 'work-b',
-            title: '作品乙',
-            order: 2,
-            sectionIndex: 4,
-            children: 2,
-          ),
-        ],
-      ),
-    );
-
-    expect(manifest.kind, AiBookStructureKind.multiWorkOmnibus);
-    expect(manifest.works.map((work) => work.title), ['作品甲', '作品乙']);
-  });
-
-  test('declared count closes after dropping a generic collection header', () {
-    final manifest = classify(
-      BookStructureIndex(
-        indexVersion: 1,
-        publicationTitle: '珍藏共2册',
-        sections: [for (var index = 0; index < 6; index++) section(index)],
-        navigation: [
-          node(
-            id: 'container',
-            title: '作者作品集',
             order: 0,
             sectionIndex: 0,
             children: 2,
@@ -619,27 +583,30 @@ void main() {
     ]);
   });
 
-  test('declared collection with unrecovered chapter tree stays uncertain', () {
-    final manifest = classify(
-      BookStructureIndex(
-        indexVersion: 1,
-        publicationTitle: '作品合集共3册',
-        sections: [for (var index = 0; index < 5; index++) section(index)],
-        navigation: [
-          for (var index = 0; index < 5; index++)
-            node(
-              id: 'chapter-$index',
-              title: '第${index + 1}章',
-              order: index,
-              sectionIndex: index,
-            ),
-        ],
-      ),
-    );
+  test(
+    'editable collection count cannot turn ordinary chapters into works',
+    () {
+      final manifest = classify(
+        BookStructureIndex(
+          indexVersion: 1,
+          publicationTitle: '作品合集共3册',
+          sections: [for (var index = 0; index < 5; index++) section(index)],
+          navigation: [
+            for (var index = 0; index < 5; index++)
+              node(
+                id: 'chapter-$index',
+                title: '第${index + 1}章',
+                order: index,
+                sectionIndex: index,
+              ),
+          ],
+        ),
+      );
 
-    expect(manifest.kind, AiBookStructureKind.uncertain);
-    expect(manifest.works, isEmpty);
-  });
+      expect(manifest.kind, AiBookStructureKind.singleWork);
+      expect(manifest.works, isEmpty);
+    },
+  );
 
   test('navigation input order does not change the selected structure', () {
     final navigation = [

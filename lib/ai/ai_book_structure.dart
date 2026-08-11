@@ -66,7 +66,7 @@ abstract final class _StructureScore {
   static const intermediateGroups = 62;
   static const flatDirectories = 54;
   static const omnibusMetadata = 18;
-  static const declaredCountMatch = 35;
+  static const declaredCountMatch = 6;
   static const distinctAnchors = 18;
   static const ambiguityMargin = 8;
 }
@@ -269,15 +269,6 @@ abstract final class AiBookStructureResolver {
               ),
         )
         .toList(growable: false);
-    if (expectedCount != null && candidates.length > expectedCount) {
-      final withoutCollectionHeaders = candidates
-          .where((node) => !_isCollectionHeaderTitle(node.title))
-          .toList(growable: false);
-      if (withoutCollectionHeaders.length == expectedCount) {
-        candidates = withoutCollectionHeaders;
-      }
-    }
-
     final chapterLikeCount = candidates
         .where(
           (node) =>
@@ -320,23 +311,19 @@ abstract final class AiBookStructureResolver {
           .toList(growable: false),
     );
     final groupedCandidates = _mergeSplitInstallments(
-      expectedCount == null
-          ? const <BookStructureNavigationNode>[]
-          : _expandIntermediateGroups(
-              index: index,
-              roots: allCandidates,
-              isSupplementTitle: isSupplementTitle,
-            ),
+      _expandIntermediateGroups(
+        index: index,
+        roots: allCandidates,
+        isSupplementTitle: isSupplementTitle,
+      ),
     );
     final flatCandidates = _mergeSplitInstallments(
-      expectedCount == null
-          ? const <BookStructureNavigationNode>[]
-          : _flatDirectoryBoundaries(
-              index: index,
-              isSupplementTitle: isSupplementTitle,
-              publicationTitle: index.publicationTitle,
-              publicationEvidence: publicationEvidence,
-            ),
+      _flatDirectoryBoundaries(
+        index: index,
+        isSupplementTitle: isSupplementTitle,
+        publicationTitle: index.publicationTitle,
+        publicationEvidence: publicationEvidence,
+      ),
     );
 
     final hypotheses = <AiBookStructureHypothesis>[];
@@ -363,8 +350,7 @@ abstract final class AiBookStructureResolver {
         evidence: List.unmodifiable(singleEvidence),
         rejections:
             candidates.length >= 2 &&
-                (expectedCount != null ||
-                    (hasOmnibusTitleEvidence && treeCandidates.length >= 2) ||
+                ((hasOmnibusTitleEvidence && treeCandidates.length >= 2) ||
                     hasRepeatedInstallmentEvidence)
             ? ['publication structure evidence remains unresolved']
             : const [],
@@ -384,11 +370,6 @@ abstract final class AiBookStructureResolver {
       if (nodes.length < 2) rejections.add('fewer than two candidate ranges');
       if (!hasRequiredEvidence) {
         rejections.add('missing required structural evidence');
-      }
-      if (expectedCount != null &&
-          kind == AiBookStructureKind.multiWorkOmnibus &&
-          nodes.length != expectedCount) {
-        rejections.add('expected $expectedCount works, found ${nodes.length}');
       }
       final anchored = nodes.where((node) => node.sectionIndex != null).length;
       final distinctAnchors = nodes
@@ -466,7 +447,7 @@ abstract final class AiBookStructureResolver {
       kind: AiBookStructureKind.multiWorkOmnibus,
       nodes: groupedCandidates,
       strategyScore: _StructureScore.intermediateGroups,
-      hasRequiredEvidence: omnibusEvidence && expectedCount != null,
+      hasRequiredEvidence: omnibusEvidence,
       evidenceLabel: 'intermediate groups expand into work ranges',
     );
     addHypothesis(
@@ -474,7 +455,7 @@ abstract final class AiBookStructureResolver {
       kind: AiBookStructureKind.multiWorkOmnibus,
       nodes: flatCandidates,
       strategyScore: _StructureScore.flatDirectories,
-      hasRequiredEvidence: omnibusEvidence && expectedCount != null,
+      hasRequiredEvidence: omnibusEvidence,
       evidenceLabel: 'repeated title-directory boundaries form works',
     );
 
@@ -577,7 +558,7 @@ abstract final class AiBookStructureResolver {
         .join('; ');
     final prefix = expectedCount == null
         ? 'no legal structure hypothesis'
-        : 'publication expects $expectedCount works but no candidate matches';
+        : 'no legal structure hypothesis (title suggests $expectedCount works)';
     return rejected.isEmpty ? prefix : '$prefix: $rejected';
   }
 
