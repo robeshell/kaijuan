@@ -14,7 +14,7 @@ void showBookReaderSettingsSheet(
   BuildContext context,
   BookReaderController controller,
 ) {
-  final theme = controller.readingTheme;
+  final theme = controller.preferences.readingTheme;
   showAppBottomSheet<void>(
     context,
     useRootNavigator: true,
@@ -48,7 +48,7 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
   @override
   void initState() {
     super.initState();
-    _previewFontSize = controller.fontSize;
+    _previewFontSize = controller.preferences.fontSize;
   }
 
   @override
@@ -59,9 +59,9 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
       listenable: controller,
       builder: (context, _) {
         if (!_draggingFontSize) {
-          _previewFontSize = controller.fontSize;
+          _previewFontSize = controller.preferences.fontSize;
         }
-        final theme = controller.readingTheme;
+        final theme = controller.preferences.readingTheme;
         final fg = Color(theme.foregroundArgb);
         final fgMuted = theme.isDark
             ? const Color(0x99F2F2F4)
@@ -119,12 +119,13 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                             ),
                           ),
                       ],
-                      selected: {controller.readingMode},
+                      selected: {controller.preferences.readingMode},
                       onSelectionChanged: (s) =>
-                          controller.setReadingMode(s.first),
+                          controller.preferences.setReadingMode(s.first),
                     ),
                   ],
-                  if (controller.readingMode == BookReadingMode.page) ...[
+                  if (controller.preferences.readingMode ==
+                      BookReadingMode.page) ...[
                     const SizedBox(height: 16),
                     _label('翻页效果', fgMuted),
                     const SizedBox(height: 8),
@@ -149,9 +150,9 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                             ),
                           ),
                       ],
-                      selected: {controller.pageTurnEffect},
+                      selected: {controller.preferences.pageTurnEffect},
                       onSelectionChanged: (s) =>
-                          controller.setPageTurnEffect(s.first),
+                          controller.preferences.setPageTurnEffect(s.first),
                     ),
                   ],
                   const SizedBox(height: 16),
@@ -173,7 +174,7 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                     },
                     onChangeEnd: (value) {
                       _draggingFontSize = false;
-                      unawaited(controller.setFontSize(value));
+                      unawaited(controller.preferences.setFontSize(value));
                     },
                   ),
                   const SizedBox(height: 8),
@@ -185,8 +186,11 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                       for (final h in _lineHeightPresets)
                         ChoiceChip(
                           label: Text(h.toStringAsFixed(1)),
-                          selected: (controller.lineHeight - h).abs() < 0.05,
-                          onSelected: (_) => controller.setLineHeight(h),
+                          selected:
+                              (controller.preferences.lineHeight - h).abs() <
+                              0.05,
+                          onSelected: (_) =>
+                              controller.preferences.setLineHeight(h),
                           backgroundColor: theme.isDark
                               ? Colors.white12
                               : Colors.black12,
@@ -223,8 +227,9 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                           ),
                         ),
                     ],
-                    selected: {controller.margin},
-                    onSelectionChanged: (s) => controller.setMargin(s.first),
+                    selected: {controller.preferences.margin},
+                    onSelectionChanged: (s) =>
+                        controller.preferences.setMargin(s.first),
                   ),
                   const SizedBox(height: 16),
                   _label('阅读背景', fgMuted),
@@ -238,8 +243,9 @@ class _BookReaderSettingsSheetState extends State<_BookReaderSettingsSheet> {
                           background: Color(t.backgroundArgb),
                           isDark: t.isDark,
                           label: t.label,
-                          selected: controller.readingTheme == t,
-                          onTap: () => controller.setReadingTheme(t),
+                          selected: controller.preferences.readingTheme == t,
+                          onTap: () =>
+                              controller.preferences.setReadingTheme(t),
                         ),
                     ],
                   ),

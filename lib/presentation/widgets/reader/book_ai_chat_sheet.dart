@@ -12,9 +12,6 @@ import '../../../ai/ai_chat.dart';
 import '../../../ai/ai_chat_retrieve.dart';
 import '../../../ai/ai_chat_session_ops.dart';
 import '../../../ai/ai_conversation_intent.dart';
-import '../../../ai/ai_graph.dart';
-import '../../../ai/ai_graph_family_tree.dart';
-import '../../../ai/ai_graph_service.dart';
 import '../../../ai/ai_models.dart';
 import '../../../ai/ai_mind_map.dart';
 import '../../../ai/ai_provider_kind.dart';
@@ -25,23 +22,15 @@ import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../../controllers/book_ai_conversation_controller.dart';
+import '../../controllers/book_ai_mind_map_coordinator.dart';
 import '../../controllers/book_ai_mind_map_controller.dart';
 import '../../screens/ai_settings_screen.dart';
 import '../ai_typography.dart';
 import '../app_components.dart';
 import '../app_overlays.dart';
 import 'book_ai_chat_components.dart';
-import 'book_ai_entity_sheet.dart';
-import 'book_ai_graph_components.dart';
-import 'book_ai_graph_content_view.dart';
-import 'book_ai_graph_family_tree_fullscreen.dart';
-import 'book_ai_graph_family_tree_view.dart';
-import 'book_ai_graph_sort.dart';
-import 'book_ai_graph_tiles.dart';
-import 'book_ai_graph_fullscreen.dart';
-import 'book_ai_mind_map_fullscreen.dart';
-import 'book_ai_mind_map_scope_card.dart';
-import 'book_ai_narration_dialog.dart';
+import 'book_ai_graph_workspace.dart';
+import 'book_ai_mind_map_routes.dart';
 
 /// Book-scoped AI chat (M2). Session is isolated by contentHash.
 ///
@@ -86,56 +75,16 @@ class _BookAiChatSheet extends StatefulWidget {
 
 enum _BookAiWorkspaceTab { chat, graph }
 
-/// Kept only while old structured-outline caches remain readable by older
-/// app versions. The current UI generates outlines through normal chat.
-enum _OutlineAction { delete }
-
-typedef _NarrationConfirmation = ({
-  AiNarrationPlan? plan,
-  AiNarrationPlanMode mode,
-  Set<int> excludedSections,
-});
-
 class _BookAiChatSheetState extends State<_BookAiChatSheet>
     with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
-  final _graphQueryController = TextEditingController();
-  final _graphScrollController = ScrollController();
   final _scroll = ScrollController();
   final _focus = FocusNode();
   late final TabController _tabs;
   _BookAiWorkspaceTab _activeTab = _BookAiWorkspaceTab.chat;
 
-  BookAiGraphViewMode _graphViewMode = BookAiGraphViewMode.persons;
-
-  /// Plan whose default view has been applied; applying again is skipped so
-  /// the user's manual view choice survives unrelated controller updates.
-  AiBookGraph? _appliedNarrationGraph;
-  bool _familyTreeDetailExpanded = false;
-
-  /// Per-view selection: changing 人物 never changes 地点/事件/组织.
-  final _graphSortOrders = <BookAiGraphViewMode, GraphEntitySortOrder>{};
-
-  GraphEntitySortOrder get _graphSortOrder =>
-      _graphSortOrders[_graphViewMode] ?? defaultGraphSortOrder(_graphListKind);
-
-  /// Isolated entities (0 relations) collapse into a single row until opened.
-  bool _graphIsolatedExpanded = false;
-
-  /// Collection works (null = plain book or not resolved yet). Resolved
-  /// lazily via a one-shot structure recognition; gates the collection UI.
-  bool _graphWorksLoading = false;
-  bool _graphPreparing = false;
-  String? _graphPreparingWorkId;
-  String _graphQuery = '';
-  String? _graphHighlighted;
-  Timer? _graphHighlightTimer;
   int _scrollRequestEpoch = 0;
   int _streamTailFollowEpoch = 0;
-  final _graphEntityKeys = <String, GlobalKey>{};
-  int _graphListEpoch = 0;
-  String? _mindMapRevealTurnId;
-  bool _mindMapPointerActive = false;
   bool _committingComposer = false;
 
   /// Attached highlight; null when cleared by user.
@@ -178,7 +127,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String? _retryTurnId;
   int _turnSerial = 0;
   String? _mindMapTurnId;
-  BookAiMindMapScopePrompt? _mindMapScopePrompt;
+  late final BookAiMindMapCoordinator _mindMapCoordinator;
   BookReaderController get _c => widget.controller;
 
   BookAiConversationController get _conversation => _c.aiWorkspace.conversation;
@@ -186,8 +135,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   BookAiMindMapController get _mindMapConversation =>
       _c.aiWorkspace.mindMapConversation;
 
-  String? get _activeMindMapArtifactId =>
-      _mindMapConversation.attachedArtifactId;
+  String? get _activeMindMapArtifactId => _mindMapCoordinator.activeArtifactId;
 
   AiChatSession get _session => _conversation.session;
 
@@ -210,21 +158,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// shared whole-book list for plain books.
   List<AiChatMessage> get _messages => _session.messagesFor(_chatWorkKey);
 
-  String _artifactIdFor(AiChatMessage message, AiBookMindMap map) =>
-      map.artifactId ?? message.turnId ?? 'mind-map:${map.scopeFingerprint}';
-
-  AiBookMindMap? _mindMapForArtifact(String artifactId) {
-    for (final message in _messages.reversed) {
-      final map = message.mindMap;
-      if (map == null) continue;
-      final fallbackId =
-          map.artifactId ??
-          message.turnId ??
-          'mind-map:${map.scopeFingerprint}';
-      if (fallbackId == artifactId) return map;
-    }
-    return null;
-  }
+  AiBookMindMap? _mindMapForArtifact(String artifactId) =>
+      _mindMapCoordinator.mapForArtifact(artifactId);
 
   AiConversationCommand? _commandForTurn(String? turnId) {
     if (turnId == null) return null;
@@ -236,22 +171,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return null;
   }
 
-  AiBookMindMap? get _activeMindMap {
-    final id = _activeMindMapArtifactId;
-    return id == null ? null : _mindMapForArtifact(id);
-  }
+  AiBookMindMap? get _activeMindMap => _mindMapCoordinator.activeMindMap;
 
   void _beginEditingMindMap(AiChatMessage message) {
-    final map = message.mindMap;
-    if (map == null || _sending || _resolvingChatScope) return;
-    final artifactId = _artifactIdFor(message, map);
-    _mindMapConversation.attachArtifact(artifactId);
-    unawaited(_focusComposer());
+    if (_mindMapCoordinator.beginEditing(
+      message,
+      enabled: !_sending && !_resolvingChatScope,
+    )) {
+      unawaited(_focusComposer());
+    }
   }
 
   bool get _ready => _c.canUseAiChat;
-
-  bool get _graphBusy => _graphPreparing || _c.isGeneratingBookGraph;
 
   bool get _canWebSearch => _c.canUseWebSearch;
 
@@ -305,13 +236,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   double _panelBodySize(BuildContext context) => context.aiBodySize;
 
-  double _panelDetailSize(BuildContext context) => context.aiDetailSize;
-
   double _panelTabSize(BuildContext context) => context.aiLabelSize;
 
   @override
   void initState() {
     super.initState();
+    _mindMapCoordinator = BookAiMindMapCoordinator(
+      conversation: _conversation,
+      mindMapConversation: _mindMapConversation,
+      currentWorkKey: () => _chatWorkKey,
+      persist: _persist,
+    )..addListener(_onMindMapCoordinatorChanged);
     _tabs = TabController(
       length: _BookAiWorkspaceTab.values.length,
       vsync: this,
@@ -331,43 +266,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     // the workspace changes, which feels like a stalled tab switch.
     if (_activeTab.index == _tabs.index) return;
     setState(() => _activeTab = _BookAiWorkspaceTab.values[_tabs.index]);
-    // TabBarView keeps visited pages alive; bump the graph list epoch so the
-    // ListView is rebuilt fresh (landing at the top) instead of restoring its
-    // previous scroll position.
-    if (_activeTab == _BookAiWorkspaceTab.graph) {
-      _graphListEpoch++;
-      unawaited(_ensureGraphWorks());
-    }
   }
 
   void _onReaderControllerChanged() {
     if (!mounted) return;
-    // Apply the narration plan's recommended default view once per graph
-    // instance (new generation or re-analysis); afterwards the user's own
-    // view choice wins.
-    final storedGraph = _c.bookGraph;
-    final visibleGraph = _c.visibleBookGraph;
-    if (storedGraph != null &&
-        !identical(storedGraph, _appliedNarrationGraph)) {
-      _appliedNarrationGraph = storedGraph;
-      final wanted = _viewModeFor(
-        resolveGraphInitialView(
-          visibleGraph ?? storedGraph,
-          storedGraph.narration?.defaultView,
-        ),
-      );
-      if (wanted != null && _graphViewMode != wanted) {
-        _graphViewMode = wanted;
-      }
-      _graphQueryController.clear();
-      _graphQuery = '';
-    }
     if (_mindMapTurnId != null) {
       _toolStatus =
           _c.bookMindMapProgress ??
           (_c.isGeneratingBookMindMap ? '正在生成思维导图' : _toolStatus);
     }
-    // The graph scope is user-selected and must not follow pagination.
     setState(() {});
   }
 
@@ -397,6 +304,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _toolStatus = _mindMapConversation.progress;
       _sending = _conversation.sending;
     });
+  }
+
+  void _onMindMapCoordinatorChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _bootstrap() async {
@@ -517,7 +428,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (text.isEmpty ||
         _sending ||
         _resolvingChatScope ||
-        _mindMapScopePrompt != null) {
+        _mindMapCoordinator.scopePrompt != null) {
       return;
     }
     if (!_ready) return;
@@ -941,10 +852,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _stop({bool commitPartial = true, bool persist = true}) async {
-    final scopePrompt = _mindMapScopePrompt;
-    if (scopePrompt != null && !scopePrompt.completer.isCompleted) {
-      scopePrompt.completer.complete(null);
-    }
+    _mindMapCoordinator.cancelScope();
     final turnId = _activeTurnId;
     final turnWorkKey = _activeTurnWorkKey;
     if (_mindMapTurnId == turnId) {
@@ -967,7 +875,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _sending = false;
       _searchingWeb = false;
       _toolStatus = null;
-      _mindMapScopePrompt = null;
       if (turnId != null && !conversationOwnsTurn) {
         _setTurnStatus(
           turnId,
@@ -1164,51 +1071,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (mounted) showAppSnackBar(context, '已复制');
   }
 
-  void _updateMindMapLayout(AiChatMessage message, AiMindMapLayout layout) {
-    final sourceMap = message.mindMap;
-    if (sourceMap == null) return;
-    final workKey = _chatWorkKey;
-    final messages = List<AiChatMessage>.from(_session.messagesFor(workKey));
-    var index = messages.indexWhere(
-      (candidate) => identical(candidate, message),
-    );
-    if (index < 0 && message.turnId != null) {
-      // User + assistant messages intentionally share a turnId. Match the
-      // structured assistant artifact, not the earlier user bubble.
-      index = messages.lastIndexWhere(
-        (candidate) =>
-            candidate.role == message.role &&
-            candidate.turnId == message.turnId &&
-            candidate.mindMap?.scopeFingerprint == sourceMap.scopeFingerprint,
-      );
-    }
-    if (index < 0) return;
-    final currentMap = messages[index].mindMap;
-    if (currentMap == null || currentMap.layout == layout) return;
-    messages[index] = messages[index].copyWith(
-      mindMap: currentMap.copyWith(layout: layout),
-    );
-    setState(() {
-      _session = _session.withMessagesFor(workKey, messages);
-    });
-    unawaited(_persist());
-  }
-
-  void _openMindMapFullscreen(AiChatMessage message) {
-    final map = message.mindMap;
-    if (map == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BookAiMindMapFullscreen(
-          title: map.root.title.isEmpty ? '思维导图' : map.root.title,
-          map: map,
-          onLayoutChanged: (layout) => _updateMindMapLayout(message, layout),
-          onOpenEvidence: _goToMindMapEvidence,
-        ),
-      ),
-    );
-  }
-
   Future<void> _openSettings() async {
     final ai = _c.aiSettingsController;
     if (ai == null) {
@@ -1221,46 +1083,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       await ai.load();
     }
     if (mounted) setState(() {});
-  }
-
-  Future<void> _generateOutline({bool force = false}) async {
-    if (!_ready || _c.isGeneratingBookOutline) return;
-    if (force && _c.bookOutline != null) {
-      final confirmed = await showAppConfirmDialog(
-        context,
-        title: '重新生成大纲？',
-        message: '将重新请求 AI，并替换当前保存的大纲。',
-        confirmLabel: '重新生成',
-      );
-      if (confirmed != true || !mounted) return;
-    }
-    Set<int>? excludedSections;
-    if (_c.hasAmbiguousInternalWorks) {
-      final existing = _c.bookOutline;
-      final confirmed = await _showNarrationChooser(
-        initialExcluded: existing?.excludedSectionIndices.toSet() ?? const {},
-        useRecommendedSelection: existing == null,
-        scopeOnly: true,
-        dialogTitle: '选择大纲范围',
-        confirmLabel: '生成大纲',
-      );
-      if (confirmed == null || !mounted) return;
-      excludedSections = confirmed.excludedSections;
-    }
-    await _c.generateBookOutline(excludedSectionIndices: excludedSections);
-  }
-
-  Future<void> _deleteOutline() async {
-    if (_c.bookOutline == null || _c.isGeneratingBookOutline) return;
-    final confirmed = await showAppConfirmDialog(
-      context,
-      title: '删除大纲？',
-      message: '只删除这本书保存的 AI 大纲，不影响对话记录。',
-      confirmLabel: '删除大纲',
-      destructive: true,
-    );
-    if (confirmed != true || !mounted) return;
-    await _c.deleteBookOutline();
   }
 
   Future<void> _handleOpeningShortcut(AiChatShortcut shortcut) async {
@@ -1479,30 +1301,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<int?> _showMindMapScopePrompt({
     required String title,
     required List<BookAiMindMapScopeChoice> choices,
-  }) async {
-    final prompt = BookAiMindMapScopePrompt(title: title, choices: choices);
-    setState(() => _mindMapScopePrompt = prompt);
-    _scrollToEnd();
-    final selected = await prompt.completer.future;
-    if (selected == null && mounted && identical(_mindMapScopePrompt, prompt)) {
-      setState(() => _mindMapScopePrompt = null);
-    }
-    return selected;
-  }
-
-  void _selectMindMapScope(int value) {
-    final prompt = _mindMapScopePrompt;
-    if (prompt == null || prompt.completer.isCompleted) return;
-    setState(() => prompt.selectedValue = value);
-    prompt.completer.complete(value);
-  }
-
-  void _cancelMindMapScopePrompt() {
-    final prompt = _mindMapScopePrompt;
-    if (prompt == null) return;
-    if (!prompt.completer.isCompleted) prompt.completer.complete(null);
-    setState(() => _mindMapScopePrompt = null);
-  }
+  }) => _mindMapCoordinator.requestScope(
+    title: title,
+    choices: choices,
+    onOpened: _scrollToEnd,
+  );
 
   int _workChapterCount(AiBookWork work) {
     final logicalStart = work.startLogicalIndex;
@@ -1562,11 +1365,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         if (keepEditing && artifactId != null) {
           _mindMapConversation.attachArtifact(artifactId);
         }
-        setState(() => _mindMapRevealTurnId = artifactId);
+        if (artifactId != null) _mindMapCoordinator.reveal(artifactId);
       },
     );
     if (!mounted) return;
     final failed = !outcome.succeeded && !outcome.cancelled;
+    _mindMapCoordinator.cancelScope();
     setState(() {
       if (failed) {
         _error = outcome.completed == 0
@@ -1588,7 +1392,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _activeTurnId = null;
       _activeTurnWorkKey = null;
       _mindMapTurnId = null;
-      _mindMapScopePrompt = null;
     });
     if (!failed) {
       // Cancel the pending "scroll to bottom" retries started for the user
@@ -1599,1267 +1402,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
   }
 
-  void _goToMindMapEvidence(AiMindMapEvidence evidence) {
-    final index = evidence.sectionIndex - 1;
-    if (index < 0 || index >= _c.sectionCount) return;
-    _c.goToSection(index, progressInSection: evidence.progressInSection);
-    // The node detail has just started closing. Wait for it to leave before
-    // closing the AI workspace, otherwise the immediate pop can hit the same
-    // modal twice and leave the workspace covering the target passage.
-    Future<void>.delayed(const Duration(milliseconds: 300), () {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).maybePop();
-      }
-    });
-  }
-
-  // Legacy renderer kept during the structured-outline cache compatibility
-  // window. It has no navigation entry; new outlines use normal chat.
-  // ignore: unused_element
-  Widget _buildOutlineTab(BuildContext context) {
-    final colors = context.appColors;
-    final outline = _c.bookOutline;
-    final progress = _c.bookOutlineProgress;
-    final generating = _c.isGeneratingBookOutline;
-    final error = _c.bookOutlineError;
-    if (!_ready) {
-      return _AiUnavailable(
-        message: '添加 API Key 后，就可以生成本书大纲。',
-        onOpenSettings: () => unawaited(_openSettings()),
-        icon: KaijuanIcons.toc,
-      );
-    }
-    if (outline == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(KaijuanIcons.toc, size: 34, color: context.appSecondaryText),
-              const SizedBox(height: 14),
-              // While generating, the title is redundant next to the live
-              // progress label below; keep it only for the idle state.
-              if (!generating)
-                Text(
-                  _c.hasAmbiguousInternalWorks
-                      ? '选择范围生成大纲'
-                      : _c.currentReadingWork != null
-                      ? '《${_c.currentReadingWork!.title}》大纲'
-                      : '本书大纲',
-                  style: TextStyle(
-                    fontSize: _panelTitleSize(context),
-                    fontWeight: FontWeight.w600,
-                    color: context.appPrimaryText,
-                  ),
-                ),
-              if (!generating) ...[
-                const SizedBox(height: 6),
-                Text(
-                  _c.hasAmbiguousInternalWorks
-                      ? '目录结构无法可靠区分章节和多部作品。生成前请确认参与分析的内容。'
-                      : '生成一次后会保存在这本书中。',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: _panelBodySize(context),
-                    height: 1.45,
-                    color: context.appSecondaryText,
-                  ),
-                ),
-              ],
-              if (generating) ...[
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _thinkingOrb(context),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        progress?.label ?? '正在生成…',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: _panelBodySize(context),
-                          height: 1.45,
-                          color: context.appSecondaryText,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  onPressed: _c.cancelBookOutlineGeneration,
-                  icon: const Icon(KaijuanIcons.stop, size: 18),
-                  label: const Text('停止'),
-                ),
-              ] else ...[
-                if (error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    error,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: colors.error,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () => unawaited(_generateOutline()),
-                  icon: const Icon(KaijuanIcons.aiChat, size: 18),
-                  label: Text(
-                    _c.hasAmbiguousInternalWorks ? '选择范围并生成' : '生成大纲',
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                _c.currentReadingWork != null
-                    ? '《${_c.currentReadingWork!.title}》'
-                    : '本书',
-                style: TextStyle(
-                  fontSize: _panelTitleSize(context),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip: '重新生成大纲',
-              onPressed: generating
-                  ? null
-                  : () => unawaited(_generateOutline(force: true)),
-              icon: const Icon(KaijuanIcons.refresh, size: 20),
-            ),
-            PopupMenuButton<_OutlineAction>(
-              tooltip: '更多大纲操作',
-              enabled: !generating,
-              onSelected: (action) {
-                if (action == _OutlineAction.delete) {
-                  unawaited(_deleteOutline());
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: _OutlineAction.delete,
-                  child: Text('删除大纲'),
-                ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        // 综述（一段话讲清全书脉络）
-        Text(
-          outline.overview,
-          style: TextStyle(
-            fontSize: _panelBodySize(context),
-            height: 1.6,
-            color: context.appPrimaryText,
-          ),
-        ),
-        if (generating) ...[
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              _thinkingOrb(context),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  progress?.label ?? '正在生成…',
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    color: context.appSecondaryText,
-                  ),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: _c.cancelBookOutlineGeneration,
-                icon: const Icon(KaijuanIcons.stop, size: 18),
-                label: const Text('停止'),
-              ),
-            ],
-          ),
-        ],
-        if (error != null) ...[
-          const SizedBox(height: 10),
-          Text(
-            error,
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: colors.error,
-            ),
-          ),
-        ],
-        SizedBox(height: context.appIsCompact ? 20 : 28),
-        // 大纲（结构单元，按书中顺序）
-        Text(
-          '大纲',
-          style: TextStyle(
-            fontSize: _panelTitleSize(context),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 12),
-        for (var i = 0; i < outline.units.length; i++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 序号
-                Container(
-                  width: 24,
-                  height: 24,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: colors.surfaceContainerHighest.withValues(
-                      alpha: 0.5,
-                    ),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    '${i + 1}',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      fontWeight: FontWeight.w600,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        outline.units[i].title,
-                        style: TextStyle(
-                          fontSize: _panelBodySize(context),
-                          fontWeight: FontWeight.w600,
-                          height: 1.4,
-                          color: context.appPrimaryText,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        outline.units[i].blurb,
-                        style: TextStyle(
-                          fontSize: _panelDetailSize(context),
-                          height: 1.55,
-                          color: context.appSecondaryText,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  /// Which entity types the current list view shows; empty on the graph
-  /// view (no list rendered there). The persons view also folds in
-  /// `organization` has its own index; it must not inflate the person list.
-  Set<AiGraphEntityType> get _graphListEntityTypes => switch (_graphViewMode) {
-    BookAiGraphViewMode.persons => {AiGraphEntityType.person},
-    BookAiGraphViewMode.locations => {AiGraphEntityType.location},
-    BookAiGraphViewMode.events => {AiGraphEntityType.event},
-    BookAiGraphViewMode.organizations => {AiGraphEntityType.organization},
-    BookAiGraphViewMode.things => {
-      AiGraphEntityType.item,
-      AiGraphEntityType.concept,
-      AiGraphEntityType.creature,
-    },
-    BookAiGraphViewMode.graph => const {},
-    BookAiGraphViewMode.familyTree => const {},
-  };
-
-  GraphEntityListKind get _graphListKind => switch (_graphViewMode) {
-    BookAiGraphViewMode.persons => GraphEntityListKind.persons,
-    BookAiGraphViewMode.locations => GraphEntityListKind.locations,
-    BookAiGraphViewMode.events => GraphEntityListKind.events,
-    BookAiGraphViewMode.organizations => GraphEntityListKind.organizations,
-    BookAiGraphViewMode.things => GraphEntityListKind.things,
-    // Sorting controls are not rendered for exploration views. This fallback
-    // only keeps the shared build path total while those views are active.
-    BookAiGraphViewMode.graph ||
-    BookAiGraphViewMode.familyTree => GraphEntityListKind.persons,
-  };
-
-  BookAiGraphViewMode? _viewModeFor(String view) => switch (view) {
-    'persons' => BookAiGraphViewMode.persons,
-    'locations' => BookAiGraphViewMode.locations,
-    'events' => BookAiGraphViewMode.events,
-    'organizations' || 'org_tree' => BookAiGraphViewMode.organizations,
-    'things' => BookAiGraphViewMode.things,
-    'graph' => BookAiGraphViewMode.graph,
-    'family_tree' => BookAiGraphViewMode.familyTree,
-    _ => null,
-  };
-
-  Widget _buildGraphTab(BuildContext context) {
-    if (_c.hasCollectionWorks && !_c.hasActiveWorkGraph) {
-      return _buildGraphWorkList(context);
-    }
-    return _buildGraphContent(context);
-  }
-
-  Widget _buildGraphWorkList(BuildContext context) {
-    if (!_ready) {
-      return _AiUnavailable(
-        message: '添加 API Key 后，就可以生成本书的人物、地点与事件图谱。',
-        onOpenSettings: () => unawaited(_openSettings()),
-        icon: KaijuanIcons.graph,
-      );
-    }
-    final works = _c.resolvedGraphWorks ?? const <AiGraphWorkCandidate>[];
-    final reading = _c.currentReadingWork;
-    final generatingWork = _c.generatingGraphWork;
-    final progress = _c.bookGraphProgress;
-    final error = _c.bookGraphError;
-    return BookAiGraphWorkList(
-      works: works,
-      readingWork: reading,
-      generatingWork: generatingWork,
-      preparing: _graphPreparing,
-      preparingWorkId: _graphPreparingWorkId,
-      busy: _graphBusy,
-      error: error,
-      progressLabel: progress?.label,
-      titleSize: _panelTitleSize(context),
-      isReady: _c.hasWorkGraph,
-      onCancelGeneration: _c.cancelBookGraphGeneration,
-      onSelect: (work) {
-        if (_c.hasWorkGraph(work)) {
-          _c.openWorkGraph(work);
-        } else {
-          unawaited(_generateGraph(work: work));
-        }
-      },
-    );
-  }
-
-  Widget _buildGraphContent(BuildContext context) {
-    final colors = context.appColors;
-    final graph = _c.visibleBookGraph;
-    final hadEmptySnapshot = graph == null && _c.bookGraph != null;
-    final generating = _c.isGeneratingBookGraph;
-    final preparing = _graphPreparing && !generating;
-    final busy = preparing || generating;
-    final error = _c.bookGraphError;
-    if (!_ready) {
-      return _AiUnavailable(
-        message: '添加 API Key 后，就可以生成本书的人物、地点与事件图谱。',
-        onOpenSettings: () => unawaited(_openSettings()),
-        icon: KaijuanIcons.graph,
-      );
-    }
-    if (graph == null) {
-      // Collection detection is async (outline → work candidates). Until the
-      // works are known, there is no valid range to generate — show a
-      // loading state instead of the actionable empty-state button, or a
-      // tap would start a whole-book dialog against a half-loaded book.
-      // Only a recognition IN PROGRESS shows the loading state; once it
-      // fails (or this is a plain book that will never have works), fall
-      // through to the actionable empty state — otherwise the tab would be
-      // stuck on「正在识别著作范围…」forever.
-      final works = _c.resolvedGraphWorks;
-      if (works == null && _graphWorksLoading) {
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '正在识别著作范围…',
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    color: context.appSecondaryText,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                KaijuanIcons.graph,
-                size: 34,
-                color: context.appSecondaryText,
-              ),
-              const SizedBox(height: 14),
-              if (!busy)
-                Text(
-                  hadEmptySnapshot ? '尚无有效图谱数据' : '知识图谱',
-                  style: TextStyle(
-                    fontSize: _panelTitleSize(context),
-                    fontWeight: FontWeight.w600,
-                    color: context.appPrimaryText,
-                  ),
-                ),
-              if (busy) ...[
-                const SizedBox(height: 10),
-                Text(
-                  '生成完成后，实体、关系与索引会显示在这里。',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    color: context.appSecondaryText,
-                  ),
-                ),
-              ] else ...[
-                if (hadEmptySnapshot) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '上一次没有得到可展示的实体或关系。再次生成会重新读取正文，不会沿用空的完成记录。',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      height: 1.4,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                ],
-                if (error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    error,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: colors.error,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () => unawaited(
-                    _generateGraph(
-                      // Retry the range being retried: after a cancelled /
-                      // failed generation the active work is still set, and
-                      // the dialog must open scoped to it (not the whole
-                      // collection).
-                      work: _c.activeGraphWork,
-                    ),
-                  ),
-                  icon: const Icon(KaijuanIcons.graph, size: 18),
-                  label: Text(hadEmptySnapshot ? '重新生成图谱' : '生成图谱'),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    final readThrough = _c.sectionIndex + 1;
-    // [visibleBookGraph] has already removed ungrounded evidence. Its saved
-    // generation scope is authoritative, so child widgets must not invent a
-    // device-local progress projection.
-    const gateByProgress = false;
-    // Entities with at least one relation form the readable core; zero-edge
-    // entities (mere mentions) collapse into one foldable row and are left
-    // off the force-directed view where they would float as orphan dots.
-    final connectedIds = <String>{
-      for (final r in graph.relations) ...[
-        if (r.sourceId.isNotEmpty) r.sourceId,
-        if (r.targetId.isNotEmpty) r.targetId,
-      ],
-    };
-    // Structural gates below (view-mode switcher, graph/family-tree blocks)
-    // must NOT depend on the search query: when a query matches nothing,
-    // hiding a block above the search box shifts the ListView's children,
-    // recreates the field's element and breaks IME composition (the next
-    // keystroke garbles). baseEntities = progress/type gated, no query.
-    // The model/store layers enforce unique stable IDs, but keep the render
-    // boundary defensive: a legacy or in-memory graph must never mount one
-    // GlobalKey twice and take down the whole AI panel.
-    final renderedEntityIds = <String>{};
-    final baseEntities = graph.entities
-        .where((entity) {
-          if (!renderedEntityIds.add(entity.id)) return false;
-          final listTypes = _graphListEntityTypes;
-          if (listTypes.isNotEmpty && !listTypes.contains(entity.type)) {
-            return false;
-          }
-          return true;
-        })
-        .toList(growable: false);
-    final visibleEntities = _graphQuery.trim().isEmpty
-        ? baseEntities
-        : baseEntities
-              .where((entity) {
-                final query = _graphQuery.trim();
-                final hit =
-                    entity.name.contains(query) ||
-                    entity.aliases.any((alias) => alias.contains(query));
-                return hit;
-              })
-              .toList(growable: false);
-    // Main list = everything the book itself is about (setting), connected
-    // or not. Only referenced outsiders (罗素 etc.) fold away — in essay
-    // collections relations are sparse, so "connected only" would empty the
-    // list.
-    final isolatedEntities = <AiGraphEntity>[
-      for (final entity in visibleEntities)
-        if (entity.scope != AiGraphEntityScope.setting) entity,
-    ];
-    final mainEntities = <AiGraphEntity>[
-      for (final entity in visibleEntities)
-        if (entity.scope == AiGraphEntityScope.setting) entity,
-    ];
-    // Search is allowed to surface mere mentions without the fold.
-    final foldIsolated =
-        isolatedEntities.isNotEmpty && _graphQuery.trim().isEmpty;
-    final relationCounts = graphEntityRelationCounts(
-      graph.entities,
-      graph.relations,
-    );
-    // Sort the visible snapshot explicitly. Cached graphs, repaired graphs
-    // and newly generated graphs may all arrive in different array orders;
-    // presentation order must never depend on that incidental storage order.
-    List<AiGraphEntity> ordered(List<AiGraphEntity> source) {
-      return sortGraphEntities(
-        source,
-        order: _graphSortOrder,
-        relationCounts: relationCounts,
-      );
-    }
-
-    final orderedMain = ordered(mainEntities);
-    final orderedIsolated = ordered(isolatedEntities);
-
-    return BookAiGraphContentView(
-      graph: graph,
-      listEpoch: _graphListEpoch,
-      scrollController: _graphScrollController,
-      activeWorkTitle: _c.activeGraphWork?.title,
-      busy: busy,
-      error: error,
-      viewMode: _graphViewMode,
-      connectedEntities: graph.entities
-          .where((entity) => connectedIds.contains(entity.id))
-          .toList(growable: false),
-      visibleEntities: visibleEntities,
-      orderedMain: orderedMain,
-      orderedIsolated: orderedIsolated,
-      foldIsolated: foldIsolated,
-      queryController: _graphQueryController,
-      query: _graphQuery,
-      sortOrder: _graphSortOrder,
-      listKind: _graphListKind,
-      titleSize: _panelTitleSize(context),
-      bodySize: _panelBodySize(context),
-      onCloseWork: _c.closeActiveWorkGraph,
-      onRegenerate: () =>
-          unawaited(_generateGraph(force: true, work: _c.activeGraphWork)),
-      onDelete: () => unawaited(_deleteGraph()),
-      onViewModeChanged: (mode) => setState(() => _graphViewMode = mode),
-      onQueryChanged: (value) => setState(() => _graphQuery = value),
-      onClearQuery: () {
-        _graphQueryController.clear();
-        setState(() => _graphQuery = '');
-      },
-      onSortChanged: (order) =>
-          setState(() => _graphSortOrders[_graphViewMode] = order),
-      onGraphVertexTap: _onGraphVertexTap,
-      onOpenGraphFullscreen: _openGraphFullscreen,
-      buildFamilyTree: () =>
-          _buildFamilyTreeView(context, graph, gateByProgress, readThrough),
-      buildLocationChain: () =>
-          _buildLocationChain(context, graph, gateByProgress, readThrough),
-      buildMainEntities: (entities) {
-        if (_graphViewMode == BookAiGraphViewMode.events) {
-          return _buildGraphEventTimeline(
-            context,
-            entities,
-            gateByProgress,
-            readThrough,
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final entity in entities)
-              KeyedSubtree(
-                key: _graphEntityKeys.putIfAbsent(entity.id, () => GlobalKey()),
-                child: _buildGraphEntityTile(
-                  context,
-                  entity,
-                  gateByProgress,
-                  readThrough,
-                ),
-              ),
-          ],
-        );
-      },
-      buildIsolatedEntities: (entities) {
-        if (foldIsolated) {
-          return _buildIsolatedRow(
-            context,
-            entities,
-            gateByProgress,
-            readThrough,
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final entity in entities)
-              KeyedSubtree(
-                key: _graphEntityKeys.putIfAbsent(entity.id, () => GlobalKey()),
-                child: _buildGraphEntityTile(
-                  context,
-                  entity,
-                  gateByProgress,
-                  readThrough,
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// Events view: chapter-ordered flat list of event cards. Chapter headers
-  /// were dropped — section labels from the graph pipeline are too unreliable
-  /// to show as headers, and the chapter order is already implied by the
-  /// sort (出场顺序).
-  Widget _buildGraphEventTimeline(
-    BuildContext context,
-    List<AiGraphEntity> events,
-    bool gateByProgress,
-    int readThrough,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final event in events)
-          KeyedSubtree(
-            key: _graphEntityKeys.putIfAbsent(event.id, () => GlobalKey()),
-            child: _buildGraphEventTile(
-              context,
-              event,
-              gateByProgress,
-              readThrough,
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildGraphEventTile(
-    BuildContext context,
-    AiGraphEntity entity,
-    bool gateByProgress,
-    int readThrough,
-  ) {
-    return GraphEventTile(
-      entity: entity,
-      bodySize: _panelBodySize(context),
-      trailingLabel: switch (_graphSortOrder) {
-        GraphEntitySortOrder.importance => '重要度 ${entity.importance}',
-        GraphEntitySortOrder.chapters => '${graphEntityChapterCount(entity)} 章',
-        _ => '第 ${entity.firstSection} 节',
-      },
-      highlighted: _graphHighlighted == entity.id,
-      onTap: () => _showEntityDetails(entity),
-    );
-  }
-
-  /// Family-tree view: the line-connected chart plus the foldable
-  /// 「未入树 N 人 · 关系复杂 N 人」rows (each name opens the entity card).
-  /// Degrades to a hint when the book has no kin data at all.
-  Widget _buildFamilyTreeView(
-    BuildContext context,
-    AiBookGraph graph,
-    bool gateByProgress,
-    int readThrough,
-  ) {
-    final treeEntities = graph.entities
-        .where((e) => !gateByProgress || e.firstSection <= readThrough)
-        .toList(growable: false);
-    // Spoiler gate (mirrors _buildGraphEntityTile's relation count): a 亲属
-    // edge whose evidence is entirely in unread chapters reveals a late-plot
-    // kinship between two already-introduced characters, so it must not
-    // enter the tree (or the isolated/complex counts).
-    final treeRelations = graph.relations
-        .where(
-          (r) =>
-              !gateByProgress ||
-              r.evidence.any((e) => e.sectionIndex <= readThrough),
-        )
-        .toList(growable: false);
-    final familyTree = buildFamilyTree(
-      entities: treeEntities,
-      relations: treeRelations,
-    );
-    if (familyTree.roots.isEmpty && familyTree.isolatedCount == 0) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text(
-          '本书暂无血缘关系数据',
-          style: TextStyle(
-            fontSize: context.appCaptionSize,
-            color: context.appSecondaryText,
-          ),
-        ),
-      );
-    }
-    final detailEntities = <({String id, String name})>[
-      for (var i = 0; i < familyTree.complexEntityIds.length; i++)
-        (id: familyTree.complexEntityIds[i], name: familyTree.complexNames[i]),
-      for (var i = 0; i < familyTree.isolatedEntityIds.length; i++)
-        (
-          id: familyTree.isolatedEntityIds[i],
-          name: familyTree.isolatedNames[i],
-        ),
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Semantics(
-          label: '家族树图例：从上到下表示长辈到晚辈，虚线表示额外母系关系，标记为复杂表示关系存在冲突或成环。',
-          child: Text(
-            '上→下：长辈到晚辈 · 虚线：额外母系 · 复杂：关系冲突',
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Stack(
-          children: [
-            BookAiGraphFamilyTreeView(
-              tree: familyTree,
-              onVertexTap: _onGraphVertexTap,
-            ),
-            PositionedDirectional(
-              top: 8,
-              end: 8,
-              child: Material(
-                color: context.appColors.surfaceContainerHighest.withValues(
-                  alpha: 0.9,
-                ),
-                shape: const CircleBorder(),
-                child: IconButton(
-                  tooltip: '全屏查看',
-                  iconSize: 18,
-                  icon: const Icon(KaijuanIcons.maximize),
-                  onPressed: () => _openFamilyTreeFullscreen(
-                    familyTree,
-                    graph,
-                    gateByProgress,
-                    readThrough,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (familyTree.isolatedCount > 0 ||
-            familyTree.complexNames.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          InkWell(
-            onTap: () => setState(
-              () => _familyTreeDetailExpanded = !_familyTreeDetailExpanded,
-            ),
-            borderRadius: BorderRadius.circular(6),
-            child: Row(
-              children: [
-                Icon(
-                  _familyTreeDetailExpanded
-                      ? Icons.expand_less
-                      : Icons.expand_more,
-                  size: 14,
-                  color: context.appSecondaryText,
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    '未入树 ${familyTree.isolatedCount} 人'
-                    ' · 关系复杂 ${familyTree.complexNames.length} 人',
-                    style: TextStyle(
-                      fontSize: context.appCaptionSize,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_familyTreeDetailExpanded) ...[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                for (final entity in detailEntities)
-                  ActionChip(
-                    label: Text(entity.name),
-                    visualDensity: VisualDensity.compact,
-                    // Tree mode renders no entity list rows, so the
-                    // scroll-and-highlight path in _onGraphVertexTap has
-                    // nothing to scroll to — go straight to the detail card
-                    // (same as tapping a tree node).
-                    onPressed: () => _onGraphVertexTap(entity.id),
-                  ),
-              ],
-            ),
-          ],
-        ],
-      ],
-    );
-  }
-
-  Widget _buildLocationChain(
-    BuildContext context,
-    AiBookGraph graph,
-    bool gateByProgress,
-    int readThrough,
-  ) {
-    return GraphLocationChain(
-      locations: graph.entities
-          .where(
-            (e) =>
-                e.type == AiGraphEntityType.location &&
-                e.scope == AiGraphEntityScope.setting,
-          )
-          .toList(growable: false),
-      gateByProgress: gateByProgress,
-      readThrough: readThrough,
-      onPillTap: _onGraphVertexTap,
-    );
-  }
-
-  Widget _buildIsolatedRow(
-    BuildContext context,
-    List<AiGraphEntity> isolated,
-    bool gateByProgress,
-    int readThrough,
-  ) {
-    final expanded = _graphIsolatedExpanded;
-    return GraphIsolatedRow(
-      count: isolated.length,
-      expanded: expanded,
-      onToggle: () => setState(() => _graphIsolatedExpanded = !expanded),
-      expandedChildren: [
-        for (final entity in isolated)
-          KeyedSubtree(
-            key: _graphEntityKeys.putIfAbsent(entity.id, () => GlobalKey()),
-            child: _buildGraphEntityTile(
-              context,
-              entity,
-              gateByProgress,
-              readThrough,
-            ),
-          ),
-      ],
-    );
-  }
-
-  void _onGraphVertexTap(String entityId) {
-    final graph = _c.visibleBookGraph;
-    final entity = graph?.entityById(entityId);
-    if (entity == null) return;
-    if (_graphViewMode == BookAiGraphViewMode.graph ||
-        _graphViewMode == BookAiGraphViewMode.familyTree) {
-      _showEntityDetails(entity);
-      return;
-    }
-    setState(() => _graphHighlighted = entityId);
-    _graphHighlightTimer?.cancel();
-    _graphHighlightTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _graphHighlighted = null);
-    });
-    final ctx = _graphEntityKeys[entityId]?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(
-        ctx,
-        duration: const Duration(milliseconds: 250),
-        alignment: 0.2,
-      );
-    }
-  }
-
-  void _openFamilyTreeFullscreen(
-    AiFamilyTree familyTree,
-    AiBookGraph graph,
-    bool gateByProgress,
-    int readThrough,
-  ) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BookAiGraphFamilyTreeFullscreen(
-          title: _c.activeGraphWork != null
-              ? '《${_c.activeGraphWork!.title}》家族树'
-              : '家族树',
-          tree: familyTree,
-          graph: graph,
-          gateByProgress: gateByProgress,
-          readThrough: readThrough,
-          onJumpToEvidence: _goToGraphEvidence,
-        ),
-      ),
-    );
-  }
-
-  void _openGraphFullscreen() {
-    final graph = _c.visibleBookGraph;
-    if (graph == null) return;
-    final readThrough = _c.sectionIndex + 1;
-    const gateByProgress = false;
-    final connectedIds = <String>{
-      for (final r in graph.relations) ...[
-        if (r.sourceId.isNotEmpty) r.sourceId,
-        if (r.targetId.isNotEmpty) r.targetId,
-      ],
-    };
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BookAiGraphFullscreen(
-          title: _c.activeGraphWork != null
-              ? '《${_c.activeGraphWork!.title}》图谱'
-              : '知识图谱',
-          graph: graph,
-          gateByProgress: gateByProgress,
-          readThrough: readThrough,
-          entities: graph.entities
-              .where((entity) => connectedIds.contains(entity.id))
-              .toList(growable: false),
-          relations: graph.relations,
-          onJumpToEvidence: _goToGraphEvidence,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGraphEntityTile(
-    BuildContext context,
-    AiGraphEntity entity,
-    bool gateByProgress,
-    int readThrough,
-  ) {
-    final graph = _c.visibleBookGraph;
-    final relationCount = graph == null
-        ? 0
-        : graph.relations
-              .where(
-                (r) =>
-                    ((r.sourceId.isNotEmpty &&
-                            (r.sourceId == entity.id ||
-                                r.targetId == entity.id)) ||
-                        (r.sourceId.isEmpty &&
-                            (r.source == entity.name ||
-                                r.target == entity.name))) &&
-                    (!gateByProgress ||
-                        r.evidence.any((e) => e.sectionIndex <= readThrough)),
-              )
-              .length;
-    return GraphEntityTile(
-      entity: entity,
-      metadata: switch (_graphSortOrder) {
-        GraphEntitySortOrder.appearance =>
-          '首次：第 ${entity.firstSection} 节 · '
-              '${graphEntityChapterCount(entity)} 章',
-        GraphEntitySortOrder.evidence =>
-          '${graphEntityEvidenceCount(entity)} 条出处 · '
-              '${graphEntityChapterCount(entity)} 章',
-        GraphEntitySortOrder.relations =>
-          '$relationCount 关系 · ${graphEntityChapterCount(entity)} 章',
-        GraphEntitySortOrder.type =>
-          '${_graphEntityTypeLabel(entity.type)} · '
-              '${graphEntityChapterCount(entity)} 章',
-        _ => '${graphEntityChapterCount(entity)} 章 · $relationCount 关系',
-      },
-      typeColor: graphEntityTypeColor(context, entity.type),
-      highlighted: _graphHighlighted == entity.id,
-      bodySize: _panelBodySize(context),
-      onTap: () => _showEntityDetails(entity),
-    );
-  }
-
-  String _graphEntityTypeLabel(AiGraphEntityType type) => switch (type) {
-    AiGraphEntityType.person => '人物',
-    AiGraphEntityType.location => '地点',
-    AiGraphEntityType.event => '事件',
-    AiGraphEntityType.organization => '组织',
-    AiGraphEntityType.item => '物件',
-    AiGraphEntityType.concept => '概念',
-    AiGraphEntityType.creature => '非人角色',
-  };
-
-  void _showEntityDetails(AiGraphEntity entity) {
-    final graph = _c.visibleBookGraph;
-    if (graph == null) return;
-    final readThrough = _c.sectionIndex + 1;
-    const gateByProgress = false;
-    showAppBottomSheet<void>(
-      context,
-      useRootNavigator: true,
-      anchorPoint: appTrailingBottomOverlayAnchor(context),
-      builder: (_) => BookAiEntitySheet(
-        entity: entity,
-        graph: graph,
-        gateByProgress: gateByProgress,
-        readThrough: readThrough,
-        titleSize: _panelTitleSize(context),
-        bodySize: _panelBodySize(context),
-        onOpenEvidence: _goToGraphEvidence,
-        onHideEntity: () => unawaited(_c.hideBookGraphEntity(entity.id)),
-      ),
-    );
-  }
-
-  void _goToGraphEvidence(AiGraphEvidence evidence) {
-    final index = evidence.sectionIndex - 1;
-    if (index < 0 || index >= _c.sectionCount) return;
-    _c.goToSection(index, progressInSection: evidence.progressInSection ?? 0);
-    // The evidence row already popped its modal; wait for that route's exit
-    // animation to finish, then close the side panel itself so the reader
-    // sees the quoted section. Popping immediately would hit the modal
-    // (still animating out) and leave the panel open.
-    Future<void>.delayed(const Duration(milliseconds: 300), () {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).maybePop();
-      }
-    });
-  }
-
-  Future<void> _ensureGraphWorks() async {
-    if (_c.bookStructureManifest != null) return;
-    if (_graphWorksLoading || !mounted) return;
-    _graphWorksLoading = true;
-    await _c.resolveGraphWorkCandidates();
-    if (!mounted) return;
-    _graphWorksLoading = false;
-    setState(() {});
-  }
-
-  Future<void> _generateGraph({
-    bool force = false,
-    AiGraphWorkCandidate? work,
-  }) async {
-    if (!_ready || _graphBusy) return;
-    setState(() {
-      _graphPreparing = true;
-      _graphPreparingWorkId = work?.id;
-    });
-    try {
-      if (force && _c.bookGraph != null) {
-        final confirmed = await showAppConfirmDialog(
-          context,
-          title: '重新生成图谱？',
-          message: '将重新请求 AI，并替换当前保存的图谱。',
-          confirmLabel: '重新生成',
-        );
-        if (confirmed != true || !mounted) return;
-      }
-      // Step-0 display plan, confirmed before extraction: a fresh generation
-      // (no narration yet) and every regeneration get the confirm dialog;
-      // incremental runs keep their existing plan untouched. Judged against
-      // the TARGET work's graph — the picker page shows the whole-book legacy
-      // graph, whose plan must not suppress a fresh per-work dialog.
-      final hasPlan = work == null
-          ? _c.bookGraph?.narration != null
-          : _c.workGraphHasNarration(work);
-      if (force || !hasPlan) {
-        final confirmed = await _confirmNarrationPlan(work);
-        if (confirmed == null || !mounted) return;
-        final generation = _c.generateBookGraph(
-          only: work,
-          force: force,
-          narrationOverride: confirmed.plan,
-          narrationMode: confirmed.mode,
-          excludedGraphSectionIndices: confirmed.excludedSections,
-        );
-        _clearGraphPreparing();
-        await generation;
-        return;
-      }
-      final generation = _c.generateBookGraph(only: work, force: force);
-      _clearGraphPreparing();
-      await generation;
-    } catch (error) {
-      if (mounted) {
-        showAppSnackBar(
-          context,
-          aiUserErrorMessage(error, operation: AiUserOperation.graph),
-        );
-      }
-    } finally {
-      _clearGraphPreparing();
-    }
-  }
-
-  void _clearGraphPreparing() {
-    if (!mounted || !_graphPreparing) return;
-    setState(() {
-      _graphPreparing = false;
-      _graphPreparingWorkId = null;
-    });
-  }
-
-  /// Pre-generation confirm dialog: runs the step-0 display plan (features +
-  /// recommended view, user may pick another default view) **and** the
-  /// auto-filtered graph corpus with a manual section chooser (uncheck to
-  /// exclude a chapter). Returns the confirmed plan (null = keep the default
-  /// view) + excluded section indices. Null = cancelled.
-  Future<_NarrationConfirmation?> _confirmNarrationPlan(
-    AiGraphWorkCandidate? work,
-  ) async {
-    final existing = work == null ? _c.bookGraph : _c.workGraphFor(work);
-    return _showNarrationChooser(
-      work: work,
-      initialExcluded: existing?.excludedGraphSections.toSet() ?? const {},
-      useRecommendedSelection: existing == null,
-    );
-  }
-
-  Future<_NarrationConfirmation?> _showNarrationChooser({
-    AiGraphWorkCandidate? work,
-    Set<int> initialExcluded = const {},
-    bool useRecommendedSelection = true,
-    bool scopeOnly = false,
-    String? dialogTitle,
-    String? confirmLabel,
-  }) async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return null;
-    final anchorPoint = appTrailingBottomOverlayAnchor(context);
-    Widget chooser(BuildContext _) => NarrationPlanDialog(
-      controller: _c,
-      work: work,
-      initialExcluded: initialExcluded,
-      useRecommendedSelection: useRecommendedSelection,
-      scopeOnly: scopeOnly,
-      dialogTitle: dialogTitle,
-      confirmLabel: confirmLabel,
-      sheetLayout: context.appIsCompact,
-    );
-    if (context.appIsCompact) {
-      return showAppBottomSheet<_NarrationConfirmation>(
-        context,
-        useRootNavigator: true,
-        isDismissible: false,
-        enableDrag: false,
-        showHandle: false,
-        maxWidth: 640,
-        anchorPoint: anchorPoint,
-        builder: chooser,
-      );
-    }
-    return showDialog<_NarrationConfirmation>(
-      context: context,
-      useRootNavigator: true,
-      barrierDismissible: false,
-      anchorPoint: anchorPoint,
-      builder: chooser,
-    );
-  }
-
-  Future<void> _deleteGraph() async {
-    if (_c.bookGraph == null || _c.isGeneratingBookGraph) return;
-    final confirmed = await showAppConfirmDialog(
-      context,
-      title: '删除图谱？',
-      message: '只删除这本书保存的 AI 图谱，不影响对话与大纲。',
-      confirmLabel: '删除图谱',
-      destructive: true,
-    );
-    if (confirmed != true || !mounted) return;
-    await _c.deleteBookGraph();
-  }
-
-  /// Inline thinking indicator, same animation family as the chat bubbles.
-  Widget _thinkingOrb(BuildContext context) => ThinkingOrb(
-    state: OrbState.working,
-    size: OrbSize.size20,
-    theme: Theme.of(context).brightness == Brightness.dark
-        ? OrbTheme.dark
-        : OrbTheme.light,
-  );
-
-  Widget _buildGraphOperationStatus(BuildContext context) {
-    final progress = _c.bookGraphProgress;
-    final generating = _c.isGeneratingBookGraph;
-    final label = _graphPreparing
-        ? '正在准备知识图谱…'
-        : progress?.label ?? '正在生成知识图谱…';
-    return BookAiGraphOperationStatus(
-      label: label,
-      completed: progress?.completed ?? 0,
-      total: progress?.total ?? 0,
-      generating: generating,
-      onCancel: _c.cancelBookGraphGeneration,
-    );
-  }
-
-  Widget _withLiveStatus({
-    required Widget child,
-    required String label,
-    bool announce = true,
-  }) {
-    if (!announce) return child;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        child,
-        Semantics(
-          container: true,
-          liveRegion: true,
-          label: label,
-          child: const SizedBox.shrink(),
-        ),
-      ],
-    );
-  }
-
   @override
   void dispose() {
     _c.removeListener(_onReaderControllerChanged);
     _conversation.removeListener(_onConversationChanged);
     _mindMapConversation.removeListener(_onMindMapConversationChanged);
     _cancel.cancel();
-    final scopePrompt = _mindMapScopePrompt;
-    if (scopePrompt != null && !scopePrompt.completer.isCompleted) {
-      scopePrompt.completer.complete(null);
-    }
+    _mindMapCoordinator.removeListener(_onMindMapCoordinatorChanged);
+    _mindMapCoordinator.dispose();
     _suggestionCancel?.cancel();
     _finalizeActiveTurnForDisposal();
     _input.dispose();
-    _graphQueryController.dispose();
-    _graphScrollController.dispose();
-    _graphHighlightTimer?.cancel();
     _scroll.dispose();
     _focus.dispose();
     _tabs
@@ -2880,7 +1433,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final openingShortcuts = aiChatOpeningShortcuts(hasSelection: hasSelection);
     final showFollowUpShortcuts =
         !_sending &&
-        _mindMapScopePrompt == null &&
+        _mindMapCoordinator.scopePrompt == null &&
         !_generatingFollowUp &&
         !_searchingWeb &&
         _streaming.isEmpty &&
@@ -2895,19 +1448,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           ? _messages.last.suggestedQuestions
           : const [],
     );
-    final graphLiveStatus = _graphPreparing
-        ? '正在准备知识图谱'
-        : _c.isGeneratingBookGraph
-        ? _c.bookGraphProgress?.label ?? '正在生成知识图谱'
-        : _c.bookGraphError ??
-              (_c.visibleBookGraph != null
-                  ? '知识图谱已生成'
-                  : _c.bookGraph != null
-                  ? '知识图谱没有有效数据'
-                  : '尚未生成知识图谱');
     final composerControlSize = compact ? 44.0 : 40.0;
     final conversationInputLocked =
-        _sending || _resolvingChatScope || _mindMapScopePrompt != null;
+        _sending ||
+        _resolvingChatScope ||
+        _mindMapCoordinator.scopePrompt != null;
 
     // Side panel already has a fixed height; bottom sheet needs an explicit
     // height so Expanded children layout correctly.
@@ -2939,7 +1484,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       _sending ||
                           _resolvingChatScope ||
                           _clearingHistory ||
-                          _mindMapScopePrompt != null
+                          _mindMapCoordinator.scopePrompt != null
                       ? null
                       : () => unawaited(_clearHistory()),
                   icon: const Icon(KaijuanIcons.delete, size: 20),
@@ -2970,14 +1515,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ],
           ),
         ),
-        if (_activeTab == _BookAiWorkspaceTab.graph && _graphBusy)
-          _buildGraphOperationStatus(context),
         if (_activeTab == _BookAiWorkspaceTab.graph)
           Expanded(
-            child: _withLiveStatus(
-              child: _buildGraphTab(context),
-              label: graphLiveStatus,
-              announce: !_graphBusy,
+            child: BookAiGraphWorkspace(
+              controller: _c,
+              onOpenSettings: _openSettings,
             ),
           )
         else if (!_ready)
@@ -3063,7 +1605,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 : BookAiChatTimeline(
                     scrollController: _scroll,
                     compact: compact,
-                    pointerActive: _mindMapPointerActive,
+                    pointerActive: _mindMapCoordinator.pointerActive,
                     liveStatus: _liveStatus,
                     messages: _messages,
                     openingShortcuts: openingShortcuts,
@@ -3079,10 +1621,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     searchingWeb: _searchingWeb,
                     error: _error,
                     canRetry: _canRetry,
-                    mindMapRevealTurnId: _mindMapRevealTurnId,
-                    scopePrompt: _mindMapScopePrompt,
-                    onScopeSelected: _selectMindMapScope,
-                    onScopeCancelled: _cancelMindMapScopePrompt,
+                    mindMapRevealTurnId: _mindMapCoordinator.revealArtifactId,
+                    scopePrompt: _mindMapCoordinator.scopePrompt,
+                    onScopeSelected: _mindMapCoordinator.selectScope,
+                    onScopeCancelled: _mindMapCoordinator.cancelScope,
                     onUserDrag: () {
                       _scrollRequestEpoch++;
                       _streamTailFollowEpoch++;
@@ -3090,19 +1632,29 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     onShortcutSelected: (shortcut) =>
                         unawaited(_handleOpeningShortcut(shortcut)),
                     onCopy: (message) => unawaited(_copy(message.content)),
-                    onMindMapLayoutChanged: _updateMindMapLayout,
-                    onOpenMindMapEvidence: _goToMindMapEvidence,
-                    onOpenMindMapFullscreen: _openMindMapFullscreen,
+                    onMindMapLayoutChanged: _mindMapCoordinator.updateLayout,
+                    onOpenMindMapEvidence: (evidence) =>
+                        BookAiMindMapRoutes.openEvidence(
+                          context,
+                          reader: _c,
+                          evidence: evidence,
+                        ),
+                    onOpenMindMapFullscreen: (message) =>
+                        BookAiMindMapRoutes.openFullscreen(
+                          context,
+                          message: message,
+                          coordinator: _mindMapCoordinator,
+                          onOpenEvidence: (evidence) =>
+                              BookAiMindMapRoutes.openEvidence(
+                                context,
+                                reader: _c,
+                                evidence: evidence,
+                              ),
+                        ),
                     onContinueEditingMindMap: _beginEditingMindMap,
-                    onMindMapRevealed: (message) {
-                      if (_mindMapRevealTurnId == message.turnId) {
-                        _mindMapRevealTurnId = null;
-                      }
-                    },
-                    onMindMapPointerChanged: (active) {
-                      if (_mindMapPointerActive == active) return;
-                      setState(() => _mindMapPointerActive = active);
-                    },
+                    onMindMapRevealed: _mindMapCoordinator.consumeReveal,
+                    onMindMapPointerChanged:
+                        _mindMapCoordinator.setPointerActive,
                     onRetry: () => unawaited(_send(_retryText)),
                   ),
           ),
@@ -3120,7 +1672,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 ? null
                 : '正在修改：${_activeMindMap!.root.title}',
             activeMindMapRevision: _activeMindMap?.revision,
-            onMindMapDetached: _mindMapConversation.detachArtifact,
+            onMindMapDetached: _mindMapCoordinator.detachArtifact,
             onFocusRequested: () => unawaited(_focusComposer()),
             onSend: () => unawaited(_send()),
             onStop: () => unawaited(_stop()),
@@ -3153,47 +1705,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
               ),
             )
           : body,
-    );
-  }
-}
-
-class _AiUnavailable extends StatelessWidget {
-  const _AiUnavailable({
-    required this.message,
-    required this.onOpenSettings,
-    this.icon,
-  });
-
-  final String message;
-  final VoidCallback onOpenSettings;
-
-  /// Optional leading icon (e.g. toc for the outline tab, graph for the
-  /// graph tab) matching the empty-state language of each tab.
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 34, color: context.appSecondaryText),
-            const SizedBox(height: 14),
-          ],
-          Text(
-            message,
-            style: TextStyle(
-              fontSize: context.aiBodySize,
-              height: 1.45,
-              color: context.appPrimaryText,
-            ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: onOpenSettings, child: const Text('去设置')),
-        ],
-      ),
     );
   }
 }

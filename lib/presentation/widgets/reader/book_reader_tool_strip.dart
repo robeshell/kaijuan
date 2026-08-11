@@ -402,13 +402,13 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
   @override
   void initState() {
     super.initState();
-    _preview = widget.controller.brightness;
+    _preview = widget.controller.preferences.brightness;
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_dragging) {
-      _preview = widget.controller.brightness;
+      _preview = widget.controller.preferences.brightness;
     }
     final t =
         ((_preview - BookReadingPreferences.minBrightness) /
@@ -443,7 +443,7 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                           (BookReadingPreferences.maxBrightness -
                               BookReadingPreferences.minBrightness);
                   setState(() => _preview = next);
-                  widget.controller.previewBrightness(next);
+                  widget.controller.preferences.previewBrightness(next);
                 },
                 onDragUpdate: (v) {
                   final next =
@@ -452,12 +452,12 @@ class _BrightnessPanelState extends State<_BrightnessPanel> {
                           (BookReadingPreferences.maxBrightness -
                               BookReadingPreferences.minBrightness);
                   setState(() => _preview = next);
-                  widget.controller.previewBrightness(next);
+                  widget.controller.preferences.previewBrightness(next);
                 },
                 onDragEnd: (v) {
                   _dragging = false;
                   unawaited(
-                    widget.controller.setBrightness(
+                    widget.controller.preferences.setBrightness(
                       BookReadingPreferences.minBrightness +
                           v *
                               (BookReadingPreferences.maxBrightness -
@@ -504,7 +504,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
   @override
   void initState() {
     super.initState();
-    final c = widget.controller;
+    final c = widget.controller.preferences;
     _previewFontSize = c.fontSize;
     _previewLineHeight = c.lineHeight;
     _previewMargin = c.margin;
@@ -513,7 +513,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
 
   void _syncPreviewsIfIdle() {
     if (_dragging != null) return;
-    final c = widget.controller;
+    final c = widget.controller.preferences;
     _previewFontSize = c.fontSize;
     _previewLineHeight = c.lineHeight;
     _previewMargin = c.margin;
@@ -564,9 +564,9 @@ class _TypographyPanelState extends State<_TypographyPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _ThemePresetCards(
-          selected: controller.readingTheme,
+          selected: controller.preferences.readingTheme,
           accent: widget.accent,
-          onSelected: controller.setReadingTheme,
+          onSelected: controller.preferences.setReadingTheme,
         ),
         const SizedBox(height: AppSpacing.x3),
         _PrefScrubberRow(
@@ -586,10 +586,12 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           accent: widget.accent,
           fgMuted: widget.fgMuted,
           trailing: _BoldToggle(
-            selected: controller.bold,
+            selected: controller.preferences.bold,
             accent: widget.accent,
             fg: widget.fg,
-            onTap: () => unawaited(controller.setBold(!controller.bold)),
+            onTap: () => unawaited(
+              controller.preferences.setBold(!controller.preferences.bold),
+            ),
           ),
           onDragStart: (t) {
             _dragging = 'font';
@@ -613,7 +615,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           onDragEnd: (t) {
             _dragging = null;
             unawaited(
-              controller.setFontSize(
+              controller.preferences.setFontSize(
                 _lerp(
                   BookReadingPreferences.minFontSize,
                   BookReadingPreferences.maxFontSize,
@@ -662,7 +664,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           onDragEnd: (t) {
             _dragging = null;
             unawaited(
-              controller.setLineHeight(
+              controller.preferences.setLineHeight(
                 _lerp(
                   BookReadingPreferences.minLineHeight,
                   BookReadingPreferences.maxLineHeight,
@@ -723,7 +725,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
               onDragEnd: (t) {
                 _dragging = null;
                 unawaited(
-                  controller.setMargin(
+                  controller.preferences.setMargin(
                     _lerp(
                       BookReadingPreferences.minMargin,
                       BookReadingPreferences.maxMargin,
@@ -779,7 +781,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
               onDragEnd: (t) {
                 _dragging = null;
                 unawaited(
-                  controller.setVerticalMargin(
+                  controller.preferences.setVerticalMargin(
                     _lerp(
                       BookReadingPreferences.minVerticalMargin,
                       BookReadingPreferences.maxVerticalMargin,
@@ -814,7 +816,7 @@ class _TypographyPanelState extends State<_TypographyPanel> {
           children: [
             Expanded(
               child: _TypographyActionRow(
-                label: controller.fontLabel,
+                label: controller.preferences.fontLabel,
                 fg: widget.fg,
                 fgMuted: widget.fgMuted,
                 onTap: () => setState(() => _sub = _TypographySub.font),
@@ -921,15 +923,15 @@ class _FontPickerPanel extends StatelessWidget {
       ],
     );
     if (files.isEmpty) return;
-    final error = await controller.importFontFile(files.first.path);
+    final error = await controller.preferences.importFontFile(files.first.path);
     if (!context.mounted) return;
     if (error != null) showAppSnackBar(context, error);
   }
 
   @override
   Widget build(BuildContext context) {
-    final selection = controller.fontSelection;
-    final store = controller.fontStore;
+    final selection = controller.preferences.fontSelection;
+    final store = controller.preferences.fontStore;
     final userFonts = store?.fonts ?? const <BookUserFont>[];
 
     return Column(
@@ -969,7 +971,9 @@ class _FontPickerPanel extends StatelessWidget {
           fg: fg,
           fgMuted: fgMuted,
           onTap: () => unawaited(
-            controller.setFontSelection(const BookFontSelection.book()),
+            controller.preferences.setFontSelection(
+              const BookFontSelection.book(),
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.x3),
@@ -995,7 +999,7 @@ class _FontPickerPanel extends StatelessWidget {
                       fg: fg,
                       fgMuted: fgMuted,
                       onTap: () => unawaited(
-                        controller.setFontSelection(
+                        controller.preferences.setFontSelection(
                           BookFontSelection.system(font.id),
                         ),
                       ),
@@ -1017,12 +1021,16 @@ class _FontPickerPanel extends StatelessWidget {
             fg: fg,
             fgMuted: fgMuted,
             onDownload: () async {
-              final error = await controller.downloadCatalogFont(catalog);
+              final error = await controller.preferences.downloadCatalogFont(
+                catalog,
+              );
               if (!context.mounted) return;
               if (error != null) showAppSnackBar(context, error);
             },
             onSelect: (userFont) => unawaited(
-              controller.setFontSelection(BookFontSelection.user(userFont.id)),
+              controller.preferences.setFontSelection(
+                BookFontSelection.user(userFont.id),
+              ),
             ),
           ),
           const SizedBox(height: AppSpacing.x2),
@@ -1043,9 +1051,12 @@ class _FontPickerPanel extends StatelessWidget {
               fg: fg,
               fgMuted: fgMuted,
               onTap: () => unawaited(
-                controller.setFontSelection(BookFontSelection.user(font.id)),
+                controller.preferences.setFontSelection(
+                  BookFontSelection.user(font.id),
+                ),
               ),
-              onDelete: () => unawaited(controller.deleteUserFont(font.id)),
+              onDelete: () =>
+                  unawaited(controller.preferences.deleteUserFont(font.id)),
             ),
             const SizedBox(height: AppSpacing.x2),
           ],
@@ -1338,14 +1349,14 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
   @override
   void initState() {
     super.initState();
-    _previewLetter = widget.controller.letterSpacing;
-    _previewParagraph = widget.controller.paragraphSpacing;
+    _previewLetter = widget.controller.preferences.letterSpacing;
+    _previewParagraph = widget.controller.preferences.paragraphSpacing;
   }
 
   void _syncIfIdle() {
     if (_dragging != null) return;
-    _previewLetter = widget.controller.letterSpacing;
-    _previewParagraph = widget.controller.paragraphSpacing;
+    _previewLetter = widget.controller.preferences.letterSpacing;
+    _previewParagraph = widget.controller.preferences.paragraphSpacing;
   }
 
   double _lerp(double min, double max, double t) => min + t * (max - min);
@@ -1363,7 +1374,7 @@ class _MoreSettingsPanelState extends State<_MoreSettingsPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final c = widget.controller;
+    final c = widget.controller.preferences;
     _syncIfIdle();
 
     return Column(
@@ -1980,22 +1991,22 @@ class _ReadingModePanel extends StatelessWidget {
           ReaderSegmentedChoices<BookReadingMode>(
             values: modes,
             labels: [for (final m in modes) m.label],
-            selected: controller.readingMode,
-            onSelected: controller.setReadingMode,
+            selected: controller.preferences.readingMode,
+            onSelected: controller.preferences.setReadingMode,
             fg: fg,
             fgMuted: fgMuted,
             accent: accent,
           ),
           const SizedBox(height: AppSpacing.x3),
         ],
-        if (controller.readingMode == BookReadingMode.page) ...[
+        if (controller.preferences.readingMode == BookReadingMode.page) ...[
           ReaderToolPanelLabel('翻页效果', fgMuted),
           const SizedBox(height: AppSpacing.x2),
           ReaderSegmentedChoices<BookPageTurnEffect>(
             values: BookPageTurnEffect.values,
             labels: [for (final e in BookPageTurnEffect.values) e.label],
-            selected: controller.pageTurnEffect,
-            onSelected: controller.setPageTurnEffect,
+            selected: controller.preferences.pageTurnEffect,
+            onSelected: controller.preferences.setPageTurnEffect,
             fg: fg,
             fgMuted: fgMuted,
             accent: accent,

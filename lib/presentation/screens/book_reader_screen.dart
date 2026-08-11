@@ -117,7 +117,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     _engine = FoliateJsBookEngineAdapter(readerController: _controller);
     _engine.addListener(_onBookEngineTick);
     _controller.attachPlatformFocusClearer(_engine.clearPlatformFocus);
-    _controller.onOpenNoteEditor = _presentNoteEditor;
+    _controller.annotations.onOpenNoteEditor = _presentNoteEditor;
     _controller.addListener(_onBookControllerTick);
     _timeTracker = ReadingTimeTracker(
       database: widget.database,
@@ -248,7 +248,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
   }
 
   void _openNoteFromDrawer(BookAnnotation note) {
-    _controller.goToAnnotation(note);
+    _controller.annotations.goToAnnotation(note);
     _presentNoteEditor(note);
   }
 
@@ -262,16 +262,16 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     }
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (_controller.imageViewerOpen) {
-        _controller.closeImageViewer();
+      if (_controller.search.imageOpen) {
+        _controller.search.closeImage();
         return KeyEventResult.handled;
       }
-      if (_controller.searchOpen) {
-        _controller.closeSearch();
+      if (_controller.search.open) {
+        _controller.search.closeSearch();
         return KeyEventResult.handled;
       }
-      if (_controller.selectionMenu != null) {
-        _controller.clearSelectionMenu();
+      if (_controller.annotations.selectionMenu != null) {
+        _controller.annotations.clearSelectionMenu();
         return KeyEventResult.handled;
       }
       if (_controller.chromeVisible) {
@@ -290,17 +290,17 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     if (event.logicalKey == LogicalKeyboardKey.equal ||
         event.logicalKey == LogicalKeyboardKey.add ||
         event.logicalKey == LogicalKeyboardKey.numpadAdd) {
-      _controller.changeFontSize(2);
+      _controller.preferences.changeFontSize(2);
       return KeyEventResult.handled;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.minus ||
         event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
-      _controller.changeFontSize(-2);
+      _controller.preferences.changeFontSize(-2);
       return KeyEventResult.handled;
     }
 
-    final isPage = _controller.readingMode == BookReadingMode.page;
+    final isPage = _controller.preferences.readingMode == BookReadingMode.page;
     if (isPage) {
       if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
           event.logicalKey == LogicalKeyboardKey.pageUp) {
@@ -335,7 +335,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
         return ListenableBuilder(
           listenable: _controller,
           builder: (context, _) {
-            final theme = _controller.readingTheme;
+            final theme = _controller.preferences.readingTheme;
             final bg = Color(theme.backgroundArgb);
 
             final ttsMessage = _controller.ttsUserMessage;
@@ -443,10 +443,13 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                           ),
                         ),
                       ),
-                      if (_controller.searchOpen)
-                        BookSearchPanel(controller: _controller),
-                      if (_controller.imageViewerOpen)
-                        BookImageViewer(controller: _controller),
+                      if (_controller.search.open)
+                        BookSearchPanel(
+                          controller: _controller.search,
+                          readingTheme: _controller.preferences.readingTheme,
+                        ),
+                      if (_controller.search.imageOpen)
+                        BookImageViewer(controller: _controller.search),
                     ],
                     // Above WebView + chrome SafeArea pad so the title band
                     // still moves the window (Platform View eats background drag).
@@ -473,7 +476,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     _controller.removeListener(_onBookControllerTick);
     _engine.removeListener(_onBookEngineTick);
     unawaited(_timeTracker.detach());
-    _controller.onOpenNoteEditor = null;
+    _controller.annotations.onOpenNoteEditor = null;
     _controller.detachPlatformFocusClearer();
     _reveal.dispose();
     _focusNode.dispose();

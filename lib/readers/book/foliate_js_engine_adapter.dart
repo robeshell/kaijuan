@@ -154,12 +154,12 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   }
 
   void attach() {
-    readerController.attachExternalPageNavigation(
+    readerController.bridge.attachPageNavigation(
       nextPage: _nextPage,
       previousPage: _previousPage,
     );
-    readerController.attachExternalSeek(_seekToFraction);
-    readerController.attachAnnotationBridge(
+    readerController.bridge.attachSeek(_seekToFraction);
+    readerController.annotations.attachBridge(
       renderAll: _renderAnnotations,
       add: _addAnnotation,
       remove: _removeAnnotation,
@@ -167,13 +167,15 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
       getSelectedText: _getSelectedText,
       setMenuCursorZone: _setMenuCursorZone,
       setMenuOpen: _setMenuOpen,
+    );
+    readerController.bridge.attachContent(
       getChapterText: _getChapterText,
       getBookPlainText: _getBookPlainText,
       getBookStructureIndex: _getBookStructureIndex,
       getSelectionContext: _getSelectionContext,
     );
-    readerController.attachSearchBridge(
-      search: _runSearch,
+    readerController.search.attachBridge(
+      runSearch: _runSearch,
       clearSearch: _clearEngineSearch,
     );
     readerController.attachTtsBridge(
@@ -257,13 +259,13 @@ try {
   void _onSearch(List<dynamic> arguments) {
     final event = FoliateSearchEvent.fromHandlerArguments(arguments);
     if (event == null) return;
-    readerController.reportSearchEvent(event);
+    readerController.search.report(event);
   }
 
   void _onImageClick(List<dynamic> arguments) {
     final click = FoliateImageClick.fromHandlerArguments(arguments);
     if (click == null) return;
-    readerController.openImageViewer(click.dataUrl);
+    readerController.search.openImage(click.dataUrl);
   }
 
   void _seekToFraction(double fraction) {
@@ -454,35 +456,37 @@ try {
   void _onSelectionEnd(List<dynamic> arguments) {
     final selection = FoliateSelectionEnd.fromHandlerArguments(arguments);
     if (selection == null) return;
-    readerController.reportSelectionEnd(selection);
+    readerController.annotations.reportSelectionEnd(selection);
   }
 
   void _onSelectionCleared() {
-    readerController.reportSelectionCleared();
+    readerController.annotations.reportSelectionCleared();
   }
 
   void _onSelectionMenuDismiss() {
-    readerController.clearSelectionMenu();
+    readerController.annotations.clearSelectionMenu();
   }
 
   void _onAnnotationClick(List<dynamic> arguments) {
     final click = FoliateAnnotationClick.fromHandlerArguments(arguments);
     if (click == null) return;
-    readerController.reportAnnotationClick(click);
+    readerController.annotations.reportAnnotationClick(click);
   }
 
   void _onAnnotationNoteClick(List<dynamic> arguments) {
     final click = FoliateAnnotationClick.fromHandlerArguments(arguments);
     if (click == null) return;
-    readerController.reportAnnotationNoteClick(click);
+    readerController.annotations.reportAnnotationNoteClick(click);
   }
 
   void _onRenderAnnotationsRequest() {
-    readerController.requestAnnotationsRender();
+    readerController.annotations.requestAnnotationsRender();
   }
 
   Widget buildView(BuildContext context) {
-    final themeBg = Color(readerController.readingTheme.backgroundArgb);
+    final themeBg = Color(
+      readerController.preferences.readingTheme.backgroundArgb,
+    );
     final session = _session;
     if (session == null) {
       // Match the reading canvas immediately; never flash a spinner hole.
@@ -570,7 +574,7 @@ try {
   }
 
   Future<void> _applyReaderBrightness() async {
-    final brightness = readerController.brightness;
+    final brightness = readerController.preferences.brightness;
     if (brightness == _lastBrightness) return;
     _lastBrightness = brightness;
     await _evaluate('window.setReaderBrightness(${jsonEncode(brightness)})');
@@ -704,19 +708,19 @@ try {
   }
 
   void _onClick(FoliateViewportClick click) {
-    if (readerController.selectionMenu != null) {
-      readerController.clearSelectionMenu();
+    if (readerController.annotations.selectionMenu != null) {
+      readerController.annotations.clearSelectionMenu();
       return;
     }
     if (readerController.chromeVisible) {
       readerController.hideChrome();
       return;
     }
-    if (readerController.readingMode == BookReadingMode.page) {
+    if (readerController.preferences.readingMode == BookReadingMode.page) {
       // Suppress only edge page-turns after a selection (ghost click). Middle
       // band must still toggle chrome on the first intentional tap.
       if (BookReaderCapabilities.isPageTurnEdge(click.x)) {
-        if (readerController.shouldSuppressPageTurnFromClick) {
+        if (readerController.annotations.shouldSuppressPageTurnFromClick) {
           return;
         }
         if (click.x < BookReaderCapabilities.pageTurnEdgeFraction) {
@@ -750,20 +754,20 @@ try {
   }
 
   Future<void> _applyPreferences({bool force = false}) async {
-    final fontSize = readerController.fontSize;
-    final lineHeight = readerController.lineHeight;
-    final margin = readerController.margin;
-    final verticalMargin = readerController.verticalMargin;
-    final bold = readerController.bold;
-    final fontSelection = readerController.fontSelection;
-    final letterSpacing = readerController.letterSpacing;
-    final paragraphSpacing = readerController.paragraphSpacing;
-    final textAlign = readerController.textAlign;
-    final firstLineIndent = readerController.firstLineIndent;
-    final hyphenate = readerController.hyphenate;
-    final theme = readerController.readingTheme;
-    final mode = readerController.readingMode;
-    final effect = readerController.pageTurnEffect;
+    final fontSize = readerController.preferences.fontSize;
+    final lineHeight = readerController.preferences.lineHeight;
+    final margin = readerController.preferences.margin;
+    final verticalMargin = readerController.preferences.verticalMargin;
+    final bold = readerController.preferences.bold;
+    final fontSelection = readerController.preferences.fontSelection;
+    final letterSpacing = readerController.preferences.letterSpacing;
+    final paragraphSpacing = readerController.preferences.paragraphSpacing;
+    final textAlign = readerController.preferences.textAlign;
+    final firstLineIndent = readerController.preferences.firstLineIndent;
+    final hyphenate = readerController.preferences.hyphenate;
+    final theme = readerController.preferences.readingTheme;
+    final mode = readerController.preferences.readingMode;
+    final effect = readerController.preferences.pageTurnEffect;
     if (!force &&
         fontSize == _lastFontSize &&
         lineHeight == _lastLineHeight &&
@@ -793,20 +797,20 @@ try {
   }
 
   void _rememberPreferenceState() {
-    _lastFontSize = readerController.fontSize;
-    _lastLineHeight = readerController.lineHeight;
-    _lastMargin = readerController.margin;
-    _lastVerticalMargin = readerController.verticalMargin;
-    _lastBold = readerController.bold;
-    _lastFontSelection = readerController.fontSelection;
-    _lastLetterSpacing = readerController.letterSpacing;
-    _lastParagraphSpacing = readerController.paragraphSpacing;
-    _lastTextAlign = readerController.textAlign;
-    _lastFirstLineIndent = readerController.firstLineIndent;
-    _lastHyphenate = readerController.hyphenate;
-    _lastTheme = readerController.readingTheme;
-    _lastMode = readerController.readingMode;
-    _lastEffect = readerController.pageTurnEffect;
+    _lastFontSize = readerController.preferences.fontSize;
+    _lastLineHeight = readerController.preferences.lineHeight;
+    _lastMargin = readerController.preferences.margin;
+    _lastVerticalMargin = readerController.preferences.verticalMargin;
+    _lastBold = readerController.preferences.bold;
+    _lastFontSelection = readerController.preferences.fontSelection;
+    _lastLetterSpacing = readerController.preferences.letterSpacing;
+    _lastParagraphSpacing = readerController.preferences.paragraphSpacing;
+    _lastTextAlign = readerController.preferences.textAlign;
+    _lastFirstLineIndent = readerController.preferences.firstLineIndent;
+    _lastHyphenate = readerController.preferences.hyphenate;
+    _lastTheme = readerController.preferences.readingTheme;
+    _lastMode = readerController.preferences.readingMode;
+    _lastEffect = readerController.preferences.pageTurnEffect;
   }
 
   void _rendererProcessGone(
@@ -863,10 +867,12 @@ try {
   }
 
   Map<String, Object?> _styleJson() {
-    final theme = readerController.readingTheme;
-    final turnStyle = readerController.readingMode == BookReadingMode.scroll
+    final theme = readerController.preferences.readingTheme;
+    final turnStyle =
+        readerController.preferences.readingMode == BookReadingMode.scroll
         ? 'scroll'
-        : readerController.pageTurnEffect.resolved == BookPageTurnEffect.none
+        : readerController.preferences.pageTurnEffect.resolved ==
+              BookPageTurnEffect.none
         ? 'noAnimation'
         : 'slide';
     final mobile =
@@ -877,24 +883,24 @@ try {
     // Mobile: ~5% per side at margin=24. Desktop: milder — single column is
     // already centered by the paginator grid, so large gap looks sparse.
     final sideMargin = mobile
-        ? (6 + readerController.margin / 6).clamp(8.0, 16.0)
-        : (3 + readerController.margin / 8).clamp(4.0, 8.0);
+        ? (6 + readerController.preferences.margin / 6).clamp(8.0, 16.0)
+        : (3 + readerController.preferences.margin / 8).clamp(4.0, 8.0);
     // Label band (chapter / progress) + user vertical margin.
     // Default verticalMargin=26 → mobile ≈ safe+50; desktop top ≈ safe+52,
     // bottom ≈ safe+32.
     final labelTop = mobile ? 24.0 : 26.0;
     final labelBottom = mobile ? 24.0 : 6.0;
-    final vExtra = readerController.verticalMargin;
-    readerController.fontStore?.attachLoopback();
+    final vExtra = readerController.preferences.verticalMargin;
+    readerController.preferences.fontStore?.attachLoopback();
     return {
-      'fontSize': readerController.fontSize / 16,
+      'fontSize': readerController.preferences.fontSize / 16,
       'fontName': _styleFontName(),
       'fontPath': _styleFontPath(),
-      'fontWeight': readerController.bold ? 700 : 400,
-      'letterSpacing': readerController.letterSpacing,
-      'spacing': readerController.lineHeight,
-      'paragraphSpacing': readerController.paragraphSpacing,
-      'textIndent': readerController.firstLineIndent ? 2.0 : 0.0,
+      'fontWeight': readerController.preferences.bold ? 700 : 400,
+      'letterSpacing': readerController.preferences.letterSpacing,
+      'spacing': readerController.preferences.lineHeight,
+      'paragraphSpacing': readerController.preferences.paragraphSpacing,
+      'textIndent': readerController.preferences.firstLineIndent ? 2.0 : 0.0,
       'fontColor': _cssColor(Color(theme.foregroundArgb)),
       'backgroundColor': _cssColor(Color(theme.backgroundArgb)),
       'linkColor': _cssColor(Color(theme.linkColorArgb)),
@@ -902,14 +908,16 @@ try {
       'topMargin': _safeTop + labelTop + vExtra,
       'bottomMargin': _safeBottom + labelBottom + vExtra,
       'sideMargin': sideMargin,
-      'justify': readerController.textAlign == BookTextAlign.justify,
-      'hyphenate': readerController.hyphenate,
+      'justify':
+          readerController.preferences.textAlign == BookTextAlign.justify,
+      'hyphenate': readerController.preferences.hyphenate,
       'pageTurnStyle': turnStyle,
       // Keep Foliate auto columns (desktop may spread to two).
       'maxColumnCount': 0,
       'columnThreshold': 720,
       'writingMode': 'horizontal-tb',
-      'textAlign': readerController.textAlign == BookTextAlign.justify
+      'textAlign':
+          readerController.preferences.textAlign == BookTextAlign.justify
           ? 'justify'
           : 'start',
       'backgroundImage': 'none',
@@ -937,7 +945,7 @@ try {
   }
 
   String _styleFontName() {
-    final selection = readerController.fontSelection;
+    final selection = readerController.preferences.fontSelection;
     switch (selection.kind) {
       case BookFontKind.book:
         return 'book';
@@ -945,16 +953,18 @@ try {
         return BookSystemFont.byId(selection.systemId!)?.cssFontName ??
             BookSystemFont.byId(BookSystemFont.defaultId)!.cssFontName;
       case BookFontKind.user:
-        final font = readerController.fontStore?.byId(selection.userFontId!);
+        final font = readerController.preferences.fontStore?.byId(
+          selection.userFontId!,
+        );
         return font?.cssFamilyName ??
             BookSystemFont.byId(BookSystemFont.defaultId)!.cssFontName;
     }
   }
 
   String _styleFontPath() {
-    final selection = readerController.fontSelection;
+    final selection = readerController.preferences.fontSelection;
     if (selection.kind != BookFontKind.user) return '';
-    final store = readerController.fontStore;
+    final store = readerController.preferences.fontStore;
     final font = store?.byId(selection.userFontId!);
     if (store == null || font == null) return '';
     return store.loopbackUrlFor(font) ?? '';
@@ -1006,10 +1016,11 @@ try {
     _prefsApplyTimer = null;
     _openGeneration++;
     readerController.removeListener(_onControllerChanged);
-    readerController.detachExternalPageNavigation();
-    readerController.detachExternalSeek();
-    readerController.detachAnnotationBridge();
-    readerController.detachSearchBridge();
+    readerController.bridge.detachPageNavigation();
+    readerController.bridge.detachSeek();
+    readerController.annotations.detachBridge();
+    readerController.bridge.detachContent();
+    readerController.search.detachBridge();
     readerController.detachTtsBridge();
     _session?.invalidateWebView(_webLease);
     _webLease = null;
@@ -1112,7 +1123,12 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
     if (_rendererGone) {
       return ColoredBox(
         color: Color(
-          widget.adapter.readerController.readingTheme.backgroundArgb,
+          widget
+              .adapter
+              .readerController
+              .preferences
+              .readingTheme
+              .backgroundArgb,
         ),
       );
     }

@@ -8,6 +8,7 @@ import '../../../ai/ai_provider_kind.dart';
 import '../../../core/kaijuan_icons.dart';
 import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
+import '../../controllers/book_ai_mind_map_coordinator.dart';
 import '../ai_typography.dart';
 import 'ai_result_body.dart';
 import 'book_ai_mind_map_scope_card.dart';

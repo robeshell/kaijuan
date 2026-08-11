@@ -1,21 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
+import '../../controllers/book_ai_mind_map_coordinator.dart';
 import '../ai_typography.dart';
-
-typedef BookAiMindMapScopeChoice = ({int value, String label, String subtitle});
-
-class BookAiMindMapScopePrompt {
-  BookAiMindMapScopePrompt({required this.title, required this.choices});
-
-  final String title;
-  final List<BookAiMindMapScopeChoice> choices;
-  final Completer<int?> completer = Completer<int?>();
-  int? selectedValue;
-}
 
 class BookAiMindMapScopeChoiceCard extends StatelessWidget {
   const BookAiMindMapScopeChoiceCard({

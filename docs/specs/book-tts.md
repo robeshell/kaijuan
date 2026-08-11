@@ -82,7 +82,7 @@ ttsHighlightByCfi
 底栏听书 /（可选）选区朗读
         │
         ▼
-BookReaderController（播放状态、语速、生命周期）
+BookTtsController（播放状态、语速、generation、发声循环）
         │
         ├─ FoliateJs bridge：window.tts* → { text, cfi }
         │
@@ -142,7 +142,8 @@ paused
 |-----------|------|
 | `foliate_js_bridge.dart` | `FoliateTtsUtterance { text, cfi }` 解析 |
 | `foliate_js_engine_adapter.dart` | `evaluate` 封装 `tts*` |
-| `book_reader_controller.dart` | 播放状态、语速、generation + armed 换句门槛 |
+| `book_tts_controller.dart` | 播放状态、语速、generation + armed 换句门槛；独占系统 TTS 引擎与发声循环 |
+| `book_reader_controller.dart` | 组合 TTS Controller，保留既有公共门面与阅读器生命周期接线 |
 | `BookReadingPreferences` | 持久化语速（可选音色 id） |
 | UI | 工具条听书键；迷你控制面板 |
 | `pubspec` | `flutter_tts`（或等价）；**不**引入云 TTS SDK |

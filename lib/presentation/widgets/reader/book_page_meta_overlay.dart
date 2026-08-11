@@ -13,7 +13,7 @@ class BookPageMetaOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = controller.readingTheme;
+    final theme = controller.preferences.readingTheme;
     final meta = Color(theme.metaColorArgb);
     final visible = !controller.chromeVisible;
     final short = context.appIsShortViewport;

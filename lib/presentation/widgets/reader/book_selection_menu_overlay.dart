@@ -73,7 +73,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final menu = controller.selectionMenu;
+    final menu = controller.annotations.selectionMenu;
     if (menu == null) return const SizedBox.shrink();
 
     final size = MediaQuery.sizeOf(context);
@@ -160,9 +160,9 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     final caretX = (anchorMidX - left).clamp(16.0, menuW - 16.0);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (controller.selectionMenu == null) return;
+      if (controller.annotations.selectionMenu == null) return;
       if (!_needsMenuCursorZone) return;
-      controller.setMenuCursorZone(
+      controller.annotations.setMenuCursorZone(
         left: left / size.width,
         top: zoneTop.clamp(0.0, size.height) / size.height,
         right: (left + menuW) / size.width,
@@ -180,7 +180,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
             caretX: caretX,
             onStyle: (type, color) {
               unawaited(
-                controller.applyAnnotationStyle(
+                controller.annotations.applyAnnotationStyle(
                   type: type,
                   color: color,
                   cfiOverride: cfi,
@@ -190,7 +190,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
               );
             },
             onClear: () {
-              unawaited(controller.removeActiveAnnotation());
+              unawaited(controller.annotations.removeActiveAnnotation());
             },
             onCopy: () => _copy(context, text),
             onExcerpt: () => _excerpt(context, text),
@@ -209,7 +209,8 @@ class BookSelectionMenuOverlay extends StatelessWidget {
         : _ActionsCard(
             placeAbove: placeAbove,
             caretX: caretX,
-            onUnderline: () => unawaited(controller.openMarkupPhase()),
+            onUnderline: () =>
+                unawaited(controller.annotations.openMarkupPhase()),
             onNote: () => unawaited(_openNote(context)),
             onCopy: () => _copy(context, text),
             onDict: () => unawaited(
@@ -224,8 +225,8 @@ class BookSelectionMenuOverlay extends StatelessWidget {
             ),
             onSearch: () {
               final q = text.trim();
-              controller.clearSelectionMenu();
-              controller.openSearch(initialQuery: q.isEmpty ? null : q);
+              controller.annotations.clearSelectionMenu();
+              controller.search.openSearch(initialQuery: q.isEmpty ? null : q);
             },
             onExcerpt: () => _excerpt(context, text),
             onAiChat: () => unawaited(_openAiChat(context, text)),
@@ -233,7 +234,8 @@ class BookSelectionMenuOverlay extends StatelessWidget {
 
     final interactive = Listener(
       behavior: HitTestBehavior.opaque,
-      onPointerDown: (_) => controller.retainSelectionMenuForInteraction(),
+      onPointerDown: (_) =>
+          controller.annotations.retainSelectionMenuForInteraction(),
       child: PointerInterceptor(
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
@@ -268,11 +270,13 @@ class BookSelectionMenuOverlay extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             onTapUp: (_) {
               // Absorb the finger-up that finished the selection (menu open race).
-              if (!controller.selectionMenuBarrierAcceptsDismiss) return;
+              if (!controller.annotations.selectionMenuBarrierAcceptsDismiss) {
+                return;
+              }
               // Dismiss only — never page-turn here. Edge zones are ~28% wide;
               // coupling flip to dismiss made left-side selections jump 上一页
               // on iOS/Android as soon as the bubble appeared.
-              controller.clearSelectionMenu();
+              controller.annotations.clearSelectionMenu();
             },
           ),
         ),
@@ -282,7 +286,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
   }
 
   Future<void> _copy(BuildContext context, String text) async {
-    final ok = await controller.copySelection(textOverride: text);
+    final ok = await controller.annotations.copySelection(textOverride: text);
     if (!context.mounted) return;
     showAppSnackBar(context, ok ? '已复制' : '没有可复制的文字');
   }
@@ -296,7 +300,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     final title = controller.item.title;
     final chapter = controller.currentChapterTitle;
     final subtitle = controller.item.seriesName;
-    controller.clearSelectionMenu();
+    controller.annotations.clearSelectionMenu();
     if (!context.mounted) return;
     await showBookExcerptSheet(
       context,
@@ -308,7 +312,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
   }
 
   Future<void> _openNote(BuildContext context) async {
-    final menu = controller.selectionMenu;
+    final menu = controller.annotations.selectionMenu;
     if (menu == null || menu.cfi.trim().isEmpty) return;
     final cfi = menu.cfi;
     final text = menu.text;
@@ -316,14 +320,14 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     final colorCss = menu.annotationColorCss;
     var note = menu.note?.trim() ?? '';
     if (note.isEmpty) {
-      for (final row in controller.annotations) {
+      for (final row in controller.annotations.annotations) {
         if (row.cfi == cfi) {
           note = row.note?.trim() ?? '';
           break;
         }
       }
     }
-    controller.clearSelectionMenu();
+    controller.annotations.clearSelectionMenu();
     if (!context.mounted) return;
     await showBookAnnotationNoteSheet(
       context,
@@ -339,7 +343,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
   Future<void> _openAiChat(BuildContext context, String text) async {
     final sel = text.trim();
     // Keep page highlight; only drop the action bubble.
-    controller.dismissSelectionMenuKeepHighlight();
+    controller.annotations.dismissSelectionMenuKeepHighlight();
     if (!context.mounted) return;
     await showBookAiChatSheet(
       context,
@@ -353,7 +357,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
     BookLanguageOperation operation,
     String text,
   ) async {
-    final cfi = controller.selectionMenu?.cfi;
+    final cfi = controller.annotations.selectionMenu?.cfi;
     final wantAi =
         controller.canUseAiLanguage &&
         operation != BookLanguageOperation.fullBookTranslation;
@@ -365,14 +369,14 @@ class BookSelectionMenuOverlay extends StatelessWidget {
         operation == BookLanguageOperation.selectionTranslation &&
         controller.translationPreferences.includeContext) {
       final prefs = controller.translationPreferences;
-      final ctx = await controller.loadSelectionContext(
+      final ctx = await controller.bridge.loadSelectionContext(
         before: prefs.contextChars,
         after: prefs.contextChars,
       );
       before = ctx?.before;
       after = ctx?.after;
     }
-    controller.clearSelectionMenu();
+    controller.annotations.clearSelectionMenu();
     if (wantAi) {
       if (!context.mounted) return;
       await showBookAiLanguageSheet(
@@ -386,7 +390,7 @@ class BookSelectionMenuOverlay extends StatelessWidget {
       );
       return;
     }
-    final result = await controller.performPlatformLanguageAction(
+    final result = await controller.annotations.performPlatformLanguageAction(
       operation: operation,
       textOverride: text,
     );

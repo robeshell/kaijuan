@@ -77,7 +77,7 @@ class _BookAnnotationNoteSheetState extends State<_BookAnnotationNoteSheet> {
     if (_saving) return;
     setState(() => _saving = true);
     final noteText = clear ? '' : _text.text;
-    await widget.controller.saveAnnotationNote(
+    await widget.controller.annotations.saveAnnotationNote(
       cfi: widget.cfi,
       noteText: noteText,
       selectedText: widget.selectedText,

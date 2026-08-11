@@ -390,7 +390,7 @@ M6  Markdown / Obsidian 导出
 | **P4** | 拖拽与系统分享导入 | **中** |
 | **P5** | 全文 / 语义检索 | **远** |
 | — | 仿真翻页 | **搁置** |
-| — | 结构债（god-controller 等） | 工程项，见 ENGINEERING / 评审，不改产品范围 |
+| — | 结构债（本书 AI 大面板、图书阅读器 god-controller） | **治理中**：按图谱工作区、导图路由、批注、搜索/图片与排版偏好拆成可独立验证的 Controller / Widget；不改变产品范围、UI、提示词、缓存、WebDAV、阅读行为或 TTS 公共门面，边界见 ENGINEERING |
 
 具体交互以对应 specs 为准；AI 见 [specs/ai.md](./specs/ai.md)。
 

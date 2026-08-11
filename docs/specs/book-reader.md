@@ -293,6 +293,16 @@ markup
 
 原则：**DB 不解析 locator**；节索引 + 节内进度分数属 format-owned JSON。包结构解析走库，不手写 OPF/NCX。
 
+### Controller 组合边界
+
+- `BookReaderController` 持有阅读定位、书签、chrome、阅读器生命周期、AI 应用门面与 TTS 公共门面；它组合而不复制以下子 Controller / bridge 的状态。
+- `BookAnnotationsController` 持有批注 watch、选择菜单两阶段状态机、Foliate annotation bridge、笔记与复制/系统语言动作。
+- `BookSearchController` 持有书内搜索、搜索 bridge 与正文图片查看状态；跳转通过显式 locator 回调交回阅读器。
+- `BookReaderPreferencesController` 持有排版、主题、亮度、阅读模式、字体存储与偏好持久化；阅读器只消费其当前不可变投影，并在模式切换时冻结当前 locator。
+- `BookReaderBridge` 持有 Foliate 页导航、seek、正文/结构/选区上下文回调；adapter 直接 attach / detach，主 Controller 不保留重复转发字段。
+- `BookTtsController` 持有系统 TTS 引擎、播放循环、句游标与速率；`BookReaderController` 继续保留既有 TTS 公共方法，UI 不直连插件。
+- 子 Controller 不得各自复制 section / progress / CFI；需要当前位置、TOC 或跳转时使用只读 getter / 回调。表现层按职责监听相应 Controller，避免任一批注或搜索事件重建整个阅读器状态树。
+
 ### 目录与链接
 
 - 阅读与导入均使用 foliate-js 解析 EPUB3 `nav` / EPUB2 `toc.ncx` 和 spine；不再保留 Dart 侧第二套 EPUB 包解析器。

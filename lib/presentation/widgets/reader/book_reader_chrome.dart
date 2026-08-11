@@ -25,7 +25,7 @@ class BookReaderChrome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = controller.readingTheme;
+    final theme = controller.preferences.readingTheme;
     // Opaque reading surface — translucent glass made the tool strip unreadable.
     final surface = Color(theme.backgroundArgb);
     final fg = Color(theme.foregroundArgb);
@@ -69,8 +69,8 @@ class BookReaderChrome extends StatelessWidget {
                   controller.hideChrome();
                   // Capture text first; do not clear the page highlight
                   // (default clearSelectionMenu wipes WebView selection).
-                  final sel = await controller.peekSelectedText();
-                  controller.dismissSelectionMenuKeepHighlight();
+                  final sel = await controller.annotations.peekSelectedText();
+                  controller.annotations.dismissSelectionMenuKeepHighlight();
                   if (!context.mounted) return;
                   await showBookAiChatSheet(
                     context,
@@ -83,7 +83,7 @@ class BookReaderChrome extends StatelessWidget {
               IconButton(
                 tooltip: '搜索',
                 visualDensity: density,
-                onPressed: () => controller.openSearch(),
+                onPressed: () => controller.search.openSearch(),
                 icon: Icon(KaijuanIcons.search, color: fg, weight: 300),
               ),
             ],

@@ -73,11 +73,11 @@ void main() {
       final item = await insertBook(id: 'defaults');
       final controller = BookReaderController(database: database, item: item);
 
-      expect(controller.fontSize, 18.0);
-      expect(controller.lineHeight, 1.7);
-      expect(controller.readingTheme, BookReadingTheme.paper);
-      expect(controller.margin, 24.0);
-      expect(controller.readingMode, BookReadingMode.page);
+      expect(controller.preferences.fontSize, 18.0);
+      expect(controller.preferences.lineHeight, 1.7);
+      expect(controller.preferences.readingTheme, BookReadingTheme.paper);
+      expect(controller.preferences.margin, 24.0);
+      expect(controller.preferences.readingMode, BookReadingMode.page);
       expect(controller.isReady, isFalse);
       expect(controller.chromeVisible, isFalse);
 
@@ -101,11 +101,11 @@ void main() {
         readingPreferences: prefs,
       );
 
-      expect(controller.fontSize, 22.0);
-      expect(controller.lineHeight, 1.8);
-      expect(controller.readingTheme, BookReadingTheme.sepia);
-      expect(controller.margin, 32.0);
-      expect(controller.readingMode, BookReadingMode.page);
+      expect(controller.preferences.fontSize, 22.0);
+      expect(controller.preferences.lineHeight, 1.8);
+      expect(controller.preferences.readingTheme, BookReadingTheme.sepia);
+      expect(controller.preferences.margin, 32.0);
+      expect(controller.preferences.readingMode, BookReadingMode.page);
 
       controller.dispose();
     });
@@ -359,9 +359,9 @@ void main() {
       scrollModeEnabled: false,
     );
 
-    await controller.setReadingMode(BookReadingMode.scroll);
+    await controller.preferences.setReadingMode(BookReadingMode.scroll);
 
-    expect(controller.readingMode, BookReadingMode.page);
+    expect(controller.preferences.readingMode, BookReadingMode.page);
     expect(controller.scrollModeEnabled, isFalse);
     controller.dispose();
   });
@@ -370,17 +370,17 @@ void main() {
     final item = await insertBook(id: 'clamp');
     final controller = BookReaderController(database: database, item: item);
 
-    await controller.setFontSize(5);
-    expect(controller.fontSize, 14.0);
+    await controller.preferences.setFontSize(5);
+    expect(controller.preferences.fontSize, 14.0);
 
-    await controller.setFontSize(50);
-    expect(controller.fontSize, 28.0);
+    await controller.preferences.setFontSize(50);
+    expect(controller.preferences.fontSize, 28.0);
 
-    await controller.setLineHeight(0.5);
-    expect(controller.lineHeight, 1.2);
+    await controller.preferences.setLineHeight(0.5);
+    expect(controller.preferences.lineHeight, 1.2);
 
-    await controller.setLineHeight(5);
-    expect(controller.lineHeight, 2.2);
+    await controller.preferences.setLineHeight(5);
+    expect(controller.preferences.lineHeight, 2.2);
 
     controller.dispose();
   });
@@ -389,8 +389,8 @@ void main() {
     final item = await insertBook(id: 'pure-black');
     final controller = BookReaderController(database: database, item: item);
 
-    await controller.setReadingTheme(BookReadingTheme.pureBlack);
-    expect(controller.readingTheme, BookReadingTheme.pureBlack);
+    await controller.preferences.setReadingTheme(BookReadingTheme.pureBlack);
+    expect(controller.preferences.readingTheme, BookReadingTheme.pureBlack);
 
     controller.dispose();
   });
@@ -509,9 +509,9 @@ void main() {
         await controller.attachEngine(sectionMap, tocTitles);
         controller.goToSection(2, progressInSection: 0.42);
 
-        await controller.setReadingMode(BookReadingMode.scroll);
+        await controller.preferences.setReadingMode(BookReadingMode.scroll);
 
-        expect(controller.readingMode, BookReadingMode.scroll);
+        expect(controller.preferences.readingMode, BookReadingMode.scroll);
         expect(controller.pendingJump?.sectionIndex, 2);
         expect(controller.pendingJump?.progressInSection, closeTo(0.42, 0.001));
 
@@ -526,7 +526,7 @@ void main() {
       var previousCount = 0;
 
       expect(controller.hasPageMode, isFalse);
-      controller.attachExternalPageNavigation(
+      controller.bridge.attachPageNavigation(
         nextPage: () => nextCount++,
         previousPage: () => previousCount++,
       );
@@ -537,7 +537,7 @@ void main() {
       expect(nextCount, 1);
       expect(previousCount, 1);
 
-      controller.detachExternalPageNavigation();
+      controller.bridge.detachPageNavigation();
       expect(controller.hasPageMode, isFalse);
       controller.dispose();
     });
@@ -598,12 +598,12 @@ void main() {
       readingPreferences: prefs,
     );
 
-    await controller.setFontSize(20);
-    await controller.setLineHeight(1.8);
-    await controller.setReadingTheme(BookReadingTheme.dark);
-    await controller.setMargin(40);
-    await controller.setReadingMode(BookReadingMode.page);
-    await controller.setPageTurnEffect(BookPageTurnEffect.none);
+    await controller.preferences.setFontSize(20);
+    await controller.preferences.setLineHeight(1.8);
+    await controller.preferences.setReadingTheme(BookReadingTheme.dark);
+    await controller.preferences.setMargin(40);
+    await controller.preferences.setReadingMode(BookReadingMode.page);
+    await controller.preferences.setPageTurnEffect(BookPageTurnEffect.none);
 
     final reloaded = await BookReadingPreferences.load(
       supportDirectory: tempDir,
@@ -628,16 +628,7 @@ void main() {
         await controller.attachEngine(sectionMap, tocTitles);
         controller.goToSection(1);
         final chapter = Completer<String>();
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
-          getChapterText: () => chapter.future,
-        );
+        controller.bridge.attachContent(getChapterText: () => chapter.future);
 
         final frozen = controller.captureCurrentBookMindMapChapter();
         controller.goToSection(2);
@@ -728,14 +719,7 @@ void main() {
         final controller = BookReaderController(database: database, item: item);
         final loads =
             <({bool toc, int? startSection, int? endSectionExclusive})>[];
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getChapterText: () async => '翻页后另一部作品的正文',
           getBookPlainText:
               (
@@ -806,14 +790,7 @@ void main() {
       () async {
         final item = await insertBook(id: 'same-spine-omnibus');
         final controller = BookReaderController(database: database, item: item);
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -844,14 +821,7 @@ void main() {
       () async {
         final item = await insertBook(id: 'flat-single-work');
         final controller = BookReaderController(database: database, item: item);
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -903,14 +873,7 @@ void main() {
           ),
           List<String>.generate(80, (index) => '第 ${index + 1} 节'),
         );
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -955,14 +918,7 @@ void main() {
       () async {
         final item = await insertBook(id: 'graph-sections');
         final controller = BookReaderController(database: database, item: item);
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -1013,14 +969,7 @@ void main() {
       () async {
         final item = await insertBook(id: 'graph-series-metadata');
         final controller = BookReaderController(database: database, item: item);
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -1055,14 +1004,7 @@ void main() {
     test('per-work choices keep the logical heading level', () async {
       final item = await insertBook(id: 'graph-levels');
       final controller = BookReaderController(database: database, item: item);
-      controller.attachAnnotationBridge(
-        renderAll: (_) {},
-        add: (_) {},
-        remove: (_) {},
-        clearSelection: () {},
-        getSelectedText: () async => '',
-        setMenuCursorZone: (_) {},
-        setMenuOpen: (_) {},
+      controller.bridge.attachContent(
         getBookPlainText:
             (
               maxChars, {
@@ -1124,14 +1066,7 @@ void main() {
             '第三章 猫头鹰传书',
           ],
         );
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -1166,14 +1101,7 @@ void main() {
     test('manual exclude drops the compound front matter (中文版序言)', () async {
       final item = await insertBook(id: 'graph-sections-exclude');
       final controller = BookReaderController(database: database, item: item);
-      controller.attachAnnotationBridge(
-        renderAll: (_) {},
-        add: (_) {},
-        remove: (_) {},
-        clearSelection: () {},
-        getSelectedText: () async => '',
-        setMenuCursorZone: (_) {},
-        setMenuOpen: (_) {},
+      controller.bridge.attachContent(
         getBookPlainText:
             (
               maxChars, {
@@ -1208,14 +1136,7 @@ void main() {
       () async {
         final item = await insertBook(id: 'graph-sections-dedupe');
         final controller = BookReaderController(database: database, item: item);
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -1253,14 +1174,7 @@ void main() {
         final item = await insertBook(id: 'mind-map-substantive-scope');
         final controller = BookReaderController(database: database, item: item);
         var corpusReads = 0;
-        controller.attachAnnotationBridge(
-          renderAll: (_) {},
-          add: (_) {},
-          remove: (_) {},
-          clearSelection: () {},
-          getSelectedText: () async => '',
-          setMenuCursorZone: (_) {},
-          setMenuOpen: (_) {},
+        controller.bridge.attachContent(
           getBookPlainText:
               (
                 maxChars, {
@@ -1344,14 +1258,7 @@ void main() {
         item: item,
         aiSettings: aiSettings,
       );
-      controller.attachAnnotationBridge(
-        renderAll: (_) {},
-        add: (_) {},
-        remove: (_) {},
-        clearSelection: () {},
-        getSelectedText: () async => '',
-        setMenuCursorZone: (_) {},
-        setMenuOpen: (_) {},
+      controller.bridge.attachContent(
         getBookPlainText:
             (
               maxChars, {

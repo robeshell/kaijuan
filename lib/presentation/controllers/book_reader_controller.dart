@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 
 import '../../ai/ai_chat.dart';
 import '../../ai/ai_agent_runtime.dart';
@@ -36,17 +35,19 @@ import '../../ai/ai_translation.dart';
 import '../../ai/ai_user_error.dart';
 import '../../ai/legacy_ai_agent_runtime.dart';
 import '../../app/book_reading_preferences.dart';
-import '../../domain/book_structure.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../readers/book/book_models.dart';
-import '../../readers/book/book_theme.dart';
 import '../../readers/book/book_language_actions.dart';
 import '../../readers/book/foliate_js_bridge.dart';
 import 'ai_settings_controller.dart';
+import 'book_annotations_controller.dart';
 import 'book_ai_mind_map_controller.dart';
 import 'book_ai_reader_gateway.dart';
 import 'book_ai_workspace_controller.dart';
+import 'book_reader_bridge.dart';
+import 'book_reader_preferences_controller.dart';
+import 'book_search_controller.dart';
 import 'book_tts_controller.dart';
 
 typedef BookMindMapRevisionInput = ({
@@ -73,50 +74,32 @@ class BookReaderController extends ChangeNotifier {
     this.genkitAgentCapabilities = AiAgentRuntimeCapabilities.genkitDart0151,
     this.scrollModeEnabled = true,
   }) : languageProvider =
-           languageProvider ?? const PlatformBookLanguageProvider(),
-       _prefs = readingPreferences,
-       _fontSize =
-           readingPreferences?.fontSize ??
-           BookReadingPreferences.defaultFontSize,
-       _lineHeight =
-           readingPreferences?.lineHeight ??
-           BookReadingPreferences.defaultLineHeight,
-       _readingTheme =
-           readingPreferences?.readingTheme ?? BookReadingTheme.paper,
-       _margin =
-           readingPreferences?.margin ?? BookReadingPreferences.defaultMargin,
-       _verticalMargin =
-           readingPreferences?.verticalMargin ??
-           BookReadingPreferences.defaultVerticalMargin,
-       _bold = readingPreferences?.bold ?? BookReadingPreferences.defaultBold,
-       _brightness =
-           readingPreferences?.brightness ??
-           BookReadingPreferences.defaultBrightness,
-       _fontSelection =
-           readingPreferences?.fontSelection ??
-           BookReadingPreferences.defaultFontSelection,
-       _letterSpacing =
-           readingPreferences?.letterSpacing ??
-           BookReadingPreferences.defaultLetterSpacing,
-       _paragraphSpacing =
-           readingPreferences?.paragraphSpacing ??
-           BookReadingPreferences.defaultParagraphSpacing,
-       _textAlign =
-           readingPreferences?.textAlign ??
-           BookReadingPreferences.defaultTextAlign,
-       _firstLineIndent =
-           readingPreferences?.firstLineIndent ??
-           BookReadingPreferences.defaultFirstLineIndent,
-       _hyphenate =
-           readingPreferences?.hyphenate ??
-           BookReadingPreferences.defaultHyphenate,
-       _readingMode = scrollModeEnabled
-           ? readingPreferences?.readingMode ??
-                 BookReadingPreferences.defaultReadingMode
-           : BookReadingMode.page,
-       _pageTurnEffect =
-           readingPreferences?.pageTurnEffect ??
-           BookReadingPreferences.defaultPageTurnEffect {
+           languageProvider ?? const PlatformBookLanguageProvider() {
+    bridge.onContentDetached = _aiCorpus.clear;
+    _preferences = BookReaderPreferencesController(
+      preferences: readingPreferences,
+      scrollModeEnabled: scrollModeEnabled,
+      onReadingModeWillChange: () {
+        _pendingJumpLocator = currentLocator;
+      },
+    )..addListener(_notifyPreferencesChanged);
+    _annotationState = BookAnnotationsController(
+      database: database,
+      item: item,
+      languageProvider: this.languageProvider,
+      beforeOpenMenu: hideChrome,
+      tocTitles: () => _tocTitles,
+      tocEntries: () => _tocEntries,
+      sectionCount: () => sectionCount,
+      onGoToCfi: _goToAnnotationCfi,
+    )..addListener(_notifyAnnotationsChanged);
+    _search = BookSearchController(
+      beforeOpenOverlay: () {
+        _annotationState.clearSelectionMenu();
+        hideChrome();
+      },
+      onSearchHitSelected: _goToSearchHit,
+    )..addListener(_notifySearchChanged);
     _aiWorkspace = BookAiWorkspaceController(
       saveChatSession: saveChatSession,
       agentRuntimeFactory: agentRuntimeFactory,
@@ -125,7 +108,6 @@ class BookReaderController extends ChangeNotifier {
       genkitAgentCapabilities: genkitAgentCapabilities,
       onChanged: _notifyAiWorkspaceChanged,
     );
-    readingPreferences?.fontStore.addListener(_onFontStoreChanged);
     bindAiSettings(aiSettings);
   }
 
@@ -133,9 +115,17 @@ class BookReaderController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  void _onFontStoreChanged() {
+  void _notifyPreferencesChanged() {
     if (_disposed) return;
     notifyListeners();
+  }
+
+  void _notifySearchChanged() {
+    if (!_disposed) notifyListeners();
+  }
+
+  void _notifyAnnotationsChanged() {
+    if (!_disposed) notifyListeners();
   }
 
   final AppDatabase database;
@@ -146,7 +136,10 @@ class BookReaderController extends ChangeNotifier {
   final AiAgentRuntimeKind requestedAgentRuntime;
   final AiAgentRuntimeCapabilities genkitAgentCapabilities;
   late final BookAiWorkspaceController _aiWorkspace;
-  final BookReadingPreferences? _prefs;
+  late final BookAnnotationsController _annotationState;
+  final BookReaderBridge bridge = BookReaderBridge();
+  late final BookReaderPreferencesController _preferences;
+  late final BookSearchController _search;
   final bool scrollModeEnabled;
   Future<void> Function()? _clearPlatformFocus;
 
@@ -225,85 +218,12 @@ class BookReaderController extends ChangeNotifier {
 
   int _sectionIndex = 0;
   double _progressInSection = 0;
-  double _fontSize;
-  double _lineHeight;
-  BookReadingTheme _readingTheme;
-  double _margin;
-  double _verticalMargin;
-  bool _bold;
-  double _brightness;
-  BookFontSelection _fontSelection;
-  double _letterSpacing;
-  double _paragraphSpacing;
-  BookTextAlign _textAlign;
-  bool _firstLineIndent;
-  bool _hyphenate;
-  BookReadingMode _readingMode;
-  BookPageTurnEffect _pageTurnEffect;
-
   Timer? _saveDebounce;
   BookLocator? _pendingJumpLocator;
   String? _progressLocatorJson;
   List<ReaderBookmark> _bookmarks = const [];
   StreamSubscription<List<ReaderBookmark>>? _bookmarksSubscription;
-  List<BookAnnotation> _annotations = const [];
-  StreamSubscription<List<BookAnnotation>>? _annotationsSubscription;
-  BookSelectionMenu? _selectionMenu;
 
-  /// Brief lock while pressing the Flutter bubble / applying a style.
-  bool _selectionClearLocked = false;
-  Timer? _selectionClearLockTimer;
-
-  /// Until this instant, the mobile Flutter dismiss-barrier ignores taps.
-  ///
-  /// Opening the menu often races the same finger-up that finished the
-  /// selection; without a grace window that pointer hits the barrier and used
-  /// to dismiss (and historically also page-turn on edge zones).
-  DateTime? _selectionMenuBarrierArmAt;
-
-  /// Until this instant, edge/tap page-turns from the WebView are ignored.
-  /// Covers the race where `onClick` arrives before/with `onSelectionEnd`.
-  DateTime? _suppressPageTurnUntil;
-
-  /// Foliate asks for annotations at open; DB watch may emit later.
-  bool _annotationsHydrated = false;
-  bool _annotationsRenderRequested = false;
-
-  /// Ignore overlayer taps right after dismiss (same click would reopen ②).
-  DateTime? _ignoreAnnotationClickUntil;
-
-  /// Last tab in the nav drawer (目录 / 书签 / 笔记).
-  int _navDrawerTabIndex = 0;
-
-  bool _searchOpen = false;
-  String _searchQuery = '';
-  bool _searchRunning = false;
-  double _searchProgress = 0;
-  List<FoliateSearchHit> _searchHits = const [];
-  int _searchGeneration = 0;
-  String? _imageViewerDataUrl;
-
-  VoidCallback? _externalNextPage;
-  VoidCallback? _externalPreviousPage;
-  void Function(double fraction)? _externalSeek;
-  void Function(List<Map<String, Object?>> annotations)? _renderAnnotations;
-  void Function(Map<String, Object?> annotation)? _addAnnotationToEngine;
-  void Function(String cfi)? _removeAnnotationFromEngine;
-  VoidCallback? _clearWebSelection;
-  Future<String> Function()? _getSelectedText;
-  Future<String> Function()? _getChapterText;
-  Future<String> Function(
-    int maxChars, {
-    bool toc,
-    int? startSection,
-    int? endSectionExclusive,
-  })?
-  _getBookPlainText;
-  Future<BookStructureIndex?> Function()? _getBookStructureIndex;
-  Future<({String before, String after})?> Function(int before, int after)?
-  _getSelectionContext;
-  void Function(Map<String, double>? zone)? _setMenuCursorZone;
-  void Function(bool open)? _setMenuOpen;
   AiChatHistoryStore? _chatHistoryStore;
   AiGraphStore? _aiGraphStore;
   AiBookOutline? _bookOutline;
@@ -354,16 +274,8 @@ class BookReaderController extends ChangeNotifier {
   }
 
   late final AiBookCorpusCache _aiCorpus = AiBookCorpusCache(
-    loadBookBody:
-        (maxChars, {required toc, startSection, endSectionExclusive}) async =>
-            (await _getBookPlainText?.call(
-              maxChars,
-              toc: toc,
-              startSection: startSection,
-              endSectionExclusive: endSectionExclusive,
-            )) ??
-            '',
-    loadChapter: () async => (await _getChapterText?.call()) ?? '',
+    loadBookBody: bridge.loadBookPlainText,
+    loadChapter: bridge.loadChapterText,
   );
   late final BookAiReaderGateway _aiReaderGateway = BookAiReaderGateway(
     _aiWorkspace,
@@ -372,16 +284,14 @@ class BookReaderController extends ChangeNotifier {
   late final AiBookStructureSession _aiStructure = AiBookStructureSession(
     corpus: _aiCorpus,
     publicationTitle: item.title,
-    loadIndex: () async => await _getBookStructureIndex?.call(),
+    loadIndex: bridge.loadBookStructureIndex,
     isSupplementTitle: (title) =>
         _isOutlineMetadataTitle(title) || _isGraphAppendixLabel(title),
   );
-  void Function(String query)? _runSearch;
-  VoidCallback? _clearSearch;
   late final BookTtsController _tts = BookTtsController(
     isReaderDisposed: () => _disposed,
     isReaderReady: () => _ready,
-    beforeStart: clearSelectionMenu,
+    beforeStart: _annotationState.clearSelectionMenu,
     onPlaybackStarted: showChrome,
     onChanged: notifyListeners,
   );
@@ -409,78 +319,13 @@ class BookReaderController extends ChangeNotifier {
   int get sectionCount => _sectionMap?.sectionCount ?? 0;
   int get sectionIndex => _sectionIndex;
   double get progressInSection => _progressInSection;
-  double get fontSize => _fontSize;
-  double get lineHeight => _lineHeight;
-  BookReadingTheme get readingTheme => _readingTheme;
-  double get margin => _margin;
-  double get verticalMargin => _verticalMargin;
-  bool get bold => _bold;
-  double get brightness => _brightness;
-  BookFontSelection get fontSelection => _fontSelection;
-  BookFontStore? get fontStore => _prefs?.fontStore;
-  String get fontLabel {
-    switch (_fontSelection.kind) {
-      case BookFontKind.book:
-        return '图书自带';
-      case BookFontKind.system:
-        return BookSystemFont.byId(_fontSelection.systemId!)?.label ?? '默认字体';
-      case BookFontKind.user:
-        return fontStore?.byId(_fontSelection.userFontId!)?.displayName ??
-            '用户字体';
-    }
-  }
-
-  double get letterSpacing => _letterSpacing;
-  double get paragraphSpacing => _paragraphSpacing;
-  BookTextAlign get textAlign => _textAlign;
-  bool get firstLineIndent => _firstLineIndent;
-  bool get hyphenate => _hyphenate;
-  BookReadingMode get readingMode => _readingMode;
-  BookPageTurnEffect get pageTurnEffect => _pageTurnEffect;
+  BookAnnotationsController get annotations => _annotationState;
+  BookReaderPreferencesController get preferences => _preferences;
+  BookSearchController get search => _search;
 
   bool get hasPageMode =>
-      _readingMode == BookReadingMode.page && _externalNextPage != null;
+      _preferences.readingMode == BookReadingMode.page && bridge.canGoNextPage;
   List<ReaderBookmark> get bookmarks => _bookmarks;
-  List<BookAnnotation> get annotations => _annotations;
-  BookSelectionMenu? get selectionMenu => _selectionMenu;
-
-  /// Whether the full-screen mobile dismiss barrier should honor a tap.
-  bool get selectionMenuBarrierAcceptsDismiss {
-    if (_selectionMenu == null) return false;
-    final armAt = _selectionMenuBarrierArmAt;
-    if (armAt == null) return true;
-    return !DateTime.now().isBefore(armAt);
-  }
-
-  void _armSelectionMenuDismissBarrier() {
-    // Long enough to absorb selection finger-up / iOS Platform View handoff.
-    _selectionMenuBarrierArmAt = DateTime.now().add(
-      const Duration(milliseconds: 450),
-    );
-  }
-
-  /// True while a just-finished selection should not trigger edge page-turns.
-  bool get shouldSuppressPageTurnFromClick {
-    final until = _suppressPageTurnUntil;
-    if (until == null) return false;
-    return DateTime.now().isBefore(until);
-  }
-
-  void _armPageTurnSuppressAfterSelection() {
-    _suppressPageTurnUntil = DateTime.now().add(
-      const Duration(milliseconds: 900),
-    );
-  }
-
-  int get navDrawerTabIndex => _navDrawerTabIndex;
-
-  bool get searchOpen => _searchOpen;
-  String get searchQuery => _searchQuery;
-  bool get searchRunning => _searchRunning;
-  double get searchProgress => _searchProgress;
-  List<FoliateSearchHit> get searchHits => _searchHits;
-  String? get imageViewerDataUrl => _imageViewerDataUrl;
-  bool get imageViewerOpen => _imageViewerDataUrl != null;
 
   BookTtsStatus get ttsStatus => _tts.status;
   bool get ttsActive => _tts.active;
@@ -490,11 +335,8 @@ class BookReaderController extends ChangeNotifier {
 
   static const ttsRatePresets = BookTtsController.ratePresets;
 
-  /// Opens the note editor (list / note bubble). Set by [BookReaderScreen].
-  void Function(BookAnnotation note)? onOpenNoteEditor;
-
-  bool get canGoPreviousPage => _externalPreviousPage != null;
-  bool get canGoNextPage => _externalNextPage != null;
+  bool get canGoPreviousPage => bridge.canGoPreviousPage;
+  bool get canGoNextPage => bridge.canGoNextPage;
 
   /// Pending programmatic jump (restore / TOC / bookmark). Not cleared until
   /// the active view reports success via [clearPendingJump].
@@ -623,65 +465,11 @@ class BookReaderController extends ChangeNotifier {
       _pendingJumpLocator = locator;
     }
     _watchBookmarks();
-    _watchAnnotations();
+    _annotationState.watchAnnotations();
     _ready = true;
     _openError = null;
     notifyListeners();
     unawaited(database.touchLastOpened(item.id, DateTime.now()));
-  }
-
-  void attachExternalPageNavigation({
-    required VoidCallback nextPage,
-    required VoidCallback previousPage,
-  }) {
-    _externalNextPage = nextPage;
-    _externalPreviousPage = previousPage;
-  }
-
-  void detachExternalPageNavigation() {
-    _externalNextPage = null;
-    _externalPreviousPage = null;
-  }
-
-  void attachExternalSeek(void Function(double fraction) seek) {
-    _externalSeek = seek;
-  }
-
-  void detachExternalSeek() {
-    _externalSeek = null;
-  }
-
-  void attachAnnotationBridge({
-    required void Function(List<Map<String, Object?>> annotations) renderAll,
-    required void Function(Map<String, Object?> annotation) add,
-    required void Function(String cfi) remove,
-    required VoidCallback clearSelection,
-    required Future<String> Function() getSelectedText,
-    required void Function(Map<String, double>? zone) setMenuCursorZone,
-    required void Function(bool open) setMenuOpen,
-    Future<String> Function()? getChapterText,
-    Future<String> Function(
-      int maxChars, {
-      bool toc,
-      int? startSection,
-      int? endSectionExclusive,
-    })?
-    getBookPlainText,
-    Future<BookStructureIndex?> Function()? getBookStructureIndex,
-    Future<({String before, String after})?> Function(int before, int after)?
-    getSelectionContext,
-  }) {
-    _renderAnnotations = renderAll;
-    _addAnnotationToEngine = add;
-    _removeAnnotationFromEngine = remove;
-    _clearWebSelection = clearSelection;
-    _getSelectedText = getSelectedText;
-    _setMenuCursorZone = setMenuCursorZone;
-    _setMenuOpen = setMenuOpen;
-    _getChapterText = getChapterText;
-    _getBookPlainText = getBookPlainText;
-    _getBookStructureIndex = getBookStructureIndex;
-    _getSelectionContext = getSelectionContext;
   }
 
   /// Optional chat history store (per contentHash). Null → memory-only session.
@@ -694,19 +482,6 @@ class BookReaderController extends ChangeNotifier {
     _aiGraphStore = store;
   }
 
-  void attachSearchBridge({
-    required void Function(String query) search,
-    required VoidCallback clearSearch,
-  }) {
-    _runSearch = search;
-    _clearSearch = clearSearch;
-  }
-
-  void detachSearchBridge() {
-    _runSearch = null;
-    _clearSearch = null;
-  }
-
   void attachTtsBridge({
     required Future<String?> Function() here,
     required Future<String?> Function() next,
@@ -717,20 +492,6 @@ class BookReaderController extends ChangeNotifier {
   }
 
   void detachTtsBridge() => _tts.detachBridge();
-
-  void detachAnnotationBridge() {
-    _renderAnnotations = null;
-    _addAnnotationToEngine = null;
-    _removeAnnotationFromEngine = null;
-    _clearWebSelection = null;
-    _getSelectedText = null;
-    _getChapterText = null;
-    _getBookPlainText = null;
-    _getBookStructureIndex = null;
-    _setMenuCursorZone = null;
-    _setMenuOpen = null;
-    _aiCorpus.clear();
-  }
 
   /// Load or create the chat session for this book (isolated by contentHash).
   Future<AiChatSession> loadChatSession() async {
@@ -1169,11 +930,9 @@ class BookReaderController extends ChangeNotifier {
   /// indices and the logical whole-book corpus are deliberately not joined:
   /// some EPUBs expose different spine spaces through those two bridges.
   Future<AiBookSectionSlice?> captureCurrentBookMindMapChapter() async {
-    final load = _getChapterText;
-    if (load == null) return null;
     final sourceSectionIndex = _sectionIndex + 1;
     final title = currentChapterTitle.trim();
-    final text = (await load()).trim();
+    final text = (await bridge.loadChapterText()).trim();
     if (text.isEmpty) return null;
     AiLog.d(
       'mind map chapter scope: source=$sourceSectionIndex '
@@ -2048,23 +1807,6 @@ class BookReaderController extends ChangeNotifier {
     _bookGraphCancel?.cancel();
   }
 
-  /// Text for AI chat attachment: menu first, then live WebView selection.
-  Future<String> peekSelectedText() async {
-    final fromMenu = _selectionMenu?.text.trim() ?? '';
-    if (fromMenu.isNotEmpty) return fromMenu;
-    return ((await _getSelectedText?.call()) ?? '').trim();
-  }
-
-  /// Dismiss the selection **bubble** but keep page highlight when possible.
-  /// Call after [peekSelectedText] when opening 本书 AI.
-  void dismissSelectionMenuKeepHighlight() {
-    // Survive focus moving into the AI panel (WebView may fire selectionchange).
-    retainSelectionMenuForInteraction(
-      duration: const Duration(milliseconds: 2000),
-    );
-    clearSelectionMenu(clearWebSelection: false);
-  }
-
   /// Lean chat seed: current chapter + selection + TOC titles (no whole-book dump).
   Future<AiChatContextBundle> loadAiChatContext({
     String? selectionOverride,
@@ -2075,9 +1817,9 @@ class BookReaderController extends ChangeNotifier {
     tocTitles: _tocTitles,
     workScope: workScope,
     selectionOverride: selectionOverride,
-    currentSelection: _selectionMenu?.text,
-    loadSelectedText: _getSelectedText,
-    loadChapterText: _getChapterText,
+    currentSelection: _annotationState.selectionMenu?.text,
+    loadSelectedText: _annotationState.peekSelectedText,
+    loadChapterText: bridge.loadChapterText,
   );
 
   /// Stream an assistant reply for book chat. Null when AI is unavailable.
@@ -2134,45 +1876,13 @@ class BookReaderController extends ChangeNotifier {
     cancelToken: cancelToken,
   );
 
-  /// Surrounding text around the current WebView selection (translation
-  /// context, ai-translation §4.5). Null when unavailable (selection gone /
-  /// legacy bundle without `window.selectionContext`).
-  Future<({String before, String after})?> loadSelectionContext({
-    int before = 100,
-    int after = 100,
-  }) async {
-    final fn = _getSelectionContext;
-    if (fn == null) return null;
-    try {
-      return await fn(before, after);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Foliate `renderAnnotations` handler — may arrive before DB watch emits.
-  void requestAnnotationsRender() {
-    _annotationsRenderRequested = true;
-    if (_annotationsHydrated) {
-      pushAnnotationsToEngine();
-    }
-  }
-
-  /// Push current DB annotations into Foliate (open / section overlay / heal).
-  void pushAnnotationsToEngine() {
-    final render = _renderAnnotations;
-    if (render == null) return;
-    render([for (final annotation in _annotations) annotation.toFoliateJson()]);
-    _annotationsRenderRequested = false;
-  }
-
   /// Optimistic scrub to a whole-book fraction; Foliate relocate confirms CFI.
   void seekToFraction(double fraction) {
     if (_disposed || !_ready) return;
     final next = fraction.clamp(0.0, 1.0);
     _renditionProgress = next;
     notifyListeners();
-    _externalSeek?.call(next);
+    bridge.seek(next);
   }
 
   void reportRenditionLocation({
@@ -2305,15 +2015,9 @@ class BookReaderController extends ChangeNotifier {
   // Page-mode navigation
   // ------------------------------------------------------------------
 
-  void goNextPage() {
-    final external = _externalNextPage;
-    external?.call();
-  }
+  void goNextPage() => bridge.nextPage();
 
-  void goPreviousPage() {
-    final external = _externalPreviousPage;
-    external?.call();
-  }
+  void goPreviousPage() => bridge.previousPage();
 
   void clearPendingJump() {
     _pendingJumpLocator = null;
@@ -2389,269 +2093,6 @@ class BookReaderController extends ChangeNotifier {
 
   Future<void> removeBookmark(ReaderBookmark bookmark) {
     return database.deleteBookmark(bookmark.id);
-  }
-
-  // ------------------------------------------------------------------
-  // Selection / annotations
-  // ------------------------------------------------------------------
-
-  void _watchAnnotations() {
-    _annotationsSubscription?.cancel();
-    _annotationsHydrated = false;
-    _annotationsSubscription = database.watchAnnotationsFor(item.id).listen((
-      rows,
-    ) {
-      if (_disposed) return;
-      _annotations = List.unmodifiable(rows);
-      _annotationsHydrated = true;
-      notifyListeners();
-      // Heal open race: Foliate may have called renderAnnotations before the
-      // first watch emission. addAnnotation replaces by CFI so re-push is safe.
-      if (_annotationsRenderRequested) {
-        pushAnnotationsToEngine();
-      }
-    });
-  }
-
-  void reportSelectionEnd(FoliateSelectionEnd selection) {
-    if (_disposed) return;
-    if (selection.footnote) {
-      clearSelectionMenu();
-      return;
-    }
-    hideChrome();
-    final matched = _annotationForCfi(selection.cfi);
-    _selectionMenu = BookSelectionMenu(
-      cfi: selection.cfi,
-      text: selection.text,
-      left: selection.pos.left,
-      top: selection.pos.top,
-      right: selection.pos.right,
-      bottom: selection.pos.bottom,
-      phase: BookSelectionMenuPhase.actions,
-      annotationId: matched?.id,
-      annotationType: matched?.type,
-      annotationColorCss: matched?.colorCss,
-      note: matched?.note,
-      fromAnnotation: matched != null,
-    );
-    _armSelectionMenuDismissBarrier();
-    _armPageTurnSuppressAfterSelection();
-    _setMenuOpen?.call(true);
-    notifyListeners();
-  }
-
-  void reportSelectionCleared() {
-    // Deselect → close immediately (Anx default). Only ignore while a bubble
-    // press / style write briefly locks to survive focus-loss clears.
-    if (_selectionClearLocked) return;
-    if (_selectionMenu == null) return;
-    clearSelectionMenu(clearWebSelection: false);
-  }
-
-  void reportAnnotationClick(FoliateAnnotationClick click) {
-    if (_disposed) return;
-    final ignoreUntil = _ignoreAnnotationClickUntil;
-    if (ignoreUntil != null && DateTime.now().isBefore(ignoreUntil)) {
-      return;
-    }
-    hideChrome();
-    BookAnnotation? matched;
-    for (final row in _annotations) {
-      if (row.cfi == click.cfi) {
-        matched = row;
-        break;
-      }
-    }
-    final type = BookAnnotationType.fromStorage(click.type);
-    final contextText = click.contextText?.trim() ?? '';
-    final storedQuote = matched?.selectedText?.trim() ?? '';
-    // Heal older rows that lost selectedText (upsert used to wipe it).
-    if (matched != null && storedQuote.isEmpty && contextText.isNotEmpty) {
-      unawaited(
-        database.upsertAnnotation(
-          itemId: item.id,
-          cfi: matched.cfi,
-          type: matched.type.storageValue,
-          color: matched.colorCss,
-          selectedText: contextText,
-        ),
-      );
-    }
-    _selectionMenu = BookSelectionMenu(
-      cfi: click.cfi,
-      text: storedQuote.isNotEmpty ? storedQuote : contextText,
-      left: click.pos.left,
-      top: click.pos.top,
-      right: click.pos.right,
-      bottom: click.pos.bottom,
-      phase: BookSelectionMenuPhase.markup,
-      annotationId: matched?.id ?? click.id,
-      annotationType: type ?? matched?.type,
-      annotationColorCss: click.color,
-      note: matched?.note ?? click.note,
-      fromAnnotation: true,
-    );
-    // Clicking an existing mark often collapses any leftover Range; hold
-    // briefly so the markup panel is not torn down by that clear.
-    retainSelectionMenuForInteraction();
-    _armSelectionMenuDismissBarrier();
-    _setMenuOpen?.call(true);
-    notifyListeners();
-  }
-
-  /// Enter ②. Fresh selections immediately paint a default underline (Anx
-  /// autoMarkSelection equivalent) so the range stays visible after the
-  /// native DOM selection collapses.
-  ///
-  /// Desktop Platform Views often collapse selection when the Flutter bubble
-  /// takes focus; mobile keeps selection handles. Always clear the web
-  /// selection after the mark is drawn so both feel the same: 划线 → paint →
-  /// 取消选中, menu stays on ② for style/color.
-  Future<void> openMarkupPhase() async {
-    final menu = _selectionMenu;
-    if (menu == null) return;
-    retainSelectionMenuForInteraction();
-    if (menu.phase == BookSelectionMenuPhase.markup &&
-        menu.annotationId != null) {
-      return;
-    }
-    if (menu.annotationId != null || menu.fromAnnotation) {
-      if (menu.phase != BookSelectionMenuPhase.markup) {
-        _selectionMenu = menu.copyWith(phase: BookSelectionMenuPhase.markup);
-        notifyListeners();
-      }
-      return;
-    }
-    // 划线 = commit default mark (kept on menu dismiss; 清空 to delete).
-    await applyAnnotationStyle(
-      type: BookAnnotationType.underline,
-      color: BookHighlightColor.yellow,
-      dismissMenu: false,
-    );
-    if (_disposed) return;
-    // Hold the lock so the deselect's onSelectionCleared does not tear down ②.
-    retainSelectionMenuForInteraction();
-    _clearWebSelection?.call();
-  }
-
-  void clearSelectionMenu({bool clearWebSelection = true}) {
-    _selectionClearLockTimer?.cancel();
-    _selectionClearLocked = false;
-    _selectionMenuBarrierArmAt = null;
-    // Same pointer that dismissed can hit the overlayer next — ignore briefly.
-    _ignoreAnnotationClickUntil = DateTime.now().add(
-      const Duration(milliseconds: 800),
-    );
-    if (_selectionMenu == null) {
-      _setMenuOpen?.call(false);
-      _clearMenuCursorZone();
-      return;
-    }
-    _selectionMenu = null;
-    _setMenuOpen?.call(false);
-    _clearMenuCursorZone();
-    // Anx only clears the native selection when the menu closes.
-    if (clearWebSelection) {
-      _clearWebSelection?.call();
-    }
-    notifyListeners();
-  }
-
-  /// Call from the bubble on pointer-down so focus-loss selection clears do
-  /// not dismiss mid-tap. Auto-unlocks; a later real deselect will close.
-  void retainSelectionMenuForInteraction({
-    Duration duration = const Duration(milliseconds: 500),
-  }) {
-    _selectionClearLocked = true;
-    _selectionClearLockTimer?.cancel();
-    _selectionClearLockTimer = Timer(duration, () {
-      _selectionClearLocked = false;
-    });
-  }
-
-  Map<String, double>? _lastMenuCursorZone;
-
-  /// Normalized viewport box for the Flutter menu bubble (Platform View cursor).
-  ///
-  /// Skips identical updates — the selection overlay rebuilds often, and
-  /// re-pushing the same zone into the WebView makes the desktop cursor flicker.
-  void setMenuCursorZone({
-    required double left,
-    required double top,
-    required double right,
-    required double bottom,
-  }) {
-    final zone = <String, double>{
-      'left': left.clamp(0.0, 1.0),
-      'top': top.clamp(0.0, 1.0),
-      'right': right.clamp(0.0, 1.0),
-      'bottom': bottom.clamp(0.0, 1.0),
-    };
-    final prev = _lastMenuCursorZone;
-    if (prev != null &&
-        prev['left'] == zone['left'] &&
-        prev['top'] == zone['top'] &&
-        prev['right'] == zone['right'] &&
-        prev['bottom'] == zone['bottom']) {
-      return;
-    }
-    _lastMenuCursorZone = zone;
-    _setMenuCursorZone?.call(zone);
-  }
-
-  void _clearMenuCursorZone() {
-    if (_lastMenuCursorZone == null) {
-      // Still tell the engine — it may hold a zone after a hot restart / race.
-      _setMenuCursorZone?.call(null);
-      return;
-    }
-    _lastMenuCursorZone = null;
-    _setMenuCursorZone?.call(null);
-  }
-
-  /// Returns true when text was written to the clipboard.
-  Future<bool> copySelection({String? textOverride}) async {
-    var text = (textOverride ?? _selectionMenu?.text ?? '').trim();
-    if (text.isEmpty) {
-      text = ((await _getSelectedText?.call()) ?? '').trim();
-    }
-    if (text.isEmpty) {
-      _clearWebSelection?.call();
-      clearSelectionMenu();
-      return false;
-    }
-    await Clipboard.setData(ClipboardData(text: text));
-    _clearWebSelection?.call();
-    clearSelectionMenu();
-    return true;
-  }
-
-  Future<BookLanguageActionResult> performLanguageAction({
-    required BookLanguageOperation operation,
-    String? textOverride,
-  }) {
-    return performPlatformLanguageAction(
-      operation: operation,
-      textOverride: textOverride,
-    );
-  }
-
-  /// Always uses the platform dictionary / translation path (system apps).
-  Future<BookLanguageActionResult> performPlatformLanguageAction({
-    required BookLanguageOperation operation,
-    String? textOverride,
-  }) {
-    final menu = _selectionMenu;
-    final text = (textOverride ?? _selectionMenu?.text ?? '').trim();
-    return languageProvider.execute(
-      BookLanguageRequest(
-        operation: operation,
-        text: text,
-        itemId: item.id,
-        cfi: menu?.cfi,
-      ),
-    );
   }
 
   /// AI stream for in-app dictionary / translation. Null when AI is unavailable.
@@ -2745,143 +2186,10 @@ class BookReaderController extends ChangeNotifier {
     }
   }
 
-  /// Legacy clipboard excerpt helper (金句卡走 [showBookExcerptSheet]).
-  Future<bool> copyExcerpt({String? textOverride}) =>
-      copySelection(textOverride: textOverride);
-
-  Future<void> applyAnnotationStyle({
-    required BookAnnotationType type,
-    required BookHighlightColor color,
-    String? cfiOverride,
-    String? textOverride,
-    bool dismissMenu = true,
-  }) async {
-    final menu = _selectionMenu;
-    final cfi = (cfiOverride ?? menu?.cfi ?? '').trim();
-    if (cfi.isEmpty) return;
-    retainSelectionMenuForInteraction();
-    final selectedText = (textOverride ?? menu?.text ?? '').trim();
-    final id = await database.upsertAnnotation(
-      itemId: item.id,
-      cfi: cfi,
-      type: type.storageValue,
-      color: color.css,
-      selectedText: selectedText.isEmpty ? null : selectedText,
-    );
-    if (_disposed) return;
-    // Keep note in the engine payload so the「注」bubble is not dropped on
-    // style-only upserts (JS replace-by-cfi).
-    final existingNote = _selectionMenu?.note ?? _annotationForCfi(cfi)?.note;
-    _addAnnotationToEngine?.call({
-      'id': id,
-      'value': cfi,
-      'type': type.storageValue,
-      'color': color.css,
-      'replace': true,
-      if (existingNote != null && existingNote.trim().isNotEmpty)
-        'note': existingNote.trim(),
-    });
-    if (dismissMenu) {
-      clearSelectionMenu();
-    } else if (menu != null) {
-      _selectionMenu = menu.copyWith(
-        phase: BookSelectionMenuPhase.markup,
-        annotationId: id,
-        annotationType: type,
-        annotationColorCss: color.css,
-        fromAnnotation: true,
-      );
-      notifyListeners();
-    }
-  }
-
-  Future<void> removeActiveAnnotation() async {
-    final menu = _selectionMenu;
-    if (menu == null) return;
-    if (menu.annotationId != null) {
-      await database.deleteAnnotation(menu.annotationId!);
-    } else {
-      await database.deleteAnnotationByCfi(itemId: item.id, cfi: menu.cfi);
-    }
-    if (_disposed) return;
-    _removeAnnotationFromEngine?.call(menu.cfi);
-    _clearWebSelection?.call();
-    clearSelectionMenu();
-  }
-
-  /// Annotations that carry a non-empty note (for the notes list).
-  List<BookAnnotation> get notes {
-    final rows = [
-      for (final row in _annotations)
-        if (row.note != null && row.note!.trim().isNotEmpty) row,
-    ];
-    // Newest first (DB watch is ascending by createdAt).
-    return List.unmodifiable(rows.reversed);
-  }
-
-  String noteLabel(BookAnnotation annotation) {
-    final note = annotation.note?.trim() ?? '';
-    if (note.isNotEmpty) return note;
-    final text = annotation.selectedText?.trim() ?? '';
-    if (text.isNotEmpty) return text;
-    return '笔记';
-  }
-
-  /// Chapter title for a note row (from CFI spine index + TOC titles).
-  String? noteChapterTitle(BookAnnotation annotation) {
-    final index = BookLocator.sectionIndexFromCfi(annotation.cfi);
-    if (index == null) return null;
-    if (index >= 0 && index < _tocTitles.length) {
-      final title = _tocTitles[index].trim();
-      if (title.isNotEmpty) return title;
-    }
-    for (final entry in _tocEntries) {
-      if (entry.sectionIndex == index) {
-        final title = entry.title.trim();
-        if (title.isNotEmpty) return title;
-      }
-    }
-    if (sectionCount > 0 && index < sectionCount) {
-      return '第 ${index + 1} 节';
-    }
-    return null;
-  }
-
-  /// Original quote for the subtitle — always the selected range when stored.
-  String? noteExcerpt(BookAnnotation annotation) {
-    final text = annotation.selectedText?.trim() ?? '';
-    return text.isEmpty ? null : text;
-  }
-
-  /// List subtitle: **原文摘录** first. Chapter alone is useless when many notes
-  /// share a section — only used as a fallback label when quote is missing.
-  String noteListSubtitle(BookAnnotation annotation) {
-    final quote = noteExcerpt(annotation);
-    if (quote != null) return quote;
-    final chapter = noteChapterTitle(annotation);
-    if (chapter != null) return '$chapter（无原文）';
-    return '（无原文摘录）';
-  }
-
-  void setNavDrawerTabIndex(int index) {
-    final next = index.clamp(0, 2);
-    if (next == _navDrawerTabIndex) return;
-    _navDrawerTabIndex = next;
-  }
-
-  BookAnnotation? _annotationForCfi(String cfi) {
+  void _goToAnnotationCfi(String cfi) {
     final key = cfi.trim();
-    if (key.isEmpty) return null;
-    for (final row in _annotations) {
-      if (row.cfi == key) return row;
-    }
-    return null;
-  }
-
-  void goToAnnotation(BookAnnotation annotation) {
-    final cfi = annotation.cfi.trim();
-    if (cfi.isEmpty) return;
-    final fromCfi = BookLocator.sectionIndexFromCfi(cfi);
+    if (key.isEmpty) return;
+    final fromCfi = BookLocator.sectionIndexFromCfi(key);
     final sectionIndex =
         (fromCfi != null && (sectionCount <= 0 || fromCfi < sectionCount))
         ? fromCfi
@@ -2890,80 +2198,12 @@ class BookReaderController extends ChangeNotifier {
     _pendingJumpLocator = BookLocator(
       sectionIndex: sectionIndex,
       progressInSection: _progressInSection,
-      cfi: cfi,
+      cfi: key,
     );
     notifyListeners();
   }
 
-  void openSearch({String? initialQuery}) {
-    clearSelectionMenu();
-    hideChrome();
-    final query = initialQuery?.trim() ?? '';
-    _searchOpen = true;
-    if (query.isNotEmpty) {
-      _searchQuery = query;
-      notifyListeners();
-      submitSearch(query);
-      return;
-    }
-    notifyListeners();
-  }
-
-  void closeSearch() {
-    if (!_searchOpen && !_searchRunning && _searchHits.isEmpty) return;
-    _searchGeneration++;
-    _searchOpen = false;
-    _searchRunning = false;
-    _searchProgress = 0;
-    _searchHits = const [];
-    _clearSearch?.call();
-    notifyListeners();
-  }
-
-  void submitSearch(String query) {
-    final trimmed = query.trim();
-    _searchQuery = trimmed;
-    if (trimmed.isEmpty) {
-      _searchGeneration++;
-      _searchRunning = false;
-      _searchProgress = 0;
-      _searchHits = const [];
-      _clearSearch?.call();
-      notifyListeners();
-      return;
-    }
-    final generation = ++_searchGeneration;
-    _searchRunning = true;
-    _searchProgress = 0;
-    _searchHits = const [];
-    notifyListeners();
-    _clearSearch?.call();
-    _runSearch?.call(trimmed);
-    // Stale generations are ignored in reportSearchEvent.
-    if (generation != _searchGeneration) return;
-  }
-
-  void reportSearchEvent(FoliateSearchEvent event) {
-    if (_disposed || !_searchOpen) return;
-    final generation = _searchGeneration;
-    switch (event) {
-      case FoliateSearchProgress(:final fraction):
-        if (generation != _searchGeneration) return;
-        _searchProgress = fraction;
-        notifyListeners();
-      case FoliateSearchDone():
-        if (generation != _searchGeneration) return;
-        _searchRunning = false;
-        _searchProgress = 1;
-        notifyListeners();
-      case FoliateSearchChapterHits(:final hits):
-        if (generation != _searchGeneration) return;
-        _searchHits = [..._searchHits, ...hits];
-        notifyListeners();
-    }
-  }
-
-  void goToSearchHit(FoliateSearchHit hit) {
+  void _goToSearchHit(FoliateSearchHit hit) {
     final cfi = hit.cfi.trim();
     if (cfi.isEmpty) return;
     final fromCfi = BookLocator.sectionIndexFromCfi(cfi);
@@ -2977,113 +2217,7 @@ class BookReaderController extends ChangeNotifier {
       progressInSection: _progressInSection,
       cfi: cfi,
     );
-    // 关掉面板看正文；引擎高亮保留到下次搜索或点关闭。
-    _searchOpen = false;
-    _searchRunning = false;
     notifyListeners();
-  }
-
-  void openImageViewer(String dataUrl) {
-    final url = dataUrl.trim();
-    if (!url.startsWith('data:')) return;
-    clearSelectionMenu();
-    hideChrome();
-    _imageViewerDataUrl = url;
-    notifyListeners();
-  }
-
-  void closeImageViewer() {
-    if (_imageViewerDataUrl == null) return;
-    _imageViewerDataUrl = null;
-    notifyListeners();
-  }
-
-  /// Write or clear the note on a range. Empty [noteText] clears note only;
-  /// creates a default underline if the range has no annotation yet.
-  Future<void> saveAnnotationNote({
-    required String cfi,
-    required String noteText,
-    String? selectedText,
-    BookAnnotationType? type,
-    String? colorCss,
-  }) async {
-    final key = cfi.trim();
-    if (key.isEmpty) return;
-    final trimmed = noteText.trim();
-    final existing = _annotationForCfi(key);
-    if (trimmed.isEmpty && existing == null) return;
-
-    final resolvedType = type ?? existing?.type ?? BookAnnotationType.underline;
-    final resolvedColor = BookHighlightColor.fromCss(
-      colorCss ?? existing?.colorCss ?? BookHighlightColor.yellow.css,
-    );
-    // Empty string from UI must not erase a previously stored quote.
-    final incoming = selectedText?.trim() ?? '';
-    final text = incoming.isNotEmpty
-        ? incoming
-        : (existing?.selectedText?.trim() ?? '');
-    final noteValue = trimmed.isEmpty ? null : trimmed;
-
-    final id = await database.upsertAnnotation(
-      itemId: item.id,
-      cfi: key,
-      type: resolvedType.storageValue,
-      color: resolvedColor.css,
-      selectedText: text.isEmpty ? null : text,
-      note: noteValue,
-      writeNote: true,
-    );
-    if (_disposed) return;
-    _addAnnotationToEngine?.call({
-      'id': id,
-      'value': key,
-      'type': resolvedType.storageValue,
-      'color': resolvedColor.css,
-      'replace': true,
-      'note': ?noteValue,
-    });
-  }
-
-  /// Clear note from the list; keeps underline / highlight.
-  Future<void> clearAnnotationNote(BookAnnotation annotation) {
-    return saveAnnotationNote(
-      cfi: annotation.cfi,
-      noteText: '',
-      selectedText: annotation.selectedText,
-      type: annotation.type,
-      colorCss: annotation.colorCss,
-    );
-  }
-
-  /// Note bubble / list: jump optional caller, then present the editor.
-  void openNoteEditor(BookAnnotation annotation) {
-    clearSelectionMenu(clearWebSelection: false);
-    onOpenNoteEditor?.call(annotation);
-  }
-
-  /// Foliate note-marker tap — open editor, not markup ②.
-  void reportAnnotationNoteClick(FoliateAnnotationClick click) {
-    if (_disposed) return;
-    // Keep WebView selection untouched; clearing it reflows the paginator.
-    if (_selectionMenu != null) {
-      clearSelectionMenu(clearWebSelection: false);
-    }
-    final matched = _annotationForCfi(click.cfi);
-    final noteText = (matched?.note ?? click.note)?.trim() ?? '';
-    final forEditor =
-        matched ??
-        BookAnnotation(
-          id: click.id ?? 0,
-          cfi: click.cfi,
-          type:
-              BookAnnotationType.fromStorage(click.type) ??
-              BookAnnotationType.underline,
-          colorCss: click.color,
-          selectedText: matched?.selectedText,
-          note: noteText.isEmpty ? null : noteText,
-          createdAt: DateTime.now(),
-        );
-    onOpenNoteEditor?.call(forEditor);
   }
 
   // ------------------------------------------------------------------
@@ -3105,209 +2239,6 @@ class BookReaderController extends ChangeNotifier {
     if (_chromeVisible) return;
     _chromeVisible = true;
     notifyListeners();
-  }
-
-  // ------------------------------------------------------------------
-  // Preferences
-  // ------------------------------------------------------------------
-
-  Future<void> setFontSize(double size) async {
-    final next = size.clamp(
-      BookReadingPreferences.minFontSize,
-      BookReadingPreferences.maxFontSize,
-    );
-    if (next == _fontSize) return;
-    _fontSize = next;
-    notifyListeners();
-    await _prefs?.setFontSize(next);
-  }
-
-  Future<void> changeFontSize(double delta) async {
-    await setFontSize(_fontSize + delta);
-  }
-
-  Future<void> setLineHeight(double height) async {
-    final next = height.clamp(
-      BookReadingPreferences.minLineHeight,
-      BookReadingPreferences.maxLineHeight,
-    );
-    if (next == _lineHeight) return;
-    _lineHeight = next;
-    notifyListeners();
-    await _prefs?.setLineHeight(next);
-  }
-
-  Future<void> setReadingTheme(BookReadingTheme theme) async {
-    if (theme == _readingTheme) return;
-    _readingTheme = theme;
-    notifyListeners();
-    await _prefs?.setReadingTheme(theme);
-  }
-
-  Future<void> setMargin(double margin) async {
-    final next = margin.clamp(
-      BookReadingPreferences.minMargin,
-      BookReadingPreferences.maxMargin,
-    );
-    if (next == _margin) return;
-    _margin = next;
-    notifyListeners();
-    await _prefs?.setMargin(next);
-  }
-
-  Future<void> setVerticalMargin(double margin) async {
-    final next = margin.clamp(
-      BookReadingPreferences.minVerticalMargin,
-      BookReadingPreferences.maxVerticalMargin,
-    );
-    if (next == _verticalMargin) return;
-    _verticalMargin = next;
-    notifyListeners();
-    await _prefs?.setVerticalMargin(next);
-  }
-
-  Future<void> setBold(bool bold) async {
-    if (bold == _bold) return;
-    _bold = bold;
-    notifyListeners();
-    await _prefs?.setBold(bold);
-  }
-
-  Future<void> setBrightness(double value) async {
-    final next = value.clamp(
-      BookReadingPreferences.minBrightness,
-      BookReadingPreferences.maxBrightness,
-    );
-    if (next == _brightness) {
-      await _prefs?.setBrightness(next);
-      return;
-    }
-    _brightness = next;
-    notifyListeners();
-    await _prefs?.setBrightness(next);
-  }
-
-  /// Live dimming while dragging; persist with [setBrightness] on drag end.
-  void previewBrightness(double value) {
-    final next = value.clamp(
-      BookReadingPreferences.minBrightness,
-      BookReadingPreferences.maxBrightness,
-    );
-    if (next == _brightness) return;
-    _brightness = next;
-    notifyListeners();
-  }
-
-  Future<void> setFontSelection(BookFontSelection selection) async {
-    if (selection == _fontSelection) return;
-    if (selection.kind == BookFontKind.user) {
-      final id = selection.userFontId;
-      if (id == null || fontStore?.byId(id) == null) return;
-    }
-    _fontSelection = selection;
-    notifyListeners();
-    await _prefs?.setFontSelection(selection);
-  }
-
-  Future<String?> downloadCatalogFont(BookCatalogFont catalog) async {
-    final store = fontStore;
-    if (store == null) return '字体存储未就绪';
-    try {
-      final font = await store.downloadCatalogFont(catalog);
-      await setFontSelection(BookFontSelection.user(font.id));
-      return null;
-    } catch (error) {
-      debugPrint('[Font] download failed: $error');
-      return '字体下载失败';
-    }
-  }
-
-  Future<String?> importFontFile(String path) async {
-    final store = fontStore;
-    if (store == null) return '字体存储未就绪';
-    try {
-      final font = await store.importFontFile(path);
-      await setFontSelection(BookFontSelection.user(font.id));
-      return null;
-    } catch (error) {
-      debugPrint('[Font] import failed: $error');
-      return '字体导入失败';
-    }
-  }
-
-  Future<void> deleteUserFont(String id) async {
-    final store = fontStore;
-    if (store == null) return;
-    final wasSelected =
-        _fontSelection.kind == BookFontKind.user &&
-        _fontSelection.userFontId == id;
-    await store.deleteUserFont(id);
-    if (wasSelected) {
-      await setFontSelection(BookReadingPreferences.defaultFontSelection);
-    } else {
-      notifyListeners();
-    }
-  }
-
-  Future<void> setLetterSpacing(double spacing) async {
-    final next = spacing.clamp(
-      BookReadingPreferences.minLetterSpacing,
-      BookReadingPreferences.maxLetterSpacing,
-    );
-    if (next == _letterSpacing) return;
-    _letterSpacing = next;
-    notifyListeners();
-    await _prefs?.setLetterSpacing(next);
-  }
-
-  Future<void> setParagraphSpacing(double spacing) async {
-    final next = spacing.clamp(
-      BookReadingPreferences.minParagraphSpacing,
-      BookReadingPreferences.maxParagraphSpacing,
-    );
-    if (next == _paragraphSpacing) return;
-    _paragraphSpacing = next;
-    notifyListeners();
-    await _prefs?.setParagraphSpacing(next);
-  }
-
-  Future<void> setTextAlign(BookTextAlign align) async {
-    if (align == _textAlign) return;
-    _textAlign = align;
-    notifyListeners();
-    await _prefs?.setTextAlign(align);
-  }
-
-  Future<void> setFirstLineIndent(bool enabled) async {
-    if (enabled == _firstLineIndent) return;
-    _firstLineIndent = enabled;
-    notifyListeners();
-    await _prefs?.setFirstLineIndent(enabled);
-  }
-
-  Future<void> setHyphenate(bool enabled) async {
-    if (enabled == _hyphenate) return;
-    _hyphenate = enabled;
-    notifyListeners();
-    await _prefs?.setHyphenate(enabled);
-  }
-
-  Future<void> setReadingMode(BookReadingMode mode) async {
-    if (mode == BookReadingMode.scroll && !scrollModeEnabled) return;
-    if (mode == _readingMode) return;
-    _readingMode = mode;
-    // Foliate reflows in place. Re-applying the stable locator after a mode
-    // switch keeps the same semantic position without a Dart page map.
-    _pendingJumpLocator = currentLocator;
-    notifyListeners();
-    await _prefs?.setReadingMode(mode);
-  }
-
-  Future<void> setPageTurnEffect(BookPageTurnEffect effect) async {
-    if (effect == _pageTurnEffect) return;
-    _pageTurnEffect = effect;
-    notifyListeners();
-    await _prefs?.setPageTurnEffect(effect);
   }
 
   // ------------------------------------------------------------------
@@ -3339,18 +2270,17 @@ class BookReaderController extends ChangeNotifier {
     _bookOutlineCancel?.cancel();
     _bookGraphCancel?.cancel();
     _attachGeneration++;
-    _prefs?.fontStore.removeListener(_onFontStoreChanged);
+    _preferences.removeListener(_notifyPreferencesChanged);
+    _preferences.dispose();
+    _annotationState.removeListener(_notifyAnnotationsChanged);
+    _annotationState.dispose();
+    _search.removeListener(_notifySearchChanged);
+    _search.dispose();
     _saveDebounce?.cancel();
-    _selectionClearLockTimer?.cancel();
     unawaited(_tts.dispose());
-    _externalNextPage = null;
-    _externalPreviousPage = null;
-    _externalSeek = null;
-    detachAnnotationBridge();
-    detachSearchBridge();
+    bridge.detachAll();
     detachTtsBridge();
     unawaited(_bookmarksSubscription?.cancel());
-    unawaited(_annotationsSubscription?.cancel());
     unawaited(_persist());
     super.dispose();
   }

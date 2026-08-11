@@ -5,14 +5,20 @@ import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
 import '../../../core/theme/brand_tokens.g.dart';
 import '../../../readers/book/foliate_js_bridge.dart';
-import '../../controllers/book_reader_controller.dart';
+import '../../../readers/book/book_theme.dart';
+import '../../controllers/book_search_controller.dart';
 import '../app_components.dart';
 
 /// Full-screen in-book search overlay (顶栏入口 / 选区「搜索」).
 class BookSearchPanel extends StatefulWidget {
-  const BookSearchPanel({super.key, required this.controller});
+  const BookSearchPanel({
+    super.key,
+    required this.controller,
+    required this.readingTheme,
+  });
 
-  final BookReaderController controller;
+  final BookSearchController controller;
+  final BookReadingTheme readingTheme;
 
   @override
   State<BookSearchPanel> createState() => _BookSearchPanelState();
@@ -22,16 +28,16 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
   late final TextEditingController _text;
   late final FocusNode _focus;
 
-  BookReaderController get _controller => widget.controller;
+  BookSearchController get _controller => widget.controller;
 
   @override
   void initState() {
     super.initState();
-    _text = TextEditingController(text: _controller.searchQuery);
+    _text = TextEditingController(text: _controller.query);
     _focus = FocusNode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_controller.searchQuery.isEmpty) {
+      if (_controller.query.isEmpty) {
         _focus.requestFocus();
       }
     });
@@ -45,13 +51,13 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
   }
 
   void _submit() {
-    _controller.submitSearch(_text.text);
+    _controller.submit(_text.text);
     _focus.unfocus();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = _controller.readingTheme;
+    final theme = widget.readingTheme;
     final bg = Color(theme.backgroundArgb);
     final fg = Color(theme.foregroundArgb);
     final muted = fg.withValues(alpha: 0.55);
@@ -98,7 +104,7 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
                                   tooltip: '清除',
                                   onPressed: () {
                                     _text.clear();
-                                    _controller.submitSearch('');
+                                    _controller.submit('');
                                     setState(() {});
                                     _focus.requestFocus();
                                   },
@@ -122,11 +128,9 @@ class _BookSearchPanelState extends State<BookSearchPanel> {
               ),
             ),
             Divider(height: 1, thickness: 1, color: hairline),
-            if (_controller.searchRunning)
+            if (_controller.running)
               LinearProgressIndicator(
-                value: _controller.searchProgress <= 0
-                    ? null
-                    : _controller.searchProgress,
+                value: _controller.progress <= 0 ? null : _controller.progress,
                 minHeight: 2,
                 backgroundColor: hairline,
                 color: accent,
@@ -148,15 +152,15 @@ class _Results extends StatelessWidget {
     required this.fg,
   });
 
-  final BookReaderController controller;
+  final BookSearchController controller;
   final Color muted;
   final Color fg;
 
   @override
   Widget build(BuildContext context) {
-    final query = controller.searchQuery.trim();
-    final hits = controller.searchHits;
-    final running = controller.searchRunning;
+    final query = controller.query.trim();
+    final hits = controller.hits;
+    final running = controller.running;
 
     if (query.isEmpty) {
       return const AppEmptyState(
@@ -193,7 +197,7 @@ class _Results extends StatelessWidget {
           hit: hit,
           fg: fg,
           muted: muted,
-          onTap: () => controller.goToSearchHit(hit),
+          onTap: () => controller.selectHit(hit),
         );
       },
     );

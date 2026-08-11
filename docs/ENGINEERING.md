@@ -132,7 +132,12 @@ BookAiChatView
 - 对话、图谱与设置的模型和文件存储分别放置；JSON 原子写入、备份恢复与安全凭据不得混入模型类。生成数据面只经 `AiModelAdapter`，模型目录是独立只读 `AiModelCatalog`；旧 Provider 双栈不得重建。
 - 对话发送状态和大纲/图谱任务状态按上面的目标运行时迁入独立 workspace/conversation controller；迁移前后均用 Widget 流程测试守住行为，不以 `part` 或跨文件私有字段制造形式拆分。
 - `BookAiReaderGateway` 承担阅读快照到 Agent turn 的上下文、工具宿主、联网与追问桥接；`book_ai_chat_components.dart` 只放无业务状态的对话展示组件。`BookReaderController` 与 `book_ai_chat_sheet.dart` 不再通过 `part` 共享私有状态来伪装拆分。
-- 大文件继续按可独立验证的职责拆分：聊天消息时间线、输入区、导图范围选择和图谱展示使用公开 Widget 输入/回调，不读取主 Sheet 私有字段；系统听书由独立 `BookTtsController` 持有引擎、句游标、速率与播放循环，`BookReaderController` 只保留兼容门面和阅读引擎 bridge。拆分不得改变 UI、系统 TTS 行为、持久化格式或 AI 提示词。
+- 大文件继续按可独立验证的组合边界拆分，不以 `part`、跨文件私有状态或只有一层转发的兼容门面充数：
+  - `BookAiGraphWorkspace` 独占图谱 Tab 的视图/排序/折叠、生成确认、作品选择、实体详情、证据跳转及全屏路由；生成/取消/checkpoint 继续经 `BookReaderController` 既有 AI 应用门面进入 `AiGraphService`，不在 Workspace 复制图谱缓存或持久化状态。主 AI Sheet 只选择 Tab、组合对话/图谱工作区。
+  - `BookAiMindMapCoordinator` 组合既有 `BookAiMindMapController` 与对话 Controller，独占附件、范围选择等待态、布局持久化、揭示与指针交互状态；`BookAiMindMapRoutes` 独占证据跳转和原生全屏路由。产品行动解析与冻结范围仍由主 Sheet 组合现有 Workflow，避免在迁移中复制一套提示词或生成状态机。
+  - `BookAnnotationsController` 独占批注列表、选择菜单状态机、数据库 watch、Foliate annotation bridge 与笔记操作；`BookSearchController` 独占搜索/图片查看状态和对应 bridge；`BookReaderPreferencesController` 独占排版偏好、字体存储与持久化；`BookReaderBridge` 独占 Foliate 页导航、seek 与正文读取回调。`BookReaderController` 组合这些职责，只保留阅读定位、书签、chrome、生命周期、AI 应用门面与 TTS 公共门面。
+  - 系统听书继续由独立 `BookTtsController` 持有引擎、句游标、速率与播放循环；`BookReaderController` 保留既有 TTS 公共门面，避免修改 UI 与 Foliate bridge 契约。
+  - 子 Controller 只通过公开构造依赖、不可变输入和显式回调协作；不得各自复制当前 section、locator、作品或会话状态。拆分不得改变 UI、AI 提示词、思维导图/图谱结构与持久化、WebDAV、阅读器行为或系统 TTS 行为。
 - `tool/ai_runtime_harness.dart` 是运行时验收入口，通过 `flutter test tool/ai_runtime_harness.dart --reporter expanded` 运行：默认启动进程内伪 OpenAI Compatible 端点，验证普通回答、书内工具、产品行动、结构化思维导图、续写和真实 transport 取消；只有显式设置 `AI_HARNESS_MODE=live` 及 BYOK 环境变量时才访问真实端点。Harness 不读取 Keychain、不打印正文/Key，输出机器可读 JSON 报告；通过 Genkit CLI 包装运行时还必须保留 Trace ID 供人工复核。
 - 图谱模型、文件存储、抽取、合并消歧、质量门和描述润色是独立职责。管线 orchestrator 只编排这些组件，拆分不得改变提示词、算法阈值、缓存 schema 或 checkpoint 时机。
 

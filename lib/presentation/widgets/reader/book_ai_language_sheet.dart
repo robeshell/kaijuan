@@ -253,7 +253,7 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
         AiTranslationNoteFormat.sourceAndTranslation =>
           '${widget.text.trim()}\n→\n$translation',
       };
-      await widget.controller.saveAnnotationNote(
+      await widget.controller.annotations.saveAnnotationNote(
         cfi: cfi,
         noteText: note,
         selectedText: widget.text,
@@ -266,10 +266,11 @@ class _BookAiLanguageSheetState extends State<_BookAiLanguageSheet> {
 
   Future<void> _useSystemFallback() async {
     Navigator.of(context).maybePop();
-    final result = await widget.controller.performPlatformLanguageAction(
-      operation: widget.operation,
-      textOverride: widget.text,
-    );
+    final result = await widget.controller.annotations
+        .performPlatformLanguageAction(
+          operation: widget.operation,
+          textOverride: widget.text,
+        );
     if (!mounted) return;
     if (!result.handled) {
       showAppSnackBar(context, result.message ?? '系统能力不可用');

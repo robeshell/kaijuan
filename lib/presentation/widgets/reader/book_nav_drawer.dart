@@ -44,7 +44,7 @@ class _BookNavDrawerState extends State<BookNavDrawer>
     _tabs = TabController(
       length: 3,
       vsync: this,
-      initialIndex: _controller.navDrawerTabIndex.clamp(0, 2),
+      initialIndex: _controller.annotations.navDrawerTabIndex.clamp(0, 2),
     );
     _tabs.addListener(_onTabChanged);
     _takeControllerSnapshot();
@@ -54,23 +54,23 @@ class _BookNavDrawerState extends State<BookNavDrawer>
   void _onTabChanged() {
     // TabController updates its index at the start of the indicator motion.
     // Waiting for indexIsChanging=false makes the panel content appear to lag.
-    if (_controller.navDrawerTabIndex == _tabs.index) return;
-    _controller.setNavDrawerTabIndex(_tabs.index);
+    if (_controller.annotations.navDrawerTabIndex == _tabs.index) return;
+    _controller.annotations.setNavDrawerTabIndex(_tabs.index);
     setState(() {});
   }
 
   void _takeControllerSnapshot() {
     _tocEntries = _controller.tocEntries;
     _bookmarks = _controller.bookmarks;
-    _annotations = _controller.annotations;
-    _notes = _controller.notes;
+    _annotations = _controller.annotations.annotations;
+    _notes = _controller.annotations.notes;
     _sectionIndex = _controller.sectionIndex;
   }
 
   void _onControllerChanged() {
     final tocEntries = _controller.tocEntries;
     final bookmarks = _controller.bookmarks;
-    final annotations = _controller.annotations;
+    final annotations = _controller.annotations.annotations;
     final sectionIndex = _controller.sectionIndex;
     final tocChanged = !identical(tocEntries, _tocEntries);
     final bookmarksChanged = !identical(bookmarks, _bookmarks);
@@ -90,7 +90,7 @@ class _BookNavDrawerState extends State<BookNavDrawer>
         _annotations = annotations;
         // The controller derives notes from annotations. Do that work only
         // when the annotation stream itself changes, not on every progress tick.
-        _notes = _controller.notes;
+        _notes = _controller.annotations.notes;
       }
       if (sectionChanged) _sectionIndex = sectionIndex;
     });
@@ -173,13 +173,13 @@ class _BookNavDrawerState extends State<BookNavDrawer>
       ),
       _ => _NotesList(
         notes: _notes,
-        labelFor: _controller.noteLabel,
-        subtitleFor: _controller.noteListSubtitle,
+        labelFor: _controller.annotations.noteLabel,
+        subtitleFor: _controller.annotations.noteListSubtitle,
         onOpen: (annotation) {
           Navigator.of(context).pop();
           widget.onOpenNote(annotation);
         },
-        onClearNote: _controller.clearAnnotationNote,
+        onClearNote: _controller.annotations.clearAnnotationNote,
       ),
     };
   }

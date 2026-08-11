@@ -4,17 +4,17 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../../core/kaijuan_icons.dart';
-import '../../controllers/book_reader_controller.dart';
+import '../../controllers/book_search_controller.dart';
 
 /// Full-screen image viewer for Foliate `onImageClick` data URLs.
 class BookImageViewer extends StatelessWidget {
   const BookImageViewer({super.key, required this.controller});
 
-  final BookReaderController controller;
+  final BookSearchController controller;
 
   @override
   Widget build(BuildContext context) {
-    final dataUrl = controller.imageViewerDataUrl;
+    final dataUrl = controller.imageDataUrl;
     if (dataUrl == null) return const SizedBox.shrink();
     final bytes = _decodeDataUrl(dataUrl);
 
@@ -44,7 +44,7 @@ class BookImageViewer extends StatelessWidget {
               alignment: Alignment.topLeft,
               child: IconButton(
                 tooltip: '关闭',
-                onPressed: controller.closeImageViewer,
+                onPressed: controller.closeImage,
                 icon: const Icon(
                   KaijuanIcons.close,
                   color: Colors.white,
