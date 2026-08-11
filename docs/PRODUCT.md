@@ -268,6 +268,7 @@
 | **范围与防剧透** | 本书对话优先使用当前作品；无法定位时回退整个文件而不封锁。全书大纲始终基于整本书；知识图谱的未读开关限制生成输入，已保存图谱跨设备完整展示 |
 | **工具先于自主** | 词典/翻译多为单步调用；整本译/大纲为任务队列；图谱等再上多步编排 |
 | **确定性编排** | 开卷拥有书籍/作品作用域、权限、取消、预算、续写、checkpoint、存储与 UI 状态；模型运行框架只能作为可替换适配层，不接管产品边界 |
+| **可替换 Agent 运行时** | 普通本书对话可以经 App 自有 `AiAgentRuntime` 接入 Genkit Agent；Dart SDK 仍为 Preview，必须精确锁版、保留兼容运行时和功能开关。思维导图、知识图谱、翻译等领域 Workflow 继续由开卷确定性执行 |
 | **范围** | v1 仅 **图书 reflow**；漫画 OCR/气泡译 **远** 或另案 |
 | **与 TTS 解耦** | 听书继续用系统 TTS；不做云端 AI 音色（见 book-tts） |
 
@@ -282,6 +283,7 @@
 | 翻译偏好设置 | **已有（MVP）** | 目标语言默认简中、固定译到目标、通顺意译；结果卡可临时改目标语言；见 [ai-translation.md](./specs/ai-translation.md) |
 | 本书对话 | **已有（MVP）** | 顶栏「本书 AI」；**按需 tool 取文**（目录/当前章/按节/书内搜/全书取样），不默认灌全书；可选联网补充；最终回答严格跟随用户问题语言，中文请求不得夹带英文的工具、理解或规划过渡句；会话按 **contentHash** 存盘；见 [ai.md](./specs/ai.md) |
 | 统一 AI 运行时 | **已有** | `AiRunOrchestrator` 统一 run 状态/事件、冻结作用域、预算、取消、usage 与 checkpoint；对话、词典/翻译、结构化大纲与知识图谱全部只依赖 App 自有 `AiModelAdapter`，OpenAI Compatible 和 Anthropic 的 Genkit adapter 精确锁版并隔离。工具使用原生 Function Calling / Tool Use，确定性 Workflow 使用 Schemantic + Genkit 结构化输出；DeepSeek 按其原生 `json_object` 能力输出合法 JSON，再由同一 schema 与业务校验拒绝不合格结果，不退回 fenced JSON。旧 `AiProvider` 双栈及旧 transport 已删除。模型列表是独立只读 catalog，连接测试也走 adapter；见 [完整收口记录](./research/ai-runtime-genkit-completion-plan.md) |
+| Agent 运行时收口 | **进行中** | 新增 App 自有 `AiAgentRuntime` 稳定契约；先把现有 `AiChatService` 包装为兼容实现，再以 Genkit `defineAgent` 承接普通对话的会话、工具循环、Interrupt 与 Trace。产品工具必须经 `ProductActionGateway` 校验后才能调用确定性 Workflow；Genkit Session/Artifact 不是数据库与 WebDAV 的事实源 |
 | AI 大纲 | **已有（对话快捷操作）** | 本书 AI「对话」中的「生成本书大纲」快捷操作，直接复用对话的书内上下文、检索工具与流式回答，不再提供独立 Tab、范围选择或分批汇总任务；回答作为普通对话消息保存。旧结构化大纲缓存继续兼容读取、备份与恢复，避免历史数据丢失，但不再作为主入口展示 |
 | 图书思维导图 | **已有** | 作为本书对话中的原生结构化回答生成。未附加产物的自由输入只进入一次普通对话模型回合；模型可以直接回答，也可以调用 App 动态提供的 `create_book_mind_map` / `revise_book_mind_map` 产品工具。产品工具调用是该回合的终止行动请求，App 再校验作用域、产物别名、预算和运行状态，并执行确定性的 `AiBookMindMapService`，不增加前置意图模型或中文关键词路由。模型若在未调用工具时声称已经生成原生导图，App 会撤回文字草稿并进行一次受约束的产品工具修复；仍不合规则明确失败，不再用 Markdown 提纲冒充导图。发送时即冻结章节、作品、manifest、会话范围和本轮 `artifact_1` / `work_1` 别名，模型运行期间翻页不会改变实际生成目标；标题只作为转义后的不可信匹配数据。导图卡片的“继续修改”会把稳定 `artifactId` 显式附加到输入框；附件存在时，后续输入确定性地作为该产物的修订要求，不再交给模型猜目标或动作，关闭附件后立即恢复普通对话。快捷按钮、显式附件和失败重试均使用 App 已知的结构化命令。模型不能自行提交数据库 ID；存在歧义时在对话内纵向补充选择。未附加产物时的评价讨论、如何生成、概念比较及明确 Mermaid 请求仍走普通聊天，通用 Mermaid 不进入原生导图产物目录，也不自动迁移。生成时用户原始提示词会随冻结正文发送。当前章直接发送冻结章节；普通单书和合集中的一部作品发送完整有效正文；结构切割只回答“正文范围是什么”，不得参与主题提炼。同章标题与副标题分列的 EPUB 仍须读取最后一个标题后的完整正文。混合格式合集按局部容器合成作品范围；合成后仍冲突才请求用户确认。分卷单书按卷依次生成，全部作品逐部生成独立卡片。模型先确定书型与一个主导组织原则，再按论说、叙事或知识类编辑模板形成专业层级。导图附件由 App 分配 `artifactId`，修订结果以 `sourceArtifactId + revision` 追加保存；范围、取消、持久化和 WebDAV 继续由开卷拥有。结果支持原生全屏画布、双向/向右/放射布局、折叠、自由拖动、证据跳转和 PNG 导出。见 [ai-mind-map.md](./specs/ai-mind-map.md) |
 | 整本 / 按章翻译任务 | **中** | 后台队列、进度、可取消；**复用翻译偏好**；契约 `fullBookTranslation` 已预留 |
@@ -303,6 +305,7 @@ M2b 不引入 LangChain；五个只读书内工具由 App 执行
 M2c 统一 AiRun 状态 / 事件                               ← 已有 MVP
 M2d AiRunOrchestrator + 隔离 Genkit 适配层 + 原生工具调用 ← 已有 MVP
 M2e 词典/翻译/大纲/图谱统一使用 Genkit adapter，删除旧完成链路 ← 进行中
+M2f 独立 AI Workspace + AiAgentRuntime；兼容实现先行，Genkit Agent 灰度切换
 M3  AI 大纲（结构化任务 + 本地缓存 + 可跳转）                 ← 已有 MVP
 M3b 图书思维导图（独立确定性 Workflow + 原生布局）           ← 已有
 M4  按章 / 整本翻译任务（复用翻译偏好）

@@ -476,6 +476,17 @@ AI 对话备份规则：
 
 协议边界：本书对话按服务商选择 OpenAI Compatible 原生 Function Calling 或 Anthropic Messages API 原生 Tool Use；失败直接进入 `RunFailed`，不得跨协议重试，也不得回退 fenced JSON 或旧 Provider 对话 transport。五个工具仍由 App 白名单执行且全为只读。Anthropic assistant `tool_use` 与后续 user `tool_result` 必须保留 call ID 和内容块顺序；工具参数只在完整 `content_block_stop` 且 JSON 对象解析成功后交给 App。DeepSeek 思考模式与工具调用并用时，adapter 必须流式映射并在终态提取 `reasoning_content`，在对应 assistant tool-call message 中原样回传给下一轮。Anthropic thinking block 必须携带原签名并保持在对应 assistant tool-use 之前；不可见 `redacted_thinking` 也必须作为不透明块按原顺序回传，但不进入 UI 或存储。当前锁版插件的出站转换缺口只能在隔离的本地插件补丁中修复，禁止由业务层伪造。业务层只投影供应商可见的过程/摘要，终态可写入会话独立字段，但不得进入回答快照、回答复制或后续普通聊天历史。
 
+### 7.6 Agent 运行时迁移契约
+
+- 普通本书对话统一依赖 App 自有 `AiAgentRuntime`，不得由 Widget 或 `BookReaderController` 直接依赖 `AiChatService` / Genkit `Agent`。运行时输入必须在发送时冻结书籍、作品、当前章、产物别名、联网结果、推理偏好和历史消息。
+- 运行时输出复用 `AiRunEvent`：正文与可见推理仍是完整快照，产品动作仍是终止型 `AiRunProductActionRequested`。迁移不得把 Genkit token delta、Session 类型或 Tool 对象暴露给 UI。
+- 第一阶段由 `LegacyAiAgentRuntime` 包装现有行为；第二阶段新增 `GenkitAgentRuntime`。两者必须通过同一套正常回答、书内工具、产品工具、截断续写、取消、失败、并发发送和快照回放契约测试。
+- Genkit Agent 负责普通对话的一次 action-observation 循环、运行时会话、Interrupt/Resume、Retry 与 Trace。所有会改变产品状态的 Tool 必须先经过 App 的 `ProductActionGateway`，并接受 App 的作用域、权限、预算与别名校验。
+- `BookMindMapWorkflow`、`BookGraphWorkflow`、翻译任务和大纲任务保持确定性；它们可以被 Agent Tool 触发并在内部继续使用 `AiWorkflowModelSession.completeJson`，但不得改成由 Agent 自由拆解、重复执行或直接持久化。
+- Genkit Dart 仍按 Preview 风险管理：依赖精确锁版；默认保留兼容运行时开关；升级前跑 Provider 模型矩阵与 Agent 契约测试。Genkit Session/Artifact 不是 `AiChatSession`、导图、图谱或 WebDAV 的存储 schema。
+- Genkit Dart `0.15.1` 的本地 attached Agent 尚未把取消信号传入进行中的模型生成。该缺口未修复前，Genkit 实现只能处于隔离验证状态，不得切为默认；验收必须证明取消会中止实际模型请求，而不只是把 App 投影改成 `cancelled`。
+- 迁移完成标准：普通对话不再存在 App 手写模型工具循环和语言正则修复；Widget 不再执行 Workflow 或提交会话文件；`BookReaderController` 只保留阅读引擎桥接与兼容门面。
+
 ---
 
 ## 8. 与现有契约的衔接
@@ -572,6 +583,9 @@ AiBookLanguageProvider（或 Composite）
 - [x] 结构化大纲与知识图谱全部模型步骤使用独立 Schemantic schema + Genkit structured output；已删除 fence 截取、正则恢复和格式修补请求。
 - [x] 模型列表拆为只读 catalog，连接测试改走 adapter；`AiProvider`、`AiProviderFactory`、两套旧 completion transport 与 tracking provider 已删除。
 - [x] 两类 Genkit adapter 通过本地伪服务协议测试；`tool/ai_genkit_smoke.dart` 提供不含 Key 的本地 OpenAI Compatible CLI trace，也可用用户环境变量选测 Anthropic；完整验收见 [执行记录](../research/ai-runtime-genkit-completion-plan.md)。
+- [ ] `BookAiWorkspaceController` 独占会话发送/流式/重试/产品附件状态，聊天 Widget 不再编排模型和 Workflow。
+- [x] `AiAgentRuntime` 契约落地，现有行为经 `LegacyAiAgentRuntime` 兼容，阅读 controller 不再直接依赖 `AiChatService`。
+- [ ] Genkit Agent 经功能开关、真实 HTTP 取消、模型矩阵和 Trace 验证后替换普通聊天循环。
 
 
 

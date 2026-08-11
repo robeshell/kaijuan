@@ -168,6 +168,13 @@ abstract interface class AiModelAdapter {
   Future<void> close();
 }
 
+/// Opens one provider-bound model adapter for a run.
+///
+/// This factory type lives at the provider-neutral seam so higher-level
+/// runtimes do not depend on a particular chat-loop implementation.
+typedef AiModelAdapterOpener =
+    AiModelAdapter? Function({bool? reasoningEnabled});
+
 abstract interface class AiStructuredOutputAdapter {
   Future<AiModelJsonResult> completeJson(
     AiModelJsonRequest request, {

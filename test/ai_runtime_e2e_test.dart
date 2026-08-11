@@ -5,11 +5,12 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:kaijuan/ai/adapters/genkit_anthropic_model_adapter.dart';
 import 'package:kaijuan/ai/adapters/genkit_openai_model_adapter.dart';
+import 'package:kaijuan/ai/ai_agent_runtime.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
-import 'package:kaijuan/ai/ai_chat_service.dart';
 import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
+import 'package:kaijuan/ai/legacy_ai_agent_runtime.dart';
 
 import 'support/anthropic_test_server.dart';
 
@@ -55,26 +56,28 @@ data: [DONE]
         httpClient: client,
       );
       final host = _E2eToolHost();
-      final service = AiChatService(
+      final runtime = LegacyAiAgentRuntime(
         isAvailable: () => true,
         openModelAdapter: ({reasoningEnabled}) => adapter,
       );
 
-      final events = await service
-          .streamRun(
-            run: const AiRunDescriptor(
-              runId: 'e2e-native-run',
-              task: AiRunTask.bookChat,
-              scope: AiRunScope(contentHash: 'book-hash', workKey: 'work-1'),
+      final events = await runtime
+          .stream(
+            AiAgentTurn(
+              run: const AiRunDescriptor(
+                runId: 'e2e-native-run',
+                task: AiRunTask.bookChat,
+                scope: AiRunScope(contentHash: 'book-hash', workKey: 'work-1'),
+              ),
+              userText: '张居正是谁？',
+              history: const [],
+              context: const AiChatContextBundle(
+                chapterTitle: '万历十五年',
+                chapterText: '张居正推行考成法。',
+              ),
+              bookTitle: '万历十五年',
+              tools: host,
             ),
-            userText: '张居正是谁？',
-            history: const [],
-            context: const AiChatContextBundle(
-              chapterTitle: '万历十五年',
-              chapterText: '张居正推行考成法。',
-            ),
-            bookTitle: '万历十五年',
-            tools: host,
           )
           .toList();
 
@@ -153,28 +156,30 @@ data: {"type":"message_stop"}
       model: 'claude-sonnet-5',
     );
     final host = _E2eToolHost();
-    final service = AiChatService(
+    final runtime = LegacyAiAgentRuntime(
       isAvailable: () => true,
       openModelAdapter: ({reasoningEnabled}) => adapter,
     );
 
     late List<AiRunEvent> events;
     try {
-      events = await service
-          .streamRun(
-            run: const AiRunDescriptor(
-              runId: 'e2e-anthropic-run',
-              task: AiRunTask.bookChat,
-              scope: AiRunScope(contentHash: 'book-hash', workKey: 'work-1'),
+      events = await runtime
+          .stream(
+            AiAgentTurn(
+              run: const AiRunDescriptor(
+                runId: 'e2e-anthropic-run',
+                task: AiRunTask.bookChat,
+                scope: AiRunScope(contentHash: 'book-hash', workKey: 'work-1'),
+              ),
+              userText: '张居正是谁？',
+              history: const [],
+              context: const AiChatContextBundle(
+                chapterTitle: '万历十五年',
+                chapterText: '张居正推行考成法。',
+              ),
+              bookTitle: '万历十五年',
+              tools: host,
             ),
-            userText: '张居正是谁？',
-            history: const [],
-            context: const AiChatContextBundle(
-              chapterTitle: '万历十五年',
-              chapterText: '张居正推行考成法。',
-            ),
-            bookTitle: '万历十五年',
-            tools: host,
           )
           .toList();
     } finally {

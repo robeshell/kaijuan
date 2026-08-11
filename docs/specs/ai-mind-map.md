@@ -64,7 +64,7 @@
 - 根节点概括核心命题、中心问题或叙事主线；一级通常保持 4–7 个处于同一抽象层级、使用同一划分维度的主要分支；二级展开观点、阶段、机制或矛盾；更深节点承载原因、事实、案例、转折、影响、条件与结论。同级标题保持语法形式平行，摘要写出正文事实而不复述标题。模型必须合并语义重复内容，避免目录复刻、同级维度混用和为了平衡而制造空节点。
 - 正文规模只用于 App 计算输出 token 容量，不向模型暴露目标节点数、最低节点数或按字符换算的密度指标，也不因节点数量重试。提示词包含论说、叙事、知识类的短结构示例及“目录标题逐章平铺”的反例；示例只规范编辑方法，不向最终结果注入示例事实。
 
-暂不使用 Genkit `defineFlow` / Agent。Genkit 继续只承担 Provider 归一化、Schemantic structured output、协议兼容和 trace；范围、用户确认、取消、预算、错误与对话持久化属于开卷。
+思维导图 Workflow 不迁入 Genkit `defineFlow`，仍由开卷确定性执行。普通对话可以经 App 自有 `AiAgentRuntime` 使用 Genkit Agent 来选择 `create_book_mind_map` / `revise_book_mind_map` 产品工具；工具请求必须经过 App 的别名、范围、预算和运行状态校验后才能启动 Workflow。Genkit 继续承担 Provider 归一化、Schemantic structured output、原生工具协议、运行时会话与 trace；范围、用户确认、取消、领域产物、错误与对话持久化属于开卷。
 
 ## 5. 校验与数据
 

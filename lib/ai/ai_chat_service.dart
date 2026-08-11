@@ -14,9 +14,6 @@ import 'ai_run.dart';
 import 'ai_run_orchestrator.dart';
 import 'ai_search.dart';
 
-typedef AiChatModelAdapterOpener =
-    AiModelAdapter? Function({bool? reasoningEnabled});
-
 /// Book-scoped chat: **light tools** for body text, not a full-book dump.
 ///
 /// Each turn starts with title / TOC / current chapter / selection. The model
@@ -26,12 +23,12 @@ typedef AiChatModelAdapterOpener =
 class AiChatService {
   AiChatService({
     required bool Function() isAvailable,
-    required AiChatModelAdapterOpener openModelAdapter,
+    required AiModelAdapterOpener openModelAdapter,
   }) : isAvailableFn = isAvailable,
        openModelAdapterFn = openModelAdapter;
 
   final bool Function() isAvailableFn;
-  final AiChatModelAdapterOpener openModelAdapterFn;
+  final AiModelAdapterOpener openModelAdapterFn;
 
   /// Corpus budget when tools load book text from the engine. This is the
   /// **whole-book** cap (covers typical novels ~300–700k chars), NOT the

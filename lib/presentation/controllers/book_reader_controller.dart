@@ -7,11 +7,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../../ai/ai_chat.dart';
+import '../../ai/ai_agent_runtime.dart';
 import '../../ai/ai_chat_store.dart';
 import '../../ai/ai_book_mind_map_service.dart';
 import '../../ai/ai_book_chat_tool_host.dart';
 import '../../ai/ai_chat_retrieve.dart';
-import '../../ai/ai_chat_service.dart';
 import '../../ai/ai_chat_tools.dart';
 import '../../ai/ai_book_structure.dart';
 import '../../ai/ai_book_structure_session.dart';
@@ -34,6 +34,7 @@ import '../../ai/ai_settings.dart';
 import '../../ai/ai_structure_supplements.dart';
 import '../../ai/ai_translation.dart';
 import '../../ai/ai_user_error.dart';
+import '../../ai/legacy_ai_agent_runtime.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../domain/book_structure.dart';
 import '../../domain/reader_models.dart';
@@ -43,6 +44,7 @@ import '../../readers/book/book_theme.dart';
 import '../../readers/book/book_language_actions.dart';
 import '../../readers/book/foliate_js_bridge.dart';
 import 'ai_settings_controller.dart';
+import 'book_ai_workspace_controller.dart';
 
 /// Listen-to-book playback state (system TTS).
 enum BookTtsStatus { idle, playing, paused }
@@ -87,6 +89,7 @@ class BookReaderController extends ChangeNotifier {
     BookReadingPreferences? readingPreferences,
     BookLanguageProvider? languageProvider,
     AiSettingsController? aiSettings,
+    this.agentRuntimeFactory = createLegacyAiAgentRuntime,
     this.scrollModeEnabled = true,
   }) : languageProvider =
            languageProvider ?? const PlatformBookLanguageProvider(),
@@ -133,8 +136,16 @@ class BookReaderController extends ChangeNotifier {
        _pageTurnEffect =
            readingPreferences?.pageTurnEffect ??
            BookReadingPreferences.defaultPageTurnEffect {
+    _aiWorkspace = BookAiWorkspaceController(
+      agentRuntimeFactory: agentRuntimeFactory,
+      onChanged: _notifyAiWorkspaceChanged,
+    );
     readingPreferences?.fontStore.addListener(_onFontStoreChanged);
     bindAiSettings(aiSettings);
+  }
+
+  void _notifyAiWorkspaceChanged() {
+    if (!_disposed) notifyListeners();
   }
 
   void _onFontStoreChanged() {
@@ -145,8 +156,8 @@ class BookReaderController extends ChangeNotifier {
   final AppDatabase database;
   final ReadingItem item;
   final BookLanguageProvider languageProvider;
-  AiSettingsController? _aiSettings;
-  AiLanguageService? _aiLanguage;
+  final AiAgentRuntimeFactory agentRuntimeFactory;
+  late final BookAiWorkspaceController _aiWorkspace;
   final BookReadingPreferences? _prefs;
   final bool scrollModeEnabled;
   Future<void> Function()? _clearPlatformFocus;
@@ -154,86 +165,38 @@ class BookReaderController extends ChangeNotifier {
   /// Wire / re-wire BYOK AI after the widget tree can resolve [AiSettingsScope].
   /// Safe to call repeatedly; no-ops when the controller identity is unchanged.
   void bindAiSettings(AiSettingsController? aiSettings) {
-    if (identical(_aiSettings, aiSettings) &&
-        (aiSettings == null) == (_aiLanguage == null) &&
-        (aiSettings == null) == (_aiChat == null) &&
-        (aiSettings == null) == (_aiOutline == null) &&
-        (aiSettings == null) == (_aiMindMap == null) &&
-        (aiSettings == null) == (_aiGraph == null)) {
-      return;
-    }
-    _aiSettings = aiSettings;
-    _aiLanguage = aiSettings == null
-        ? null
-        : AiLanguageService(
-            isAvailable: () => aiSettings.isReadyForRequests,
-            openModelAdapter: () => aiSettings.openModelAdapter(),
-            // Always read live settings so translation prefs pick up changes
-            // made while the reader is already open.
-            settings: () => aiSettings.settings,
-          );
-    _aiChat = aiSettings == null
-        ? null
-        : AiChatService(
-            isAvailable: () => aiSettings.isReadyForRequests,
-            openModelAdapter: ({reasoningEnabled}) =>
-                aiSettings.openModelAdapter(reasoningEnabled: reasoningEnabled),
-          );
-    _aiOutline = aiSettings == null
-        ? null
-        : AiBookOutlineService(
-            isAvailable: () => aiSettings.isReadyForRequests,
-            openModelAdapter: () => aiSettings.openModelAdapter(),
-            settings: () => aiSettings.settings,
-          );
-    _aiMindMap = aiSettings == null
-        ? null
-        : AiBookMindMapService(
-            isAvailable: () => aiSettings.isReadyForRequests,
-            openModelAdapter: () => aiSettings.openModelAdapter(),
-            settings: () => aiSettings.settings,
-          );
-    _aiGraph = aiSettings == null
-        ? null
-        : AiBookGraphService(
-            isAvailable: () => aiSettings.isReadyForRequests,
-            openModelAdapter: () => aiSettings.openModelAdapter(),
-            settings: () => aiSettings.settings,
-          );
-    if (!_disposed) notifyListeners();
+    if (_aiWorkspace.bindSettings(aiSettings) && !_disposed) notifyListeners();
   }
 
   /// True when BYOK AI is enabled and ready for dictionary / translation / chat.
-  bool get canUseAiLanguage => _aiLanguage?.isAvailable ?? false;
+  bool get canUseAiLanguage => _aiWorkspace.canUseLanguage;
 
   /// Same readiness gate as language tools (shared provider + key).
-  bool get canUseAiChat => _aiChat?.isAvailable ?? false;
+  bool get canUseAiChat => _aiWorkspace.canUseChat;
 
   /// Search API key configured (chat 联网 switch).
-  bool get canUseWebSearch => _aiSettings?.isSearchReady ?? false;
+  bool get canUseWebSearch => _aiWorkspace.canUseWebSearch;
 
   bool get supportsDeepThinking {
-    final settings = _aiSettings?.settings;
-    return settings != null &&
-        settings.providerKind
-            .reasoningCapabilities(settings.resolvedModel)
-            .supported;
+    return _aiWorkspace.supportsDeepThinking;
   }
 
   bool get defaultDeepThinkingEnabled =>
-      _aiSettings?.settings.reasoningEnabled ?? false;
+      _aiWorkspace.defaultDeepThinkingEnabled;
 
-  AiSettingsController? get aiSettingsController => _aiSettings;
+  AiSettingsController? get aiSettingsController =>
+      _aiWorkspace.settingsController;
+
+  BookAiWorkspaceController get aiWorkspace => _aiWorkspace;
 
   /// Initial scope recommendation for graph generation. The confirmation
   /// sheet may let the user override it; once confirmed, that explicit range
   /// is authoritative.
-  bool get allowUnreadGraphContext =>
-      _aiSettings?.settings.allowUnreadContext ?? false;
+  bool get allowUnreadGraphContext => _aiWorkspace.allowUnreadGraphContext;
 
   /// Live translation prefs from the shared settings controller (not a snapshot).
   AiTranslationPreferences get translationPreferences =>
-      _aiSettings?.settings.translation ?? const AiTranslationPreferences();
+      _aiWorkspace.translationPreferences;
 
   /// Authors from EPUB metadata when the book is open (may be empty).
   List<String> get bookAuthors => _bookAuthors;
@@ -353,14 +316,8 @@ class BookReaderController extends ChangeNotifier {
   _getSelectionContext;
   void Function(Map<String, double>? zone)? _setMenuCursorZone;
   void Function(bool open)? _setMenuOpen;
-  AiChatService? _aiChat;
-  AiBookOutlineService? _aiOutline;
-  AiBookMindMapService? _aiMindMap;
-  AiBookGraphService? _aiGraph;
   AiChatHistoryStore? _chatHistoryStore;
   AiGraphStore? _aiGraphStore;
-  final Map<String, AiRunState> _aiRunStates = {};
-  String? _latestAiRunId;
   AiBookOutline? _bookOutline;
 
   /// Work key of [_bookOutline] for collections (null = plain book / whole
@@ -392,27 +349,9 @@ class BookReaderController extends ChangeNotifier {
   Future<void>? _bookGraphGeneration;
   Future<void> _chatSessionWriteQueue = Future<void>.value();
 
-  Map<String, AiRunState> get aiRunStates => Map.unmodifiable(_aiRunStates);
+  Map<String, AiRunState> get aiRunStates => _aiWorkspace.runStates;
 
-  AiRunState? get activeAiRunState =>
-      _latestAiRunId == null ? null : _aiRunStates[_latestAiRunId];
-
-  void _recordAiRunEvent(AiRunEvent event) {
-    if (event case AiRunStarted(:final descriptor)) {
-      _latestAiRunId = descriptor.runId;
-      _aiRunStates[descriptor.runId] = AiRunState.initial(descriptor);
-      while (_aiRunStates.length > 20) {
-        _aiRunStates.remove(_aiRunStates.keys.first);
-      }
-    }
-    final current = _aiRunStates[event.runId];
-    if (current == null) return;
-    final next = current.apply(event);
-    _aiRunStates[event.runId] = next;
-    if (!_disposed && (event is AiRunStarted || next.isTerminal)) {
-      notifyListeners();
-    }
-  }
+  AiRunState? get activeAiRunState => _aiWorkspace.activeRunState;
 
   Future<T> _executeAiWorkflow<T>({
     required AiRunDescriptor descriptor,
@@ -421,37 +360,13 @@ class BookReaderController extends ChangeNotifier {
     required Future<T> Function(AiRunExecution execution) body,
     AiRunCheckpointWriter? checkpointWriter,
   }) async {
-    late T result;
-    var hasResult = false;
-    Object? failure;
-    StackTrace? failureStack;
-    await for (final event in const AiRunOrchestrator().run(
+    return _aiWorkspace.executeWorkflow(
       descriptor: descriptor,
       budget: budget,
       cancelToken: cancelToken,
       checkpointWriter: checkpointWriter,
-      body: (execution) async {
-        result = await body(execution);
-        hasResult = true;
-      },
-    )) {
-      _recordAiRunEvent(event);
-      switch (event) {
-        case AiRunFailed():
-          failure = event.error;
-          failureStack = event.stackTrace;
-        case AiRunCancelled():
-          failure = AiProviderException('已取消');
-          failureStack = StackTrace.current;
-        default:
-          break;
-      }
-    }
-    if (failure != null) {
-      Error.throwWithStackTrace(failure, failureStack ?? StackTrace.current);
-    }
-    if (!hasResult) throw StateError('AI workflow ended without a result');
-    return result;
+      body: body,
+    );
   }
 
   late final AiBookCorpusCache _aiCorpus = AiBookCorpusCache(
@@ -995,7 +910,7 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Future<void> _generateBookOutline({Set<int>? excludedSectionIndices}) async {
-    final service = _aiOutline;
+    final service = _aiWorkspace.outline;
     if (service == null || !canUseAiChat) {
       _bookOutlineError = 'AI 未启用或未配置';
       if (!_disposed) notifyListeners();
@@ -1151,8 +1066,7 @@ class BookReaderController extends ChangeNotifier {
         .toList(growable: false);
   }
 
-  AiContentRuleWords get _contentRuleWords =>
-      _aiSettings?.settings.contentRuleWords ?? const AiContentRuleWords();
+  AiContentRuleWords get _contentRuleWords => _aiWorkspace.contentRuleWords;
 
   /// Never-matches regex used when a word list is empty (rule disabled).
   static final RegExp _neverMatches = RegExp(r'$.^');
@@ -1466,7 +1380,7 @@ class BookReaderController extends ChangeNotifier {
     String? scopeLabel,
     String? progressLabel,
   }) async {
-    final service = _aiMindMap;
+    final service = _aiWorkspace.mindMap;
     if (service == null || !canUseAiChat) {
       _bookMindMapError = 'AI 未启用或未配置';
       if (!_disposed) notifyListeners();
@@ -1848,7 +1762,7 @@ class BookReaderController extends ChangeNotifier {
     // Carry the manual slice so a failed partial save doesn't silently drop
     // it for the next incremental run (catch block is out of try scope).
     var carryExcluded = const <int>[];
-    final service = _aiGraph;
+    final service = _aiWorkspace.graph;
     if (service == null || !canUseAiChat) {
       _bookGraphError = 'AI 未启用或未配置';
       if (!_disposed) notifyListeners();
@@ -2232,7 +2146,7 @@ class BookReaderController extends ChangeNotifier {
   Future<AiNarrationPlan?> analyzeActiveGraphNarration({
     AiGraphWorkCandidate? work,
   }) async {
-    final service = _aiGraph;
+    final service = _aiWorkspace.graph;
     if (service == null || !canUseAiChat) return null;
     try {
       await resolveGraphWorkCandidates();
@@ -2371,10 +2285,10 @@ class BookReaderController extends ChangeNotifier {
     CancelToken? cancelToken,
     String? runId,
   }) {
-    final service = _aiChat;
-    if (service == null || !service.isAvailable) return null;
+    final runtime = _aiWorkspace.agentRuntime;
+    if (runtime == null || !runtime.isAvailable) return null;
     return _streamResolvedBookChat(
-      service: service,
+      runtime: runtime,
       userText: userText,
       history: history,
       context: context,
@@ -2388,7 +2302,7 @@ class BookReaderController extends ChangeNotifier {
   }
 
   Stream<AiRunEvent> _streamResolvedBookChat({
-    required AiChatService service,
+    required AiAgentRuntime runtime,
     required String userText,
     required List<AiChatMessage> history,
     required AiChatContextBundle context,
@@ -2399,32 +2313,34 @@ class BookReaderController extends ChangeNotifier {
     CancelToken? cancelToken,
     String? runId,
   }) async* {
-    await for (final event in service.streamRun(
-      run: AiRunDescriptor(
-        runId: runId ?? AiRunIds.next(),
-        task: AiRunTask.bookChat,
-        scope: AiRunScope(
-          contentHash: item.contentHash,
-          workKey: workScope == null ? null : workKeyFor(workScope),
-          label: context.scopeLabel,
+    await for (final event in runtime.stream(
+      AiAgentTurn(
+        run: AiRunDescriptor(
+          runId: runId ?? AiRunIds.next(),
+          task: AiRunTask.bookChat,
+          scope: AiRunScope(
+            contentHash: item.contentHash,
+            workKey: workScope == null ? null : workKeyFor(workScope),
+            label: context.scopeLabel,
+          ),
         ),
+        userText: userText,
+        history: history,
+        context: context,
+        bookTitle: item.title,
+        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        webHits: webHits,
+        productContext: productContext,
+        reasoningEnabled: reasoningEnabled,
+        tools: AiBookChatToolHost(
+          corpus: _aiCorpus,
+          work: workScope,
+          turnContext: context,
+        ),
+        cancelToken: cancelToken,
       ),
-      userText: userText,
-      history: history,
-      context: context,
-      bookTitle: item.title,
-      bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-      webHits: webHits,
-      productContext: productContext,
-      reasoningEnabled: reasoningEnabled,
-      tools: AiBookChatToolHost(
-        corpus: _aiCorpus,
-        work: workScope,
-        turnContext: context,
-      ),
-      cancelToken: cancelToken,
     )) {
-      _recordAiRunEvent(event);
+      _aiWorkspace.recordRunEvent(event);
       yield event;
     }
   }
@@ -2437,15 +2353,17 @@ class BookReaderController extends ChangeNotifier {
     required AiChatContextBundle context,
     CancelToken? cancelToken,
   }) async {
-    final service = _aiChat;
-    if (service == null || !service.isAvailable) return const [];
-    return service.suggestFollowUpQuestions(
-      userText: userText,
-      answer: answer,
-      context: context,
-      bookTitle: item.title,
-      bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-      cancelToken: cancelToken,
+    final runtime = _aiWorkspace.agentRuntime;
+    if (runtime == null || !runtime.isAvailable) return const [];
+    return runtime.suggestFollowUpQuestions(
+      AiAgentSuggestionRequest(
+        userText: userText,
+        answer: answer,
+        context: context,
+        bookTitle: item.title,
+        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+        cancelToken: cancelToken,
+      ),
     );
   }
 
@@ -2455,7 +2373,7 @@ class BookReaderController extends ChangeNotifier {
     required AiBookWork? workScope,
     CancelToken? cancelToken,
   }) async {
-    final ai = _aiSettings;
+    final ai = _aiWorkspace.settingsController;
     if (ai == null || !ai.isSearchReady) {
       throw AiProviderException('请先在设置中配置联网搜索 Key');
     }
@@ -2994,7 +2912,7 @@ class BookReaderController extends ChangeNotifier {
     CancelToken? cancelToken,
     AiTranslationRequestOptions? translationOptions,
   }) {
-    final service = _aiLanguage;
+    final service = _aiWorkspace.language;
     if (service == null || !service.isAvailable) return null;
     if (operation == BookLanguageOperation.fullBookTranslation) {
       return null;
@@ -3064,7 +2982,7 @@ class BookReaderController extends ChangeNotifier {
         }
       },
     )) {
-      _recordAiRunEvent(event);
+      _aiWorkspace.recordRunEvent(event);
       switch (event) {
         case AiRunTextSnapshot():
           yield event.text;
