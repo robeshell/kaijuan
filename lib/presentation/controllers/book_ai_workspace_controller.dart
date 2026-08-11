@@ -1,4 +1,5 @@
 import '../../ai/ai_agent_runtime.dart';
+import '../../ai/ai_agent_runtime_gate.dart';
 import '../../ai/ai_book_mind_map_service.dart';
 import '../../ai/ai_cancel.dart';
 import '../../ai/ai_chat_retrieve.dart';
@@ -27,15 +28,27 @@ class BookAiWorkspaceController {
   BookAiWorkspaceController({
     required AiChatSessionWriter saveChatSession,
     this.agentRuntimeFactory = createLegacyAiAgentRuntime,
+    this.genkitAgentRuntimeFactory,
+    this.requestedAgentRuntime = AiAgentRuntimeKind.compatible,
+    this.genkitAgentCapabilities = AiAgentRuntimeCapabilities.genkitDart0151,
     this.onChanged,
   }) : conversation = BookAiConversationController(saveChatSession) {
     mindMapConversation = BookAiMindMapController(conversation);
+    agentRuntimeDecision = AiAgentRuntimeGate.decide(
+      requested: requestedAgentRuntime,
+      genkitCapabilities: genkitAgentCapabilities,
+      hasGenkitRuntimeFactory: genkitAgentRuntimeFactory != null,
+    );
   }
 
   final AiAgentRuntimeFactory agentRuntimeFactory;
+  final AiAgentRuntimeFactory? genkitAgentRuntimeFactory;
+  final AiAgentRuntimeKind requestedAgentRuntime;
+  final AiAgentRuntimeCapabilities genkitAgentCapabilities;
   final void Function()? onChanged;
   final BookAiConversationController conversation;
   late final BookAiMindMapController mindMapConversation;
+  late final AiAgentRuntimeDecision agentRuntimeDecision;
 
   AiSettingsController? _settings;
   AiLanguageService? _language;
@@ -70,9 +83,13 @@ class BookAiWorkspaceController {
             openModelAdapter: () => settings.openModelAdapter(),
             settings: () => settings.settings,
           );
+    final selectedAgentFactory =
+        agentRuntimeDecision.effective == AiAgentRuntimeKind.genkitAgent
+        ? genkitAgentRuntimeFactory!
+        : agentRuntimeFactory;
     _agentRuntime = settings == null
         ? null
-        : agentRuntimeFactory(
+        : selectedAgentFactory(
             isAvailable: () => settings.isReadyForRequests,
             openModelAdapter: ({reasoningEnabled}) =>
                 settings.openModelAdapter(reasoningEnabled: reasoningEnabled),

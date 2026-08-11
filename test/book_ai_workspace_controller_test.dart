@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_agent_runtime.dart';
+import 'package:kaijuan/ai/ai_agent_runtime_gate.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_run_orchestrator.dart';
@@ -86,6 +87,65 @@ void main() {
       settings.dispose();
     },
   );
+
+  test(
+    'workspace falls back when requested Genkit runtime misses a gate',
+    () async {
+      final compatible = _FakeAgentRuntime();
+      final preview = _FakeAgentRuntime();
+      final settings = AiSettingsController(
+        settingsStore: MemoryAiSettingsStore(),
+        credentialStore: MemoryAiCredentialStore(),
+      );
+      await settings.load();
+      final workspace = BookAiWorkspaceController(
+        saveChatSession: (_) async {},
+        requestedAgentRuntime: AiAgentRuntimeKind.genkitAgent,
+        genkitAgentCapabilities: AiAgentRuntimeCapabilities.genkitDart0151,
+        agentRuntimeFactory:
+            ({required isAvailable, required openModelAdapter}) => compatible,
+        genkitAgentRuntimeFactory:
+            ({required isAvailable, required openModelAdapter}) => preview,
+      );
+
+      workspace.bindSettings(settings);
+
+      expect(workspace.agentRuntimeDecision.fellBack, isTrue);
+      expect(workspace.agentRuntime, same(compatible));
+      expect(
+        workspace.agentRuntimeDecision.blockers,
+        contains('attached 模型请求不支持真实取消'),
+      );
+      workspace.dispose();
+      settings.dispose();
+    },
+  );
+
+  test('workspace promotes a fully validated Genkit runtime factory', () async {
+    final compatible = _FakeAgentRuntime();
+    final preview = _FakeAgentRuntime();
+    final settings = AiSettingsController(
+      settingsStore: MemoryAiSettingsStore(),
+      credentialStore: MemoryAiCredentialStore(),
+    );
+    await settings.load();
+    final workspace = BookAiWorkspaceController(
+      saveChatSession: (_) async {},
+      requestedAgentRuntime: AiAgentRuntimeKind.genkitAgent,
+      genkitAgentCapabilities: AiAgentRuntimeCapabilities.productionReady,
+      agentRuntimeFactory:
+          ({required isAvailable, required openModelAdapter}) => compatible,
+      genkitAgentRuntimeFactory:
+          ({required isAvailable, required openModelAdapter}) => preview,
+    );
+
+    workspace.bindSettings(settings);
+
+    expect(workspace.agentRuntimeDecision.canPromoteGenkit, isTrue);
+    expect(workspace.agentRuntime, same(preview));
+    workspace.dispose();
+    settings.dispose();
+  });
 }
 
 final class _FakeAgentRuntime implements AiAgentRuntime {

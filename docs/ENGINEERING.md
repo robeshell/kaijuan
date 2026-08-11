@@ -117,6 +117,7 @@ BookAiChatView
 - `create_book_mind_map`、`revise_book_mind_map`、图谱和翻译等是产品工具。Agent 只提交 App 签发的别名与用户要求，`AiBookMindMapActionGateway` 等 App 网关解析真实身份并复核冻结范围，`BookAiMindMapController` 再调用确定性 Workflow；模型不得直接写数据库 ID。网关是纯校验/解析边界，不读取实时翻页位置，也不渲染 UI。
 - Genkit Dart 当前仍是 Preview 依赖，必须精确锁版。升级只能发生在隔离 adapter/runtime 内，并经过伪 Provider、DeepSeek/OpenAI Compatible、Anthropic、流式取消、工具调用、Interrupt 和会话恢复契约测试；生产路径必须可回退到兼容运行时。
 - 当前锁定的 Genkit Dart `0.15.1` 明确没有把本地 attached Agent 的取消信号传入正在进行的 `generate`。在 SDK 修复且开卷的模型矩阵验证通过前，`GenkitAgentRuntime` 不得成为默认运行时；不能用仅更新 UI 状态的“假取消”替代底层 HTTP 中止。
+- 默认切换由 App 自有 `AiAgentRuntimeGate` 执行，而不是靠注释或人工约定。即使请求使用 Genkit Agent，也必须同时存在 runtime factory，并通过 attached 请求真实取消、Provider 矩阵、工具与 Interrupt/Resume、Trace/Snapshot、统一 Runtime 契约测试；任一条件缺失即确定性回退 `LegacyAiAgentRuntime`，并保留可观察 blocker 列表。
 - Genkit `SessionStore` 与 `Artifact` 只承载运行时状态和事件引用，不替代 `AiChatSession`、`AiBookMindMap`、`AiBookGraph` 等产品事实；本地文件与 WebDAV schema 不跟随 SDK 类型变化。
 
 知识图谱 v3：入口与共享的 `AiBookStructureResolver` 保持不变；识别结果之后采用“生成目标 → 内容单元 → 构建任务”三层边界。`AiGraphScopePlanner` 把书内作品与全部可读单元整理为确定性选择计划，只给出正文/辅文的默认勾选建议，不能替用户删除范围；图谱管线只接收用户确认后的正文切片，负责多类型抽取、可选补漏、证据定位、消歧、合并与方向复核，并通过 checkpoint 回调发布不可变快照。实体与关系以稳定 ID 相连，关系图、家族树及实体详情都不得用名称作为身份键；家族树只消费父母/祖辈到子女的代际边，旁系亲属保留在关系图但不进入层级。电子书正文、标题、证据摘录和已知实体表一律作为不可信上下文注入模型。
@@ -130,6 +131,7 @@ BookAiChatView
 - AI 运行时采用“开卷确定性编排器 + 可替换模型适配层”。`AiRunState` / `AiRunEvent` 是 App 自有的纯 Dart 契约；回答正文与供应商可见思考过程分别采用**完整快照**而非不可回退 delta，支持自动续写去重拼接和消费者幂等重放。本书对话只暴露事件流，UI 不得自行推测运行阶段或把思考过程拼入回答正文。
 - 对话、图谱与设置的模型和文件存储分别放置；JSON 原子写入、备份恢复与安全凭据不得混入模型类。生成数据面只经 `AiModelAdapter`，模型目录是独立只读 `AiModelCatalog`；旧 Provider 双栈不得重建。
 - 对话发送状态和大纲/图谱任务状态按上面的目标运行时迁入独立 workspace/conversation controller；迁移前后均用 Widget 流程测试守住行为，不以 `part` 或跨文件私有字段制造形式拆分。
+- `BookAiReaderGateway` 承担阅读快照到 Agent turn 的上下文、工具宿主、联网与追问桥接；`book_ai_chat_components.dart` 只放无业务状态的对话展示组件。`BookReaderController` 与 `book_ai_chat_sheet.dart` 不再通过 `part` 共享私有状态来伪装拆分。
 - 图谱模型、文件存储、抽取、合并消歧、质量门和描述润色是独立职责。管线 orchestrator 只编排这些组件，拆分不得改变提示词、算法阈值、缓存 schema 或 checkpoint 时机。
 
 - 产品范围见 [PRODUCT.md §6](./PRODUCT.md) 与 [specs/ai.md](./specs/ai.md)。

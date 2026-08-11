@@ -488,6 +488,7 @@ AI 对话备份规则：
 - `BookMindMapWorkflow`、`BookGraphWorkflow`、翻译任务和大纲任务保持确定性；它们可以被 Agent Tool 触发并在内部继续使用 `AiWorkflowModelSession.completeJson`，但不得改成由 Agent 自由拆解、重复执行或直接持久化。
 - Genkit Dart 仍按 Preview 风险管理：依赖精确锁版；默认保留兼容运行时开关；升级前跑 Provider 模型矩阵与 Agent 契约测试。Genkit Session/Artifact 不是 `AiChatSession`、导图、图谱或 WebDAV 的存储 schema。
 - Genkit Dart `0.15.1` 的本地 attached Agent 尚未把取消信号传入进行中的模型生成。该缺口未修复前，Genkit 实现只能处于隔离验证状态，不得切为默认；验收必须证明取消会中止实际模型请求，而不只是把 App 投影改成 `cancelled`。
+- `AiAgentRuntimeGate` 是默认切换的可执行门禁：需要 Genkit runtime factory，并逐项验证 attached 请求真实取消、Provider 矩阵、工具与 Interrupt/Resume、Trace/Snapshot 和统一契约测试；请求 Genkit 但条件不足时必须回退兼容 Runtime，并公开阻塞原因供测试与诊断。
 - 迁移完成标准：普通对话不再存在 App 手写模型工具循环和语言正则修复；Widget 不再执行 Workflow 或提交会话文件；`BookReaderController` 只保留阅读引擎桥接与兼容门面。
 
 ---
@@ -590,6 +591,8 @@ AiBookLanguageProvider（或 Composite）
 - [x] `BookAiConversationController` 接管有界会话、run 投影、重试、部分回答 checkpoint、完成/失败/取消提交与持久化；聊天 Widget 不再维护第二套 checkpoint。
 - [x] `AiBookMindMapActionGateway` 在 Widget/阅读器之外校验冻结作品、章节和产物身份；模型动作不能读取实时翻页状态。
 - [x] `AiAgentRuntime` 契约落地，现有行为经 `LegacyAiAgentRuntime` 兼容，阅读 controller 不再直接依赖 `AiChatService`。
+- [x] `BookAiReaderGateway` 接管阅读快照、书内工具宿主、普通 Agent turn、联网和追问桥接；聊天纯展示组件从主 Sheet 物理拆分且不共享私有状态。
+- [x] `AiAgentRuntimeGate` 对 Genkit 默认切换执行 runtime factory、真实取消、模型矩阵、工具恢复、Trace/Snapshot 与契约测试门禁；当前锁版会确定性回退兼容 Runtime。
 - [ ] Genkit Agent 经功能开关、真实 HTTP 取消、模型矩阵和 Trace 验证后替换普通聊天循环。
 
 

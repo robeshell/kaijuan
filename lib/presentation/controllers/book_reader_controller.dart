@@ -8,10 +8,10 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../../ai/ai_chat.dart';
 import '../../ai/ai_agent_runtime.dart';
+import '../../ai/ai_agent_runtime_gate.dart';
 import '../../ai/ai_chat_store.dart';
 import '../../ai/ai_book_mind_map_service.dart';
 import '../../ai/ai_book_mind_map_action_gateway.dart';
-import '../../ai/ai_book_chat_tool_host.dart';
 import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_chat_tools.dart';
 import '../../ai/ai_conversation_intent.dart';
@@ -46,8 +46,9 @@ import '../../readers/book/book_theme.dart';
 import '../../readers/book/book_language_actions.dart';
 import '../../readers/book/foliate_js_bridge.dart';
 import 'ai_settings_controller.dart';
-import 'book_ai_workspace_controller.dart';
 import 'book_ai_mind_map_controller.dart';
+import 'book_ai_reader_gateway.dart';
+import 'book_ai_workspace_controller.dart';
 
 /// Listen-to-book playback state (system TTS).
 enum BookTtsStatus { idle, playing, paused }
@@ -71,6 +72,9 @@ class BookReaderController extends ChangeNotifier {
     BookLanguageProvider? languageProvider,
     AiSettingsController? aiSettings,
     this.agentRuntimeFactory = createLegacyAiAgentRuntime,
+    this.genkitAgentRuntimeFactory,
+    this.requestedAgentRuntime = AiAgentRuntimeKind.compatible,
+    this.genkitAgentCapabilities = AiAgentRuntimeCapabilities.genkitDart0151,
     this.scrollModeEnabled = true,
   }) : languageProvider =
            languageProvider ?? const PlatformBookLanguageProvider(),
@@ -120,6 +124,9 @@ class BookReaderController extends ChangeNotifier {
     _aiWorkspace = BookAiWorkspaceController(
       saveChatSession: saveChatSession,
       agentRuntimeFactory: agentRuntimeFactory,
+      genkitAgentRuntimeFactory: genkitAgentRuntimeFactory,
+      requestedAgentRuntime: requestedAgentRuntime,
+      genkitAgentCapabilities: genkitAgentCapabilities,
       onChanged: _notifyAiWorkspaceChanged,
     );
     readingPreferences?.fontStore.addListener(_onFontStoreChanged);
@@ -139,6 +146,9 @@ class BookReaderController extends ChangeNotifier {
   final ReadingItem item;
   final BookLanguageProvider languageProvider;
   final AiAgentRuntimeFactory agentRuntimeFactory;
+  final AiAgentRuntimeFactory? genkitAgentRuntimeFactory;
+  final AiAgentRuntimeKind requestedAgentRuntime;
+  final AiAgentRuntimeCapabilities genkitAgentCapabilities;
   late final BookAiWorkspaceController _aiWorkspace;
   final BookReadingPreferences? _prefs;
   final bool scrollModeEnabled;
@@ -358,6 +368,10 @@ class BookReaderController extends ChangeNotifier {
             )) ??
             '',
     loadChapter: () async => (await _getChapterText?.call()) ?? '',
+  );
+  late final BookAiReaderGateway _aiReaderGateway = BookAiReaderGateway(
+    _aiWorkspace,
+    _aiCorpus,
   );
   late final AiBookStructureSession _aiStructure = AiBookStructureSession(
     corpus: _aiCorpus,
@@ -2080,48 +2094,16 @@ class BookReaderController extends ChangeNotifier {
   Future<AiChatContextBundle> loadAiChatContext({
     String? selectionOverride,
     required AiBookWork? workScope,
-  }) async {
-    try {
-      final chapterSectionIndex = _sectionIndex + 1;
-      final chapterTitle = currentChapterTitle;
-      final loadChapter = _getChapterText;
-      var selection = selectionOverride?.trim() ?? '';
-      if (selection.isEmpty) {
-        selection = _selectionMenu?.text.trim() ?? '';
-      }
-      if (selection.isEmpty) {
-        selection = ((await _getSelectedText?.call()) ?? '').trim();
-      }
-      final chapter = ((await loadChapter?.call()) ?? '').trim();
-      final work = workScope;
-      // 合集读哪本跟哪本：目录也裁到当前作品范围，否则全书 TOC 会让模型
-      // 综述整个合集。下标保持全书 1-based，与 get_toc 工具口径一致。
-      var outline = _tocTitles
-          .map((t) => t.trim())
-          .where((t) => t.isNotEmpty)
-          .toList(growable: false);
-      if (work != null) {
-        outline = [
-          for (var i = 0; i < _tocTitles.length; i++)
-            if (work.contains(i + 1) && _tocTitles[i].trim().isNotEmpty)
-              _tocTitles[i].trim(),
-        ];
-      }
-      return AiChatContextBundle(
-        chapterTitle: chapterTitle,
-        chapterText: chapter,
-        selectionText: selection,
-        tocOutline: outline,
-        scopeLabel: work?.title.trim().isNotEmpty == true ? work!.title : null,
-        chapterSectionIndex: chapterSectionIndex,
-      );
-    } catch (_) {
-      return AiChatContextBundle(
-        chapterTitle: currentChapterTitle,
-        chapterSectionIndex: _sectionIndex + 1,
-      );
-    }
-  }
+  }) => _aiReaderGateway.loadContext(
+    chapterSectionIndex: _sectionIndex + 1,
+    chapterTitle: currentChapterTitle,
+    tocTitles: _tocTitles,
+    workScope: workScope,
+    selectionOverride: selectionOverride,
+    currentSelection: _selectionMenu?.text,
+    loadSelectedText: _getSelectedText,
+    loadChapterText: _getChapterText,
+  );
 
   /// Stream an assistant reply for book chat. Null when AI is unavailable.
   Stream<AiRunEvent>? streamBookChat({
@@ -2134,66 +2116,20 @@ class BookReaderController extends ChangeNotifier {
     bool? reasoningEnabled,
     CancelToken? cancelToken,
     String? runId,
-  }) {
-    final runtime = _aiWorkspace.agentRuntime;
-    if (runtime == null || !runtime.isAvailable) return null;
-    return _streamResolvedBookChat(
-      runtime: runtime,
-      userText: userText,
-      history: history,
-      context: context,
-      workScope: workScope,
-      webHits: webHits,
-      productContext: productContext,
-      reasoningEnabled: reasoningEnabled,
-      cancelToken: cancelToken,
-      runId: runId,
-    );
-  }
-
-  Stream<AiRunEvent> _streamResolvedBookChat({
-    required AiAgentRuntime runtime,
-    required String userText,
-    required List<AiChatMessage> history,
-    required AiChatContextBundle context,
-    required AiBookWork? workScope,
-    List<AiWebSearchHit>? webHits,
-    required AiChatProductContext productContext,
-    bool? reasoningEnabled,
-    CancelToken? cancelToken,
-    String? runId,
-  }) async* {
-    await for (final event in runtime.stream(
-      AiAgentTurn(
-        run: AiRunDescriptor(
-          runId: runId ?? AiRunIds.next(),
-          task: AiRunTask.bookChat,
-          scope: AiRunScope(
-            contentHash: item.contentHash,
-            workKey: workScope == null ? null : workKeyFor(workScope),
-            label: context.scopeLabel,
-          ),
-        ),
-        userText: userText,
-        history: history,
-        context: context,
-        bookTitle: item.title,
-        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        webHits: webHits,
-        productContext: productContext,
-        reasoningEnabled: reasoningEnabled,
-        tools: AiBookChatToolHost(
-          corpus: _aiCorpus,
-          work: workScope,
-          turnContext: context,
-        ),
-        cancelToken: cancelToken,
-      ),
-    )) {
-      _aiWorkspace.recordRunEvent(event);
-      yield event;
-    }
-  }
+  }) => _aiReaderGateway.streamChat(
+    contentHash: item.contentHash,
+    bookTitle: item.title,
+    bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+    userText: userText,
+    history: history,
+    context: context,
+    workScope: workScope,
+    webHits: webHits,
+    productContext: productContext,
+    reasoningEnabled: reasoningEnabled,
+    cancelToken: cancelToken,
+    runId: runId,
+  );
 
   /// A short, answer-specific follow-up prompt. Failure is intentionally an
   /// empty result so the chat sheet can keep its stable fallback suggestions.
@@ -2202,38 +2138,26 @@ class BookReaderController extends ChangeNotifier {
     required String answer,
     required AiChatContextBundle context,
     CancelToken? cancelToken,
-  }) async {
-    final runtime = _aiWorkspace.agentRuntime;
-    if (runtime == null || !runtime.isAvailable) return const [];
-    return runtime.suggestFollowUpQuestions(
-      AiAgentSuggestionRequest(
-        userText: userText,
-        answer: answer,
-        context: context,
-        bookTitle: item.title,
-        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        cancelToken: cancelToken,
-      ),
-    );
-  }
+  }) => _aiReaderGateway.suggestFollowUps(
+    bookTitle: item.title,
+    bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+    userText: userText,
+    answer: answer,
+    context: context,
+    cancelToken: cancelToken,
+  );
 
   /// BYOK web search for chat 联网. Empty list if not configured.
   Future<List<AiWebSearchHit>> searchWebForChat(
     String query, {
     required AiBookWork? workScope,
     CancelToken? cancelToken,
-  }) async {
-    final ai = _aiWorkspace.settingsController;
-    if (ai == null || !ai.isSearchReady) {
-      throw AiProviderException('请先在设置中配置联网搜索 Key');
-    }
-    final q = buildAiWebSearchQuery(
-      userText: query,
-      bookTitle: workScope?.title ?? item.title,
-      bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-    );
-    return ai.searchWeb(q, cancelToken: cancelToken);
-  }
+  }) => _aiReaderGateway.searchWeb(
+    query: query,
+    bookTitle: workScope?.title ?? item.title,
+    bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+    cancelToken: cancelToken,
+  );
 
   /// Surrounding text around the current WebView selection (translation
   /// context, ai-translation §4.5). Null when unavailable (selection gone /
@@ -3782,11 +3706,7 @@ AiChatToolHost createBookChatToolHostForTesting({
   required BookReaderController controller,
   required AiChatContextBundle context,
   AiBookWork? work,
-}) => AiBookChatToolHost(
-  corpus: controller._aiCorpus,
-  work: work,
-  turnContext: context,
-);
+}) => controller._aiReaderGateway.createToolHost(context: context, work: work);
 
 /// Restricts a getBookPlainText body to [work]'s unit (「读到哪本跟哪本」
 /// chat scope). A null work passes the body through unchanged.
