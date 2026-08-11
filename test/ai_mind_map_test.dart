@@ -12,6 +12,7 @@ void main() {
       scopeSectionIndices: const [1, 2],
       scopeFingerprint: 'scope',
       contentKind: AiMindMapContentKind.argumentative,
+      organizingPrinciple: '围绕问题与回应的论证结构',
       layout: layout,
       nodes: const [
         AiBookMindMapNode(
@@ -79,8 +80,17 @@ void main() {
     final restored = AiBookMindMap.fromJson(source.toJson());
     expect(restored, isNotNull);
     expect(restored!.root.nodeId, 'mm001');
+    expect(restored.organizingPrinciple, '围绕问题与回应的论证结构');
     expect(restored.nodes[2].parentId, 'mm002');
     expect(restored.nodes[1].evidence.single.spanResolved, isTrue);
+  });
+
+  test('older persisted maps remain readable without organizing principle', () {
+    final json = sample().toJson()..remove('organizingPrinciple');
+    final restored = AiBookMindMap.fromJson(json);
+
+    expect(restored, isNotNull);
+    expect(restored!.organizingPrinciple, isEmpty);
   });
 
   test('mind map JSON rejects an empty persisted summary', () {

@@ -443,11 +443,23 @@ base class _AiMindMapNodeOutputTypeFactory
     definition: $Schema
         .object(
           properties: {
-            'tempId': $Schema.string(),
+            'tempId': $Schema.string(
+              description: 'Unique temporary node ID within this output',
+            ),
             'parentTempId': $Schema.string(),
             'order': $Schema.integer(),
-            'title': $Schema.string(),
-            'summary': $Schema.string(),
+            'title': $Schema.string(
+              description:
+                  'Concise parallel node label; a concept phrase rather than a sentence or copied chapter heading',
+              minLength: 1,
+              maxLength: 40,
+            ),
+            'summary': $Schema.string(
+              description:
+                  'Substantive source-grounded explanation that adds information instead of restating the title',
+              minLength: 1,
+              maxLength: 360,
+            ),
             'evidence': $Schema.list(
               items: $Schema.fromMap({
                 '\$ref': r'#/$defs/AiMindMapEvidenceOutput',
@@ -470,10 +482,12 @@ base class AiMindMapOutput {
 
   AiMindMapOutput({
     required String contentKind,
+    required String organizingPrinciple,
     required List<AiMindMapNodeOutput> nodes,
   }) {
     _json = {
       'contentKind': contentKind,
+      'organizingPrinciple': organizingPrinciple,
       'nodes': nodes.map((e) => e.toJson()).toList(),
     };
   }
@@ -490,6 +504,14 @@ base class AiMindMapOutput {
 
   set contentKind(String value) {
     _json['contentKind'] = value;
+  }
+
+  String get organizingPrinciple {
+    return _json['organizingPrinciple'] as String;
+  }
+
+  set organizingPrinciple(String value) {
+    _json['organizingPrinciple'] = value;
   }
 
   List<AiMindMapNodeOutput> get nodes {
@@ -527,12 +549,21 @@ base class _AiMindMapOutputTypeFactory extends SchemanticType<AiMindMapOutput> {
     definition: $Schema
         .object(
           properties: {
-            'contentKind': $Schema.string(),
+            'contentKind': $Schema.string(
+              description: 'Dominant type of the selected book content',
+              enumValues: ['narrative', 'argumentative', 'reference', 'mixed'],
+            ),
+            'organizingPrinciple': $Schema.string(
+              description:
+                  'One concise phrase naming the single primary dimension used to organize the whole map',
+              minLength: 2,
+              maxLength: 80,
+            ),
             'nodes': $Schema.list(
               items: $Schema.fromMap({'\$ref': r'#/$defs/AiMindMapNodeOutput'}),
             ),
           },
-          required: ['contentKind', 'nodes'],
+          required: ['contentKind', 'organizingPrinciple', 'nodes'],
         )
         .value,
     dependencies: [AiMindMapNodeOutput.$schema],

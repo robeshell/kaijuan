@@ -119,6 +119,7 @@ class AiBookMindMap {
     required this.contentKind,
     required this.layout,
     required this.nodes,
+    this.organizingPrinciple = '',
   });
 
   static const currentVersion = 1;
@@ -130,6 +131,7 @@ class AiBookMindMap {
   final List<int> scopeSectionIndices;
   final String scopeFingerprint;
   final AiMindMapContentKind contentKind;
+  final String organizingPrinciple;
   final AiMindMapLayout layout;
   final List<AiBookMindMapNode> nodes;
 
@@ -144,6 +146,7 @@ class AiBookMindMap {
     scopeSectionIndices: scopeSectionIndices,
     scopeFingerprint: scopeFingerprint,
     contentKind: contentKind,
+    organizingPrinciple: organizingPrinciple,
     layout: layout ?? this.layout,
     nodes: nodes,
   );
@@ -157,6 +160,8 @@ class AiBookMindMap {
     'scopeSectionIndices': scopeSectionIndices,
     'scopeFingerprint': scopeFingerprint,
     'contentKind': contentKind.name,
+    if (organizingPrinciple.isNotEmpty)
+      'organizingPrinciple': organizingPrinciple,
     'layout': layout.name,
     'nodes': [for (final node in nodes) node.toJson()],
   };
@@ -196,6 +201,9 @@ class AiBookMindMap {
         (value) => value.name == raw['contentKind'],
         orElse: () => AiMindMapContentKind.mixed,
       ),
+      organizingPrinciple: raw['organizingPrinciple'] is String
+          ? (raw['organizingPrinciple'] as String).trim()
+          : '',
       layout: AiMindMapLayout.values.firstWhere(
         (value) => value.name == raw['layout'],
         orElse: () => AiMindMapLayout.rightFacing,

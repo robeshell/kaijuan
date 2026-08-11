@@ -54,8 +54,10 @@
 - 如果供应商拒绝过长上下文，本次范围明确失败并提示改用更大上下文模型或选择较小作品/分卷；开卷不得静默采样、缩短正文或生成看似完整的残缺结果。
 - 模型输入包含书名、可选作者、范围标题、用户原始提示词、章节标题和正文。正文是不可信引用材料，其中的角色指令和提示词不得覆盖系统要求。
 - 结构分类的候选策略、分数、出版册数提示和冲突原因不进入模型输入。它们只用于 App 冻结范围；模型面对的是确定的章节正文，不负责补救 EPUB 制作者的目录结构。
-- 模型只返回 `contentKind` 与扁平 `nodes`；不返回 `coveredSections`、Mermaid、HTML、坐标或布局建议。节点字段为 `tempId / parentTempId / order / title / summary / evidence`。
-- 一级通常保持 4–7 个可浏览主题，子层级和总节点数按正文自然展开。App 根据有效章节数与正文字符数给出软性密度建议和输出预算，不规定最低节点数，也不因节点数量重试；模型仍须检查全部实质章节，可按章节主题或跨章主题组织观点、事实、例子、过程、影响与结论，不能只返回少量目录节点或为了达标凑空节点。标题用于浏览，摘要必须写出正文实质内容，不能只重排目录。
+- 模型只返回 `contentKind`、简短的 `organizingPrinciple` 与扁平 `nodes`；不返回 `coveredSections`、Mermaid、HTML、坐标或布局建议。节点字段为 `tempId / parentTempId / order / title / summary / evidence`。`organizingPrinciple` 记录本图唯一的主导划分维度，随对话附件持久化但不作为布局参数。
+- 同一次调用先选择书型和一个主导组织原则，再生成最终树。论说类围绕核心问题、主张、论证机制、事实案例、限制与结论组织；叙事类围绕背景与人物、主要阶段、冲突与选择、转折结果和主题意义组织；知识类围绕核心概念、原理体系、方法步骤、应用案例、条件与边界组织。`mixed` 只在确实没有一种书型能够主导时使用。
+- 根节点概括核心命题、中心问题或叙事主线；一级通常保持 4–7 个处于同一抽象层级、使用同一划分维度的主要分支；二级展开观点、阶段、机制或矛盾；更深节点承载原因、事实、案例、转折、影响、条件与结论。同级标题保持语法形式平行，摘要写出正文事实而不复述标题。模型必须合并语义重复内容，避免目录复刻、同级维度混用和为了平衡而制造空节点。
+- 正文规模只用于 App 计算输出 token 容量，不向模型暴露目标节点数、最低节点数或按字符换算的密度指标，也不因节点数量重试。提示词包含论说、叙事、知识类的短结构示例及“目录标题逐章平铺”的反例；示例只规范编辑方法，不向最终结果注入示例事实。
 
 暂不使用 Genkit `defineFlow` / Agent。Genkit 继续只承担 Provider 归一化、Schemantic structured output、协议兼容和 trace；范围、用户确认、取消、预算、错误与对话持久化属于开卷。
 
@@ -66,7 +68,7 @@
 ```text
 AiBookMindMap
   version / contentHash / workKey / createdAt / model
-  scopeSectionIndices / scopeFingerprint / contentKind / layout
+  scopeSectionIndices / scopeFingerprint / contentKind / organizingPrinciple / layout
   nodes[]
 
 AiBookMindMapNode
@@ -97,6 +99,7 @@ AiBookMindMapNode
 ## 8. 验收
 
 - “生成本章思维导图”完整发送冻结章节与用户原始要求，只调用一次结构化模型；普通单书全书同样一次调用。
+- 论说、叙事和知识类测试材料分别命中对应编辑模板；结果记录非空主导组织原则，一级分支保持同一划分维度，提示词不再包含目标节点数。
 - 分卷单书按卷依次生成；多作品合集在任何模型调用前于对话内纵向展示作品数、章节数与范围选择，选择全部后按作品依次生成，全程不弹窗。
 - 不再存在 mind-map batch/reduce Schema、批次摘要、字符采样、checkpoint、最近产物 store 或独立 WebDAV记录。
 - 取消、结构化输出失败、上下文过长和树拓扑非法有清晰终态；已经完成的作品/分卷卡片保留。

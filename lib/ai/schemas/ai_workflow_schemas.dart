@@ -31,17 +31,48 @@ abstract class $AiMindMapEvidenceOutput {
 
 @Schema()
 abstract class $AiMindMapNodeOutput {
+  @StringField(description: 'Unique temporary node ID within this output')
   String get tempId;
+
   String? get parentTempId;
+
   int get order;
+
+  @StringField(
+    description:
+        'Concise parallel node label; a concept phrase rather than a sentence or copied chapter heading',
+    minLength: 1,
+    maxLength: 40,
+  )
   String get title;
+
+  @StringField(
+    description:
+        'Substantive source-grounded explanation that adds information instead of restating the title',
+    minLength: 1,
+    maxLength: 360,
+  )
   String get summary;
+
   List<$AiMindMapEvidenceOutput> get evidence;
 }
 
 @Schema()
 abstract class $AiMindMapOutput {
+  @StringField(
+    description: 'Dominant type of the selected book content',
+    enumValues: ['narrative', 'argumentative', 'reference', 'mixed'],
+  )
   String get contentKind;
+
+  @StringField(
+    description:
+        'One concise phrase naming the single primary dimension used to organize the whole map',
+    minLength: 2,
+    maxLength: 80,
+  )
+  String get organizingPrinciple;
+
   List<$AiMindMapNodeOutput> get nodes;
 }
 

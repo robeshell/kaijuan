@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_mind_map_service.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
@@ -24,6 +26,7 @@ void main() {
 
   Map<String, dynamic> tree() => {
     'contentKind': 'argumentative',
+    'organizingPrinciple': '围绕就业政策取舍的因果论证',
     'nodes': [
       {
         'tempId': 'root',
@@ -79,6 +82,20 @@ void main() {
     expect(prompt, contains(sections[0].text));
     expect(prompt, contains(sections[1].text));
     expect(prompt, contains('生成一份详细的全书思维导图'));
+    expect(
+      prompt.indexOf('<final_instruction>'),
+      greaterThan(prompt.indexOf('</book_content>')),
+    );
+    final system = adapter.request.messages.first.text;
+    expect(system, contains('主导组织原则'));
+    expect(system, contains('同一抽象层级'));
+    expect(system, contains('argumentative'));
+    expect(system, contains('narrative'));
+    expect(system, contains('reference'));
+    expect(system, contains('反例'));
+    expect(system, contains('禁止这种目录复刻'));
+    expect(jsonEncode(adapter.request.schema), contains('organizingPrinciple'));
+    expect(result.organizingPrinciple, '围绕就业政策取舍的因果论证');
     expect(result.nodes.map((node) => node.nodeId), [
       'mm001',
       'mm002',
@@ -139,37 +156,60 @@ void main() {
     },
   );
 
-  test(
-    'scales coverage guidance and output budget with the selected corpus',
-    () async {
-      final longSections = [
-        for (var index = 0; index < 12; index++)
-          AiBookSectionSlice(
-            index: index + 1,
-            sourceSectionIndex: index + 1,
-            label: '第 ${index + 1} 章',
-            text: List.filled(240, '第${index + 1}章包含政策背景、事实案例与影响分析。').join(),
-          ),
-      ];
-      final adapter = _FakeAdapter(tree());
+  test('scales output budget without prompting for a node target', () async {
+    final longSections = [
+      for (var index = 0; index < 12; index++)
+        AiBookSectionSlice(
+          index: index + 1,
+          sourceSectionIndex: index + 1,
+          label: '第 ${index + 1} 章',
+          text: List.filled(240, '第${index + 1}章包含政策背景、事实案例与影响分析。').join(),
+        ),
+    ];
+    final adapter = _FakeAdapter(tree());
 
-      await service(adapter).generate(
+    await service(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '长书测试',
+      scopeLabel: '全书',
+      userInstruction: '生成一份详细完整的全书思维导图',
+      sections: longSections,
+    );
+
+    final prompt = adapter.request.messages.last.text;
+    expect(prompt, contains('有效章节：12'));
+    expect(prompt, contains('这些数据只说明输入范围'));
+    expect(prompt, isNot(contains('可参考约')));
+    expect(prompt, isNot(contains('目标节点')));
+    expect(prompt, isNot(contains('实质节点')));
+    expect(prompt, isNot(contains('至少生成')));
+    expect(adapter.request.maxTokens, greaterThan(12000));
+  });
+
+  test('rejects a blank organizing principle without retrying', () async {
+    final value = tree()..['organizingPrinciple'] = '   ';
+    final adapter = _FakeAdapter(value);
+
+    await expectLater(
+      service(adapter).generate(
         contentHash: 'a' * 64,
         workKey: null,
-        bookTitle: '长书测试',
+        bookTitle: '测试书',
         scopeLabel: '全书',
-        userInstruction: '生成一份详细完整的全书思维导图',
-        sections: longSections,
-      );
-
-      final prompt = adapter.request.messages.last.text;
-      expect(prompt, contains('有效章节：12'));
-      expect(prompt, contains('可参考约'));
-      expect(prompt, contains('不是最低数量'));
-      expect(prompt, isNot(contains('至少生成')));
-      expect(adapter.request.maxTokens, greaterThan(12000));
-    },
-  );
+        userInstruction: '生成思维导图',
+        sections: sections,
+      ),
+      throwsA(
+        isA<AiProviderException>().having(
+          (error) => error.message,
+          'message',
+          contains('组织原则'),
+        ),
+      ),
+    );
+    expect(adapter.calls, 1);
+  });
 
   test('rejects invalid parent references without retrying', () async {
     final value = tree();
