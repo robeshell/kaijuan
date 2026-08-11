@@ -101,18 +101,20 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 ```text
 BookAiChatView
   → BookAiWorkspaceController
-    → AiAgentRuntime
-      → LegacyAiAgentRuntime | GenkitAgentRuntime
-        → ProductActionGateway
-          → BookContextGateway / deterministic Workflows
-            → App repositories / WebDAV snapshot
+    → BookAiConversationController
+      → AiAgentRuntime
+        → LegacyAiAgentRuntime | GenkitAgentRuntime
+    → BookAiMindMapController
+      → AiBookMindMapActionGateway
+      → deterministic BookMindMap Workflow
+    → BookContextGateway / App repositories / WebDAV snapshot
 ```
 
-- `BookAiWorkspaceController` 独占发送串行化、会话消息、流式快照、重试、显式产物附件、对话内 Interrupt 和 UI 可观察状态；Widget 只渲染状态并转发用户事件。
+- `BookAiWorkspaceController` 持有独立的 `BookAiConversationController` 与 `BookAiMindMapController`。前者拥有有界会话消息、联网/模型 run、流式投影、重试身份、部分回答 checkpoint、终态提交和会话持久化；后者拥有原生导图附件、批次进度、确定性顺序执行、产物谱系和产品 turn 终态。Widget 只冻结阅读上下文、承载范围选择交互、调用 Controller 并渲染投影，不再自行订阅模型流或执行 Workflow 循环。
 - `AiAgentRuntime` 是 App 自有的纯 Dart 契约，输入包含冻结作用域、历史、可用产品别名和预算，输出继续使用 `AiRunEvent` 完整快照语义。任何 Genkit 类型不得越过该边界进入表现层或产品持久化。
 - `LegacyAiAgentRuntime` 在迁移期包装当前 `AiChatService`，保证提示词、原生 Function Calling、四轮工具上限、八轮续写、取消和错误语义不变；`GenkitAgentRuntime` 通过功能开关和同一契约测试灰度替换。
 - Genkit Agent 在通过运行时契约后可以拥有普通对话的模型工具循环、运行时 Session/Snapshot、Interrupt/Resume、Retry 和 Trace；开卷仍拥有 EPUB 解析、书籍/作品范围授权、预算、产品任务取消、领域 Artifact 版本、checkpoint、数据库、WebDAV 与 UI 状态。
-- `create_book_mind_map`、`revise_book_mind_map`、图谱和翻译等是产品工具。Agent 只提交 App 签发的别名与用户要求，`ProductActionGateway` 解析真实身份、复核冻结范围并调用确定性 Workflow；模型不得直接写数据库 ID。
+- `create_book_mind_map`、`revise_book_mind_map`、图谱和翻译等是产品工具。Agent 只提交 App 签发的别名与用户要求，`AiBookMindMapActionGateway` 等 App 网关解析真实身份并复核冻结范围，`BookAiMindMapController` 再调用确定性 Workflow；模型不得直接写数据库 ID。网关是纯校验/解析边界，不读取实时翻页位置，也不渲染 UI。
 - Genkit Dart 当前仍是 Preview 依赖，必须精确锁版。升级只能发生在隔离 adapter/runtime 内，并经过伪 Provider、DeepSeek/OpenAI Compatible、Anthropic、流式取消、工具调用、Interrupt 和会话恢复契约测试；生产路径必须可回退到兼容运行时。
 - 当前锁定的 Genkit Dart `0.15.1` 明确没有把本地 attached Agent 的取消信号传入正在进行的 `generate`。在 SDK 修复且开卷的模型矩阵验证通过前，`GenkitAgentRuntime` 不得成为默认运行时；不能用仅更新 UI 状态的“假取消”替代底层 HTTP 中止。
 - Genkit `SessionStore` 与 `Artifact` 只承载运行时状态和事件引用，不替代 `AiChatSession`、`AiBookMindMap`、`AiBookGraph` 等产品事实；本地文件与 WebDAV schema 不跟随 SDK 类型变化。

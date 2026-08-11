@@ -479,9 +479,12 @@ AI 对话备份规则：
 ### 7.6 Agent 运行时迁移契约
 
 - 普通本书对话统一依赖 App 自有 `AiAgentRuntime`，不得由 Widget 或 `BookReaderController` 直接依赖 `AiChatService` / Genkit `Agent`。运行时输入必须在发送时冻结书籍、作品、当前章、产物别名、联网结果、推理偏好和历史消息。
+- `BookAiConversationController` 是会话事实的内存投影，拥有有界消息、当前 run、完整正文/推理快照、retry turn、部分回答 checkpoint 和终态持久化。聊天 Widget 不得另建第二份会话或 checkpoint 状态机。
+- `BookAiMindMapController` 拥有原生导图附件、批次进度、按冻结范围顺序执行、产物 revision/source 谱系及产品 turn 终态。范围选择卡片属于 UI，但选择后的 Workflow 循环、消息附件提交和部分失败处理不得回到 Widget。
 - 运行时输出复用 `AiRunEvent`：正文与可见推理仍是完整快照，产品动作仍是终止型 `AiRunProductActionRequested`。迁移不得把 Genkit token delta、Session 类型或 Tool 对象暴露给 UI。
 - 第一阶段由 `LegacyAiAgentRuntime` 包装现有行为；第二阶段新增 `GenkitAgentRuntime`。两者必须通过同一套正常回答、书内工具、产品工具、截断续写、取消、失败、并发发送和快照回放契约测试。
 - Genkit Agent 负责普通对话的一次 action-observation 循环、运行时会话、Interrupt/Resume、Retry 与 Trace。所有会改变产品状态的 Tool 必须先经过 App 的 `ProductActionGateway`，并接受 App 的作用域、权限、预算与别名校验。
+- 思维导图产品动作由 `AiBookMindMapActionGateway` 对发送前冻结的章节、作品列表和产物表做纯解析；实时阅读位置变化不得重定向已发出的创建或修订请求。
 - `BookMindMapWorkflow`、`BookGraphWorkflow`、翻译任务和大纲任务保持确定性；它们可以被 Agent Tool 触发并在内部继续使用 `AiWorkflowModelSession.completeJson`，但不得改成由 Agent 自由拆解、重复执行或直接持久化。
 - Genkit Dart 仍按 Preview 风险管理：依赖精确锁版；默认保留兼容运行时开关；升级前跑 Provider 模型矩阵与 Agent 契约测试。Genkit Session/Artifact 不是 `AiChatSession`、导图、图谱或 WebDAV 的存储 schema。
 - Genkit Dart `0.15.1` 的本地 attached Agent 尚未把取消信号传入进行中的模型生成。该缺口未修复前，Genkit 实现只能处于隔离验证状态，不得切为默认；验收必须证明取消会中止实际模型请求，而不只是把 App 投影改成 `cancelled`。
@@ -583,7 +586,9 @@ AiBookLanguageProvider（或 Composite）
 - [x] 结构化大纲与知识图谱全部模型步骤使用独立 Schemantic schema + Genkit structured output；已删除 fence 截取、正则恢复和格式修补请求。
 - [x] 模型列表拆为只读 catalog，连接测试改走 adapter；`AiProvider`、`AiProviderFactory`、两套旧 completion transport 与 tracking provider 已删除。
 - [x] 两类 Genkit adapter 通过本地伪服务协议测试；`tool/ai_genkit_smoke.dart` 提供不含 Key 的本地 OpenAI Compatible CLI trace，也可用用户环境变量选测 Anthropic；完整验收见 [执行记录](../research/ai-runtime-genkit-completion-plan.md)。
-- [ ] `BookAiWorkspaceController` 独占会话发送/流式/重试/产品附件状态，聊天 Widget 不再编排模型和 Workflow。
+- [x] `BookAiWorkspaceController` 通过 conversation/mind-map 子 Controller 独占会话发送、联网/流式、重试、原生导图附件、批次 Workflow 和终态状态；聊天 Widget 只冻结阅读上下文、展示范围选择并渲染投影。
+- [x] `BookAiConversationController` 接管有界会话、run 投影、重试、部分回答 checkpoint、完成/失败/取消提交与持久化；聊天 Widget 不再维护第二套 checkpoint。
+- [x] `AiBookMindMapActionGateway` 在 Widget/阅读器之外校验冻结作品、章节和产物身份；模型动作不能读取实时翻页状态。
 - [x] `AiAgentRuntime` 契约落地，现有行为经 `LegacyAiAgentRuntime` 兼容，阅读 controller 不再直接依赖 `AiChatService`。
 - [ ] Genkit Agent 经功能开关、真实 HTTP 取消、模型矩阵和 Trace 验证后替换普通聊天循环。
 

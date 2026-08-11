@@ -10,9 +10,11 @@ import '../../ai/ai_chat.dart';
 import '../../ai/ai_agent_runtime.dart';
 import '../../ai/ai_chat_store.dart';
 import '../../ai/ai_book_mind_map_service.dart';
+import '../../ai/ai_book_mind_map_action_gateway.dart';
 import '../../ai/ai_book_chat_tool_host.dart';
 import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_chat_tools.dart';
+import '../../ai/ai_conversation_intent.dart';
 import '../../ai/ai_book_structure.dart';
 import '../../ai/ai_book_structure_session.dart';
 import '../../ai/ai_book_corpus.dart';
@@ -45,6 +47,7 @@ import '../../readers/book/book_language_actions.dart';
 import '../../readers/book/foliate_js_bridge.dart';
 import 'ai_settings_controller.dart';
 import 'book_ai_workspace_controller.dart';
+import 'book_ai_mind_map_controller.dart';
 
 /// Listen-to-book playback state (system TTS).
 enum BookTtsStatus { idle, playing, paused }
@@ -54,28 +57,6 @@ typedef BookMindMapRevisionInput = ({
   String label,
   List<AiBookSectionSlice> frozenSections,
   int estimatedSections,
-});
-
-class BookMindMapTurnSnapshot {
-  const BookMindMapTurnSnapshot({
-    required this.conversationWorkKey,
-    required this.currentWork,
-    required this.availableWorks,
-    required this.currentChapter,
-    required this.manifest,
-  });
-
-  final String? conversationWorkKey;
-  final AiBookWork? currentWork;
-  final List<AiBookWork> availableWorks;
-  final AiBookSectionSlice? currentChapter;
-  final AiBookStructureManifest? manifest;
-}
-
-typedef BookMindMapCreateInput = ({
-  AiBookWork? work,
-  AiBookSectionSlice? frozenCurrentChapter,
-  AiMindMapRequestScope scope,
 });
 
 /// Owns reflow book session state, chrome, progress, and preferences.
@@ -137,6 +118,7 @@ class BookReaderController extends ChangeNotifier {
            readingPreferences?.pageTurnEffect ??
            BookReadingPreferences.defaultPageTurnEffect {
     _aiWorkspace = BookAiWorkspaceController(
+      saveChatSession: saveChatSession,
       agentRuntimeFactory: agentRuntimeFactory,
       onChanged: _notifyAiWorkspaceChanged,
     );
@@ -328,10 +310,6 @@ class BookReaderController extends ChangeNotifier {
   String? _bookOutlineError;
   CancelToken? _bookOutlineCancel;
   Future<void>? _bookOutlineGeneration;
-  String? _bookMindMapProgress;
-  String? _bookMindMapError;
-  CancelToken? _bookMindMapCancel;
-  Future<AiBookMindMap?>? _bookMindMapGeneration;
   AiBookGraph? _bookGraph;
 
   /// Graph of the work currently shown/generated when viewing a collection
@@ -1181,9 +1159,9 @@ class BookReaderController extends ChangeNotifier {
   // Book mind map — independent from chat Mermaid and the knowledge graph.
   // ------------------------------------------------------------------
 
-  String? get bookMindMapProgress => _bookMindMapProgress;
-  String? get bookMindMapError => _bookMindMapError;
-  bool get isGeneratingBookMindMap => _bookMindMapGeneration != null;
+  String? get bookMindMapProgress => _aiWorkspace.mindMapProgress;
+  String? get bookMindMapError => _aiWorkspace.mindMapError;
+  bool get isGeneratingBookMindMap => _aiWorkspace.isGeneratingMindMap;
 
   /// Deterministic substantive units for the frozen current work/publication.
   /// The conversation scope is already confirmed by the user's wording, so
@@ -1259,77 +1237,16 @@ class BookReaderController extends ChangeNotifier {
     );
   }
 
-  BookMindMapTurnSnapshot freezeBookMindMapTurn({
+  AiBookMindMapTurnSnapshot freezeBookMindMapTurn({
     required AiBookWork? workScope,
     required AiChatContextBundle context,
   }) {
-    final chapterText = context.chapterText.trim();
-    final chapterIndex = context.chapterSectionIndex;
-    final chapter = chapterText.isEmpty || chapterIndex == null
-        ? null
-        : AiBookSectionSlice(
-            index: chapterIndex,
-            sourceSectionIndex: chapterIndex,
-            label: context.chapterTitle.trim().isEmpty
-                ? '当前章节'
-                : context.chapterTitle.trim(),
-            text: chapterText,
-          );
-    return BookMindMapTurnSnapshot(
+    return AiBookMindMapActionGateway.freeze(
       conversationWorkKey: workScope == null ? null : workKeyFor(workScope),
       currentWork: workScope,
-      availableWorks: List.unmodifiable(
-        bookStructureManifest?.works ?? const <AiBookWork>[],
-      ),
-      currentChapter: chapter,
       manifest: bookStructureManifest,
+      context: context,
     );
-  }
-
-  /// Maps a validated model action onto the immutable scope captured before
-  /// the model turn. Presentation must not re-read the live reader position.
-  BookMindMapCreateInput prepareBookMindMapCreate(
-    AiCreateBookMindMapAction action,
-    BookMindMapTurnSnapshot snapshot,
-  ) {
-    switch (action.scope) {
-      case AiBookMindMapActionScope.currentChapter:
-      case AiBookMindMapActionScope.unspecified:
-        final chapter = snapshot.currentChapter;
-        if (chapter == null) {
-          throw AiProviderException('发送问题时的章节正文尚未就绪，请重试');
-        }
-        return (
-          work: snapshot.currentWork,
-          frozenCurrentChapter: chapter,
-          scope: AiMindMapRequestScope.currentChapter,
-        );
-      case AiBookMindMapActionScope.currentWork:
-        return (
-          work: snapshot.currentWork,
-          frozenCurrentChapter: null,
-          scope: AiMindMapRequestScope.currentWork,
-        );
-      case AiBookMindMapActionScope.specificWork:
-        final workId = action.workId;
-        final matches = snapshot.availableWorks.where(
-          (work) => work.id == workId,
-        );
-        if (workId == null || matches.length != 1) {
-          throw AiProviderException('所选作品范围已经变化，请重新选择');
-        }
-        return (
-          work: matches.single,
-          frozenCurrentChapter: null,
-          scope: AiMindMapRequestScope.currentWork,
-        );
-      case AiBookMindMapActionScope.wholePublication:
-        return (
-          work: null,
-          frozenCurrentChapter: null,
-          scope: AiMindMapRequestScope.wholeBook,
-        );
-    }
   }
 
   Future<AiBookMindMap?> generateBookMindMap({
@@ -1342,137 +1259,70 @@ class BookReaderController extends ChangeNotifier {
     String? scopeLabel,
     String? progressLabel,
   }) async {
-    final active = _bookMindMapGeneration;
-    if (active != null) {
-      _bookMindMapError = '已有思维导图正在生成，请稍后再试';
-      if (!_disposed) notifyListeners();
-      return null;
-    }
-    final future = _generateBookMindMap(
-      work: work,
-      frozenCurrentChapter: frozenCurrentChapter,
-      frozenSections: frozenSections,
-      existingMindMap: existingMindMap,
-      useFrozenWork: useFrozenWork,
+    if (!useFrozenWork) await resolveBookStructure();
+    final target = useFrozenWork ? work : work ?? currentReadingWork;
+    final sections =
+        frozenSections ??
+        (frozenCurrentChapter == null
+            ? await bookMindMapSections(work: target, useFrozenWork: true)
+            : <AiBookSectionSlice>[frozenCurrentChapter]);
+    return _aiWorkspace.generateMindMap(
+      contentHash: item.contentHash,
+      workKey: target == null ? null : workKeyFor(target),
+      publicationTitle: target?.title ?? item.title,
+      publicationAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
+      scopeLabel: scopeLabel ?? target?.title ?? item.title,
       userInstruction: userInstruction,
-      scopeLabel: scopeLabel,
+      sections: sections,
+      existingMindMap: existingMindMap,
       progressLabel: progressLabel,
+      emptyScopeMessage: frozenCurrentChapter == null
+          ? '这本书没有可用于生成思维导图的正文'
+          : '当前章节没有可用于生成思维导图的正文',
     );
-    _bookMindMapGeneration = future;
-    try {
-      return await future;
-    } finally {
-      if (identical(_bookMindMapGeneration, future)) {
-        _bookMindMapGeneration = null;
-        _bookMindMapCancel = null;
-        if (!_disposed) notifyListeners();
-      }
-    }
   }
 
-  Future<AiBookMindMap?> _generateBookMindMap({
-    AiBookWork? work,
-    AiBookSectionSlice? frozenCurrentChapter,
-    List<AiBookSectionSlice>? frozenSections,
-    AiBookMindMap? existingMindMap,
-    required bool useFrozenWork,
-    required String userInstruction,
-    String? scopeLabel,
-    String? progressLabel,
-  }) async {
-    final service = _aiWorkspace.mindMap;
-    if (service == null || !canUseAiChat) {
-      _bookMindMapError = 'AI 未启用或未配置';
-      if (!_disposed) notifyListeners();
-      return null;
-    }
-    _bookMindMapError = null;
-    _bookMindMapProgress = progressLabel ?? '正在读取思维导图范围';
-    final cancel = CancelToken();
-    _bookMindMapCancel = cancel;
-    if (!_disposed) notifyListeners();
-    try {
-      if (!useFrozenWork) {
-        await resolveBookStructure(cancel: cancel);
-      }
-      final target = useFrozenWork ? work : work ?? currentReadingWork;
-      final workKey = target == null ? null : workKeyFor(target);
-      final allSections =
-          frozenSections ??
-          (frozenCurrentChapter == null
-              ? await bookMindMapSections(work: target, useFrozenWork: true)
-              : <AiBookSectionSlice>[frozenCurrentChapter]);
-      final sections = allSections;
-      if (sections.isEmpty) {
-        throw AiProviderException(
-          frozenCurrentChapter == null
-              ? '这本书没有可用于生成思维导图的正文'
-              : '当前章节没有可用于生成思维导图的正文',
-        );
-      }
-      final result = await _executeAiWorkflow<AiBookMindMap>(
-        descriptor: AiRunDescriptor(
-          runId: AiRunIds.next(),
-          task: AiRunTask.bookMindMap,
-          scope: AiRunScope(
-            contentHash: item.contentHash,
-            workKey: workKey,
-            label: target?.title,
-          ),
-        ),
-        budget: AiRunBudget(
-          maxModelCalls: 1,
-          maxElapsed: const Duration(minutes: 10),
-        ),
-        cancelToken: cancel,
-        body: (execution) => service.generate(
-          contentHash: item.contentHash,
-          workKey: workKey,
-          bookTitle: target?.title ?? item.title,
-          bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-          scopeLabel: scopeLabel ?? target?.title ?? item.title,
-          userInstruction: userInstruction,
-          sections: sections,
-          existingMindMap: existingMindMap,
-          cancelToken: execution.cancelToken,
-          onModelStarted: execution.modelStarted,
-          onUsage: ({inputTokens, outputTokens}) => execution.reportTokens(
-            inputTokens: inputTokens,
-            outputTokens: outputTokens,
-          ),
-        ),
-      );
-      _bookMindMapProgress = null;
-      _bookMindMapError = null;
-      if (!_disposed) notifyListeners();
-      return result;
-    } on AiProviderException catch (error) {
-      _bookMindMapProgress = null;
-      AiLog.d('mind map failed: ${error.message}');
-      if (!cancel.isCancelled) {
-        _bookMindMapError = aiUserErrorMessage(
-          error,
-          operation: AiUserOperation.mindMap,
-        );
-      }
-      if (!_disposed) notifyListeners();
-      return null;
-    } catch (error, stackTrace) {
-      _bookMindMapProgress = null;
-      AiLog.d('mind map failed: $error\n$stackTrace');
-      if (!cancel.isCancelled) {
-        _bookMindMapError = '生成思维导图失败，请稍后重试';
-      }
-      if (!_disposed) notifyListeners();
-      return null;
-    }
-  }
+  void cancelBookMindMapGeneration() => _aiWorkspace.cancelMindMapGeneration();
 
-  void cancelBookMindMapGeneration() {
-    if (_bookMindMapGeneration == null) return;
-    _bookMindMapError = '已停止';
-    _bookMindMapCancel?.cancel();
-    if (!_disposed) notifyListeners();
+  Future<BookAiMindMapBatchOutcome> generateMindMapsInConversation({
+    required String turnId,
+    required String? workKey,
+    required String text,
+    required List<BookAiMindMapGenerationUnit> units,
+    required CancelToken cancelToken,
+    AiBookMindMap? baseMap,
+    String? retryTurnId,
+    AiConversationCommand? command,
+    void Function(AiBookMindMap artifact)? onArtifact,
+  }) {
+    return _aiWorkspace.mindMapConversation.generate(
+      turnId: turnId,
+      workKey: workKey,
+      text: text,
+      publicationTitle: item.title,
+      units: units,
+      retryTurnId: retryTurnId,
+      command: command,
+      baseMap: baseMap,
+      segmentedPublication:
+          bookStructureManifest?.kind ==
+          AiBookStructureKind.segmentedSingleWork,
+      isCancelled: () =>
+          cancelToken.isCancelled || _aiWorkspace.mindMapError == '已停止',
+      generationError: () => _aiWorkspace.mindMapError,
+      loadSections: (unit) =>
+          bookMindMapSections(work: unit.work, useFrozenWork: true),
+      generateMap: (unit, sections, progress) => generateBookMindMap(
+        work: unit.work,
+        useFrozenWork: true,
+        frozenSections: sections,
+        existingMindMap: baseMap,
+        userInstruction: text,
+        scopeLabel: unit.label,
+        progressLabel: progress,
+      ),
+      onArtifact: onArtifact,
+    );
   }
 
   // ------------------------------------------------------------------
@@ -3586,8 +3436,8 @@ class BookReaderController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _aiWorkspace.dispose();
     _bookOutlineCancel?.cancel();
-    _bookMindMapCancel?.cancel();
     _bookGraphCancel?.cancel();
     _attachGeneration++;
     _ttsGeneration++;

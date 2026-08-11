@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:thinking_orbs/thinking_orbs.dart';
 
 import '../../../ai/ai_cancel.dart';
+import '../../../ai/ai_book_mind_map_action_gateway.dart';
 import '../../../ai/ai_book_structure.dart';
 import '../../../ai/ai_chat.dart';
 import '../../../ai/ai_chat_retrieve.dart';
@@ -19,13 +20,13 @@ import '../../../ai/ai_mind_map.dart';
 import '../../../ai/ai_provider_kind.dart';
 import '../../../ai/ai_product_action.dart';
 import '../../../ai/ai_rich_content_inspector.dart';
-import '../../../ai/ai_run.dart';
-import '../../../ai/ai_search.dart';
 import '../../../ai/ai_user_error.dart';
 import '../../../core/kaijuan_icons.dart';
 import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
 import '../../controllers/book_reader_controller.dart';
+import '../../controllers/book_ai_conversation_controller.dart';
+import '../../controllers/book_ai_mind_map_controller.dart';
 import '../../screens/ai_settings_screen.dart';
 import '../ai_typography.dart';
 import '../app_components.dart';
@@ -95,20 +96,7 @@ typedef _NarrationConfirmation = ({
   Set<int> excludedSections,
 });
 
-typedef _MindMapGenerationUnit = ({
-  AiBookWork? work,
-  String label,
-  List<AiBookSectionSlice>? frozenSections,
-  int estimatedSections,
-});
-
 typedef _MindMapScopeChoice = ({int value, String label, String subtitle});
-
-typedef _MindMapProductTurn = ({
-  AiChatProductContext modelContext,
-  BookMindMapTurnSnapshot scopeSnapshot,
-  Map<String, AiBookMindMap> artifactsById,
-});
 
 class _MindMapScopePrompt {
   _MindMapScopePrompt({required this.title, required this.choices});
@@ -143,7 +131,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   late final TabController _tabs;
   _BookAiWorkspaceTab _activeTab = _BookAiWorkspaceTab.chat;
 
-  AiChatSession _session = const AiChatSession(contentHash: '', itemId: '');
   _GraphViewMode _graphViewMode = _GraphViewMode.persons;
 
   /// Plan whose default view has been applied; applying again is skipped so
@@ -168,10 +155,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String _graphQuery = '';
   String? _graphHighlighted;
   Timer? _graphHighlightTimer;
-  Timer? _streamCheckpointTimer;
   int _scrollRequestEpoch = 0;
   int _streamTailFollowEpoch = 0;
-  DateTime? _lastStreamCheckpointAt;
   final _graphEntityKeys = <String, GlobalKey>{};
   int _graphListEpoch = 0;
   String? _mindMapRevealTurnId;
@@ -205,8 +190,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   bool _generatingFollowUp = false;
   CancelToken _cancel = CancelToken();
   CancelToken? _suggestionCancel;
-  StreamSubscription<AiRunEvent>? _sub;
-  AiRunState? _runState;
+  bool _chatRunActive = false;
   String _streaming = '';
   String _streamingReasoning = '';
   AiReasoningContentKind _streamingReasoningKind =
@@ -220,9 +204,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   int _turnSerial = 0;
   String? _mindMapTurnId;
   _MindMapScopePrompt? _mindMapScopePrompt;
-  String? _activeMindMapArtifactId;
-
   BookReaderController get _c => widget.controller;
+
+  BookAiConversationController get _conversation => _c.aiWorkspace.conversation;
+
+  BookAiMindMapController get _mindMapConversation =>
+      _c.aiWorkspace.mindMapConversation;
+
+  String? get _activeMindMapArtifactId =>
+      _mindMapConversation.attachedArtifactId;
+
+  AiChatSession get _session => _conversation.session;
+
+  set _session(AiChatSession value) => _conversation.hydrate(value);
 
   /// Keep the in-memory + stored session bounded: every write re-serializes
   /// the whole JSON, so an unbounded list would grow each write (O(n²)) and
@@ -240,54 +234,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// Messages of the current conversation: per-work for collections, the
   /// shared whole-book list for plain books.
   List<AiChatMessage> get _messages => _session.messagesFor(_chatWorkKey);
-
-  _MindMapProductTurn _productTurnFor(
-    List<AiChatMessage> messages,
-    BookMindMapTurnSnapshot scopeSnapshot,
-  ) {
-    final nativeMessages = messages
-        .where((message) => message.mindMap != null)
-        .toList(growable: false);
-    final adjacentMessage = messages.lastOrNull;
-    final aliases = <AiProductArtifactAlias>[];
-    final artifactsById = <String, AiBookMindMap>{};
-    for (var index = 0; index < nativeMessages.length; index++) {
-      final message = nativeMessages[index];
-      final map = message.mindMap!;
-      final artifactId = _artifactIdFor(message, map);
-      artifactsById[artifactId] = map;
-      aliases.add(
-        AiProductArtifactAlias(
-          alias: 'artifact_${index + 1}',
-          artifactId: artifactId,
-          title: map.root.title,
-          revision: map.revision,
-          isAdjacent: identical(message, adjacentMessage),
-          isPreferred: artifactId == _activeMindMapArtifactId,
-        ),
-      );
-    }
-    final workAliases = <AiProductWorkAlias>[];
-    for (var index = 0; index < scopeSnapshot.availableWorks.length; index++) {
-      final work = scopeSnapshot.availableWorks[index];
-      workAliases.add(
-        AiProductWorkAlias(
-          alias: 'work_${index + 1}',
-          workId: work.id,
-          title: work.title,
-          isCurrent: work.id == scopeSnapshot.currentWork?.id,
-        ),
-      );
-    }
-    return (
-      modelContext: AiChatProductContext(
-        artifacts: List.unmodifiable(aliases),
-        works: List.unmodifiable(workAliases),
-      ),
-      scopeSnapshot: scopeSnapshot,
-      artifactsById: Map.unmodifiable(artifactsById),
-    );
-  }
 
   String _artifactIdFor(AiChatMessage message, AiBookMindMap map) =>
       map.artifactId ?? message.turnId ?? 'mind-map:${map.scopeFingerprint}';
@@ -324,7 +270,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final map = message.mindMap;
     if (map == null || _sending || _resolvingChatScope) return;
     final artifactId = _artifactIdFor(message, map);
-    setState(() => _activeMindMapArtifactId = artifactId);
+    _mindMapConversation.attachArtifact(artifactId);
     unawaited(_focusComposer());
   }
 
@@ -396,6 +342,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       vsync: this,
     )..addListener(_onTabChanged);
     _c.addListener(_onReaderControllerChanged);
+    _conversation.addListener(_onConversationChanged);
+    _mindMapConversation.addListener(_onMindMapConversationChanged);
     _deepThinkingOn = _c.defaultDeepThinkingEnabled;
     final sel = widget.initialSelection?.trim() ?? '';
     _selection = sel.isEmpty ? null : sel;
@@ -448,6 +396,34 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     setState(() {});
   }
 
+  void _onConversationChanged() {
+    if (!mounted || !_chatRunActive) return;
+    final previousText = _streaming;
+    final shouldFollowTail = _isNearMessageTail;
+    final previousOffset = _scroll.hasClients ? _scroll.offset : null;
+    setState(() {
+      _sending = _conversation.sending;
+      _searchingWeb = _conversation.searchingWeb;
+      _lastWebHitCount = _conversation.lastWebHitCount;
+      _streaming = _conversation.streaming;
+      _streamingReasoning = _conversation.streamingReasoning;
+      _streamingReasoningKind = _conversation.streamingReasoningKind;
+      _toolStatus = _conversation.toolStatus;
+    });
+    if (shouldFollowTail && previousText != _streaming) {
+      _followStreamingTail(previousOffset: previousOffset);
+    }
+  }
+
+  void _onMindMapConversationChanged() {
+    if (!mounted) return;
+    setState(() {
+      _mindMapTurnId = _mindMapConversation.activeTurnId;
+      _toolStatus = _mindMapConversation.progress;
+      _sending = _conversation.sending;
+    });
+  }
+
   Future<void> _bootstrap() async {
     try {
       final loadedSession = await _c.loadChatSession();
@@ -493,61 +469,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     await _c.clearPlatformFocus();
   }
 
-  Future<void> _persist() => _c.saveChatSession(_session);
-
-  void _scheduleStreamingCheckpoint() {
-    if (!_sending ||
-        _activeTurnId == null ||
-        (_streaming.trim().isEmpty && _streamingReasoning.trim().isEmpty)) {
-      return;
-    }
-    if (_streamCheckpointTimer?.isActive ?? false) return;
-    final now = DateTime.now();
-    final elapsed = _lastStreamCheckpointAt == null
-        ? const Duration(days: 1)
-        : now.difference(_lastStreamCheckpointAt!);
-    const interval = Duration(seconds: 2);
-    if (elapsed >= interval) {
-      _writeStreamingCheckpoint();
-      return;
-    }
-    _streamCheckpointTimer = Timer(
-      interval - elapsed,
-      _writeStreamingCheckpoint,
-    );
-  }
-
-  void _writeStreamingCheckpoint() {
-    _streamCheckpointTimer = null;
-    final turnId = _activeTurnId;
-    final body = _streaming.trim();
-    final reasoning = _streamingReasoning.trim();
-    if (!_sending || turnId == null || (body.isEmpty && reasoning.isEmpty)) {
-      return;
-    }
-    _lastStreamCheckpointAt = DateTime.now();
-    final snapshot = AiChatSessionOps.appendBounded(
-      _session,
-      AiChatMessage(
-        role: AiMessageRole.assistant,
-        content: body,
-        reasoningContent: reasoning,
-        reasoningKind: _streamingReasoningKind,
-        createdAt: DateTime.now(),
-        turnId: turnId,
-        status: AiChatTurnStatus.pending,
-      ),
-      workKey: _activeTurnWorkKey,
-      maxMessages: _maxStoredMessages,
-    );
-    unawaited(_c.saveChatSession(snapshot));
-  }
-
-  void _cancelStreamingCheckpoint() {
-    _streamCheckpointTimer?.cancel();
-    _streamCheckpointTimer = null;
-    _lastStreamCheckpointAt = null;
-  }
+  Future<void> _persist() => _conversation.persist();
 
   /// Append [message], keeping only the newest [_maxStoredMessages] so both the
   /// in-memory list and the JSON file stay bounded.
@@ -721,47 +643,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _pendingDraft = text;
     }
 
-    // Placeholder user bubble; webHitCount filled after search (if any).
-    var userMsg = AiChatMessage(
-      role: AiMessageRole.user,
-      content: text,
-      createdAt: DateTime.now(),
-      webHitCount: wantWeb ? 0 : null,
-      turnId: turnId,
-      status: AiChatTurnStatus.pending,
-    );
-    final historyBefore = List<AiChatMessage>.from(
-      _session.messagesFor(turnWorkKey),
-    );
-    if (retrying && historyBefore.isNotEmpty) {
-      final msgs = List<AiChatMessage>.from(_session.messagesFor(turnWorkKey));
-      if (retryTurnId != null) {
-        msgs.removeWhere((message) => message.turnId == retryTurnId);
-      } else {
-        // Legacy sessions have no turn id; retain the old tail-pair fallback.
-        if (msgs.isNotEmpty && msgs.last.role == AiMessageRole.assistant) {
-          msgs.removeLast();
-        }
-        if (msgs.isNotEmpty &&
-            msgs.last.role == AiMessageRole.user &&
-            msgs.last.content.trim() == text) {
-          msgs.removeLast();
-        }
-      }
-      historyBefore
-        ..clear()
-        ..addAll(msgs);
-      if (msgs.length != _session.messagesFor(turnWorkKey).length) {
-        setState(() => _session = _session.withMessagesFor(turnWorkKey, msgs));
-      }
-    }
-    final productTurn = _productTurnFor(historyBefore, scopeSnapshot);
-    unawaited(_sub?.cancel() ?? Future<void>.value());
-    _cancelStreamingCheckpoint();
     final turnCancel = CancelToken();
     _cancel = turnCancel;
     setState(() {
-      _session = _withMessage(userMsg, workKey: turnWorkKey);
       _sending = true;
       _generatingFollowUp = false;
       _searchingWeb = wantWeb;
@@ -773,254 +657,93 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _streamingReasoning = '';
       _streamingReasoningKind = AiReasoningContentKind.process;
       _toolStatus = null;
-      _runState = null;
     });
-    unawaited(_persist());
     _scrollToEnd();
-
-    // null = 联网 off; non-null (even []) = search ran this turn.
-    List<AiWebSearchHit>? webHits;
-    if (wantWeb) {
-      try {
-        webHits = await _c.searchWebForChat(
-          text,
-          workScope: turnWork,
-          cancelToken: turnCancel,
-        );
-      } on AiProviderException catch (error) {
-        if (turnCancel.isCancelled) return;
-        if (!mounted) return;
-        setState(() {
-          _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: turnWorkKey);
-          _sending = false;
-          _searchingWeb = false;
-          _lastWebHitCount = null;
-          _retryText = text;
-          _retryTurnId = turnId;
-          _error = aiUserErrorMessage(error, operation: AiUserOperation.search);
-          _activeTurnId = null;
-          _activeTurnWorkKey = null;
-        });
-        _restorePendingDraft();
-        unawaited(_persist());
-        return;
-      } catch (_) {
-        if (turnCancel.isCancelled) return;
-        if (!mounted) return;
-        setState(() {
-          _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: turnWorkKey);
-          _sending = false;
-          _searchingWeb = false;
-          _lastWebHitCount = null;
-          _retryText = text;
-          _retryTurnId = turnId;
-          _error = '联网搜索失败，请稍后重试';
-          _activeTurnId = null;
-          _activeTurnWorkKey = null;
-        });
-        _restorePendingDraft();
-        unawaited(_persist());
-        return;
-      }
-      turnCancel.throwIfCancelled();
-      if (!mounted) return;
-      final hitCount = webHits.length;
-      userMsg = userMsg.copyWith(webHitCount: hitCount);
-      setState(() {
-        _searchingWeb = false;
-        _lastWebHitCount = hitCount;
-        // Refresh last user bubble with real hit count.
-        final msgs = List<AiChatMessage>.from(
-          _session.messagesFor(turnWorkKey),
-        );
-        if (msgs.isNotEmpty && msgs.last.role == AiMessageRole.user) {
-          msgs[msgs.length - 1] = userMsg;
-          _session = _session.withMessagesFor(turnWorkKey, msgs);
-        }
-      });
-      unawaited(_persist());
-    } else {
-      _lastWebHitCount = null;
-    }
-
-    final stream = _c.streamBookChat(
-      userText: text,
-      history: historyBefore,
-      context: chatContext,
-      workScope: turnWork,
-      webHits: webHits,
-      productContext: productTurn.modelContext,
-      reasoningEnabled: wantDeepThinking,
-      cancelToken: turnCancel,
-      runId: turnId,
-    );
-    if (stream == null) {
-      setState(() {
-        _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: turnWorkKey);
-        _sending = false;
-        _searchingWeb = false;
-        _toolStatus = null;
-        _error = 'AI 未启用或未配置';
-        _retryText = text;
-        _retryTurnId = turnId;
-        _activeTurnId = null;
-        _activeTurnWorkKey = null;
-        _runState = null;
-      });
-      _restorePendingDraft();
-      unawaited(_persist());
-      return;
-    }
-
-    var endedWithFailure = false;
-    AiProductActionRequest? productAction;
-    void handleFailure(Object error) {
-      if (!mounted || endedWithFailure) return;
-      endedWithFailure = true;
-      _cancelStreamingCheckpoint();
-      setState(() {
-        _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: turnWorkKey);
-        _sending = false;
-        _searchingWeb = false;
-        _toolStatus = null;
-        _error = aiUserErrorMessage(error, operation: AiUserOperation.chat);
-        _retryText = text;
-        _retryTurnId = turnId;
-        if (_streaming.trim().isNotEmpty ||
-            _streamingReasoning.trim().isNotEmpty) {
-          _commitAssistant(
-            _streaming,
-            reasoningContent: _streamingReasoning,
-            reasoningKind: _streamingReasoningKind,
-            workKey: turnWorkKey,
-            turnId: turnId,
-            status: AiChatTurnStatus.failed,
+    late AiBookMindMapProductTurn productTurn;
+    _chatRunActive = true;
+    late final BookAiRunOutcome outcome;
+    try {
+      outcome = await _conversation.runTurn(
+        turnId: turnId,
+        workKey: turnWorkKey,
+        text: text,
+        wantsWebSearch: wantWeb,
+        retrying: retrying,
+        retryTurnId: retryTurnId,
+        cancelToken: turnCancel,
+        searchWeb: wantWeb
+            ? () => _c.searchWebForChat(
+                text,
+                workScope: turnWork,
+                cancelToken: turnCancel,
+              )
+            : null,
+        startRuntime: (turn, webHits) {
+          productTurn = AiBookMindMapActionGateway.prepareProductTurn(
+            history: turn.history,
+            scopeSnapshot: scopeSnapshot,
+            preferredArtifactId: _activeMindMapArtifactId,
           );
-        }
-        _streaming = '';
-        _streamingReasoning = '';
-        _streamingReasoningKind = AiReasoningContentKind.process;
-        _activeTurnId = null;
-        _activeTurnWorkKey = null;
-        _runState = null;
-      });
-      _restorePendingDraft();
-      unawaited(_persist());
-    }
-
-    _sub = stream.listen(
-      (event) {
-        if (!mounted) return;
-        final shouldFollowTail = _isNearMessageTail;
-        final previousOffset = _scroll.hasClients ? _scroll.offset : null;
-        final current = switch (event) {
-          AiRunStarted(:final descriptor) => AiRunState.initial(descriptor),
-          _ => _runState,
-        };
-        if (current == null) return;
-        final next = current.apply(event);
-        setState(() {
-          _runState = next;
-          _streaming = next.text;
-          _streamingReasoning = next.reasoningText;
-          _streamingReasoningKind = next.reasoningKind;
-          _toolStatus = next.status;
-        });
-        if (event is AiRunTextSnapshot || event is AiRunReasoningSnapshot) {
-          _scheduleStreamingCheckpoint();
-          if (shouldFollowTail) {
-            _followStreamingTail(previousOffset: previousOffset);
-          }
-        } else if (event case AiRunProductActionRequested(:final request)) {
-          productAction = request;
-        } else if (event case AiRunFailed(:final error)) {
-          handleFailure(error);
-        } else if (event is AiRunCancelled) {
-          handleFailure(AiProviderException('已取消'));
-        }
-      },
-      onError: handleFailure,
-      onDone: () {
-        if (!mounted || endedWithFailure) return;
-        _cancelStreamingCheckpoint();
-        final requestedAction = productAction;
-        if (requestedAction != null) {
-          setState(() {
-            final messages = List<AiChatMessage>.from(
-              _session.messagesFor(turnWorkKey),
-            )..removeWhere((message) => message.turnId == turnId);
-            _session = _session.withMessagesFor(turnWorkKey, messages);
-            _sending = false;
-            _searchingWeb = false;
-            _toolStatus = null;
-            _streaming = '';
-            _streamingReasoning = '';
-            _streamingReasoningKind = AiReasoningContentKind.process;
-            _activeTurnId = null;
-            _activeTurnWorkKey = null;
-            _runState = null;
-          });
-          _pendingDraft = null;
-          unawaited(_persist());
-          unawaited(
-            _dispatchProductAction(
-              text,
-              requestedAction,
-              productTurn: productTurn,
-              retryTurnId: retryTurnId,
-            ),
+          return _c.streamBookChat(
+            userText: text,
+            history: turn.history,
+            context: chatContext,
+            workScope: turnWork,
+            webHits: webHits,
+            productContext: productTurn.modelContext,
+            reasoningEnabled: wantDeepThinking,
+            cancelToken: turnCancel,
+            runId: turnId,
           );
-          return;
-        }
-        final body = _streaming.trim();
-        final reasoning = _streamingReasoning.trim();
-        int? assistantIndex;
+        },
+      );
+    } catch (error) {
+      _conversation.failActiveTurn(error);
+      outcome = BookAiRunFailedOutcome(error);
+    }
+    _chatRunActive = false;
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      _searchingWeb = false;
+      _toolStatus = null;
+      _streaming = '';
+      _streamingReasoning = '';
+      _streamingReasoningKind = AiReasoningContentKind.process;
+      _activeTurnId = null;
+      _activeTurnWorkKey = null;
+    });
+
+    switch (outcome) {
+      case BookAiRunProductActionOutcome(:final request):
+        _pendingDraft = null;
+        unawaited(
+          _dispatchProductAction(
+            text,
+            request,
+            productTurn: productTurn,
+            retryTurnId: retryTurnId,
+          ),
+        );
+      case BookAiRunCompletedOutcome(:final completion):
+        final body = completion.body;
+        final assistantIndex = completion.assistantIndex;
         setState(() {
-          _sending = false;
-          _searchingWeb = false;
-          _toolStatus = null;
-          if (body.isNotEmpty) {
-            _setTurnStatus(
-              turnId,
-              AiChatTurnStatus.completed,
-              workKey: turnWorkKey,
-            );
-            _commitAssistant(
-              body,
-              reasoningContent: reasoning,
-              reasoningKind: _streamingReasoningKind,
-              workKey: turnWorkKey,
-              turnId: turnId,
-            );
-            assistantIndex = _session.messagesFor(turnWorkKey).length - 1;
-          } else {
-            _setTurnStatus(
-              turnId,
-              AiChatTurnStatus.failed,
-              workKey: turnWorkKey,
-            );
+          if (body.isEmpty) {
             _error = '没有生成内容，请重试';
             _retryText = text;
             _retryTurnId = turnId;
-          }
-          if (body.isNotEmpty) {
+          } else {
             _retryText = null;
             _retryTurnId = null;
           }
-          _streaming = '';
-          _streamingReasoning = '';
-          _streamingReasoningKind = AiReasoningContentKind.process;
-          _activeTurnId = null;
-          _activeTurnWorkKey = null;
-          _runState = null;
         });
         _pendingDraft = null;
-        unawaited(_persist());
         if (assistantIndex != null) {
           setState(() => _generatingFollowUp = true);
           unawaited(
             _generateFollowUpQuestion(
-              messageIndex: assistantIndex!,
+              messageIndex: assistantIndex,
               userText: text,
               answer: body,
               context: chatContext,
@@ -1028,9 +751,21 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ),
           );
         }
-      },
-      cancelOnError: true,
-    );
+      case BookAiRunFailedOutcome(:final error, :final phase):
+        setState(() {
+          _error = aiUserErrorMessage(
+            error,
+            operation: phase == BookAiRunFailurePhase.webSearch
+                ? AiUserOperation.search
+                : AiUserOperation.chat,
+          );
+          _retryText = text;
+          _retryTurnId = turnId;
+        });
+        _restorePendingDraft();
+      case BookAiRunCancelledOutcome():
+        _restorePendingDraft();
+    }
   }
 
   void _appendMindMapClarification(
@@ -1069,7 +804,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _scrollToEnd();
   }
 
-  Future<_MindMapGenerationUnit?> _mindMapEditUnit(
+  Future<BookAiMindMapGenerationUnit?> _mindMapEditUnit(
     AiBookMindMap map, {
     required String requestText,
     String? conversationWorkKey,
@@ -1099,7 +834,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final targetId = target.artifactId ?? 'mind-map:${target.scopeFingerprint}';
     final keepEditing = _activeMindMapArtifactId == targetId;
     setState(() => _resolvingChatScope = true);
-    _MindMapGenerationUnit? unit;
+    BookAiMindMapGenerationUnit? unit;
     try {
       unit = await _mindMapEditUnit(
         target,
@@ -1112,7 +847,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (!mounted) return;
     if (unit == null) {
       if (_activeMindMapArtifactId == targetId) {
-        setState(() => _activeMindMapArtifactId = null);
+        _mindMapConversation.detachArtifact();
       }
       return;
     }
@@ -1242,10 +977,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _mindMapTurnId = null;
     }
     _cancel.cancel();
-    _cancelStreamingCheckpoint();
-    final sub = _sub;
-    _sub = null;
-    final cancellation = sub?.cancel();
+    if (!mounted) return;
+    final conversationOwnsTurn = _conversation.activeTurnId == turnId;
+    if (conversationOwnsTurn) {
+      await _conversation.cancelRun(
+        commitPartial: commitPartial,
+        persistAfter: persist,
+      );
+    }
     if (!mounted) return;
     final body = _streaming.trim();
     final reasoning = _streamingReasoning.trim();
@@ -1254,15 +993,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _searchingWeb = false;
       _toolStatus = null;
       _mindMapScopePrompt = null;
-      _runState = null;
-      if (turnId != null) {
+      if (turnId != null && !conversationOwnsTurn) {
         _setTurnStatus(
           turnId,
           AiChatTurnStatus.cancelled,
           workKey: turnWorkKey,
         );
       }
-      if (commitPartial &&
+      if (!conversationOwnsTurn &&
+          commitPartial &&
           (body.isNotEmpty || reasoning.isNotEmpty) &&
           turnId != null) {
         _commitAssistant(
@@ -1282,13 +1021,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _activeTurnWorkKey = null;
     });
     _restorePendingDraft();
-    if (persist) unawaited(_persist());
-    try {
-      await cancellation;
-    } catch (_) {
-      // The visible run is already stopped. Transport cleanup errors must not
-      // resurrect the turn or require a second tap.
-    }
+    if (persist && !conversationOwnsTurn) unawaited(_persist());
   }
 
   Future<void> _closePanel() async {
@@ -1298,7 +1031,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   void _finalizeActiveTurnForDisposal() {
-    _cancelStreamingCheckpoint();
     final turnId = _activeTurnId;
     if (turnId == null) return;
     if (_mindMapTurnId == turnId) {
@@ -1306,6 +1038,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _mindMapTurnId = null;
     }
     final workKey = _activeTurnWorkKey;
+    if (_conversation.activeTurnId == turnId) {
+      unawaited(_conversation.cancelRun());
+      _activeTurnId = null;
+      _activeTurnWorkKey = null;
+      return;
+    }
     _setTurnStatus(turnId, AiChatTurnStatus.cancelled, workKey: workKey);
     final body = _streaming.trim();
     final reasoning = _streamingReasoning.trim();
@@ -1350,6 +1088,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _pendingDraft = null;
       await _c.clearChatSession(workKey: workKey);
       if (!mounted) return;
+      _mindMapConversation.detachArtifact();
       setState(() {
         // 合集：只清当前作品的消息，保留其他作品的对话/大纲；单本整体会话清空。
         _session = workKey == null
@@ -1364,7 +1103,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _streamingReasoning = '';
         _streamingReasoningKind = AiReasoningContentKind.process;
         _toolStatus = null;
-        _activeMindMapArtifactId = null;
         _generatingFollowUp = false;
       });
     } finally {
@@ -1562,14 +1300,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<void> _dispatchProductAction(
     String originalText,
     AiProductActionRequest action, {
-    required _MindMapProductTurn productTurn,
+    required AiBookMindMapProductTurn productTurn,
     String? retryTurnId,
   }) async {
     switch (action) {
       case final AiCreateBookMindMapAction create:
-        BookMindMapCreateInput input;
+        AiBookMindMapCreateInput input;
         try {
-          input = _c.prepareBookMindMapCreate(
+          input = AiBookMindMapActionGateway.resolveCreate(
             create,
             productTurn.scopeSnapshot,
           );
@@ -1590,12 +1328,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           retryTurnId: retryTurnId,
           clearComposer: true,
         );
-      case AiReviseBookMindMapAction(:final artifactId):
-        final target = productTurn.artifactsById[artifactId];
-        if (target == null) {
+      case final AiReviseBookMindMapAction revise:
+        AiBookMindMap target;
+        try {
+          target = AiBookMindMapActionGateway.resolveRevision(
+            revise,
+            productTurn.artifactsById,
+          );
+        } catch (error) {
           _appendMindMapClarification(
             originalText,
-            '这张导图已不在当前对话中，请重新选择后再修改。',
+            aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
             workKey: productTurn.scopeSnapshot.conversationWorkKey,
           );
           return;
@@ -1613,14 +1356,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<void> _routeMindMapRequest(
     String text,
     AiMindMapRequestScope scope, {
-    BookMindMapTurnSnapshot? frozenTurn,
+    AiBookMindMapTurnSnapshot? frozenTurn,
     AiBookWork? resolvedWork,
     AiBookSectionSlice? frozenCurrentChapter,
     String? retryTurnId,
     bool clearComposer = false,
   }) async {
     final conversationWorkKey = frozenTurn?.conversationWorkKey ?? _chatWorkKey;
-    List<_MindMapGenerationUnit>? units;
+    List<BookAiMindMapGenerationUnit>? units;
     var composerClearedForChoice = false;
     setState(() => _resolvingChatScope = true);
     try {
@@ -1687,7 +1430,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
   }
 
-  Future<List<_MindMapGenerationUnit>?> _captureCurrentChapterUnit() async {
+  Future<List<BookAiMindMapGenerationUnit>?>
+  _captureCurrentChapterUnit() async {
     try {
       final chapter = await _c.captureCurrentBookMindMapChapter();
       if (chapter == null) {
@@ -1708,7 +1452,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
   }
 
-  Future<List<_MindMapGenerationUnit>?> _resolveMindMapUnits({
+  Future<List<BookAiMindMapGenerationUnit>?> _resolveMindMapUnits({
     required AiMindMapRequestScope scope,
     required AiBookStructureManifest? manifest,
     required AiBookWork? resolvedWork,
@@ -1795,25 +1539,21 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return end == null ? 1 : math.max(1, end - work.startSection);
   }
 
-  List<_MindMapGenerationUnit> _mindMapUnitsForWorks(List<AiBookWork> works) =>
-      [
-        for (final work in works)
-          (
-            work: work,
-            label: work.title,
-            frozenSections: null,
-            estimatedSections: _workChapterCount(work),
-          ),
-      ];
-
-  String _mindMapScopeText(_MindMapGenerationUnit unit) =>
-      unit.label == _c.item.title
-      ? '《${unit.label}》'
-      : '《${_c.item.title}》中的《${unit.label}》';
+  List<BookAiMindMapGenerationUnit> _mindMapUnitsForWorks(
+    List<AiBookWork> works,
+  ) => [
+    for (final work in works)
+      (
+        work: work,
+        label: work.title,
+        frozenSections: null,
+        estimatedSections: _workChapterCount(work),
+      ),
+  ];
 
   Future<void> _generateMindMapsInChat(
     String text,
-    List<_MindMapGenerationUnit> units, {
+    List<BookAiMindMapGenerationUnit> units, {
     AiBookMindMap? baseMap,
     String? retryTurnId,
     required String? conversationWorkKey,
@@ -1824,140 +1564,46 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final turnId = _newTurnId();
     _activeTurnId = turnId;
     _activeTurnWorkKey = workKey;
-    _mindMapTurnId = turnId;
     _cancel = CancelToken();
     setState(() {
-      if (retryTurnId != null) {
-        final messages = List<AiChatMessage>.from(_session.messagesFor(workKey))
-          ..removeWhere((message) => message.turnId == retryTurnId);
-        _session = _session.withMessagesFor(workKey, messages);
-      }
-      _session = _withMessage(
-        AiChatMessage(
-          role: AiMessageRole.user,
-          content: text,
-          createdAt: DateTime.now(),
-          turnId: turnId,
-          status: AiChatTurnStatus.pending,
-          command:
-              command ??
-              AiConversationCommand(
-                object: AiIntentObject.mindMap,
-                action: AiIntentAction.create,
-                originalText: text,
-              ),
-        ),
-        workKey: workKey,
-      );
       _sending = true;
       _error = null;
       _retryText = null;
       _retryTurnId = null;
-      final totalSections = units.fold<int>(
-        0,
-        (total, unit) => total + unit.estimatedSections,
-      );
-      final unitKind =
-          _c.bookStructureManifest?.kind ==
-              AiBookStructureKind.segmentedSingleWork
-          ? '卷'
-          : '部作品';
-      _toolStatus = units.length == 1
-          ? '正在为你生成${_mindMapScopeText(units.single)}的思维导图，共 $totalSections 章'
-          : '本书分为 ${units.length} $unitKind，共 $totalSections 章，准备依次生成';
     });
-    unawaited(_persist());
     _scrollToEnd();
-
-    var completed = 0;
-    String? localError;
-    for (var index = 0; index < units.length; index++) {
-      final unit = units[index];
-      final unitKind =
-          _c.bookStructureManifest?.kind ==
-              AiBookStructureKind.segmentedSingleWork
-          ? '卷'
-          : '部作品';
-      var progress = units.length == 1
-          ? '正在读取${_mindMapScopeText(unit)}正文，预计 ${unit.estimatedSections} 章'
-          : '本书共 ${units.length} $unitKind，正在读取第 ${index + 1}/${units.length} 个范围《${unit.label}》';
-      if (mounted) setState(() => _toolStatus = progress);
-      List<AiBookSectionSlice> sections;
-      try {
-        sections =
-            unit.frozenSections ??
-            await _c.bookMindMapSections(work: unit.work, useFrozenWork: true);
-      } catch (error) {
-        localError = aiUserErrorMessage(
-          error,
-          operation: AiUserOperation.mindMap,
-        );
-        break;
-      }
-      if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
-        return;
-      }
-      progress = units.length == 1
-          ? '正在为你生成${_mindMapScopeText(unit)}的思维导图，共 ${sections.length} 章'
-          : '本书共 ${units.length} $unitKind，正在生成第 ${index + 1}/${units.length} 个范围《${unit.label}》，共 ${sections.length} 章';
-      setState(() => _toolStatus = progress);
-      final result = await _c.generateBookMindMap(
-        work: unit.work,
-        useFrozenWork: true,
-        frozenSections: sections,
-        existingMindMap: baseMap,
-        userInstruction: text,
-        scopeLabel: unit.label,
-        progressLabel: progress,
-      );
-      if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
-        return;
-      }
-      if (result == null) {
-        localError = _c.bookMindMapError;
-        break;
-      }
-      completed++;
-      final artifactTurnId = '$turnId-mind-map-${index + 1}';
-      final artifact = result.copyWith(
-        artifactId: artifactTurnId,
-        sourceArtifactId: baseMap == null
-            ? null
-            : baseMap.artifactId ?? 'mind-map:${baseMap.scopeFingerprint}',
-        revision: baseMap == null ? 1 : baseMap.revision + 1,
-      );
-      setState(() {
-        _mindMapRevealTurnId = artifactTurnId;
-        if (keepEditing) _activeMindMapArtifactId = artifactTurnId;
-        _commitAssistant(
-          '已根据《${unit.label}》的 ${sections.length} 章内容生成思维导图。',
-          workKey: workKey,
-          turnId: artifactTurnId,
-          mindMap: artifact,
-        );
-      });
-      await _persist();
-    }
-    if (!mounted || _activeTurnId != turnId || _mindMapTurnId != turnId) {
-      return;
-    }
-    final failed = completed != units.length;
-    final cancelled = _c.bookMindMapError == '已停止';
+    final outcome = await _c.generateMindMapsInConversation(
+      turnId: turnId,
+      workKey: workKey,
+      text: text,
+      units: units,
+      cancelToken: _cancel,
+      retryTurnId: retryTurnId,
+      command: command,
+      baseMap: baseMap,
+      onArtifact: (artifact) {
+        if (!mounted) return;
+        final artifactId = artifact.artifactId;
+        if (keepEditing && artifactId != null) {
+          _mindMapConversation.attachArtifact(artifactId);
+        }
+        setState(() => _mindMapRevealTurnId = artifactId);
+      },
+    );
+    if (!mounted) return;
+    final failed = !outcome.succeeded && !outcome.cancelled;
     setState(() {
-      _setTurnStatus(
-        turnId,
-        cancelled
-            ? AiChatTurnStatus.cancelled
-            : failed
-            ? AiChatTurnStatus.failed
-            : AiChatTurnStatus.completed,
-        workKey: workKey,
-      );
-      if (failed && !cancelled) {
-        _error = completed == 0
-            ? localError ?? _c.bookMindMapError ?? '暂时无法生成思维导图，请稍后重试'
-            : '已保留前 $completed 张思维导图，生成《${units[completed].label}》时失败，可单独请求该部或卷。';
-        if (completed == 0) {
+      if (failed) {
+        _error = outcome.completed == 0
+            ? outcome.userMessage ??
+                  (outcome.error == null
+                      ? _c.bookMindMapError ?? '暂时无法生成思维导图，请稍后重试'
+                      : aiUserErrorMessage(
+                          outcome.error!,
+                          operation: AiUserOperation.mindMap,
+                        ))
+            : '已保留前 ${outcome.completed} 张思维导图，生成《${outcome.failedUnit?.label ?? '下一范围'}》时失败，可单独请求该部或卷。';
+        if (outcome.completed == 0) {
           _retryText = text;
           _retryTurnId = turnId;
         }
@@ -1969,7 +1615,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _mindMapTurnId = null;
       _mindMapScopePrompt = null;
     });
-    unawaited(_persist());
     if (!failed) {
       // Cancel the pending "scroll to bottom" retries started for the user
       // message. The newly mounted mind-map card will reveal its own toolbar.
@@ -3333,7 +2978,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
     setState(() => _graphHighlighted = entityId);
     _graphHighlightTimer?.cancel();
-    _streamCheckpointTimer?.cancel();
     _graphHighlightTimer = Timer(const Duration(seconds: 2), () {
       if (mounted) setState(() => _graphHighlighted = null);
     });
@@ -3729,13 +3373,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   @override
   void dispose() {
     _c.removeListener(_onReaderControllerChanged);
+    _conversation.removeListener(_onConversationChanged);
+    _mindMapConversation.removeListener(_onMindMapConversationChanged);
     _cancel.cancel();
     final scopePrompt = _mindMapScopePrompt;
     if (scopePrompt != null && !scopePrompt.completer.isCompleted) {
       scopePrompt.completer.complete(null);
     }
     _suggestionCancel?.cancel();
-    unawaited(_sub?.cancel() ?? Future<void>.value());
     _finalizeActiveTurnForDisposal();
     _input.dispose();
     _graphQueryController.dispose();
@@ -4129,7 +3774,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     ),
                     onDeleted: conversationInputLocked
                         ? null
-                        : () => setState(() => _activeMindMapArtifactId = null),
+                        : _mindMapConversation.detachArtifact,
                     deleteIcon: const Icon(KaijuanIcons.close, size: 16),
                   ),
                   const SizedBox(height: 6),

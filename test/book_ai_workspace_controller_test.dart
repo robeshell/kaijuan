@@ -12,7 +12,10 @@ void main() {
     'workspace owns workflow state without leaking provider types',
     () async {
       var changes = 0;
-      final workspace = BookAiWorkspaceController(onChanged: () => changes++);
+      final workspace = BookAiWorkspaceController(
+        saveChatSession: (_) async {},
+        onChanged: () => changes++,
+      );
       const descriptor = AiRunDescriptor(
         runId: 'workspace-run',
         task: AiRunTask.bookMindMap,
@@ -39,7 +42,7 @@ void main() {
   );
 
   test('workspace retains only the latest twenty run projections', () {
-    final workspace = BookAiWorkspaceController();
+    final workspace = BookAiWorkspaceController(saveChatSession: (_) async {});
     final now = DateTime(2026);
     for (var index = 0; index < 24; index++) {
       workspace.recordRunEvent(
@@ -71,6 +74,7 @@ void main() {
       );
       await settings.load();
       final workspace = BookAiWorkspaceController(
+        saveChatSession: (_) async {},
         agentRuntimeFactory:
             ({required isAvailable, required openModelAdapter}) => runtime,
       );
