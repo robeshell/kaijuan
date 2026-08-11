@@ -119,6 +119,9 @@ class AiBookMindMap {
     required this.contentKind,
     required this.layout,
     required this.nodes,
+    this.artifactId,
+    this.sourceArtifactId,
+    this.revision = 1,
     this.organizingPrinciple = '',
   });
 
@@ -135,10 +138,27 @@ class AiBookMindMap {
   final AiMindMapLayout layout;
   final List<AiBookMindMapNode> nodes;
 
+  /// App-owned identity for this rendered artifact. It is intentionally
+  /// optional so maps persisted before artifact identity was introduced stay
+  /// readable and can be addressed through their message turn as a fallback.
+  final String? artifactId;
+
+  /// Identity of the artifact this map was revised from, when applicable.
+  final String? sourceArtifactId;
+
+  /// Monotonic revision within an artifact lineage. Existing maps default to
+  /// the first revision when this field is absent in persisted JSON.
+  final int revision;
+
   AiBookMindMapNode get root =>
       nodes.singleWhere((node) => node.parentId == null);
 
-  AiBookMindMap copyWith({AiMindMapLayout? layout}) => AiBookMindMap(
+  AiBookMindMap copyWith({
+    AiMindMapLayout? layout,
+    String? artifactId,
+    String? sourceArtifactId,
+    int? revision,
+  }) => AiBookMindMap(
     contentHash: contentHash,
     workKey: workKey,
     createdAt: createdAt,
@@ -149,6 +169,9 @@ class AiBookMindMap {
     organizingPrinciple: organizingPrinciple,
     layout: layout ?? this.layout,
     nodes: nodes,
+    artifactId: artifactId ?? this.artifactId,
+    sourceArtifactId: sourceArtifactId ?? this.sourceArtifactId,
+    revision: revision ?? this.revision,
   );
 
   Map<String, Object?> toJson() => {
@@ -160,6 +183,9 @@ class AiBookMindMap {
     'scopeSectionIndices': scopeSectionIndices,
     'scopeFingerprint': scopeFingerprint,
     'contentKind': contentKind.name,
+    if (artifactId != null) 'artifactId': artifactId,
+    if (sourceArtifactId != null) 'sourceArtifactId': sourceArtifactId,
+    'revision': revision,
     if (organizingPrinciple.isNotEmpty)
       'organizingPrinciple': organizingPrinciple,
     'layout': layout.name,
@@ -204,6 +230,19 @@ class AiBookMindMap {
       organizingPrinciple: raw['organizingPrinciple'] is String
           ? (raw['organizingPrinciple'] as String).trim()
           : '',
+      artifactId:
+          raw['artifactId'] is String &&
+              (raw['artifactId'] as String).trim().isNotEmpty
+          ? (raw['artifactId'] as String).trim()
+          : null,
+      sourceArtifactId:
+          raw['sourceArtifactId'] is String &&
+              (raw['sourceArtifactId'] as String).trim().isNotEmpty
+          ? (raw['sourceArtifactId'] as String).trim()
+          : null,
+      revision: raw['revision'] is num
+          ? (raw['revision'] as num).toInt().clamp(1, 1 << 30)
+          : 1,
       layout: AiMindMapLayout.values.firstWhere(
         (value) => value.name == raw['layout'],
         orElse: () => AiMindMapLayout.rightFacing,

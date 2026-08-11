@@ -160,6 +160,29 @@ void main() {
         ),
       );
       expect(withArtifact!.target!.artifactId, 'map-1');
+
+      const editRouter = AiConversationRouter(mindMapEditingEnabled: true);
+      final editRoute = editRouter.resolve(
+        '把刚才那张思维导图改得更详细',
+        context: const AiConversationContext(
+          recentArtifacts: [
+            AiArtifactRef(
+              artifactId: 'map-1',
+              messageTurnId: 'turn-1',
+              object: AiIntentObject.mindMap,
+            ),
+          ],
+        ),
+      );
+      expect(editRoute, isA<AiWorkflowRoute>());
+      expect((editRoute as AiWorkflowRoute).intent.action, AiIntentAction.edit);
+
+      final missingTarget = editRouter.resolve('请修改这张思维导图');
+      expect(missingTarget, isA<AiClarificationRoute>());
+      expect(
+        (missingTarget as AiClarificationRoute).missingSlots,
+        contains('targetArtifact'),
+      );
     },
   );
 

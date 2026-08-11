@@ -68,7 +68,7 @@
   → 普通受控 Tool Agent / 开卷 Workflow / 对话内补参
 ```
 
-`AiConversationContext` 只提供当前 `contentHash`、章节/作品范围、最近结构化附件和活动 run 等可信事实。范围、权限、预算、取消、正文冻结和持久化继续由开卷拥有；模型不能通过意图层改变这些边界。意图解析失败或缺少必要槽位时必须普通回答或在对话内追问，不得猜测并启动高成本任务。
+`AiConversationContext` 只提供当前 `contentHash`、章节/作品范围、最近结构化附件和活动 run 等可信事实。每个结构化附件由 App 分配稳定 `artifactId`，编辑结果通过 `sourceArtifactId` 和 `revision` 形成可追踪谱系；布局变化不改变内容 artifact。范围、权限、预算、取消、正文冻结和持久化继续由开卷拥有；模型不能通过意图层改变这些边界。意图解析失败或缺少必要槽位时必须普通回答或在对话内追问，不得猜测并启动高成本任务。
 
 意图层不引入第二套模型 transport，也不把 Genkit Agent 作为前置条件。未来若 Genkit Agent 稳定，可让它负责普通对话的历史、工具循环和 interrupt/resume，但它只能调用开卷定义并再次校验的业务 Tool；确定性 Workflow、范围预检、结构化校验、附件持久化和 WebDAV 边界不迁移给模型框架。
 

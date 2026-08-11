@@ -233,6 +233,38 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   /// shared whole-book list for plain books.
   List<AiChatMessage> get _messages => _session.messagesFor(_chatWorkKey);
 
+  /// Builds the small, trusted context used by intent routing. The router
+  /// receives identities and reading position only; it never sees book body,
+  /// provider state, or the model history used to answer ordinary chat.
+  AiConversationContext get _conversationContext {
+    final artifacts = <AiArtifactRef>[];
+    for (final message in _messages) {
+      final map = message.mindMap;
+      if (map == null) continue;
+      final artifactId =
+          map.artifactId ??
+          message.turnId ??
+          'mind-map:${map.scopeFingerprint}';
+      final messageTurnId = message.turnId ?? artifactId;
+      artifacts.add(
+        AiArtifactRef(
+          artifactId: artifactId,
+          messageTurnId: messageTurnId,
+          object: AiIntentObject.mindMap,
+          revision: map.revision,
+        ),
+      );
+    }
+    return AiConversationContext(
+      contentHash: _c.item.contentHash,
+      currentSectionIndex: _c.sectionIndex,
+      currentChapterTitle: _c.currentChapterTitle,
+      currentWorkKey: _chatWorkKey,
+      recentArtifacts: List.unmodifiable(artifacts),
+      activeRunId: _activeTurnId,
+    );
+  }
+
   bool get _ready => _c.canUseAiChat;
 
   bool get _graphBusy => _graphPreparing || _c.isGeneratingBookGraph;
@@ -537,7 +569,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (!_ready) return;
     final retrying = preset != null && preset == _retryText;
     final retryTurnId = retrying ? _retryTurnId : null;
-    final route = const AiConversationRouter().resolve(text);
+    final route = const AiConversationRouter().resolve(
+      text,
+      context: _conversationContext,
+    );
     if (route is AiWorkflowRoute &&
         route.intent.object == AiIntentObject.mindMap) {
       final mindMapScope = switch (route.intent.scope) {
@@ -1616,13 +1651,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       }
       completed++;
       final artifactTurnId = '$turnId-mind-map-${index + 1}';
+      final artifact = result.copyWith(artifactId: artifactTurnId, revision: 1);
       setState(() {
         _mindMapRevealTurnId = artifactTurnId;
         _commitAssistant(
           '已根据《${unit.label}》的 ${sections.length} 章内容生成思维导图。',
           workKey: workKey,
           turnId: artifactTurnId,
-          mindMap: result,
+          mindMap: artifact,
         );
       });
       await _persist();

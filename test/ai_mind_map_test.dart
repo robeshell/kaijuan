@@ -85,6 +85,33 @@ void main() {
     expect(restored.nodes[1].evidence.single.spanResolved, isTrue);
   });
 
+  test('artifact identity and revision survive JSON round-trip', () {
+    final source = sample().copyWith(
+      artifactId: 'turn-1-mind-map-1',
+      sourceArtifactId: 'turn-0-mind-map-1',
+      revision: 2,
+    );
+    final restored = AiBookMindMap.fromJson(source.toJson());
+
+    expect(restored, isNotNull);
+    expect(restored!.artifactId, 'turn-1-mind-map-1');
+    expect(restored.sourceArtifactId, 'turn-0-mind-map-1');
+    expect(restored.revision, 2);
+  });
+
+  test('maps persisted before artifact identity default to revision one', () {
+    final json = sample().toJson()
+      ..remove('artifactId')
+      ..remove('sourceArtifactId')
+      ..remove('revision');
+    final restored = AiBookMindMap.fromJson(json);
+
+    expect(restored, isNotNull);
+    expect(restored!.artifactId, isNull);
+    expect(restored.sourceArtifactId, isNull);
+    expect(restored.revision, 1);
+  });
+
   test('older persisted maps remain readable without organizing principle', () {
     final json = sample().toJson()..remove('organizingPrinciple');
     final restored = AiBookMindMap.fromJson(json);

@@ -155,6 +155,16 @@ class AiConversationRouter {
       '制作得',
       '生成的',
     ]);
+    final hasExplicitEditVerb = _containsAny(normalized, const [
+      '修改',
+      '调整',
+      '改得',
+      '改成',
+      '补充',
+      '删除',
+      '展开',
+      '精简',
+    ]);
     final hasReplacementAction = _containsAny(normalized, const [
       '重新生成',
       '再生成',
@@ -165,7 +175,8 @@ class AiConversationRouter {
     ).hasMatch(normalized);
 
     if (hasExistingMapOperation && !hasReplacementAction) {
-      final wantsEdit = hasAcquisitionIntent || hasGenerationAction;
+      final wantsEdit =
+          hasAcquisitionIntent || hasGenerationAction || hasExplicitEditVerb;
       return AiConversationIntent(
         object: AiIntentObject.mindMap,
         action: wantsEdit ? AiIntentAction.edit : AiIntentAction.discuss,
