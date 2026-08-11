@@ -583,6 +583,139 @@ void main() {
     ]);
   });
 
+  test('local containers combine grouped, directory and restart ranges', () {
+    final analysis = AiBookStructureResolver.analyzeIndex(
+      index: BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '混合目录作品合集',
+        sections: [for (var index = 0; index < 24; index++) section(index)],
+        navigation: [
+          node(
+            id: 'season-a',
+            title: '第一季',
+            order: 0,
+            sectionIndex: 0,
+            children: 2,
+          ),
+          node(
+            id: 'season-a-work',
+            parentId: 'season-a',
+            depth: 1,
+            title: '第一卷 山海（上）',
+            order: 1,
+            sectionIndex: 1,
+            children: 2,
+          ),
+          node(
+            id: 'season-a-work-down',
+            parentId: 'season-a',
+            depth: 1,
+            title: '第二卷 山海（下）',
+            order: 2,
+            sectionIndex: 3,
+            children: 2,
+          ),
+          node(
+            id: 'season-b',
+            title: '第二季',
+            order: 3,
+            sectionIndex: 5,
+            children: 1,
+          ),
+          node(
+            id: 'season-b-work',
+            parentId: 'season-b',
+            depth: 1,
+            title: '第三卷 星河',
+            order: 4,
+            sectionIndex: 6,
+            children: 2,
+          ),
+          node(id: 'set-a', title: '远方套装共2册', order: 5, sectionIndex: 9),
+          node(id: 'work-a', title: '远方甲', order: 6, sectionIndex: 10),
+          node(id: 'toc-a', title: '目录', order: 7, sectionIndex: 10),
+          node(id: 'work-b', title: '远方乙', order: 8, sectionIndex: 13),
+          node(id: 'toc-b', title: '目录', order: 9, sectionIndex: 13),
+          node(id: 'set-b', title: '恐龙公园套装共2册', order: 10, sectionIndex: 16),
+          node(id: 'park-a', title: '恐龙公园', order: 11, sectionIndex: 17),
+          node(id: 'park-a-preface', title: '前言', order: 12, sectionIndex: 18),
+          node(id: 'park-a-chapter', title: '第一章', order: 13, sectionIndex: 19),
+          node(
+            id: 'park-guide',
+            title: '恐龙公园恐龙图鉴',
+            order: 14,
+            sectionIndex: 20,
+            children: 3,
+          ),
+          node(id: 'park-b', title: '恐龙公园2', order: 15, sectionIndex: 21),
+          node(id: 'park-b-preface', title: '前 言', order: 16, sectionIndex: 22),
+          node(
+            id: 'park-b-chapter',
+            title: '第 一 章',
+            order: 17,
+            sectionIndex: 23,
+          ),
+        ],
+      ),
+      isSupplementTitle: matchesAiStructureSupplementTitle,
+    );
+
+    expect(analysis.manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(analysis.selectedStrategy, AiBookStructureStrategy.localContainers);
+    expect(analysis.manifest.works.map((work) => work.title), [
+      '山海',
+      '第三卷 星河',
+      '远方甲',
+      '远方乙',
+      '恐龙公园',
+      '恐龙公园2',
+    ]);
+  });
+
+  test('chapter classifier tolerates creator-inserted whitespace', () {
+    expect(AiBookStructureResolver.isChapterTitle('尾 声'), isTrue);
+    expect(AiBookStructureResolver.isChapterTitle('第 一 章 开端'), isTrue);
+    expect(AiBookStructureResolver.isVolumeTitle('第 一 卷'), isTrue);
+  });
+
+  test('series-prefixed works remain works instead of local containers', () {
+    final analysis = AiBookStructureResolver.analyzeIndex(
+      index: BookStructureIndex(
+        indexVersion: 1,
+        publicationTitle: '作者作品全集共3册',
+        sections: [for (var index = 0; index < 9; index++) section(index)],
+        navigation: [
+          node(
+            id: 'work-a',
+            title: '绝望三部曲1：白夜行',
+            order: 0,
+            sectionIndex: 0,
+            children: 2,
+          ),
+          node(
+            id: 'work-b',
+            title: '绝望三部曲2：杀人之门',
+            order: 1,
+            sectionIndex: 3,
+            children: 2,
+          ),
+          node(
+            id: 'work-c',
+            title: '绝望三部曲3：幻夜',
+            order: 2,
+            sectionIndex: 6,
+            children: 2,
+          ),
+        ],
+      ),
+      isSupplementTitle: matchesAiStructureSupplementTitle,
+    );
+
+    expect(analysis.manifest.kind, AiBookStructureKind.multiWorkOmnibus);
+    expect(analysis.selectedStrategy, AiBookStructureStrategy.workTrees);
+    expect(analysis.manifest.works, hasLength(3));
+  });
+
   test(
     'editable collection count cannot turn ordinary chapters into works',
     () {
@@ -654,7 +787,7 @@ void main() {
     stopwatch.stop();
 
     expect(analysis.manifest.kind, AiBookStructureKind.singleWork);
-    expect(analysis.hypotheses, hasLength(6));
+    expect(analysis.hypotheses, hasLength(7));
     expect(stopwatch.elapsed, lessThan(const Duration(seconds: 2)));
   });
 }

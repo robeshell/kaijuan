@@ -21,6 +21,7 @@ enum AiBookStructureStrategy {
   workTrees,
   intermediateGroups,
   flatDirectories,
+  localContainers,
 }
 
 class AiBookStructureHypothesis {
@@ -65,6 +66,7 @@ abstract final class _StructureScore {
   static const workTrees = 58;
   static const intermediateGroups = 62;
   static const flatDirectories = 54;
+  static const localContainers = 70;
   static const omnibusMetadata = 18;
   static const declaredCountMatch = 6;
   static const distinctAnchors = 18;
@@ -198,11 +200,18 @@ abstract final class AiBookStructureResolver {
     caseSensitive: false,
   );
 
+  static final RegExp _localCollectionContainerPattern = RegExp(
+    r'(?:全集|合集|合订|套装|全套|作品集|'
+    r'(?:共|全)?[0-9零一二三四五六七八九十百千两]+册|'
+    r'[0-9零一二三四五六七八九十百千两]+部曲)[）)]*$',
+    caseSensitive: false,
+  );
+
   static bool isChapterTitle(String raw) =>
-      _chapterTitlePattern.hasMatch(raw.trim());
+      _chapterTitlePattern.hasMatch(raw.trim().replaceAll(RegExp(r'\s+'), ''));
 
   static bool isVolumeTitle(String raw) =>
-      _volumeTitlePattern.hasMatch(raw.trim());
+      _volumeTitlePattern.hasMatch(raw.trim().replaceAll(RegExp(r'\s+'), ''));
 
   static bool _isIndependentWorkCandidateTitle(String raw) {
     final title = raw.trim();
@@ -320,6 +329,24 @@ abstract final class AiBookStructureResolver {
     final flatCandidates = _mergeSplitInstallments(
       _flatDirectoryBoundaries(
         index: index,
+        isSupplementTitle: isSupplementTitle,
+        publicationTitle: index.publicationTitle,
+        publicationEvidence: publicationEvidence,
+      ),
+    );
+    final localContainers = candidates
+        .where(
+          (node) =>
+              _intermediateGroupPattern.hasMatch(node.title.trim()) ||
+              _isLocalCollectionContainer(node.title),
+        )
+        .toList(growable: false);
+    final localCandidates = _mergeSplitInstallments(
+      _localContainerBoundaries(
+        roots: candidates,
+        groupedCandidates: groupedCandidates,
+        treeCandidates: treeCandidates,
+        flatCandidates: flatCandidates,
         isSupplementTitle: isSupplementTitle,
         publicationTitle: index.publicationTitle,
         publicationEvidence: publicationEvidence,
@@ -457,6 +484,14 @@ abstract final class AiBookStructureResolver {
       strategyScore: _StructureScore.flatDirectories,
       hasRequiredEvidence: omnibusEvidence,
       evidenceLabel: 'repeated title-directory boundaries form works',
+    );
+    addHypothesis(
+      strategy: AiBookStructureStrategy.localContainers,
+      kind: AiBookStructureKind.multiWorkOmnibus,
+      nodes: localCandidates,
+      strategyScore: _StructureScore.localContainers,
+      hasRequiredEvidence: omnibusEvidence && localContainers.length >= 2,
+      evidenceLabel: 'local containers combine independent boundary patterns',
     );
 
     final valid = hypotheses.where((item) => item.isValid).toList()
@@ -848,23 +883,209 @@ abstract final class AiBookStructureResolver {
     return result;
   }
 
+  /// Combines only strong boundaries inside independently authored local
+  /// containers. A malformed omnibus commonly mixes season trees, repeated
+  /// title-directory pairs and flat chapter runs in one NCX; requiring one
+  /// global strategy makes those valid local facts compete with each other.
+  static List<BookStructureNavigationNode> _localContainerBoundaries({
+    required List<BookStructureNavigationNode> roots,
+    required List<BookStructureNavigationNode> groupedCandidates,
+    required List<BookStructureNavigationNode> treeCandidates,
+    required List<BookStructureNavigationNode> flatCandidates,
+    required bool Function(String title) isSupplementTitle,
+    required String publicationTitle,
+    required String publicationEvidence,
+  }) {
+    final orderedRoots = [...roots]
+      ..sort((left, right) => left.order.compareTo(right.order));
+    final hasIntermediateContainers = orderedRoots.any(
+      (node) => _intermediateGroupPattern.hasMatch(node.title.trim()),
+    );
+    final hasCollectionContainers = orderedRoots.any(
+      (node) => _isLocalCollectionContainer(node.title),
+    );
+    if (!hasIntermediateContainers && !hasCollectionContainers) {
+      return const [];
+    }
+
+    final result = <BookStructureNavigationNode>[];
+    result.addAll(groupedCandidates);
+    result.addAll(flatCandidates);
+    result.addAll(
+      treeCandidates.where(
+        (node) =>
+            !_intermediateGroupPattern.hasMatch(node.title.trim()) &&
+            !_isLocalCollectionContainer(node.title),
+      ),
+    );
+
+    if (hasIntermediateContainers) {
+      result.addAll(
+        orderedRoots.where(
+          (node) =>
+              node.directChildCount >= 2 &&
+              !isSupplementTitle(node.title) &&
+              !isChapterTitle(node.title) &&
+              !isVolumeTitle(node.title) &&
+              !_intermediateGroupPattern.hasMatch(node.title.trim()) &&
+              !_isLocalCollectionContainer(node.title) &&
+              !_isPublicationContainer(
+                node.title,
+                publicationTitle,
+                publicationEvidence,
+              ),
+        ),
+      );
+    }
+    if (hasCollectionContainers) {
+      result.addAll(
+        _chapterRestartBoundaries(
+          roots: orderedRoots,
+          isSupplementTitle: isSupplementTitle,
+        ),
+      );
+    }
+
+    return _removeEmbeddedCompanions(_deduplicateBySection(result));
+  }
+
+  static bool _isLocalCollectionContainer(String raw) =>
+      _localCollectionContainerPattern.hasMatch(
+        raw.trim().replaceAll(RegExp(r'\s+'), ''),
+      ) ||
+      _isCollectionHeaderTitle(raw);
+
+  static List<BookStructureNavigationNode> _chapterRestartBoundaries({
+    required List<BookStructureNavigationNode> roots,
+    required bool Function(String title) isSupplementTitle,
+  }) {
+    final result = <BookStructureNavigationNode>[];
+    BookStructureNavigationNode? container;
+    for (var index = 0; index < roots.length; index++) {
+      final candidate = roots[index];
+      if (_isLocalCollectionContainer(candidate.title)) {
+        container = candidate;
+        continue;
+      }
+      if (container == null ||
+          candidate.sectionIndex == null ||
+          isSupplementTitle(candidate.title) ||
+          isChapterTitle(candidate.title) ||
+          isVolumeTitle(candidate.title) ||
+          _directoryTitlePattern.hasMatch(candidate.title.trim()) ||
+          !_isIndependentWorkCandidateTitle(candidate.title) ||
+          !_sharesContainerStem(candidate.title, container.title)) {
+        continue;
+      }
+
+      var beginsChapterRun = false;
+      final limit = (index + 9).clamp(0, roots.length);
+      for (var next = index + 1; next < limit; next++) {
+        final nextNode = roots[next];
+        if (_isLocalCollectionContainer(nextNode.title)) break;
+        if (isChapterTitle(nextNode.title)) {
+          beginsChapterRun = true;
+          break;
+        }
+        if (!_isFrontMatterBridge(nextNode.title, isSupplementTitle)) break;
+      }
+      if (beginsChapterRun) result.add(candidate);
+    }
+    return result;
+  }
+
+  static bool _isFrontMatterBridge(
+    String raw,
+    bool Function(String title) isSupplementTitle,
+  ) {
+    final title = raw.trim().replaceAll(RegExp(r'\s+'), '');
+    return isSupplementTitle(title) ||
+        _directoryTitlePattern.hasMatch(title) ||
+        RegExp(r'^(?:献给|谨以此书献给|致献)').hasMatch(title);
+  }
+
+  static bool _sharesContainerStem(String candidate, String container) {
+    final candidateKey = _normalizedTitle(candidate);
+    var containerKey = _normalizedTitle(container)
+        .replaceAll(RegExp(r'[0-9零一二三四五六七八九十百千两]+'), '')
+        .replaceAll(RegExp(r'(?:套装|全套|全集|合集|合订|作品集|共册|部曲)'), '');
+    if (containerKey.length > 8) containerKey = containerKey.substring(0, 8);
+    return containerKey.length >= 3 && candidateKey.contains(containerKey);
+  }
+
+  static List<BookStructureNavigationNode> _deduplicateBySection(
+    List<BookStructureNavigationNode> candidates,
+  ) {
+    final seenSections = <int>{};
+    final seenUnanchored = <String>{};
+    final result = <BookStructureNavigationNode>[];
+    for (final candidate in candidates) {
+      final section = candidate.sectionIndex;
+      if (section != null) {
+        if (!seenSections.add(section)) continue;
+      } else if (!seenUnanchored.add(_normalizedTitle(candidate.title))) {
+        continue;
+      }
+      result.add(candidate);
+    }
+    result.sort((left, right) {
+      final section = (left.sectionIndex ?? 1 << 30).compareTo(
+        right.sectionIndex ?? 1 << 30,
+      );
+      return section != 0 ? section : left.order.compareTo(right.order);
+    });
+    return result;
+  }
+
+  static List<BookStructureNavigationNode> _removeEmbeddedCompanions(
+    List<BookStructureNavigationNode> candidates,
+  ) {
+    final result = <BookStructureNavigationNode>[];
+    for (final candidate in candidates) {
+      final title = _normalizedTitle(candidate.title);
+      final previous = result.lastOrNull;
+      final previousTitle = previous == null
+          ? ''
+          : _normalizedTitle(previous.title);
+      final suffix = previousTitle.isNotEmpty && title.startsWith(previousTitle)
+          ? title.substring(previousTitle.length)
+          : '';
+      if (suffix.isNotEmpty &&
+          RegExp(r'^.{0,12}(?:图鉴|档案|年表)$').hasMatch(suffix)) {
+        continue;
+      }
+      result.add(candidate);
+    }
+    return result;
+  }
+
   static List<BookStructureNavigationNode> _mergeSplitInstallments(
     List<BookStructureNavigationNode> candidates,
   ) {
     final merged = <BookStructureNavigationNode>[];
-    String? previousTitle;
+    String? previousSplitTitle;
     for (final candidate in candidates) {
-      final title = candidate.title
+      final rawTitle = candidate.title.trim();
+      final isSplit = _splitInstallmentSuffixPattern.hasMatch(rawTitle);
+      if (!isSplit) {
+        previousSplitTitle = null;
+        merged.add(candidate);
+        continue;
+      }
+      final withoutSuffix = rawTitle
           .replaceFirst(_splitInstallmentSuffixPattern, '')
           .trim();
-      final normalized = title.replaceAll(RegExp(r'\s+'), '').toLowerCase();
-      if (normalized.isNotEmpty && normalized == previousTitle) continue;
-      previousTitle = normalized;
+      final title = withoutSuffix
+          .replaceFirst(RegExp(r'^第[0-9零一二三四五六七八九十百千两壹贰叁肆伍陆柒捌玖拾]+卷\s*'), '')
+          .trim();
+      final normalized = _normalizedTitle(title);
+      if (normalized.isNotEmpty && normalized == previousSplitTitle) continue;
+      previousSplitTitle = normalized;
       merged.add(
         BookStructureNavigationNode(
           nodeId: candidate.nodeId,
           parentId: candidate.parentId,
-          title: title.isEmpty ? candidate.title : title,
+          title: title.isEmpty ? withoutSuffix : title,
           depth: candidate.depth,
           order: candidate.order,
           href: candidate.href,

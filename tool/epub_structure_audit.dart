@@ -14,10 +14,11 @@ import 'package:xml/xml.dart';
 /// emitted or persisted, so real user books can safely be used as samples.
 Future<void> main(List<String> args) async {
   final shadow = args.contains('--shadow');
+  final details = args.contains('--details');
   final inputs = args.where((arg) => !arg.startsWith('--')).toList();
   if (inputs.isEmpty) {
     stderr.writeln(
-      'usage: dart run tool/epub_structure_audit.dart [--shadow] '
+      'usage: dart run tool/epub_structure_audit.dart [--shadow] [--details] '
       '<file-or-directory> ...',
     );
     exitCode = 64;
@@ -86,6 +87,23 @@ Future<void> main(List<String> args) async {
         '${legacy == null ? '' : 'legacy=${legacy.kind.name}/${legacy.works.length}\tchanged=$changed\t'}'
         'reason=${manifest.reason}',
       );
+      if (details) {
+        for (final work in manifest.works) {
+          stdout.writeln(
+            '  WORK\t${work.startSection}..${work.endSectionExclusive ?? '-'}\t'
+            '${work.title}',
+          );
+        }
+        for (final hypothesis in analysis.hypotheses.where(
+          (item) => item.isValid,
+        )) {
+          stdout.writeln(
+            '  HYPOTHESIS\t${hypothesis.strategy.name}\t'
+            'score=${hypothesis.score}\tnodes=${hypothesis.nodes.length}\t'
+            '${hypothesis.nodes.map((node) => node.title).join(' | ')}',
+          );
+        }
+      }
     } catch (error) {
       failures++;
       stderr.writeln('${p.basename(file.path)}\tERROR\t$error');

@@ -129,8 +129,9 @@ void main() {
 
       final prompt = adapter.request.messages.last.text;
       expect(prompt, contains('有效章节：12'));
-      expect(prompt, contains('至少生成'));
-      expect(prompt, contains('建议约'));
+      expect(prompt, contains('可参考约'));
+      expect(prompt, contains('不是最低数量'));
+      expect(prompt, isNot(contains('至少生成')));
       expect(adapter.request.maxTokens, greaterThan(12000));
     },
   );
