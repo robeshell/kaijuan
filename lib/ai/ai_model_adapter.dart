@@ -3,6 +3,8 @@ import 'ai_provider_kind.dart';
 
 enum AiModelRole { system, user, assistant, tool }
 
+enum AiModelToolChoice { auto, required, none }
+
 class AiModelToolDefinition {
   const AiModelToolDefinition({
     required this.name,
@@ -64,6 +66,7 @@ class AiModelTurnRequest {
   const AiModelTurnRequest({
     required this.messages,
     this.tools = const [],
+    this.toolChoice = AiModelToolChoice.auto,
     this.maxTokens = 1024,
     this.temperature = 0.3,
     this.timeout,
@@ -71,6 +74,7 @@ class AiModelTurnRequest {
 
   final List<AiModelMessage> messages;
   final List<AiModelToolDefinition> tools;
+  final AiModelToolChoice toolChoice;
   final int maxTokens;
   final double temperature;
   final Duration? timeout;

@@ -241,6 +241,33 @@ class AiChatProductContext {
     );
   }
 
+  bool shouldRepairNativeMindMapImitation({
+    required String userText,
+    required String assistantText,
+  }) {
+    final answer = assistantText.trim();
+    if (answer.isEmpty || userText.toLowerCase().contains('mermaid')) {
+      return false;
+    }
+    if (RegExp(r'```\s*mermaid\b', caseSensitive: false).hasMatch(answer)) {
+      return false;
+    }
+
+    final claimsDelivery = RegExp(
+      r'(?:^|[\n。！？])\s*(?:好的|当然|可以|已(?:经)?|现在|下面|以下|我(?:已(?:经)?)?|根据)[^。！？\n]{0,180}(?:为你)?(?:生成|绘制|整理)(?:了|出)?(?:一份|一张|这份|这张)?[^。！？\n]{0,80}(?:思维导图|心智图|脑图)'
+      r'|(?:here|below)\s+is[^.!?\n]{0,120}\bmind\s*map\b'
+      r"|\bi(?:\s+have|['’]ve)?\s+(?:created|generated|drawn)[^.!?\n]{0,120}\bmind\s*map\b",
+      caseSensitive: false,
+    ).hasMatch(answer);
+    if (!claimsDelivery) return false;
+
+    final outlineMarkers = RegExp(
+      r'^\s*(?:#{1,6}\s+|[-*•]\s+|\d+[.、]\s*|[一二三四五六七八九十]+[、.]\s*)',
+      multiLine: true,
+    ).allMatches(answer).length;
+    return outlineMarkers >= 2;
+  }
+
   static String _safeJson(Object? value) => jsonEncode(value)
       .replaceAll('<', r'\u003c')
       .replaceAll('>', r'\u003e')

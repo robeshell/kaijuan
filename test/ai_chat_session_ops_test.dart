@@ -128,6 +128,41 @@ void main() {
     );
   });
 
+  test('product context detects prose that imitates a native mind map', () {
+    const context = AiChatProductContext();
+    const imitation = '''
+好的，我根据《万历十五年》全书的完整内容，为你生成一份整本书的思维导图。
+
+《万历十五年》全书思维导图
+
+一、全书主旨
+- 制度性危机
+- 人物与制度冲突
+''';
+
+    expect(
+      context.shouldRepairNativeMindMapImitation(
+        userText: '生成本书的',
+        assistantText: imitation,
+      ),
+      isTrue,
+    );
+    expect(
+      context.shouldRepairNativeMindMapImitation(
+        userText: '思维导图和知识图谱有什么区别？',
+        assistantText: '思维导图强调层级，知识图谱强调实体关系。',
+      ),
+      isFalse,
+    );
+    expect(
+      context.shouldRepairNativeMindMapImitation(
+        userText: '用 Mermaid 画一张思维导图',
+        assistantText: '好的，为你生成一份思维导图。\n```mermaid\nmindmap\n root\n```',
+      ),
+      isFalse,
+    );
+  });
+
   test('product labels cannot close the trusted prompt boundary', () {
     const context = AiChatProductContext(
       artifacts: [

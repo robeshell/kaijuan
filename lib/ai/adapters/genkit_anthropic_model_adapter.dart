@@ -119,6 +119,13 @@ class GenkitAnthropicModelAdapter
         model: anthropic.model(_modelName),
         messages: messages,
         tools: tools,
+        toolChoice: request.tools.isEmpty
+            ? null
+            : switch (request.toolChoice) {
+                AiModelToolChoice.auto => 'auto',
+                AiModelToolChoice.required => 'any',
+                AiModelToolChoice.none => 'none',
+              },
         returnToolRequests: true,
         maxTurns: 1,
         config: AnthropicOptions(

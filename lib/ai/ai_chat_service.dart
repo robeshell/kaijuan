@@ -285,6 +285,8 @@ class AiChatService {
     );
     var remainingToolChars = maxToolContextChars;
     final reasoning = _AiReasoningCollector(execution);
+    var repairingProductAction = false;
+    var productRepairAttempted = false;
 
     for (var round = 0; round < maxToolRounds; round++) {
       execution.ensureActive();
@@ -296,10 +298,15 @@ class AiChatService {
       await for (final event in adapter.streamTurn(
         AiModelTurnRequest(
           messages: working,
-          tools: [
-            ...AiChatTools.nativeDefinitions,
-            ...productContext.toolDefinitions,
-          ],
+          tools: repairingProductAction
+              ? productContext.toolDefinitions
+              : [
+                  ...AiChatTools.nativeDefinitions,
+                  ...productContext.toolDefinitions,
+                ],
+          toolChoice: repairingProductAction
+              ? AiModelToolChoice.required
+              : AiModelToolChoice.auto,
           maxTokens: toolIntentProbeMaxTokens,
           temperature: 0.2,
         ),
@@ -331,6 +338,44 @@ class AiChatService {
       if (result.toolCalls.isEmpty) {
         final answer = resultText;
         if (answer.trim().isEmpty) throw AiProviderException('没有生成内容');
+        if (repairingProductAction) {
+          if (streamed.isNotEmpty) yield '';
+          throw AiProviderException('模型未按要求返回原生思维导图操作，请重试');
+        }
+        if (productContext.shouldRepairNativeMindMapImitation(
+          userText: userText,
+          assistantText: answer,
+        )) {
+          if (productRepairAttempted) {
+            if (streamed.isNotEmpty) yield '';
+            throw AiProviderException('模型未按要求返回原生思维导图操作，请重试');
+          }
+          if (streamed.isNotEmpty) yield '';
+          productRepairAttempted = true;
+          repairingProductAction = true;
+          working
+            ..add(
+              AiModelMessage(
+                role: AiModelRole.assistant,
+                text: answer,
+                reasoningText: result.reasoningText,
+                reasoningMetadata: result.reasoningMetadata,
+              ),
+            )
+            ..add(
+              const AiModelMessage(
+                role: AiModelRole.user,
+                text:
+                    '<product_action_repair>\n'
+                    'Your previous draft claimed to deliver a native mind map '
+                    'but returned prose. Do not repeat or explain the draft. '
+                    'Call exactly one available product tool now, using only '
+                    'an App-issued alias and the reader\'s original scope.\n'
+                    '</product_action_repair>',
+              ),
+            );
+          continue;
+        }
         execution.progress(null);
         if (streamed.isEmpty || streamed.toString() != answer) yield answer;
         if (result.truncated) {
@@ -356,12 +401,19 @@ class AiChatService {
       final productCalls = calls
           .where((call) => AiProductToolNames.all.contains(call.name))
           .toList(growable: false);
+      if (repairingProductAction &&
+          (productCalls.length != 1 || calls.length != 1)) {
+        throw AiProviderException('模型未返回唯一的原生思维导图操作，请重试');
+      }
       if (productCalls.length == 1 && calls.length == 1) {
         try {
           final request = productContext.parse(productCalls.single);
           execution.productActionRequested(request);
           return;
         } on FormatException catch (error) {
+          if (repairingProductAction) {
+            throw AiProviderException('模型返回了无效的原生思维导图操作，请重试');
+          }
           working
             ..add(
               AiModelMessage(

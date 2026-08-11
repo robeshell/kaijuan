@@ -10,6 +10,51 @@ import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
 
 void main() {
+  test(
+    'forwards required tool choice through the pinned plugin seam',
+    () async {
+      Map<String, dynamic>? captured;
+      final client = MockClient((request) async {
+        captured = jsonDecode(request.body) as Map<String, dynamic>;
+        const body = '''
+data: {"id":"tool-choice","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}
+
+data: {"id":"tool-choice","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+''';
+        return http.Response.bytes(
+          utf8.encode(body),
+          200,
+          headers: {'content-type': 'text/event-stream'},
+        );
+      });
+      final adapter = GenkitOpenAiModelAdapter(
+        baseUrl: 'https://compatible.example/v1',
+        apiKey: 'test-key',
+        model: 'compatible',
+        providerKind: AiProviderKind.custom,
+        httpClient: client,
+      );
+      try {
+        await adapter
+            .streamTurn(
+              const AiModelTurnRequest(
+                messages: [AiModelMessage(role: AiModelRole.user, text: 'hi')],
+                tools: AiChatTools.nativeDefinitions,
+                toolChoice: AiModelToolChoice.required,
+              ),
+            )
+            .drain<void>();
+        expect(captured!['tool_choice'], 'required');
+      } finally {
+        await adapter.close();
+        client.close();
+      }
+    },
+  );
+
   test('maps reasoning control for every OpenAI-compatible provider', () async {
     final cases =
         <

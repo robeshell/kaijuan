@@ -161,6 +161,7 @@ class GenkitOpenAiModelAdapter
       for (final message in request.messages)
         if (message.role == AiModelRole.assistant) message.reasoningText,
     ];
+    _requestDecorator.toolChoice = request.toolChoice;
     final pendingReasoning = <String>[];
     _requestDecorator.onReasoningDelta = pendingReasoning.add;
     var timedOut = false;
@@ -373,6 +374,7 @@ class GenkitOpenAiModelAdapter
         for (final message in request.messages)
           if (message.role == AiModelRole.assistant) message.reasoningText,
       ];
+      _requestDecorator.toolChoice = AiModelToolChoice.auto;
       final schema = SchemanticType.from<Map<String, dynamic>>(
         jsonSchema: request.schema,
         parse: (value) {
@@ -486,6 +488,7 @@ final class _OpenAiRequestDecorator extends http.BaseClient {
   final http.Client _inner;
   final _OpenAiReasoningPolicy policy;
   List<String> reasoningByAssistantMessage = const [];
+  AiModelToolChoice toolChoice = AiModelToolChoice.auto;
   void Function(String text)? onReasoningDelta;
 
   @override
@@ -499,6 +502,7 @@ final class _OpenAiRequestDecorator extends http.BaseClient {
       }
       policy.decorateRequest(decoded);
       _adaptStructuredOutput(decoded);
+      _adaptToolChoice(decoded);
       final messages = decoded['messages'];
       if (policy.requiresReasoningContinuity &&
           messages is List &&
@@ -583,6 +587,18 @@ final class _OpenAiRequestDecorator extends http.BaseClient {
         'DeepSeek structured output requires text system content',
       );
     }
+  }
+
+  void _adaptToolChoice(Map<String, dynamic> body) {
+    if (body['tools'] is! List || (body['tools'] as List).isEmpty) {
+      body.remove('tool_choice');
+      return;
+    }
+    body['tool_choice'] = switch (toolChoice) {
+      AiModelToolChoice.auto => 'auto',
+      AiModelToolChoice.required => 'required',
+      AiModelToolChoice.none => 'none',
+    };
   }
 
   @override

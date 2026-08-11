@@ -589,6 +589,118 @@ void main() {
     });
 
     test(
+      'repairs a prose mind-map imitation with a required product tool turn',
+      () async {
+        const draft = '''
+好的，我根据《万历十五年》全书内容，为你生成一份整本书的思维导图。
+
+一、全书主旨
+- 制度性危机
+- 人物与制度冲突
+''';
+        final adapter = _ScriptedModelAdapter([
+          [
+            const AiModelTextDelta(draft),
+            const AiModelTurnCompleted(
+              text: draft,
+              toolCalls: [],
+              truncated: false,
+            ),
+          ],
+          [
+            const AiModelTurnCompleted(
+              text: '',
+              toolCalls: [
+                AiModelToolCall(
+                  id: 'repair-create-map',
+                  name: AiProductToolNames.createBookMindMap,
+                  arguments: {
+                    'scope': 'wholePublication',
+                    'instruction': '生成本书的',
+                  },
+                ),
+              ],
+              truncated: false,
+            ),
+          ],
+        ]);
+        final service = AiChatService(
+          isAvailable: () => true,
+          openModelAdapter: ({reasoningEnabled}) => adapter,
+        );
+
+        final events = await service
+            .streamRun(
+              run: descriptor,
+              userText: '生成本书的',
+              history: const [],
+              context: const AiChatContextBundle(),
+              bookTitle: '万历十五年',
+              tools: _FakeHost(),
+            )
+            .toList();
+
+        expect(events.last, isA<AiRunProductActionRequested>());
+        expect(
+          events.whereType<AiRunTextSnapshot>().map((event) => event.text),
+          [draft, ''],
+        );
+        expect(adapter.requests, hasLength(2));
+        expect(adapter.requests.last.toolChoice, AiModelToolChoice.required);
+        expect(adapter.requests.last.tools.map((tool) => tool.name), [
+          AiProductToolNames.createBookMindMap,
+        ]);
+      },
+    );
+
+    test('fails instead of persisting a repeated prose imitation', () async {
+      const draft = '''
+好的，我根据全书内容，为你生成一份整本书的思维导图。
+
+一、主题
+- 分支一
+- 分支二
+''';
+      final adapter = _ScriptedModelAdapter([
+        [
+          const AiModelTextDelta(draft),
+          const AiModelTurnCompleted(
+            text: draft,
+            toolCalls: [],
+            truncated: false,
+          ),
+        ],
+        [
+          const AiModelTextDelta(draft),
+          const AiModelTurnCompleted(
+            text: draft,
+            toolCalls: [],
+            truncated: false,
+          ),
+        ],
+      ]);
+      final service = AiChatService(
+        isAvailable: () => true,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
+      );
+
+      final events = await service
+          .streamRun(
+            run: descriptor,
+            userText: '生成本书的',
+            history: const [],
+            context: const AiChatContextBundle(),
+            bookTitle: '书',
+            tools: _FakeHost(),
+          )
+          .toList();
+
+      expect(events.last, isA<AiRunFailed>());
+      expect((events.last as AiRunFailed).text, isEmpty);
+      expect(events.whereType<AiRunCompleted>(), isEmpty);
+    });
+
+    test(
       'resolves a temporary artifact alias before emitting revision',
       () async {
         final adapter = _ScriptedModelAdapter([

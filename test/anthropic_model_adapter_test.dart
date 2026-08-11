@@ -12,6 +12,52 @@ import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'support/anthropic_test_server.dart';
 
 void main() {
+  test('maps required tool choice to Anthropic any', () async {
+    Map<String, dynamic>? captured;
+    final server = await AnthropicTestServer.start((request, body) async {
+      captured = body;
+      await sendAnthropicSse(request, anthropicTextSse('完成'));
+    });
+    final adapter = _adapter(server);
+    try {
+      await adapter
+          .streamTurn(
+            const AiModelTurnRequest(
+              messages: [AiModelMessage(role: AiModelRole.user, text: '问题')],
+              tools: AiChatTools.nativeDefinitions,
+              toolChoice: AiModelToolChoice.required,
+            ),
+          )
+          .drain<void>();
+      expect((captured!['tool_choice'] as Map)['type'], 'any');
+    } finally {
+      await adapter.close();
+      await server.close();
+    }
+  });
+
+  test('omits tool choice when a turn exposes no tools', () async {
+    Map<String, dynamic>? captured;
+    final server = await AnthropicTestServer.start((request, body) async {
+      captured = body;
+      await sendAnthropicSse(request, anthropicTextSse('完成'));
+    });
+    final adapter = _adapter(server);
+    try {
+      await adapter
+          .streamTurn(
+            const AiModelTurnRequest(
+              messages: [AiModelMessage(role: AiModelRole.user, text: '问题')],
+            ),
+          )
+          .drain<void>();
+      expect(captured, isNot(contains('tool_choice')));
+    } finally {
+      await adapter.close();
+      await server.close();
+    }
+  });
+
   test(
     'adaptive thinking streams a summary and preserves signed tool history',
     () async {
