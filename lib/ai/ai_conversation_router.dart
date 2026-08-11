@@ -21,10 +21,15 @@ class AiConversationRouter {
     if (intent.object == AiIntentObject.mindMap &&
         intent.action == AiIntentAction.edit &&
         !mindMapEditingEnabled) {
-      // Until the edit Workflow exists, preserve ordinary chat behavior.
+      // Callers that have not opted into the edit Workflow retain the legacy
+      // ordinary-chat behavior. The book chat sheet enables it explicitly.
       return const AiOrdinaryChatRoute();
     }
-    if (intent.action == AiIntentAction.edit && intent.target == null) {
+    final needsArtifact =
+        intent.action == AiIntentAction.edit ||
+        (intent.action == AiIntentAction.regenerate &&
+            intent.scope == AiIntentScope.existingArtifact);
+    if (needsArtifact && intent.target == null) {
       return AiClarificationRoute(
         intent: intent,
         missingSlots: const ['targetArtifact'],
@@ -170,6 +175,13 @@ class AiConversationRouter {
       '再生成',
       '重做',
     ]);
+    final refersToExistingArtifact = _containsAny(normalized, const [
+      '这张',
+      '刚才那张',
+      '上一张',
+      '当前导图',
+      '这份导图',
+    ]);
     final isBareMapCommand = RegExp(
       r'^(本章|当前章|当前章节|这一章|这章|当前作品|这部作品|当前这部|这一部|这本书|本书|整本书|全书|合集|全部作品|整部合集)的?(思维导图|脑图|mindmap)$',
     ).hasMatch(normalized);
@@ -192,10 +204,16 @@ class AiConversationRouter {
     final action = hasReplacementAction
         ? AiIntentAction.regenerate
         : AiIntentAction.create;
+    final scope = hasReplacementAction && refersToExistingArtifact
+        ? AiIntentScope.existingArtifact
+        : _scopeFor(normalized);
     return AiConversationIntent(
       object: AiIntentObject.mindMap,
       action: action,
-      scope: _scopeFor(normalized),
+      scope: scope,
+      target: scope == AiIntentScope.existingArtifact
+          ? context.latestMindMap
+          : null,
       originalText: original,
     );
   }

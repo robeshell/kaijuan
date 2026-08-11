@@ -70,6 +70,8 @@
 
 `AiConversationContext` 只提供当前 `contentHash`、章节/作品范围、最近结构化附件和活动 run 等可信事实。每个结构化附件由 App 分配稳定 `artifactId`，编辑结果通过 `sourceArtifactId` 和 `revision` 形成可追踪谱系；布局变化不改变内容 artifact。范围、权限、预算、取消、正文冻结和持久化继续由开卷拥有；模型不能通过意图层改变这些边界。意图解析失败或缺少必要槽位时必须普通回答或在对话内追问，不得猜测并启动高成本任务。
 
+当前编辑 Workflow 只接受已经存在于当前对话、且能映射回同一正文范围的思维导图附件。它复用 `AiBookMindMapService` 的一次结构化调用，输入上一版完整树与同范围正文，输出完整修订树；旧附件继续保留，新的附件通过 revision lineage 关联。Genkit Agent 若未来用于普通对话，不能绕过这一校验直接修改 artifact。
+
 意图层不引入第二套模型 transport，也不把 Genkit Agent 作为前置条件。未来若 Genkit Agent 稳定，可让它负责普通对话的历史、工具循环和 interrupt/resume，但它只能调用开卷定义并再次校验的业务 Tool；确定性 Workflow、范围预检、结构化校验、附件持久化和 WebDAV 边界不迁移给模型框架。
 
 ---

@@ -134,6 +134,7 @@ class _AmbiguousOutlineController extends BookReaderController {
     AiGraphWorkCandidate? work,
     AiBookSectionSlice? frozenCurrentChapter,
     List<AiBookSectionSlice>? frozenSections,
+    AiBookMindMap? existingMindMap,
     bool useFrozenWork = false,
     required String userInstruction,
     String? scopeLabel,

@@ -265,6 +265,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
   }
 
+  AiBookMindMap? _mindMapForArtifact(String artifactId) {
+    for (final message in _messages.reversed) {
+      final map = message.mindMap;
+      if (map == null) continue;
+      final fallbackId =
+          map.artifactId ??
+          message.turnId ??
+          'mind-map:${map.scopeFingerprint}';
+      if (fallbackId == artifactId) return map;
+    }
+    return null;
+  }
+
   bool get _ready => _c.canUseAiChat;
 
   bool get _graphBusy => _graphPreparing || _c.isGeneratingBookGraph;
@@ -569,12 +582,43 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (!_ready) return;
     final retrying = preset != null && preset == _retryText;
     final retryTurnId = retrying ? _retryTurnId : null;
-    final route = const AiConversationRouter().resolve(
-      text,
-      context: _conversationContext,
-    );
+    final route = const AiConversationRouter(
+      mindMapEditingEnabled: true,
+    ).resolve(text, context: _conversationContext);
+    if (route is AiClarificationRoute &&
+        route.intent.object == AiIntentObject.mindMap) {
+      _appendMindMapClarification(text, '请先生成一张思维导图，或告诉我你要修改对话中的哪一张导图。');
+      return;
+    }
     if (route is AiWorkflowRoute &&
         route.intent.object == AiIntentObject.mindMap) {
+      final editsExistingArtifact =
+          route.intent.action == AiIntentAction.edit ||
+          (route.intent.action == AiIntentAction.regenerate &&
+              route.intent.scope == AiIntentScope.existingArtifact);
+      if (editsExistingArtifact) {
+        final targetId = route.intent.target?.artifactId;
+        final target = targetId == null ? null : _mindMapForArtifact(targetId);
+        if (target == null) {
+          _appendMindMapClarification(
+            text,
+            '我没有找到要修改的那张导图，请先生成导图，或在消息中说明具体目标。',
+          );
+          return;
+        }
+        final unit = await _mindMapEditUnit(target, requestText: text);
+        if (!mounted || unit == null) return;
+        if (preset == null && _input.text.trim() == text) {
+          _clearComposerAfterFrame(text);
+        }
+        await _generateMindMapsInChat(
+          text,
+          [unit],
+          baseMap: target,
+          retryTurnId: retryTurnId,
+        );
+        return;
+      }
       final mindMapScope = switch (route.intent.scope) {
         AiIntentScope.currentChapter => AiMindMapRequestScope.currentChapter,
         AiIntentScope.currentWork => AiMindMapRequestScope.currentWork,
@@ -919,6 +963,88 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       },
       cancelOnError: true,
     );
+  }
+
+  void _appendMindMapClarification(String text, String answer) {
+    final workKey = _chatWorkKey;
+    final turnId = _newTurnId();
+    setState(() {
+      _session = _withMessage(
+        AiChatMessage(
+          role: AiMessageRole.user,
+          content: text,
+          createdAt: DateTime.now(),
+          turnId: turnId,
+          status: AiChatTurnStatus.completed,
+        ),
+        workKey: workKey,
+      );
+      _session = _withMessage(
+        AiChatMessage(
+          role: AiMessageRole.assistant,
+          content: answer,
+          createdAt: DateTime.now(),
+          turnId: turnId,
+          status: AiChatTurnStatus.completed,
+        ),
+        workKey: workKey,
+      );
+    });
+    if (_input.text.trim() == text) {
+      _clearComposerAfterFrame(text);
+    }
+    unawaited(_persist());
+    _scrollToEnd();
+  }
+
+  Future<_MindMapGenerationUnit?> _mindMapEditUnit(
+    AiBookMindMap map, {
+    required String requestText,
+  }) async {
+    try {
+      if (_c.bookStructureManifest == null) {
+        await _c.resolveBookStructure();
+      }
+      AiBookWork? targetWork;
+      final manifest = _c.bookStructureManifest;
+      if (map.workKey != null && manifest != null) {
+        for (final work in manifest.works) {
+          if (work.id == map.workKey) {
+            targetWork = work;
+            break;
+          }
+        }
+      }
+      targetWork ??= _c.currentReadingWork;
+      final allSections = await _c.bookMindMapSections(work: targetWork);
+      final wanted = map.scopeSectionIndices.toSet();
+      final scoped = allSections
+          .where((section) => wanted.contains(section.index))
+          .toList(growable: false);
+      if (scoped.isEmpty || scoped.length != wanted.length) {
+        if (mounted) {
+          _appendMindMapClarification(
+            requestText,
+            '这张导图对应的正文范围当前无法读取，请重新生成后再修改。',
+          );
+        }
+        return null;
+      }
+      return (
+        work: targetWork,
+        label: map.root.title,
+        frozenSections: scoped,
+        estimatedSections: scoped.length,
+      );
+    } catch (error) {
+      if (mounted) {
+        _appendMindMapClarification(
+          requestText,
+          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
+        );
+      }
+      return null;
+    }
   }
 
   void _clearComposerAfterFrame(String submittedText) {
@@ -1555,6 +1681,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<void> _generateMindMapsInChat(
     String text,
     List<_MindMapGenerationUnit> units, {
+    AiBookMindMap? baseMap,
     String? retryTurnId,
   }) async {
     final chatWork = _c.currentReadingWork;
@@ -1638,6 +1765,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         work: unit.work,
         useFrozenWork: true,
         frozenSections: sections,
+        existingMindMap: baseMap,
         userInstruction: text,
         scopeLabel: unit.label,
         progressLabel: progress,
@@ -1651,7 +1779,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       }
       completed++;
       final artifactTurnId = '$turnId-mind-map-${index + 1}';
-      final artifact = result.copyWith(artifactId: artifactTurnId, revision: 1);
+      final artifact = result.copyWith(
+        artifactId: artifactTurnId,
+        sourceArtifactId: baseMap == null
+            ? null
+            : baseMap.artifactId ?? 'mind-map:${baseMap.scopeFingerprint}',
+        revision: baseMap == null ? 1 : baseMap.revision + 1,
+      );
       setState(() {
         _mindMapRevealTurnId = artifactTurnId;
         _commitAssistant(

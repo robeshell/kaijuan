@@ -43,6 +43,8 @@ const _mindMapSystemPrompt = '''
 - 合并标题不同但语义重复的节点。多个章节可以共同支撑一个跨章主题。
 - 必须覆盖正文的核心结论、关键因果、重要转折和必要边界，但不以节点数量代表完整度，不为平衡或凑数制造空节点。
 
+当输入包含 <existing_mind_map> 时，它是读者正在修改的上一版完整导图。保留其中仍然准确的结构与事实，严格按照 <reader_request> 做增删、展开、精简或重组，并始终返回一棵完整的新导图，不返回补丁、操作说明或只包含改动部分的片段。
+
 【结构示例，仅模仿编辑方法，不复用示例事实】
 - 论说类：就业保护的政策取舍 → 短期稳定机制 → 企业留岗激励 → 财政补贴降低裁员压力；长期结构代价 → 低效岗位固化 → 生产率调整受阻。
 - 叙事类：主人公身份重建 → 被迫离开旧环境 → 初始目标破裂 → 新关系改变选择；核心冲突升级 → 盟友立场分化 → 关键背叛触发转折。
@@ -81,6 +83,7 @@ final class AiBookMindMapService {
     required String scopeLabel,
     required String userInstruction,
     required List<AiBookSectionSlice> sections,
+    AiBookMindMap? existingMindMap,
     CancelToken? cancelToken,
     void Function(AiRunModelPurpose purpose)? onModelStarted,
     AiModelUsageReporter? onUsage,
@@ -127,12 +130,13 @@ final class AiBookMindMapService {
                   '<reader_request>\n${userInstruction.trim()}\n</reader_request>\n'
                   '<scope_facts>\n有效章节：${usable.length}；正文字符：$bodyChars。'
                   '这些数据只说明输入范围，不规定导图的输出规模。\n</scope_facts>\n'
+                  '${existingMindMap == null ? '' : '<existing_mind_map>\n${jsonEncode(existingMindMap.toJson())}\n</existing_mind_map>\n'}'
                   '<book_content>\n${jsonEncode({
                     'sections': [
                       for (final section in usable) {'sectionId': section.index, 'title': section.label.trim().isEmpty ? '第 ${section.index} 节' : section.label.trim(), 'text': section.text.trim()},
                     ],
                   })}\n</book_content>\n'
-                  '<final_instruction>\n基于上述完整正文，遵守系统中的书型模板、唯一主导组织原则、层级职责和目录反例，直接返回最终结构化导图。\n</final_instruction>',
+                  '<final_instruction>\n基于上述完整正文，遵守系统中的书型模板、唯一主导组织原则、层级职责和目录反例，直接返回最终结构化导图。${existingMindMap == null ? '' : '这是对 existing_mind_map 的完整修订，必须输出修订后的全部节点。'}\n</final_instruction>',
             ),
           ],
           schema: AiWorkflowSchemas.mindMap,

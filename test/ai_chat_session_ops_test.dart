@@ -183,6 +183,22 @@ void main() {
         (missingTarget as AiClarificationRoute).missingSlots,
         contains('targetArtifact'),
       );
+
+      final regenerate = router.classify(
+        '重新生成刚才那张思维导图',
+        context: const AiConversationContext(
+          recentArtifacts: [
+            AiArtifactRef(
+              artifactId: 'map-1',
+              messageTurnId: 'turn-1',
+              object: AiIntentObject.mindMap,
+            ),
+          ],
+        ),
+      );
+      expect(regenerate!.action, AiIntentAction.regenerate);
+      expect(regenerate.scope, AiIntentScope.existingArtifact);
+      expect(regenerate.target!.artifactId, 'map-1');
     },
   );
 

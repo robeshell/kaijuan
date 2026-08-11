@@ -5,6 +5,7 @@ import 'package:kaijuan/ai/ai_book_mind_map_service.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
+import 'package:kaijuan/ai/ai_mind_map.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
 
@@ -119,6 +120,48 @@ void main() {
       sections: sections,
     );
     expect(result.nodes[1].evidence, isEmpty);
+  });
+
+  test('revision prompt includes the complete previous artifact', () async {
+    final adapter = _FakeAdapter(tree());
+    final existing = AiBookMindMap(
+      contentHash: 'a' * 64,
+      workKey: null,
+      createdAt: DateTime.utc(2026, 8, 10),
+      model: 'previous-model',
+      scopeSectionIndices: const [1, 2],
+      scopeFingerprint: 'scope',
+      contentKind: AiMindMapContentKind.argumentative,
+      artifactId: 'map-1',
+      revision: 1,
+      layout: AiMindMapLayout.bidirectional,
+      nodes: const [
+        AiBookMindMapNode(
+          nodeId: 'mm001',
+          parentId: null,
+          order: 0,
+          level: 0,
+          title: '就业与发展',
+          summary: '上一版完整根节点',
+        ),
+      ],
+    );
+
+    await service(adapter).generate(
+      contentHash: 'a' * 64,
+      workKey: null,
+      bookTitle: '测试书',
+      scopeLabel: '全书',
+      userInstruction: '把上一版导图改得更详细',
+      sections: sections,
+      existingMindMap: existing,
+    );
+
+    final prompt = adapter.request.messages.last.text;
+    expect(prompt, contains('<existing_mind_map>'));
+    expect(prompt, contains('map-1'));
+    expect(prompt, contains('上一版完整根节点'));
+    expect(prompt, contains('必须输出修订后的全部节点'));
   });
 
   test(
