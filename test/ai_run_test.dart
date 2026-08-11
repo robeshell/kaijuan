@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
+import 'package:kaijuan/ai/ai_product_action.dart';
 
 void main() {
   const scope = AiRunScope(
@@ -100,6 +101,31 @@ void main() {
     expect(state.usage.toolResultChars, 200);
     expect(state.lastSequence, 9);
     expect(state.isTerminal, isTrue);
+  });
+
+  test('action terminal state retains the replayable product request', () {
+    const action = AiCreateBookMindMapAction(
+      instruction: '生成第一部导图',
+      scope: AiBookMindMapActionScope.specificWork,
+      workAlias: 'work_1',
+      workId: 'work-real-id',
+    );
+    var state = AiRunState.initial(descriptor);
+    state = state.apply(
+      AiRunStarted(descriptor: descriptor, sequence: 0, occurredAt: time),
+    );
+    state = state.apply(
+      AiRunProductActionRequested(
+        runId: descriptor.runId,
+        sequence: 1,
+        occurredAt: time,
+        request: action,
+      ),
+    );
+
+    expect(state.phase, AiRunPhase.actionRequested);
+    expect(state.productAction, same(action));
+    expect(state.finishedAt, time);
   });
 
   test('replay is idempotent and terminal state ignores later events', () {

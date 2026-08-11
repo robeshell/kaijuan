@@ -310,6 +310,7 @@ class AiRunState {
     required this.updatedAt,
     this.finishedAt,
     this.error,
+    this.productAction,
   });
 
   factory AiRunState.initial(AiRunDescriptor descriptor) => AiRunState._(
@@ -345,6 +346,7 @@ class AiRunState {
   final DateTime? updatedAt;
   final DateTime? finishedAt;
   final Object? error;
+  final AiProductActionRequest? productAction;
 
   bool get isTerminal => switch (phase) {
     AiRunPhase.actionRequested ||
@@ -375,6 +377,7 @@ class AiRunState {
     var nextStartedAt = startedAt;
     DateTime? nextFinishedAt = finishedAt;
     Object? nextError = error;
+    var nextProductAction = productAction;
 
     switch (event) {
       case AiRunStarted():
@@ -409,10 +412,11 @@ class AiRunState {
         nextReasoningText = event.text;
         nextReasoningKind = event.kind;
         if (nextText.isEmpty) nextStatus = '正在思考…';
-      case AiRunProductActionRequested():
+      case AiRunProductActionRequested(:final request):
         nextPhase = AiRunPhase.actionRequested;
         nextStatus = null;
         nextFinishedAt = event.occurredAt;
+        nextProductAction = request;
       case AiRunCompleted():
         nextPhase = AiRunPhase.completed;
         nextText = event.text;
@@ -448,6 +452,7 @@ class AiRunState {
       updatedAt: event.occurredAt,
       finishedAt: nextFinishedAt,
       error: nextError,
+      productAction: nextProductAction,
     );
   }
 }

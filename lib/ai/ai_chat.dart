@@ -202,6 +202,7 @@ class AiChatContextBundle {
     this.bookBody = '',
     this.tocOutline = const [],
     this.scopeLabel,
+    this.chapterSectionIndex,
   });
 
   /// Where the reader is now (for "这一章" questions).
@@ -223,6 +224,9 @@ class AiChatContextBundle {
   /// work inside the book — the model must answer for this work alone, not
   /// the whole set. TOC and tool bodies are already trimmed to its range.
   final String? scopeLabel;
+
+  /// Frozen 1-based renderer section captured with [chapterText].
+  final int? chapterSectionIndex;
 }
 
 /// One-tap prompts shown at contextual points in the book chat.

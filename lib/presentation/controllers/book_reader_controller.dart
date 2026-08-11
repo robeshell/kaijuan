@@ -54,6 +54,28 @@ typedef BookMindMapRevisionInput = ({
   int estimatedSections,
 });
 
+class BookMindMapTurnSnapshot {
+  const BookMindMapTurnSnapshot({
+    required this.conversationWorkKey,
+    required this.currentWork,
+    required this.availableWorks,
+    required this.currentChapter,
+    required this.manifest,
+  });
+
+  final String? conversationWorkKey;
+  final AiBookWork? currentWork;
+  final List<AiBookWork> availableWorks;
+  final AiBookSectionSlice? currentChapter;
+  final AiBookStructureManifest? manifest;
+}
+
+typedef BookMindMapCreateInput = ({
+  AiBookWork? work,
+  AiBookSectionSlice? frozenCurrentChapter,
+  AiMindMapRequestScope scope,
+});
+
 /// Owns reflow book session state, chrome, progress, and preferences.
 ///
 /// Rendering details stay in the reader pipeline; this controller is the
@@ -1323,6 +1345,79 @@ class BookReaderController extends ChangeNotifier {
     );
   }
 
+  BookMindMapTurnSnapshot freezeBookMindMapTurn({
+    required AiBookWork? workScope,
+    required AiChatContextBundle context,
+  }) {
+    final chapterText = context.chapterText.trim();
+    final chapterIndex = context.chapterSectionIndex;
+    final chapter = chapterText.isEmpty || chapterIndex == null
+        ? null
+        : AiBookSectionSlice(
+            index: chapterIndex,
+            sourceSectionIndex: chapterIndex,
+            label: context.chapterTitle.trim().isEmpty
+                ? '当前章节'
+                : context.chapterTitle.trim(),
+            text: chapterText,
+          );
+    return BookMindMapTurnSnapshot(
+      conversationWorkKey: workScope == null ? null : workKeyFor(workScope),
+      currentWork: workScope,
+      availableWorks: List.unmodifiable(
+        bookStructureManifest?.works ?? const <AiBookWork>[],
+      ),
+      currentChapter: chapter,
+      manifest: bookStructureManifest,
+    );
+  }
+
+  /// Maps a validated model action onto the immutable scope captured before
+  /// the model turn. Presentation must not re-read the live reader position.
+  BookMindMapCreateInput prepareBookMindMapCreate(
+    AiCreateBookMindMapAction action,
+    BookMindMapTurnSnapshot snapshot,
+  ) {
+    switch (action.scope) {
+      case AiBookMindMapActionScope.currentChapter:
+      case AiBookMindMapActionScope.unspecified:
+        final chapter = snapshot.currentChapter;
+        if (chapter == null) {
+          throw AiProviderException('发送问题时的章节正文尚未就绪，请重试');
+        }
+        return (
+          work: snapshot.currentWork,
+          frozenCurrentChapter: chapter,
+          scope: AiMindMapRequestScope.currentChapter,
+        );
+      case AiBookMindMapActionScope.currentWork:
+        return (
+          work: snapshot.currentWork,
+          frozenCurrentChapter: null,
+          scope: AiMindMapRequestScope.currentWork,
+        );
+      case AiBookMindMapActionScope.specificWork:
+        final workId = action.workId;
+        final matches = snapshot.availableWorks.where(
+          (work) => work.id == workId,
+        );
+        if (workId == null || matches.length != 1) {
+          throw AiProviderException('所选作品范围已经变化，请重新选择');
+        }
+        return (
+          work: matches.single,
+          frozenCurrentChapter: null,
+          scope: AiMindMapRequestScope.currentWork,
+        );
+      case AiBookMindMapActionScope.wholePublication:
+        return (
+          work: null,
+          frozenCurrentChapter: null,
+          scope: AiMindMapRequestScope.wholeBook,
+        );
+    }
+  }
+
   Future<AiBookMindMap?> generateBookMindMap({
     AiBookWork? work,
     AiBookSectionSlice? frozenCurrentChapter,
@@ -2223,6 +2318,9 @@ class BookReaderController extends ChangeNotifier {
     required AiBookWork? workScope,
   }) async {
     try {
+      final chapterSectionIndex = _sectionIndex + 1;
+      final chapterTitle = currentChapterTitle;
+      final loadChapter = _getChapterText;
       var selection = selectionOverride?.trim() ?? '';
       if (selection.isEmpty) {
         selection = _selectionMenu?.text.trim() ?? '';
@@ -2230,7 +2328,7 @@ class BookReaderController extends ChangeNotifier {
       if (selection.isEmpty) {
         selection = ((await _getSelectedText?.call()) ?? '').trim();
       }
-      final chapter = ((await _getChapterText?.call()) ?? '').trim();
+      final chapter = ((await loadChapter?.call()) ?? '').trim();
       final work = workScope;
       // 合集读哪本跟哪本：目录也裁到当前作品范围，否则全书 TOC 会让模型
       // 综述整个合集。下标保持全书 1-based，与 get_toc 工具口径一致。
@@ -2246,14 +2344,18 @@ class BookReaderController extends ChangeNotifier {
         ];
       }
       return AiChatContextBundle(
-        chapterTitle: currentChapterTitle,
+        chapterTitle: chapterTitle,
         chapterText: chapter,
         selectionText: selection,
         tocOutline: outline,
         scopeLabel: work?.title.trim().isNotEmpty == true ? work!.title : null,
+        chapterSectionIndex: chapterSectionIndex,
       );
     } catch (_) {
-      return AiChatContextBundle(chapterTitle: currentChapterTitle);
+      return AiChatContextBundle(
+        chapterTitle: currentChapterTitle,
+        chapterSectionIndex: _sectionIndex + 1,
+      );
     }
   }
 

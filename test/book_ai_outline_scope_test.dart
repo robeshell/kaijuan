@@ -128,12 +128,27 @@ class _AmbiguousOutlineController extends BookReaderController {
   final generatedMindMapScopes = <String>[];
   AiProductActionRequest? productActionOverride;
   int productActionRequests = 0;
+  Completer<void>? productActionGate;
+  String chatChapterTitle = '当前章';
+  String chatChapterText = '当前章正文';
+  int chatChapterSectionIndex = 1;
 
   @override
   AiBookStructureManifest? get bookStructureManifest => manifestOverride;
 
   @override
   AiBookWork? get currentReadingWork => currentWorkOverride;
+
+  @override
+  Future<AiChatContextBundle> loadAiChatContext({
+    String? selectionOverride,
+    required AiBookWork? workScope,
+  }) async => AiChatContextBundle(
+    chapterTitle: chatChapterTitle,
+    chapterText: chatChapterText,
+    chapterSectionIndex: chatChapterSectionIndex,
+    scopeLabel: workScope?.title,
+  );
 
   @override
   Future<AiBookSectionSlice?> captureCurrentBookMindMapChapter() async {
@@ -240,19 +255,20 @@ class _AmbiguousOutlineController extends BookReaderController {
         task: AiRunTask.bookChat,
         scope: AiRunScope(contentHash: item.contentHash),
       );
-      return Stream<AiRunEvent>.fromIterable([
-        AiRunStarted(
+      return (() async* {
+        yield AiRunStarted(
           descriptor: descriptor,
           sequence: 0,
           occurredAt: DateTime.now(),
-        ),
-        AiRunProductActionRequested(
+        );
+        await productActionGate?.future;
+        yield AiRunProductActionRequested(
           runId: descriptor.runId,
           sequence: 1,
           occurredAt: DateTime.now(),
           request: requestedAction,
-        ),
-      ]);
+        );
+      })();
     }
     lastDeepThinkingEnabled = reasoningEnabled;
     final gate = Completer<void>();
@@ -671,7 +687,7 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(controller.structureResolveCalls, structureCallsBeforeWholeBook + 2);
+    expect(controller.structureResolveCalls, structureCallsBeforeWholeBook + 1);
     expect(controller.lastMindMapSourceSectionIndex, isNull);
     expect(controller.lastMindMapWork, isNull);
     expect(controller.lastMindMapUseFrozenWork, isTrue);
@@ -697,6 +713,102 @@ void main() {
     expect(controller.chatStreams, hasLength(1));
     expect(find.textContaining('正在修改：'), findsOneWidget);
   });
+
+  testWidgets(
+    'product action keeps the chapter and work frozen across a page flip',
+    (tester) async {
+      tester.view.physicalSize = const Size(820, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final database = AppDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final now = DateTime.utc(2026, 8, 11);
+      await database.upsertReadingItem(
+        ReadingItemsCompanion.insert(
+          id: 'mind-map-frozen-turn',
+          kind: ReaderKind.book.storageValue,
+          format: ReaderFormat.epub.storageValue,
+          title: '冻结范围测试',
+          filePath: '/tmp/mind-map-frozen-turn.epub',
+          contentHash: 'hash-mind-map-frozen-turn',
+          pageCount: const Value(4),
+          addedAt: now,
+          updatedAt: now,
+        ),
+      );
+      const firstWork = AiBookWork(
+        id: 'work-1',
+        title: '第一部',
+        startSection: 1,
+        endSectionExclusive: 3,
+      );
+      const secondWork = AiBookWork(
+        id: 'work-2',
+        title: '第二部',
+        startSection: 3,
+        endSectionExclusive: 5,
+      );
+      final controller =
+          _AmbiguousOutlineController(
+              database: database,
+              item: (await database.readingItemById('mind-map-frozen-turn'))!,
+            )
+            ..currentWorkOverride = firstWork
+            ..manifestOverride = const AiBookStructureManifest(
+              kind: AiBookStructureKind.multiWorkOmnibus,
+              source: AiBookStructureSource.navigationHierarchy,
+              confidence: 0.95,
+              reason: 'test',
+              works: [firstWork, secondWork],
+            )
+            ..chatChapterTitle = '第一部第二章'
+            ..chatChapterText = '发送时冻结的第一部正文'
+            ..chatChapterSectionIndex = 2
+            ..productActionOverride = const AiCreateBookMindMapAction(
+              instruction: '生成本章思维导图',
+              scope: AiBookMindMapActionScope.currentChapter,
+            )
+            ..productActionGate = Completer<void>();
+      addTearDown(() {
+        if (!controller.productActionGate!.isCompleted) {
+          controller.productActionGate!.complete();
+        }
+        controller.dispose();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: FilledButton(
+                onPressed: () =>
+                    showBookAiChatSheet(context, controller: controller),
+                child: const Text('打开 AI'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开 AI'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, '生成本章思维导图');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+
+      controller
+        ..currentWorkOverride = secondWork
+        ..chatChapterTitle = '第二部第四章'
+        ..chatChapterText = '翻页后的第二部正文'
+        ..chatChapterSectionIndex = 4;
+      controller.productActionGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(controller.lastMindMapWork, same(firstWork));
+      expect(controller.lastMindMapSourceSectionIndex, 2);
+      expect(controller.generatedMindMapScopes, ['第一部第二章']);
+    },
+  );
 
   testWidgets('a follow-up to a Mermaid map remains ordinary rich conversation', (
     tester,
