@@ -135,6 +135,8 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 
 思维导图修订在读取结构或正文前必须占用当前发送槽位，并冻结目标附件所在的会话 `workKey`；正文范围恢复下沉到 Controller 的修订预检，Widget 只能提交已选 `artifactId` 与用户指令。Controller 不得把一个活动生成 Future 复用给参数不同的后续请求。恢复正文范围时，附件 `workKey == null` 表示整本出版物，非空值必须在当前 manifest 中精确匹配，匹配失败即中止并提示重新生成，不得退回当前阅读作品。上一版导图与正文都属于不可信引用数据，模型适配请求必须明确忽略其中的命令或角色指令。
 
+对话 composer 只允许一个提交入口：Flutter `EditableText.onSubmitted`、发送按钮、快捷入口和重试最终都经过同一互斥锁。桌面 Enter 不得同时由外层 `Focus.onKeyEvent` 再触发一遍；真实输入在首次提交时冻结，输入连接在任何异步结构/搜索/模型工作前结束并跨过当前 frame，防止 macOS IME 在 semantics/layout 阶段回写 controller。重复平台 action 不得产生第二个 `turnId` 或重复 Workflow。
+
 模型 I/O 收口完成后的唯一依赖方向为：业务 Workflow → App 自有 `AiModelAdapter` → 隔离的 Genkit Provider 插件。模型目录读取单独抽为只读 catalog transport；连接测试通过 adapter 发起无工具单回合。UI、controller 和业务 Workflow 不得再依赖 `AiProvider`、Genkit、Schemantic 生成类型或供应商 SDK。结构化 schema 定义集中在 AI 基础设施边界，使用 Schemantic 生成并由 adapter 消费；模型返回后仍执行既有业务语义校验，JSON Schema 不能代替来源覆盖、稳定 ID、证据定位等产品规则。
 
 ### 表现层导航边界

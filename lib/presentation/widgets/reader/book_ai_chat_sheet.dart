@@ -604,24 +604,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   Future<void> _send([String? preset]) async {
     if (_committingComposer) return;
-    if (preset == null) {
-      final composing = _input.value.composing;
-      if (composing.isValid && !composing.isCollapsed) {
-        // Clicking Send while a macOS IME still owns marked text used to lock
-        // and rebuild the composer before the platform committed that text.
-        // The delayed TextInput update then notified EditableText during the
-        // frame's semantics pass (`Build scheduled during frame`). Let the IME
-        // close its composing range before changing conversation state.
-        _committingComposer = true;
-        _focus.unfocus();
-        try {
-          await WidgetsBinding.instance.endOfFrame;
-          if (!mounted) return;
-        } finally {
-          _committingComposer = false;
-        }
-      }
+    _committingComposer = true;
+    try {
+      await _sendLocked(preset);
+    } finally {
+      _committingComposer = false;
     }
+  }
+
+  Future<void> _sendLocked(String? preset) async {
+    // Freeze the submitted value before yielding. macOS can deliver a late
+    // IME editing update after the keyboard action, and rereading the
+    // controller after an await could otherwise submit that transient value.
     final text = (preset ?? _input.text).trim();
     if (text.isEmpty ||
         _sending ||
@@ -630,6 +624,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       return;
     }
     if (!_ready) return;
+    if (preset == null) {
+      // End the platform editing connection before any async scope/model work
+      // can rebuild the panel. This keeps delayed IME updates out of Flutter's
+      // layout/semantics phase. The outer submission lock also deduplicates a
+      // platform action that reaches both keyboard and submit callbacks.
+      _focus.unfocus();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     final retrying = preset != null && preset == _retryText;
     final retryTurnId = retrying ? _retryTurnId : null;
     final retryCommand = _commandForTurn(retryTurnId);
@@ -1135,24 +1138,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       if (!mounted || _input.text.trim() != submittedText) return;
       _input.clear();
     });
-  }
-
-  KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent ||
-        event.logicalKey != LogicalKeyboardKey.enter) {
-      return KeyEventResult.ignored;
-    }
-
-    // IMEs use Enter to commit the currently composed candidate. Let the
-    // platform text input handle that before considering the chat shortcut.
-    final composing = _input.value.composing;
-    if ((composing.isValid && !composing.isCollapsed) ||
-        HardwareKeyboard.instance.isShiftPressed) {
-      return KeyEventResult.ignored;
-    }
-
-    if (!_sending) unawaited(_send());
-    return KeyEventResult.handled;
   }
 
   void _commitAssistant(
@@ -3957,163 +3942,176 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       ),
                     ),
                   )
-                : ListView(
-                    key: const ValueKey<String>('ai-chat-message-list'),
-                    controller: _scroll,
-                    physics: _mindMapPointerActive
-                        ? const NeverScrollableScrollPhysics()
-                        : null,
-                    padding: EdgeInsets.fromLTRB(
-                      16,
-                      compact ? 0 : 4,
-                      16,
-                      compact ? 8 : 12,
-                    ),
-                    children: [
-                      Semantics(
-                        container: true,
-                        liveRegion: true,
-                        label: _liveStatus,
-                        child: const SizedBox.shrink(),
+                : NotificationListener<ScrollStartNotification>(
+                    onNotification: (notification) {
+                      if (notification.dragDetails != null) {
+                        // A real user drag owns the viewport from this point.
+                        // Cancel both delayed initial reveals and streaming
+                        // tail-follow callbacks so they cannot snap it back.
+                        _scrollRequestEpoch++;
+                        _streamTailFollowEpoch++;
+                      }
+                      return false;
+                    },
+                    child: ListView(
+                      key: const ValueKey<String>('ai-chat-message-list'),
+                      controller: _scroll,
+                      physics: _mindMapPointerActive
+                          ? const NeverScrollableScrollPhysics()
+                          : null,
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        compact ? 0 : 4,
+                        16,
+                        compact ? 8 : 12,
                       ),
-                      if (_messages.isEmpty &&
-                          _streaming.isEmpty &&
-                          _streamingReasoning.isEmpty &&
-                          !_searchingWeb)
-                        Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            4,
-                            compact ? 12 : 20,
-                            4,
-                            compact ? 16 : 24,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '围绕这本书聊聊：总结、人物，或你想到的问题。',
-                                style: TextStyle(
-                                  fontSize: _panelBodySize(context),
-                                  height: 1.6,
-                                  color: context.appSecondaryText,
-                                ),
-                              ),
-                              if (_mindMapScopePrompt == null &&
-                                  openingShortcuts.isNotEmpty) ...[
-                                SizedBox(height: compact ? 12 : 16),
-                                _SuggestedQuestionList(
-                                  shortcuts: openingShortcuts,
-                                  onSelected: (shortcut) => unawaited(
-                                    _handleOpeningShortcut(shortcut),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+                      children: [
+                        Semantics(
+                          container: true,
+                          liveRegion: true,
+                          label: _liveStatus,
+                          child: const SizedBox.shrink(),
                         ),
-                      for (final msg in _messages)
-                        _Bubble(
-                          key: ValueKey<String>(
-                            '${msg.turnId ?? msg.createdAt?.microsecondsSinceEpoch ?? msg.hashCode}:'
-                            '${msg.mindMap?.scopeFingerprint ?? ''}',
-                          ),
-                          message: msg,
-                          onCopy: () => unawaited(_copy(msg.content)),
-                          onMindMapLayoutChanged: msg.mindMap == null
-                              ? null
-                              : (layout) => _updateMindMapLayout(msg, layout),
-                          onOpenMindMapEvidence: msg.mindMap == null
-                              ? null
-                              : _goToMindMapEvidence,
-                          onOpenMindMapFullscreen: msg.mindMap == null
-                              ? null
-                              : () => _openMindMapFullscreen(msg),
-                          onContinueEditingMindMap: msg.mindMap == null
-                              ? null
-                              : () => _beginEditingMindMap(msg),
-                          revealMindMapOnMount:
-                              msg.mindMap != null &&
-                              msg.turnId == _mindMapRevealTurnId,
-                          onMindMapRevealed: msg.turnId == null
-                              ? null
-                              : () {
-                                  if (_mindMapRevealTurnId == msg.turnId) {
-                                    _mindMapRevealTurnId = null;
-                                  }
-                                },
-                          onMindMapPointerHoverChanged: (active) {
-                            if (_mindMapPointerActive == active) return;
-                            setState(() => _mindMapPointerActive = active);
-                          },
-                        ),
-                      if (_mindMapScopePrompt case final prompt?)
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            left: 4,
-                            right: 4,
-                            bottom: 14,
-                          ),
-                          child: _MindMapScopeChoiceCard(
-                            prompt: prompt,
-                            onSelected: _selectMindMapScope,
-                            onCancel: _cancelMindMapScopePrompt,
-                          ),
-                        ),
-                      if (showFollowUpShortcuts)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2, bottom: 12),
-                          child: _SuggestedQuestionList(
-                            shortcuts: followUpShortcuts,
-                            onSelected: (shortcut) =>
-                                unawaited(_handleOpeningShortcut(shortcut)),
-                          ),
-                        ),
-                      if (_showStatusIndicator)
-                        ExcludeSemantics(
-                          child: _ThinkingIndicator(
-                            label: _statusIndicatorLabel,
-                            state: _statusOrbState,
-                          ),
-                        ),
-                      if (_activeTurnVisible &&
-                          (_streaming.isNotEmpty ||
-                              _streamingReasoning.isNotEmpty))
-                        _Bubble(
-                          message: AiChatMessage(
-                            role: AiMessageRole.assistant,
-                            content: _streaming,
-                            reasoningContent: _streamingReasoning,
-                            reasoningKind: _streamingReasoningKind,
-                          ),
-                          streaming: true,
-                        ),
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  _error!,
+                        if (_messages.isEmpty &&
+                            _streaming.isEmpty &&
+                            _streamingReasoning.isEmpty &&
+                            !_searchingWeb)
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              4,
+                              compact ? 12 : 20,
+                              4,
+                              compact ? 16 : 24,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '围绕这本书聊聊：总结、人物，或你想到的问题。',
                                   style: TextStyle(
-                                    color: colors.error,
                                     fontSize: _panelBodySize(context),
-                                    height: 1.4,
+                                    height: 1.6,
+                                    color: context.appSecondaryText,
                                   ),
                                 ),
-                              ),
-                              if (_canRetry) ...[
-                                const SizedBox(width: 8),
-                                OutlinedButton(
-                                  onPressed: () => unawaited(_send(_retryText)),
-                                  child: const Text('重试'),
-                                ),
+                                if (_mindMapScopePrompt == null &&
+                                    openingShortcuts.isNotEmpty) ...[
+                                  SizedBox(height: compact ? 12 : 16),
+                                  _SuggestedQuestionList(
+                                    shortcuts: openingShortcuts,
+                                    onSelected: (shortcut) => unawaited(
+                                      _handleOpeningShortcut(shortcut),
+                                    ),
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
-                    ],
+                        for (final msg in _messages)
+                          _Bubble(
+                            key: ValueKey<String>(
+                              '${msg.turnId ?? msg.createdAt?.microsecondsSinceEpoch ?? msg.hashCode}:'
+                              '${msg.mindMap?.scopeFingerprint ?? ''}',
+                            ),
+                            message: msg,
+                            onCopy: () => unawaited(_copy(msg.content)),
+                            onMindMapLayoutChanged: msg.mindMap == null
+                                ? null
+                                : (layout) => _updateMindMapLayout(msg, layout),
+                            onOpenMindMapEvidence: msg.mindMap == null
+                                ? null
+                                : _goToMindMapEvidence,
+                            onOpenMindMapFullscreen: msg.mindMap == null
+                                ? null
+                                : () => _openMindMapFullscreen(msg),
+                            onContinueEditingMindMap: msg.mindMap == null
+                                ? null
+                                : () => _beginEditingMindMap(msg),
+                            revealMindMapOnMount:
+                                msg.mindMap != null &&
+                                msg.turnId == _mindMapRevealTurnId,
+                            onMindMapRevealed: msg.turnId == null
+                                ? null
+                                : () {
+                                    if (_mindMapRevealTurnId == msg.turnId) {
+                                      _mindMapRevealTurnId = null;
+                                    }
+                                  },
+                            onMindMapPointerHoverChanged: (active) {
+                              if (_mindMapPointerActive == active) return;
+                              setState(() => _mindMapPointerActive = active);
+                            },
+                          ),
+                        if (_mindMapScopePrompt case final prompt?)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              left: 4,
+                              right: 4,
+                              bottom: 14,
+                            ),
+                            child: _MindMapScopeChoiceCard(
+                              prompt: prompt,
+                              onSelected: _selectMindMapScope,
+                              onCancel: _cancelMindMapScopePrompt,
+                            ),
+                          ),
+                        if (showFollowUpShortcuts)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2, bottom: 12),
+                            child: _SuggestedQuestionList(
+                              shortcuts: followUpShortcuts,
+                              onSelected: (shortcut) =>
+                                  unawaited(_handleOpeningShortcut(shortcut)),
+                            ),
+                          ),
+                        if (_showStatusIndicator)
+                          ExcludeSemantics(
+                            child: _ThinkingIndicator(
+                              label: _statusIndicatorLabel,
+                              state: _statusOrbState,
+                            ),
+                          ),
+                        if (_activeTurnVisible &&
+                            (_streaming.isNotEmpty ||
+                                _streamingReasoning.isNotEmpty))
+                          _Bubble(
+                            message: AiChatMessage(
+                              role: AiMessageRole.assistant,
+                              content: _streaming,
+                              reasoningContent: _streamingReasoning,
+                              reasoningKind: _streamingReasoningKind,
+                            ),
+                            streaming: true,
+                          ),
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    _error!,
+                                    style: TextStyle(
+                                      color: colors.error,
+                                      fontSize: _panelBodySize(context),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                                if (_canRetry) ...[
+                                  const SizedBox(width: 8),
+                                  OutlinedButton(
+                                    onPressed: () =>
+                                        unawaited(_send(_retryText)),
+                                    child: const Text('重试'),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
           ),
           Padding(
@@ -4196,45 +4194,40 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
-                        // Keep IME candidate confirmation ahead of desktop
-                        // shortcuts; see [_handleComposerKey].
-                        child: Focus(
-                          onKeyEvent: _handleComposerKey,
-                          child: withDesktopTextEditingShortcuts(
+                        child: withDesktopTextEditingShortcuts(
+                          controller: _input,
+                          TextField(
                             controller: _input,
-                            TextField(
-                              controller: _input,
-                              focusNode: _focus,
-                              enabled: !conversationInputLocked,
-                              // Bootstrap requests focus after the first frame.
-                              // Synchronous autofocus can let an IME update the
-                              // controller during layout/semantics flushing.
-                              autofocus: false,
-                              minLines: 1,
-                              maxLines: 6,
-                              keyboardType: TextInputType.multiline,
-                              textInputAction: TextInputAction.send,
-                              textCapitalization: TextCapitalization.sentences,
-                              enableInteractiveSelection: true,
-                              onTap: conversationInputLocked
-                                  ? null
-                                  : () => unawaited(_focusComposer()),
-                              onSubmitted: (_) {
-                                if (!_sending) unawaited(_send());
-                              },
-                              style: context.appInputTextStyle.copyWith(
-                                color: context.appPrimaryText,
+                            focusNode: _focus,
+                            enabled: !conversationInputLocked,
+                            // Bootstrap requests focus after the first frame.
+                            // Synchronous autofocus can let an IME update the
+                            // controller during layout/semantics flushing.
+                            autofocus: false,
+                            minLines: 1,
+                            maxLines: 6,
+                            keyboardType: TextInputType.multiline,
+                            textInputAction: TextInputAction.send,
+                            textCapitalization: TextCapitalization.sentences,
+                            enableInteractiveSelection: true,
+                            onTap: conversationInputLocked
+                                ? null
+                                : () => unawaited(_focusComposer()),
+                            onSubmitted: (_) {
+                              if (!_sending) unawaited(_send());
+                            },
+                            style: context.appInputTextStyle.copyWith(
+                              color: context.appPrimaryText,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: '问这本书…',
+                              hintStyle: context.appInputTextStyle.copyWith(
+                                color: context.appSecondaryText,
                               ),
-                              decoration: InputDecoration(
-                                hintText: '问这本书…',
-                                hintStyle: context.appInputTextStyle.copyWith(
-                                  color: context.appSecondaryText,
-                                ),
-                                isDense: true,
-                                border: InputBorder.none,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 6,
-                                ),
+                              isDense: true,
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 6,
                               ),
                             ),
                           ),

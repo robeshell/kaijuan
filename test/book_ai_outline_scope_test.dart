@@ -816,7 +816,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, '生成本章思维导图');
       await tester.testTextInput.receiveAction(TextInputAction.send);
+      // Some desktop IMEs can deliver the same action through two callbacks
+      // before the first async preflight marks the conversation busy.
+      await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pump();
+      expect(controller.productActionRequests, 1);
 
       controller
         ..currentWorkOverride = secondWork
@@ -1161,6 +1165,7 @@ void main() {
       await tester.enterText(find.byType(TextField).last, '修改上一张思维导图');
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pump();
+      await tester.pump();
       expect(controller.mindMapSectionCalls, 1);
       expect(
         tester.widget<TextField>(find.byType(TextField).last).enabled,
@@ -1434,6 +1439,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField).last, '第一次问题');
     await tester.tap(find.byTooltip('发送'));
+    await tester.pump();
     await tester.pump();
     await tester.pump();
     expect(controller.structureResolveCalls, 1);
