@@ -113,6 +113,7 @@ class _AmbiguousOutlineController extends BookReaderController {
   bool? lastMindMapUseFrozenWork;
   int structureResolveCalls = 0;
   int mindMapFailuresRemaining = 0;
+  Completer<void>? mindMapGate;
   final generatedMindMapScopes = <String>[];
 
   @override
@@ -146,6 +147,7 @@ class _AmbiguousOutlineController extends BookReaderController {
         (frozenSections?.length == 1
             ? frozenSections!.single.originSectionIndex
             : null);
+    await mindMapGate?.future;
     if (mindMapFailuresRemaining > 0) {
       mindMapFailuresRemaining--;
       return null;
@@ -721,6 +723,69 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.generatedMindMapScopes, ['作品甲']);
     expect(find.text('已根据《作品甲》的 1 章内容生成思维导图。'), findsOneWidget);
+  });
+
+  testWidgets('long mind map progress wraps inside a narrow conversation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(375, 667);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase(NativeDatabase.memory());
+    addTearDown(database.close);
+    final now = DateTime.utc(2026, 8, 11);
+    const longTitle = '火星崛起2：黄金之子（年度科幻小说，同名电影即将开拍，环球影业出品）全球顶级畅销小说文库';
+    await database.upsertReadingItem(
+      ReadingItemsCompanion.insert(
+        id: 'mind-map-long-progress',
+        kind: ReaderKind.book.storageValue,
+        format: ReaderFormat.epub.storageValue,
+        title: longTitle,
+        filePath: '/tmp/mind-map-long-progress.epub',
+        contentHash: 'hash-mind-map-long-progress',
+        pageCount: const Value(45),
+        addedAt: now,
+        updatedAt: now,
+      ),
+    );
+    final gate = Completer<void>();
+    final controller = _AmbiguousOutlineController(
+      database: database,
+      item: (await database.readingItemById('mind-map-long-progress'))!,
+    )..mindMapGate = gate;
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+      controller.dispose();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () =>
+                  showBookAiChatSheet(context, controller: controller),
+              child: const Text('打开 AI'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开 AI'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '生成整本书思维导图');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byTooltip('停止'), findsOneWidget);
+    expect(find.textContaining(longTitle), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('chat stop and close react on the first tap', (tester) async {

@@ -4176,11 +4176,16 @@ class _ThinkingIndicator extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: context.appCaptionSize,
-              color: context.appSecondaryText,
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              softWrap: true,
+              style: TextStyle(
+                fontSize: context.appCaptionSize,
+                color: context.appSecondaryText,
+              ),
             ),
           ),
         ],
