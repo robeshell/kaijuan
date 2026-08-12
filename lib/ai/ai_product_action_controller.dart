@@ -21,6 +21,9 @@ enum AiActionRecoveryDisposition {
   waitingForHuman,
   recoverable,
   abandoned,
+
+  /// Receipt is terminal success, but conversation projection is incomplete.
+  needsProjection,
 }
 
 class AiActionRecoveryCandidate {
@@ -374,6 +377,9 @@ class AiProductActionController {
   });
 
   AiActionRecoveryDisposition _recoveryDisposition(AiActionJournalEntry entry) {
+    if (entry.needsProjection) {
+      return AiActionRecoveryDisposition.needsProjection;
+    }
     if (entry.status.isTerminal) return AiActionRecoveryDisposition.terminal;
     if (entry.status == AiActionJournalStatus.proposed ||
         entry.status == AiActionJournalStatus.awaitingConfirmation ||
@@ -386,6 +392,7 @@ class AiProductActionController {
   }
 
   String? _recoveryReason(AiActionJournalEntry entry) {
+    if (entry.needsProjection) return 'conversation_projection_pending';
     if (entry.command == null &&
         !entry.status.isTerminal &&
         entry.status != AiActionJournalStatus.proposed &&
@@ -398,6 +405,20 @@ class AiProductActionController {
     }
     return null;
   }
+
+  /// Records that conversation projection durably completed for [refs].
+  Future<AiActionJournalEntry> markProjected({
+    required String proposalId,
+    required Iterable<String> refs,
+  }) => _exclusive(() async {
+    final entry = await _requiredEntry(proposalId);
+    if (!entry.status.isTerminal) {
+      throw StateError('Projection tracking requires a terminal action');
+    }
+    final next = entry.withProjectedRefs(refs, now: _now());
+    await journal.write(next);
+    return next;
+  });
 
   /// Re-arms a failed/cancelled command for another Workflow attempt without
   /// creating a new Proposal, Command, or idempotency key.
@@ -435,6 +456,7 @@ class AiProductActionController {
         eventSequence: entry.eventSequence + 1,
         attempt: entry.attempt + 1,
         updatedAt: _now(),
+        projectedArtifactRefs: const [],
       );
       await journal.write(next);
       return next;

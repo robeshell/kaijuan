@@ -519,16 +519,16 @@ late_event.quarantined
 - [ ] 语义评测中错误产品执行为 0，未授权 Workflow 启动为 0。
 - [x] PRODUCT、ENGINEERING、ai.md 与各领域规格不再包含“模型调用或附件直接授权执行”的描述。
 
-本轮证据：
+本轮证据（含故障注入）：
 
-- 提交顺序：Adapter 只写 Artifact/checkpoint 事件；对话投影在 Receipt 之后
-  （`BookAiWorkspaceController.runMindMapProductAction`）
-- 崩溃窗口：`artifact committed before checkpoint is recovered without regenerating`
-- 谱系 head CAS：`two concurrent revisions of v1 only one becomes v2 head`
-- 原 Command 重试：`prepareRetry reuses commandId and increments attempt`
-- 第二 Workflow Tool Call 全链路：`test/ai_product_action_domain_test.dart`
-- 投影幂等：`projection is idempotent for the same artifact id`
-- 取消零 Artifact：`cancel after model return before commit leaves zero artifacts`
+- 内容 Artifact 先于 lineage head：`head CAS happens only after content artifact exists`
+- 取消不留下悬空 head：`cancel after generate does not leave dangling lineage head`
+- Receipt 后投影可恢复：`receipt committed without projection is recovered without regenerating`
+  + Journal `projectedArtifactRefs` / `needsProjection`
+- 投影持久化失败可重试：`projection persist failure is retriable and not blocked by memory`
+- attempt 使用 Journal 值：`executor uses journaled attempt after prepareRetry`
+- 第二 Workflow：Domain 提供 Adapter + projectionMessage
+  （`second workflow tool call reaches receipt and domain projection`）
 
-仍未完成：200–300 条真实模型语义评测；Chat Sheet 仍保留 mind-map 与
-`AiRegisteredProductAction` 的 sealed 分支（新领域走 Registered，不再扩 switch）。
+仍未完成：200–300 条真实模型语义评测；单书/分册/合集/作品丢失四类
+生产恢复 Widget 级套件仍可扩充；Chat Sheet 仍有 mind-map sealed 执行分支。

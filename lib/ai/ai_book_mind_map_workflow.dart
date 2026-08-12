@@ -380,55 +380,36 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
             : artifactId;
         final revision = isRevise ? (command.expectedRevision! + 1) : 1;
 
-        try {
-          if (isRevise) {
-            final baseRevision = command.expectedRevision!;
-            // Legacy/history targets may not yet have a durable lineage head.
-            // Seed it at the frozen expected revision before CAS advance.
-            final currentHead = await artifacts.readLineageHead(lineageRootId);
-            if (currentHead == null) {
-              try {
-                await artifacts.commitLineageHead(
-                  AiArtifactLineageHead(
-                    lineageRootId: lineageRootId,
-                    headArtifactId: command.targetArtifactId!,
-                    revision: baseRevision,
-                    updatedAt: environment.now(),
-                  ),
-                  expectedRevision: null,
-                );
-              } on AiArtifactRevisionConflict {
-                // Concurrent worker seeded the head.
-              }
+        // Order: content Artifact first, then lineage head CAS.
+        // Head must never point at a missing Artifact. Cancel/crash after
+        // content write leaves an orphan content file recoverable by
+        // commandId prefix; head stays on the previous valid revision.
+        if (isRevise) {
+          final baseRevision = command.expectedRevision!;
+          final currentHead = await artifacts.readLineageHead(lineageRootId);
+          if (currentHead == null) {
+            try {
+              await artifacts.commitLineageHead(
+                AiArtifactLineageHead(
+                  lineageRootId: lineageRootId,
+                  headArtifactId: command.targetArtifactId!,
+                  revision: baseRevision,
+                  updatedAt: environment.now(),
+                ),
+                expectedRevision: null,
+              );
+            } on AiArtifactRevisionConflict {
+              // Concurrent worker seeded the head from the existing target.
             }
-            await artifacts.commitLineageHead(
-              AiArtifactLineageHead(
-                lineageRootId: lineageRootId,
-                headArtifactId: artifactId,
-                revision: revision,
-                updatedAt: environment.now(),
-              ),
-              expectedRevision: baseRevision,
+          } else if (currentHead.revision != baseRevision) {
+            yield AiWorkflowFailed(
+              workflowRunId: workflowRunId,
+              sequence: nextSequence(),
+              attempt: attempt,
+              publicErrorCode: 'mind_map_revision_conflict',
             );
-          } else {
-            await artifacts.commitLineageHead(
-              AiArtifactLineageHead(
-                lineageRootId: lineageRootId,
-                headArtifactId: artifactId,
-                revision: 1,
-                updatedAt: environment.now(),
-              ),
-              expectedRevision: null,
-            );
+            return;
           }
-        } on AiArtifactRevisionConflict {
-          yield AiWorkflowFailed(
-            workflowRunId: workflowRunId,
-            sequence: nextSequence(),
-            attempt: attempt,
-            publicErrorCode: 'mind_map_revision_conflict',
-          );
-          return;
         }
 
         if (_isCancelled(workflowRunId, cancelToken)) {
@@ -455,6 +436,48 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
             createdAt: environment.now(),
           ),
         );
+
+        if (_isCancelled(workflowRunId, cancelToken)) {
+          // Content exists but head was not advanced — safe orphan.
+          yield AiWorkflowCancelled(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+          );
+          return;
+        }
+
+        try {
+          if (isRevise) {
+            await artifacts.commitLineageHead(
+              AiArtifactLineageHead(
+                lineageRootId: lineageRootId,
+                headArtifactId: artifactId,
+                revision: revision,
+                updatedAt: environment.now(),
+              ),
+              expectedRevision: command.expectedRevision,
+            );
+          } else {
+            await artifacts.commitLineageHead(
+              AiArtifactLineageHead(
+                lineageRootId: lineageRootId,
+                headArtifactId: artifactId,
+                revision: 1,
+                updatedAt: environment.now(),
+              ),
+              expectedRevision: null,
+            );
+          }
+        } on AiArtifactRevisionConflict {
+          yield AiWorkflowFailed(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+            publicErrorCode: 'mind_map_revision_conflict',
+          );
+          return;
+        }
         artifactRefs.add(committed.artifactId);
 
         // Checkpoint before Receipt. Conversation projection happens only

@@ -1,8 +1,11 @@
 import 'ai_model_adapter.dart';
 import 'ai_product_action.dart';
 import 'ai_product_action_protocol.dart';
+import 'ai_test_book_export_workflow.dart';
+import 'ai_workflow_contract.dart';
 
-/// Domain-owned parsing and confirmation metadata for one registered action.
+/// Domain-owned parsing, confirmation, adapter and projection hooks for one
+/// registered action.
 ///
 /// Generic chat code looks up handlers by tool name / actionKind and never
 /// switches on concrete product types. Strong types stay inside the domain.
@@ -27,6 +30,16 @@ abstract interface class AiProductActionDomain {
   AiProductActionConfirmationView confirmationView(
     AiProductActionRequest request, {
     required Map<String, Object?> contextHints,
+  });
+
+  /// Optional Workflow adapter for this domain. Null means another registry
+  /// (e.g. mind-map create/revise) already owns the adapter instances.
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts);
+
+  /// Formats a durable success projection string for conversation.
+  String projectionMessage({
+    required AiProductActionRequest? request,
+    required List<String> artifactRefs,
   });
 }
 
@@ -85,6 +98,10 @@ class AiProductActionDomainRegistry {
         for (final domain in domains)
           if (!productionOnly || domain.productionExposed) domain.definition,
       ]);
+
+  List<AiWorkflowAdapter> buildAdapters(AiArtifactRepository artifacts) => [
+    for (final domain in domains) ?domain.createAdapter(artifacts),
+  ];
 
   AiProductActionRequest parseToolCall(
     AiModelToolCall call,
@@ -207,6 +224,15 @@ class AiBookMindMapCreateDomain implements AiProductActionDomain {
       },
     );
   }
+
+  @override
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) => null;
+
+  @override
+  String projectionMessage({
+    required AiProductActionRequest? request,
+    required List<String> artifactRefs,
+  }) => '已生成思维导图。';
 }
 
 class AiBookMindMapReviseDomain implements AiProductActionDomain {
@@ -290,6 +316,15 @@ class AiBookMindMapReviseDomain implements AiProductActionDomain {
       revisionLabel: revision == null ? null : '基于第 $revision 版',
     );
   }
+
+  @override
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) => null;
+
+  @override
+  String projectionMessage({
+    required AiProductActionRequest? request,
+    required List<String> artifactRefs,
+  }) => '已修改思维导图。';
 }
 
 /// Non-production test export domain used to prove registry-driven extension.
@@ -368,6 +403,17 @@ class AiTestBookExportDomain implements AiProductActionDomain {
     title: '确认测试导出',
     summary: '将生成一条测试导出 Artifact（非生产能力）。',
   );
+
+  @override
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) =>
+      AiTestBookExportWorkflowAdapter(artifacts: artifacts);
+
+  @override
+  String projectionMessage({
+    required AiProductActionRequest? request,
+    required List<String> artifactRefs,
+  }) =>
+      '已完成测试导出（artifact: ${artifactRefs.isEmpty ? '—' : artifactRefs.join(', ')}）';
 }
 
 /// Production domain registry (mind maps only).

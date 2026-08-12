@@ -389,6 +389,7 @@ class AiActionJournalEntry {
     this.receipt,
     this.attempt = 0,
     this.terminalReasonCode,
+    this.projectedArtifactRefs = const [],
   });
 
   factory AiActionJournalEntry.proposed(AiActionProposal proposal) =>
@@ -411,6 +412,26 @@ class AiActionJournalEntry {
   final DateTime updatedAt;
   final String? terminalReasonCode;
 
+  /// Artifact refs that have been durably projected into conversation.
+  /// Mutable after a terminal Receipt so crash recovery can finish projection
+  /// without re-running Workflow.
+  final List<String> projectedArtifactRefs;
+
+  List<String> get pendingProjectionRefs {
+    final receiptRefs = receipt?.artifactRefs ?? const <String>[];
+    if (receiptRefs.isEmpty) return const [];
+    final done = projectedArtifactRefs.toSet();
+    return [
+      for (final ref in receiptRefs)
+        if (!done.contains(ref)) ref,
+    ];
+  }
+
+  bool get needsProjection =>
+      (status == AiActionJournalStatus.succeeded ||
+          status == AiActionJournalStatus.partiallySucceeded) &&
+      pendingProjectionRefs.isNotEmpty;
+
   AiActionJournalEntry transition(
     AiActionJournalStatus next, {
     AiActionDecision? decision,
@@ -419,6 +440,7 @@ class AiActionJournalEntry {
     int? attempt,
     DateTime? now,
     String? terminalReasonCode,
+    List<String>? projectedArtifactRefs,
   }) {
     if (this.command != null &&
         command != null &&
@@ -459,6 +481,33 @@ class AiActionJournalEntry {
       attempt: attempt ?? this.attempt,
       updatedAt: now ?? DateTime.now(),
       terminalReasonCode: terminalReasonCode ?? this.terminalReasonCode,
+      projectedArtifactRefs:
+          projectedArtifactRefs ?? this.projectedArtifactRefs,
+    );
+  }
+
+  /// Records durable conversation projections without changing terminal status.
+  AiActionJournalEntry withProjectedRefs(
+    Iterable<String> refs, {
+    DateTime? now,
+  }) {
+    final merged = <String>{
+      ...projectedArtifactRefs,
+      for (final ref in refs)
+        if (ref.trim().isNotEmpty) ref.trim(),
+    };
+    return AiActionJournalEntry(
+      proposal: proposal,
+      decision: decision,
+      command: command,
+      receipt: receipt,
+      status: status,
+      stateVersion: stateVersion + 1,
+      eventSequence: eventSequence + 1,
+      attempt: attempt,
+      updatedAt: now ?? DateTime.now(),
+      terminalReasonCode: terminalReasonCode,
+      projectedArtifactRefs: List.unmodifiable(merged),
     );
   }
 
@@ -474,6 +523,8 @@ class AiActionJournalEntry {
     'attempt': attempt,
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     if (terminalReasonCode != null) 'terminalReasonCode': terminalReasonCode,
+    if (projectedArtifactRefs.isNotEmpty)
+      'projectedArtifactRefs': projectedArtifactRefs,
   };
 
   static AiActionJournalEntry? fromJson(Object? raw) {
@@ -484,6 +535,13 @@ class AiActionJournalEntry {
     final updatedAt = DateTime.tryParse('${json['updatedAt'] ?? ''}');
     if (proposal == null || status == null || updatedAt == null) return null;
     final command = _commandFromJson(json['command']);
+    final projectedRaw = json['projectedArtifactRefs'];
+    final projected = projectedRaw is List
+        ? [
+            for (final item in projectedRaw)
+              if ('$item'.trim().isNotEmpty) '$item'.trim(),
+          ]
+        : const <String>[];
     return AiActionJournalEntry(
       proposal: proposal,
       decision: AiActionDecision.fromJson(json['decision']),
@@ -495,6 +553,7 @@ class AiActionJournalEntry {
       attempt: _int(json['attempt']) ?? 0,
       updatedAt: updatedAt,
       terminalReasonCode: _string(json['terminalReasonCode']),
+      projectedArtifactRefs: List.unmodifiable(projected),
     );
   }
 

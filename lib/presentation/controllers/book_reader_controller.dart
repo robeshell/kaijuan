@@ -1062,6 +1062,7 @@ class BookReaderController extends ChangeNotifier {
     void Function(AiBookMindMap artifact)? onArtifact,
     required String actionProposalId,
     required AiAuthorizedCommand actionCommand,
+    int? attempt,
   }) {
     return _aiWorkspace.runMindMapProductAction(
       proposalId: actionProposalId,
@@ -1075,6 +1076,7 @@ class BookReaderController extends ChangeNotifier {
       command: command,
       baseMap: baseMap,
       cancelToken: cancelToken,
+      attempt: attempt,
       segmentedPublication:
           bookStructureManifest?.kind ==
           AiBookStructureKind.segmentedSingleWork,

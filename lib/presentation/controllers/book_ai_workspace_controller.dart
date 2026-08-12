@@ -119,12 +119,21 @@ class BookAiWorkspaceController {
       createMindMapAdapter,
       reviseMindMapAdapter,
     ]);
+    _rebuildExecutor();
+  }
+
+  void registerExtraAdapters(Iterable<AiWorkflowAdapter> extra) {
+    workflowAdapters = workflowAdapters.extended(extra);
+    _rebuildExecutor();
+  }
+
+  void _rebuildExecutor() {
     workflowExecutor = AiProductWorkflowExecutor(
       actions: actionController,
       adapters: workflowAdapters,
       environment: AiWorkflowEnvironment(
         capabilities: const AiCapabilitySet({}),
-        checkpoints: checkpoints,
+        checkpoints: workflowCheckpoints,
         now: DateTime.now,
       ),
     );
@@ -138,6 +147,98 @@ class BookAiWorkspaceController {
       return createMindMapAdapter;
     }
     throw StateError('Unsupported mind-map action: $actionKind');
+  }
+
+  /// Projects receipt artifact refs into conversation and returns refs that
+  /// were durably written. Safe to call again after a partial failure.
+  ///
+  /// Each successful durable write is journaled immediately so a later crash
+  /// only retries remaining refs.
+  Future<List<String>> projectReceiptArtifacts({
+    required String proposalId,
+    required List<String> receiptRefs,
+    required String turnId,
+    required String? workKey,
+    required String publicationTitle,
+    List<String> unitLabels = const [],
+    List<int> unitSectionCounts = const [],
+    void Function(AiBookMindMap artifact)? onArtifact,
+  }) async {
+    final projectedRefs = <String>[];
+    for (var index = 0; index < receiptRefs.length; index++) {
+      final ref = receiptRefs[index];
+      final envelope = await artifactRepository.read(ref);
+      if (envelope == null) continue;
+      final map = AiBookMindMapArtifactCodec.decode(envelope.payload);
+      if (map == null) continue;
+      final unitLabel = index < unitLabels.length
+          ? unitLabels[index]
+          : publicationTitle;
+      final sectionCount = index < unitSectionCounts.length
+          ? unitSectionCounts[index]
+          : map.scopeSectionIndices.length;
+      await mindMapConversation.projectArtifact(
+        turnId: turnId,
+        workKey: workKey,
+        unitLabel: unitLabel,
+        sectionCount: sectionCount,
+        artifact: map,
+      );
+      // Persist projection progress only after durable chat write succeeds.
+      await actionController.markProjected(proposalId: proposalId, refs: [ref]);
+      projectedRefs.add(ref);
+      onArtifact?.call(map);
+    }
+    return projectedRefs;
+  }
+
+  /// Completes conversation projection for a terminal success entry that was
+  /// interrupted after Receipt commit.
+  Future<BookAiMindMapBatchOutcome> reconcilePendingProjection(
+    AiActionJournalEntry entry, {
+    required String turnId,
+    required String? workKey,
+    required String publicationTitle,
+    void Function(AiBookMindMap artifact)? onArtifact,
+  }) async {
+    final pending = entry.pendingProjectionRefs;
+    if (pending.isEmpty) {
+      return const BookAiMindMapBatchOutcome(
+        completed: 0,
+        total: 0,
+        cancelled: false,
+      );
+    }
+    final labels =
+        (entry.command?.arguments['unitLabels'] as List?)
+            ?.map((value) => '$value')
+            .toList(growable: false) ??
+        const <String>[];
+    final counts =
+        (entry.command?.arguments['unitSectionCounts'] as List?)
+            ?.whereType<num>()
+            .map((value) => value.toInt())
+            .toList(growable: false) ??
+        const <int>[];
+    final projected = <AiBookMindMap>[];
+    await projectReceiptArtifacts(
+      proposalId: entry.proposal.proposalId,
+      receiptRefs: pending,
+      turnId: turnId,
+      workKey: workKey,
+      publicationTitle: publicationTitle,
+      unitLabels: labels,
+      unitSectionCounts: counts,
+      onArtifact: (map) {
+        projected.add(map);
+        onArtifact?.call(map);
+      },
+    );
+    return BookAiMindMapBatchOutcome(
+      completed: projected.length,
+      total: pending.length,
+      cancelled: false,
+    );
   }
 
   /// Runs an authorized mind-map command through the generic product executor.
@@ -241,31 +342,21 @@ class BookAiWorkspaceController {
           entry.receipt != null &&
           entry.receipt!.artifactRefs.isNotEmpty) {
         try {
-          final refs = entry.receipt!.artifactRefs;
-          for (var index = 0; index < refs.length; index++) {
-            final ref = refs[index];
-            final envelope = await artifactRepository.read(ref);
-            if (envelope == null) continue;
-            final map = AiBookMindMapArtifactCodec.decode(envelope.payload);
-            if (map == null) continue;
-            // Prefer the frozen unit order from this run; section index matching
-            // is unreliable across originSectionIndex vs index encodings.
-            final unitLabel = index < preparedUnits.length
-                ? preparedUnits[index].label
-                : publicationTitle;
-            final sectionCount = index < preparedUnits.length
-                ? preparedUnits[index].sections.length
-                : map.scopeSectionIndices.length;
-            await mindMapConversation.projectArtifact(
-              turnId: turnId,
-              workKey: workKey,
-              unitLabel: unitLabel,
-              sectionCount: sectionCount,
-              artifact: map,
-            );
-            projected.add(map);
-            onArtifact?.call(map);
-          }
+          await projectReceiptArtifacts(
+            proposalId: proposalId,
+            receiptRefs: entry.receipt!.artifactRefs,
+            turnId: turnId,
+            workKey: workKey,
+            publicationTitle: publicationTitle,
+            unitLabels: [for (final unit in preparedUnits) unit.label],
+            unitSectionCounts: [
+              for (final unit in preparedUnits) unit.sections.length,
+            ],
+            onArtifact: (map) {
+              projected.add(map);
+              onArtifact?.call(map);
+            },
+          );
         } catch (projectionError) {
           // Durable Workflow already succeeded. Projection is retryable and
           // must not rewrite the journal terminal state as a generation failure.

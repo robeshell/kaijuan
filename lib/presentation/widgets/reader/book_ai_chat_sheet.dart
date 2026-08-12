@@ -358,6 +358,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       (candidate) =>
           candidate.entry.proposal.conversationId == _c.item.contentHash,
     );
+    // Finish conversation projection for Receipts that never reached chat.
+    final needsProjection = scopedCandidates
+        .where(
+          (candidate) =>
+              candidate.disposition ==
+              AiActionRecoveryDisposition.needsProjection,
+        )
+        .toList(growable: false);
+    for (final candidate in needsProjection) {
+      await _reconcileProjectionIfNeeded(candidate.entry);
+    }
     final pending = scopedCandidates
         .where(
           (candidate) =>
@@ -427,6 +438,37 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         _appendMindMapClarification(
           proposal.originalUserText,
           aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
+        );
+      }
+    }
+  }
+
+  Future<void> _reconcileProjectionIfNeeded(AiActionJournalEntry entry) async {
+    if (!entry.needsProjection) return;
+    final workKey = entry.command?.workKey;
+    final turnId =
+        entry.proposal.turnId ?? 'projection-${entry.proposal.proposalId}';
+    try {
+      final outcome = await _c.aiWorkspace.reconcilePendingProjection(
+        entry,
+        turnId: turnId,
+        workKey: workKey,
+        publicationTitle: _c.item.title,
+        onArtifact: (artifact) {
+          final artifactId = artifact.artifactId;
+          if (!mounted || artifactId == null) return;
+          _mindMapCoordinator.reveal(artifactId);
+        },
+      );
+      if (mounted && outcome.completed > 0) {
+        setState(() {});
+      }
+    } catch (error) {
+      if (mounted) {
+        _appendMindMapClarification(
+          entry.proposal.originalUserText,
+          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
+          workKey: workKey,
         );
       }
     }
@@ -1669,8 +1711,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required AiActionProposal proposal,
     required AiBookMindMapProductTurn productTurn,
   }) async {
-    // Generic registered actions share Policy/Journal/Executor. Adapters are
-    // resolved by actionKind from the workspace registry (tests may extend it).
+    // Generic registered actions share Policy/Journal/Executor. Adapters and
+    // projection copy come from the domain registry — not a Widget switch.
+    final domains = kaijuanTestActionDomains();
+    final domain = domains.byActionKind(action.actionKind);
+    final adapter = domain?.createAdapter(_c.aiWorkspace.artifactRepository);
+    if (adapter != null &&
+        _c.aiWorkspace.workflowAdapters.lookup(action.actionKind) == null) {
+      _c.aiWorkspace.registerExtraAdapters([adapter]);
+    }
     final entry = await _c.aiWorkspace.actionController.journal.read(
       proposal.proposalId,
     );
@@ -1693,11 +1742,23 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     );
     if (!mounted) return;
     if (completed.status == AiActionJournalStatus.succeeded) {
+      final message =
+          domain?.projectionMessage(
+            request: action,
+            artifactRefs: completed.receipt?.artifactRefs ?? const [],
+          ) ??
+          '已完成 ${action.actionKind}';
       _appendMindMapClarification(
         originalText,
-        '已完成 ${action.actionKind}（artifact: ${completed.receipt?.artifactRefs.join(', ') ?? '—'}）',
+        message,
         workKey: productTurn.scopeSnapshot.conversationWorkKey,
       );
+      if (completed.receipt != null) {
+        await _c.aiWorkspace.actionController.markProjected(
+          proposalId: proposal.proposalId,
+          refs: completed.receipt!.artifactRefs,
+        );
+      }
     } else if (completed.status == AiActionJournalStatus.failed ||
         completed.status == AiActionJournalStatus.abandoned) {
       _appendMindMapClarification(
@@ -1789,18 +1850,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       );
       if (rearmed.status == AiActionJournalStatus.succeeded ||
           rearmed.status == AiActionJournalStatus.partiallySucceeded) {
-        // Already finished; surface existing receipt by re-projecting refs.
-        final command = rearmed.command;
-        if (command == null) return;
-        await _generateMindMapsInChat(
-          text,
-          await _unitsFromCommand(command, retryTarget: retryTarget),
-          baseMap: retryTarget,
-          retryTurnId: retryTurnId,
-          conversationWorkKey: command.workKey,
-          actionProposalId: proposalId,
-          actionCommand: command,
-        );
+        // Already finished; only complete any pending conversation projection.
+        await _reconcileProjectionIfNeeded(rearmed);
         return;
       }
       final command = rearmed.command;
@@ -1824,6 +1875,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         conversationWorkKey: command.workKey,
         actionProposalId: proposalId,
         actionCommand: command,
+        attempt: rearmed.attempt == 0 ? 1 : rearmed.attempt,
       );
     } catch (error) {
       if (mounted) {
@@ -2267,6 +2319,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     bool keepEditing = false,
     required String actionProposalId,
     required AiAuthorizedCommand actionCommand,
+    int? attempt,
   }) async {
     final workKey = conversationWorkKey;
     final turnId = _newTurnId();
@@ -2274,6 +2327,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _activeActionProposalId = actionProposalId;
     _activeTurnWorkKey = workKey;
     _cancel = CancelToken();
+    final journalEntry = await _c.aiWorkspace.actionController.journal.read(
+      actionProposalId,
+    );
+    final effectiveAttempt =
+        attempt ??
+        (journalEntry == null || journalEntry.attempt == 0
+            ? 1
+            : journalEntry.attempt);
     setState(() {
       _sending = true;
       _error = null;
@@ -2292,6 +2353,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       baseMap: baseMap,
       actionProposalId: actionProposalId,
       actionCommand: actionCommand,
+      attempt: effectiveAttempt,
       onArtifact: (artifact) {
         final artifactId = artifact.artifactId;
         if (!mounted) return;

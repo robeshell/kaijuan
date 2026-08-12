@@ -156,6 +156,11 @@ class BookAiMindMapController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Projects one mind-map artifact into conversation and durably persists it.
+  ///
+  /// If the message is already in memory but a previous [persist] failed, this
+  /// retries the durable write instead of no-opping. Only a successful persist
+  /// counts as a completed projection.
   Future<void> projectArtifact({
     required String turnId,
     required String? workKey,
@@ -164,25 +169,27 @@ class BookAiMindMapController extends ChangeNotifier {
     required AiBookMindMap artifact,
   }) async {
     final artifactId = artifact.artifactId;
-    if (artifactId != null &&
-        _conversation.hasMindMapArtifact(artifactId, workKey: workKey)) {
-      // Idempotent: recovery / re-projection must not duplicate messages.
-      return;
+    final alreadyInMemory =
+        artifactId != null &&
+        _conversation.hasMindMapArtifact(artifactId, workKey: workKey);
+    if (!alreadyInMemory) {
+      final artifactTurnId =
+          artifactId ??
+          '$turnId-mind-map-${DateTime.now().microsecondsSinceEpoch}';
+      _conversation.appendMessage(
+        AiChatMessage(
+          role: AiMessageRole.assistant,
+          content: '已根据《$unitLabel》的 $sectionCount 章内容生成思维导图。',
+          createdAt: DateTime.now(),
+          turnId: artifactTurnId,
+          status: AiChatTurnStatus.completed,
+          mindMap: artifact,
+        ),
+        workKey: workKey,
+      );
     }
-    final artifactTurnId =
-        artifactId ??
-        '$turnId-mind-map-${DateTime.now().microsecondsSinceEpoch}';
-    _conversation.appendMessage(
-      AiChatMessage(
-        role: AiMessageRole.assistant,
-        content: '已根据《$unitLabel》的 $sectionCount 章内容生成思维导图。',
-        createdAt: DateTime.now(),
-        turnId: artifactTurnId,
-        status: AiChatTurnStatus.completed,
-        mindMap: artifact,
-      ),
-      workKey: workKey,
-    );
+    // Always attempt durable write. A failed previous persist leaves the
+    // in-memory message; retry must re-run persist rather than skip.
     await _conversation.persist();
   }
 

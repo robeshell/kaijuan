@@ -4,7 +4,6 @@ import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_product_action_controller.dart';
 import 'package:kaijuan/ai/ai_product_action_domain.dart';
 import 'package:kaijuan/ai/ai_product_action_protocol.dart';
-import 'package:kaijuan/ai/ai_test_book_export_workflow.dart';
 import 'package:kaijuan/ai/ai_workflow_contract.dart';
 import 'package:kaijuan/ai/ai_workflow_executor.dart';
 
@@ -12,7 +11,7 @@ void main() {
   final now = DateTime.utc(2026, 8, 12, 12);
 
   test(
-    'second workflow tool call reaches receipt without generic action switch',
+    'second workflow tool call reaches receipt and domain projection',
     () async {
       final domains = kaijuanTestActionDomains();
       final context = AiChatProductContext(
@@ -20,7 +19,6 @@ void main() {
         toolParser: domains.parseToolCall,
       );
 
-      // Real tool-call parse path — no hard-coded mind-map branch required.
       final request = context.parse(
         const AiModelToolCall(
           id: 'call-1',
@@ -32,9 +30,8 @@ void main() {
       final registered = request as AiRegisteredProductAction;
       expect(registered.actionKind, 'test_book_export');
 
-      final definition = domains
-          .byActionKind(registered.actionKind)!
-          .definition;
+      final domain = domains.byActionKind(registered.actionKind)!;
+      final definition = domain.definition;
       final journal = MemoryAiActionJournalStore();
       final controller = AiProductActionController(
         registry: AiProductActionRegistry([definition]),
@@ -72,11 +69,13 @@ void main() {
       await controller.queue('export-e2e');
 
       final artifacts = MemoryAiArtifactRepository();
+      final adapters = AiWorkflowAdapterRegistry(
+        domains.buildAdapters(artifacts),
+      );
+      expect(adapters.lookup('test_book_export'), isNotNull);
       final executor = AiProductWorkflowExecutor(
         actions: controller,
-        adapters: AiWorkflowAdapterRegistry([
-          AiTestBookExportWorkflowAdapter(artifacts: artifacts),
-        ]),
+        adapters: adapters,
         environment: AiWorkflowEnvironment(
           capabilities: const AiCapabilitySet({'book.read'}),
           checkpoints: MemoryAiWorkflowCheckpointStore(),
@@ -87,12 +86,20 @@ void main() {
       expect(completed.status, AiActionJournalStatus.succeeded);
       expect(completed.receipt?.artifactRefs, isNotEmpty);
 
-      // Domain confirmation view also comes from registration, not widget switch.
-      final view = domains
-          .byActionKind(registered.actionKind)!
-          .confirmationView(registered, contextHints: const {});
+      final view = domain.confirmationView(registered, contextHints: const {});
       expect(view.title, isNotEmpty);
       expect(view.summary, contains('测试导出'));
+      final projected = domain.projectionMessage(
+        request: registered,
+        artifactRefs: completed.receipt!.artifactRefs,
+      );
+      expect(projected, contains('测试导出'));
+      await controller.markProjected(
+        proposalId: 'export-e2e',
+        refs: completed.receipt!.artifactRefs,
+      );
+      final after = await journal.read('export-e2e');
+      expect(after!.needsProjection, isFalse);
     },
   );
 
@@ -110,6 +117,17 @@ void main() {
     expect(
       testing.definitions.any((d) => d.actionKind == 'test_book_export'),
       isTrue,
+    );
+  });
+
+  test('domain registry builds adapters without central actionKind switch', () {
+    final domains = kaijuanTestActionDomains();
+    final artifacts = MemoryAiArtifactRepository();
+    final adapters = domains.buildAdapters(artifacts);
+    expect(adapters.map((a) => a.actionKind), contains('test_book_export'));
+    expect(
+      adapters.map((a) => a.actionKind),
+      isNot(contains('create_book_mind_map')),
     );
   });
 }

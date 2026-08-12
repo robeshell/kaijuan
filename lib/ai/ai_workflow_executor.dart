@@ -74,9 +74,9 @@ class AiProductWorkflowExecutor {
     }
 
     final recovering = entry.status == AiActionJournalStatus.executing;
-    final effectiveAttempt = recovering
-        ? (entry.attempt == 0 ? attempt : entry.attempt)
-        : attempt;
+    // Prefer the journaled attempt (prepareRetry increments it) so checkpoints
+    // and receipts audit the correct attempt identity.
+    final effectiveAttempt = entry.attempt > 0 ? entry.attempt : attempt;
     if (entry.status == AiActionJournalStatus.authorized ||
         entry.status == AiActionJournalStatus.queued) {
       entry = await actions.markExecuting(
