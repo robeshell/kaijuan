@@ -8,7 +8,6 @@ import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_conversation_intent.dart';
 import '../../ai/ai_mind_map.dart';
 import '../../ai/ai_models.dart';
-import '../../ai/ai_product_action_protocol.dart';
 import 'book_ai_conversation_controller.dart';
 
 typedef BookAiMindMapGenerationUnit = ({
@@ -47,14 +46,11 @@ class BookAiMindMapBatchOutcome {
   bool get succeeded => !cancelled && completed == total;
 }
 
-/// Owns the deterministic native mind-map product turn inside chat.
+/// Owns a native mind-map **session turn** inside chat (not a Journal job).
 ///
-/// Scope selection remains a user interaction. Once the view supplies frozen
-/// units and an authorized command, this controller owns the pending user turn,
-/// artifact lineage, progress, terminal status, retry identity and session
-/// persistence. Production execution goes through
-/// [BookAiWorkspaceController.runMindMapProductAction]; this class still
-/// validates commands and projects durable conversation messages.
+/// After the view freezes generation units, this controller owns the pending
+/// user turn, progress, projection into conversation messages, and session
+/// persistence. No Product Action Command / Receipt is required.
 class BookAiMindMapController extends ChangeNotifier {
   BookAiMindMapController(this._conversation);
 
@@ -82,44 +78,6 @@ class BookAiMindMapController extends ChangeNotifier {
     if (_attachedArtifactId == null) return;
     _attachedArtifactId = null;
     notifyListeners();
-  }
-
-  void validateActionCommand({
-    required AiAuthorizedCommand actionCommand,
-    required List<BookAiMindMapGenerationUnit> units,
-    AiBookMindMap? baseMap,
-  }) {
-    if (actionCommand.actionKind == 'revise_book_mind_map' && baseMap == null) {
-      throw StateError('Revision command requires a target mind map');
-    }
-    if (actionCommand.actionKind != 'create_book_mind_map' &&
-        actionCommand.actionKind != 'revise_book_mind_map') {
-      throw StateError('Unsupported mind-map action command');
-    }
-    if (actionCommand.scopeSectionIndices.isEmpty) {
-      throw StateError('Mind-map action command has no frozen scope');
-    }
-    final frozenScope = actionCommand.scopeSectionIndices.toSet();
-    final requestedSections = <int>{};
-    for (final unit in units) {
-      for (final section in unit.frozenSections ?? const []) {
-        requestedSections.add(section.index);
-      }
-    }
-    if (requestedSections.isEmpty ||
-        requestedSections.length != frozenScope.length ||
-        !requestedSections.every(frozenScope.contains)) {
-      throw StateError('Mind-map action command scope does not match input');
-    }
-    if (actionCommand.actionKind == 'revise_book_mind_map') {
-      final targetId = baseMap?.artifactId;
-      if (targetId == null || actionCommand.targetArtifactId != targetId) {
-        throw StateError('Mind-map revision target does not match command');
-      }
-      if (actionCommand.expectedRevision != baseMap?.revision) {
-        throw StateError('Mind-map revision is stale');
-      }
-    }
   }
 
   void beginProductTurn({
@@ -215,9 +173,7 @@ class BookAiMindMapController extends ChangeNotifier {
     }
   }
 
-  /// Local batch runner used by unit tests and by callers that already hold a
-  /// validated [actionCommand]. Production chat goes through the workspace
-  /// product executor so journal, checkpoints and receipts stay consistent.
+  /// Session batch: freeze units → generate → project messages. No Journal.
   Future<BookAiMindMapBatchOutcome> generate({
     required String turnId,
     required String? workKey,
@@ -232,14 +188,8 @@ class BookAiMindMapController extends ChangeNotifier {
     String? retryTurnId,
     AiConversationCommand? command,
     bool segmentedPublication = false,
-    required AiAuthorizedCommand actionCommand,
     void Function(AiBookMindMap artifact)? onArtifact,
   }) async {
-    validateActionCommand(
-      actionCommand: actionCommand,
-      units: units,
-      baseMap: baseMap,
-    );
     beginProductTurn(
       turnId: turnId,
       workKey: workKey,

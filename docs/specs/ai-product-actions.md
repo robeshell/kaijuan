@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | v1 控制面为**重任务平台**；**图书思维导图产品主路径改为轻会话**（见 [ai-mind-map.md](./ai-mind-map.md)，实现收敛中）；**知识图谱为 Domain Job**（§3.6） |
+| **状态** | v1 控制面为**重任务平台**；**图书思维导图主路径为会话生成、不经 Journal**（见 [ai-mind-map.md](./ai-mind-map.md)）；**知识图谱为 Domain Job**（§3.6） |
 | **日期** | 2026-08-12 |
 | **收口设计** | [ai-architecture-consolidation.md](../research/ai-architecture-consolidation.md) |
 | **PRODUCT** | [§6](../PRODUCT.md) |

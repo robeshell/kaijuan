@@ -120,18 +120,12 @@ void main() {
     );
   });
 
-  test('domain registry builds adapters without central actionKind switch', () {
+  test('domain registry builds adapters only for Workflow domains', () {
     final domains = kaijuanTestActionDomains();
     final artifacts = MemoryAiArtifactRepository();
     final adapters = domains.buildAdapters(artifacts);
-    expect(
-      adapters.map((a) => a.actionKind),
-      containsAll([
-        'create_book_mind_map',
-        'revise_book_mind_map',
-        'test_book_export',
-      ]),
-    );
+    // Mind-map domains are session products (null adapter).
+    expect(adapters.map((a) => a.actionKind), ['test_book_export']);
   });
 
   test('production registry cannot resolve test_book_export', () {

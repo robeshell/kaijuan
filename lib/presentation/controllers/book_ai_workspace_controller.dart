@@ -3,11 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../../ai/ai_agent_runtime.dart';
 import '../../ai/ai_agent_runtime_gate.dart';
 import '../../ai/ai_book_mind_map_service.dart';
-import '../../ai/ai_book_mind_map_product_actions.dart';
-import '../../ai/ai_book_mind_map_workflow.dart';
-import '../../ai/ai_book_structure.dart';
+import '../../ai/ai_book_mind_map_workflow.dart'; // AiBookMindMapArtifactCodec for heavy projection
 import '../../ai/ai_cancel.dart';
-import '../../ai/ai_chat.dart';
 import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_conversation_intent.dart';
 import '../../ai/ai_graph_service.dart';
@@ -85,8 +82,6 @@ class BookAiWorkspaceController {
   late final AiProductActionController actionController;
   AiArtifactRepository artifactRepository;
   AiWorkflowCheckpointStore workflowCheckpoints;
-  late AiBookMindMapWorkflowAdapter createMindMapAdapter;
-  late AiBookMindMapWorkflowAdapter reviseMindMapAdapter;
   late AiWorkflowAdapterRegistry workflowAdapters;
   late AiProductWorkflowExecutor workflowExecutor;
 
@@ -127,21 +122,9 @@ class BookAiWorkspaceController {
   }
 
   void _rebuildAdaptersFromDomains() {
+    // Mind-map domains return null adapters (session path). Only heavy
+    // registered domains (e.g. test export) contribute Workflow adapters.
     final built = actionDomains.buildAdapters(artifactRepository);
-    createMindMapAdapter =
-        built.firstWhere(
-              (adapter) =>
-                  adapter.actionKind ==
-                  AiBookMindMapProductActions.create.actionKind,
-            )
-            as AiBookMindMapWorkflowAdapter;
-    reviseMindMapAdapter =
-        built.firstWhere(
-              (adapter) =>
-                  adapter.actionKind ==
-                  AiBookMindMapProductActions.revise.actionKind,
-            )
-            as AiBookMindMapWorkflowAdapter;
     workflowAdapters = AiWorkflowAdapterRegistry(built);
     _rebuildExecutor();
   }
@@ -181,19 +164,10 @@ class BookAiWorkspaceController {
     );
   }
 
-  AiBookMindMapWorkflowAdapter mindMapAdapterFor(String actionKind) {
-    if (actionKind == AiBookMindMapProductActions.revise.actionKind) {
-      return reviseMindMapAdapter;
-    }
-    if (actionKind == AiBookMindMapProductActions.create.actionKind) {
-      return createMindMapAdapter;
-    }
-    throw StateError('Unsupported mind-map action: $actionKind');
-  }
-
   /// Projects receipt artifact refs into conversation and returns refs that
   /// were durably written. Safe to call again after a partial failure.
   ///
+  /// Used by heavy Product Action domains only (not mind-map session path).
   /// Each successful durable write is journaled immediately so a later crash
   /// only retries remaining refs.
   Future<List<String>> projectReceiptArtifacts({
@@ -283,13 +257,9 @@ class BookAiWorkspaceController {
     );
   }
 
-  /// Runs an authorized mind-map command through the generic product executor.
-  ///
-  /// Order is fixed: generate → Artifact commit → checkpoint → Receipt →
-  /// conversation projection. Projection never runs before Receipt.
-  Future<BookAiMindMapBatchOutcome> runMindMapProductAction({
-    required String proposalId,
-    required AiAuthorizedCommand actionCommand,
+  /// Session mind-map run: units → model generate → chat projection.
+  /// No Product Action Journal / Command / Receipt.
+  Future<BookAiMindMapBatchOutcome> runMindMapSession({
     required String turnId,
     required String? workKey,
     required String text,
@@ -303,160 +273,23 @@ class BookAiWorkspaceController {
     AiConversationCommand? command,
     bool segmentedPublication = false,
     void Function(AiBookMindMap artifact)? onArtifact,
-    int? attempt,
-  }) async {
-    mindMapConversation.validateActionCommand(
-      actionCommand: actionCommand,
-      units: units,
-      baseMap: baseMap,
-    );
-
-    final preparedUnits =
-        <
-          ({AiBookWork? work, String label, List<AiBookSectionSlice> sections})
-        >[];
-    for (final unit in units) {
-      final sections = unit.frozenSections ?? await loadSections(unit);
-      preparedUnits.add((
-        work: unit.work,
-        label: unit.label,
-        sections: sections,
-      ));
-    }
-
-    final adapter = mindMapAdapterFor(actionCommand.actionKind);
-    mindMapConversation.beginProductTurn(
+  }) {
+    return mindMapConversation.generate(
       turnId: turnId,
       workKey: workKey,
       text: text,
+      publicationTitle: publicationTitle,
+      units: units,
+      loadSections: loadSections,
+      generateMap: generateMap,
+      isCancelled: () => cancelToken.isCancelled,
+      generationError: () => mindMapError,
+      baseMap: baseMap,
       retryTurnId: retryTurnId,
       command: command,
+      segmentedPublication: segmentedPublication,
+      onArtifact: onArtifact,
     );
-
-    adapter.stage(
-      actionCommand.commandId,
-      AiBookMindMapStagedRun(
-        units: preparedUnits,
-        userInstruction: text,
-        publicationTitle: publicationTitle,
-        baseMap: baseMap,
-        generateUnit:
-            ({
-              required work,
-              required label,
-              required sections,
-              required progressLabel,
-              required cancelToken,
-            }) async {
-              mindMapConversation.setProgress(progressLabel);
-              return generateMap(
-                (
-                  work: work,
-                  label: label,
-                  frozenSections: sections,
-                  estimatedSections: sections.length,
-                ),
-                sections,
-                progressLabel,
-              );
-            },
-        onProgress: mindMapConversation.setProgress,
-      ),
-    );
-
-    try {
-      final entry = await workflowExecutor.execute(
-        proposalId,
-        cancelToken: cancelToken,
-        attempt: attempt ?? 1,
-      );
-      final cancelled =
-          entry.status == AiActionJournalStatus.cancelled ||
-          cancelToken.isCancelled;
-      final succeeded = entry.status == AiActionJournalStatus.succeeded;
-      final partially =
-          entry.status == AiActionJournalStatus.partiallySucceeded;
-
-      final projected = <AiBookMindMap>[];
-      // Projection is App-owned and happens only after a non-cancelled Receipt.
-      if (!cancelled &&
-          (succeeded || partially) &&
-          entry.receipt != null &&
-          entry.receipt!.artifactRefs.isNotEmpty) {
-        try {
-          await projectReceiptArtifacts(
-            proposalId: proposalId,
-            receiptRefs: entry.receipt!.artifactRefs,
-            turnId: turnId,
-            workKey: workKey,
-            publicationTitle: publicationTitle,
-            unitLabels: [for (final unit in preparedUnits) unit.label],
-            unitSectionCounts: [
-              for (final unit in preparedUnits) unit.sections.length,
-            ],
-            onArtifact: (map) {
-              projected.add(map);
-              onArtifact?.call(map);
-            },
-          );
-        } catch (projectionError) {
-          // Durable Workflow already succeeded. Projection is retryable and
-          // must not rewrite the journal terminal state as a generation failure.
-          AiLog.d('mind map projection failed: $projectionError');
-          mindMapConversation.finishProductTurn(
-            turnId: turnId,
-            workKey: workKey,
-            status: AiChatTurnStatus.completed,
-            allowRetry: false,
-          );
-          return BookAiMindMapBatchOutcome(
-            completed: projected.length,
-            total: preparedUnits.length,
-            cancelled: false,
-            userMessage: 'mind_map_projection_failed',
-            error: projectionError,
-          );
-        }
-      }
-
-      mindMapConversation.finishProductTurn(
-        turnId: turnId,
-        workKey: workKey,
-        status: cancelled
-            ? AiChatTurnStatus.cancelled
-            : succeeded || partially
-            ? AiChatTurnStatus.completed
-            : AiChatTurnStatus.failed,
-        allowRetry: !cancelled && projected.isEmpty && !succeeded,
-      );
-      return BookAiMindMapBatchOutcome(
-        completed: projected.length,
-        total: preparedUnits.length,
-        cancelled: cancelled,
-        failedUnit: succeeded || partially || cancelled
-            ? null
-            : (units.isEmpty ? null : units.first),
-        userMessage: succeeded || partially || cancelled
-            ? null
-            : entry.receipt?.publicErrorCode,
-      );
-    } catch (error) {
-      mindMapConversation.finishProductTurn(
-        turnId: turnId,
-        workKey: workKey,
-        status: cancelToken.isCancelled
-            ? AiChatTurnStatus.cancelled
-            : AiChatTurnStatus.failed,
-        error: error,
-        allowRetry: !cancelToken.isCancelled,
-      );
-      return BookAiMindMapBatchOutcome(
-        completed: 0,
-        total: preparedUnits.length,
-        cancelled: cancelToken.isCancelled,
-        error: error,
-      );
-    }
   }
 
   AiSettingsController? _settings;
@@ -611,11 +444,10 @@ class BookAiWorkspaceController {
     return result;
   }
 
-  /// Content-generation hook for one frozen unit. Used only as the
-  /// `generateMap` callback inside [runMindMapProductAction] — not a product
-  /// entry. Presentation must not call this for user intents; product path is
-  /// always Proposal → Command → [runMindMapProductAction].
+  /// Content-generation hook for one frozen unit (model I/O only).
+  /// Session orchestration goes through [runMindMapSession].
   Future<AiBookMindMap?> generateMindMapContent({
+
     required String contentHash,
     required String? workKey,
     required String publicationTitle,

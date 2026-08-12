@@ -1,5 +1,4 @@
 import 'ai_book_mind_map_product_actions.dart';
-import 'ai_book_mind_map_workflow.dart';
 import 'ai_model_adapter.dart';
 import 'ai_product_action.dart';
 import 'ai_product_action_protocol.dart';
@@ -190,11 +189,8 @@ class AiBookMindMapCreateDomain implements AiProductActionDomain {
   }
 
   @override
-  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) =>
-      AiBookMindMapWorkflowAdapter(
-        actionKind: actionKind,
-        artifacts: artifacts,
-      );
+  // Mind maps are session products; no Workflow adapter.
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) => null;
 
   @override
   String projectionMessage({
@@ -264,11 +260,8 @@ class AiBookMindMapReviseDomain implements AiProductActionDomain {
   }
 
   @override
-  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) =>
-      AiBookMindMapWorkflowAdapter(
-        actionKind: actionKind,
-        artifacts: artifacts,
-      );
+  // Mind maps are session products; no Workflow adapter.
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) => null;
 
   @override
   String projectionMessage({

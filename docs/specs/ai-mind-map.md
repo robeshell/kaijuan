@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | **目标：轻会话产物（默认）**；实现仍部分走 Product Action 重路径，以本文为目标收敛 |
+| **状态** | **轻会话产物（已落地）**；主路径不经 Product Action Journal |
 | **日期** | 2026-08-12 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **相关** | [ai.md](./ai.md)、[ai-product-actions.md](./ai-product-actions.md)、[ai-graph.md](./ai-graph.md)、[webdav-backup.md](./webdav-backup.md) |
@@ -150,7 +150,7 @@ AiBookMindMapNode
 
 ### 7.1 实现收敛说明（文档债）
 
-轻路径已落地：自由输入 create/revise 无确认卡；会话改图不设「继续修改」按钮（默认最近/preferred 图）。Journal 控制面仍可承载崩溃恢复与重任务，**不**作为导图日常交互门槛。
+轻路径已落地：快捷 / 自由输入 create·revise → 冻结范围 → 生成 → 写入对话附件。**不经** Proposal / Journal / Command / Receipt。模型仍可用 `create_book_mind_map` / `revise_book_mind_map` 工具声明意图（解析与工具目录），但执行是会话生成。Product Action 平台留给未来整本译、导出等重任务。
 
 ---
 

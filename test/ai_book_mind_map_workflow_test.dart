@@ -558,47 +558,8 @@ void main() {
           estimatedSections: 1,
         ),
       ];
-      final controller = workspace.actionController;
-      // Replace id generator by using a fresh controller is hard; drive via
-      // public authorize path on workspace.actionController.
-      await controller.propose(
-        AiActionProposal(
-          protocolVersion: 1,
-          proposalId: 'ws-proposal',
-          parentRunId: null,
-          conversationId: null,
-          turnId: null,
-          actionKind: 'create_book_mind_map',
-          definitionVersion: 1,
-          proposalSchemaVersion: 1,
-          source: AiActionProposalSource.explicitUi,
-          sourceSubmissionId: 'ws-sub',
-          originalUserText: '生成',
-          requestedArguments: const {},
-          createdAt: now,
-          expiresAt: now.add(const Duration(hours: 1)),
-        ),
-        deferExplicitAuthorization: true,
-      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
-    );
-      final authorized = await controller.authorize(
-        proposalId: 'ws-proposal',
-        authorizationSubmissionId: 'ws-sub',
-        authorizationEvidence: 'ui',
-        normalizedArguments: const {
-          'scopeFingerprint': 'sections:1',
-          'scopeSectionIndices': [1],
-          'contentHash': 'hash',
-        },
-      );
-      await controller.queue('ws-proposal');
-
-      // First run: force projection failure by closing conversation mid-way is
-      // hard; instead call project twice after success to prove idempotency,
-      // and assert generate is once.
-      final outcome = await workspace.runMindMapProductAction(
-        proposalId: 'ws-proposal',
-        actionCommand: authorized.command!,
+      // Session path: no Journal authorize. Projection is part of generate.
+      final outcome = await workspace.runMindMapSession(
         turnId: 'turn-ws',
         workKey: null,
         text: '生成',

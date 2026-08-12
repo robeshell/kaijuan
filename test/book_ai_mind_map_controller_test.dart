@@ -3,38 +3,10 @@ import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
-import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 import 'package:kaijuan/presentation/controllers/book_ai_conversation_controller.dart';
 import 'package:kaijuan/presentation/controllers/book_ai_mind_map_controller.dart';
 
 void main() {
-  AiAuthorizedCommand commandFor(List<BookAiMindMapGenerationUnit> units) {
-    final indices = [
-      for (final unit in units)
-        for (final section
-            in unit.frozenSections ?? const <AiBookSectionSlice>[])
-          section.index,
-    ];
-    return AiAuthorizedCommand(
-      protocolVersion: 1,
-      commandId: 'command-test',
-      proposalId: 'proposal-test',
-      actionKind: 'create_book_mind_map',
-      definitionVersion: 1,
-      commandSchemaVersion: 1,
-      workflowVersion: 1,
-      authorizationSource: AiActionProposalSource.explicitUi,
-      authorizationSubmissionId: 'submission-test',
-      authorizationEvidence: 'test',
-      authorizedAt: DateTime.utc(2026, 8, 12),
-      idempotencyKey: 'idem-test',
-      arguments: const {},
-      originalUserText: '生成思维导图',
-      scopeSectionIndices: indices,
-      scopeFingerprint: 'sections:${indices.join(',')}',
-    );
-  }
-
   const firstWork = AiBookWork(
     id: 'work-1',
     title: '第一部',
@@ -112,7 +84,6 @@ void main() {
         publicationTitle: '合集',
         units: const [firstUnit, secondUnit],
         segmentedPublication: true,
-        actionCommand: commandFor(const [firstUnit, secondUnit]),
         isCancelled: () => false,
         loadSections: (_) => throw StateError('frozen sections must be used'),
         generateMap: (unit, _, _) async => mapFor(unit),
@@ -151,7 +122,6 @@ void main() {
         text: '生成全部',
         publicationTitle: '合集',
         units: const [firstUnit, secondUnit],
-        actionCommand: commandFor(const [firstUnit, secondUnit]),
         isCancelled: () => false,
         generationError: () => '第二部失败',
         loadSections: (_) => throw StateError('frozen sections must be used'),
@@ -189,7 +159,6 @@ void main() {
         text: '生成第一部',
         publicationTitle: '合集',
         units: const [firstUnit],
-        actionCommand: commandFor(const [firstUnit]),
         isCancelled: () => cancelled,
         loadSections: (_) => throw StateError('frozen sections must be used'),
         generateMap: (unit, _, _) async {
@@ -209,59 +178,4 @@ void main() {
     },
   );
 
-  test('rejects missing frozen scope or wrong action kind on command', () {
-    final conversation = BookAiConversationController((_) async {})
-      ..hydrate(const AiChatSession(contentHash: 'hash', itemId: 'item'));
-    final controller = BookAiMindMapController(conversation);
-    final wrongKind = commandFor(const [firstUnit]);
-    final emptyScope = AiAuthorizedCommand(
-      protocolVersion: wrongKind.protocolVersion,
-      commandId: wrongKind.commandId,
-      proposalId: wrongKind.proposalId,
-      actionKind: wrongKind.actionKind,
-      definitionVersion: wrongKind.definitionVersion,
-      commandSchemaVersion: wrongKind.commandSchemaVersion,
-      workflowVersion: wrongKind.workflowVersion,
-      authorizationSource: wrongKind.authorizationSource,
-      authorizationSubmissionId: wrongKind.authorizationSubmissionId,
-      authorizationEvidence: wrongKind.authorizationEvidence,
-      authorizedAt: wrongKind.authorizedAt,
-      idempotencyKey: wrongKind.idempotencyKey,
-      arguments: wrongKind.arguments,
-      originalUserText: wrongKind.originalUserText,
-      scopeSectionIndices: const [],
-    );
-    expect(
-      () => controller.validateActionCommand(
-        actionCommand: emptyScope,
-        units: const [firstUnit],
-      ),
-      throwsStateError,
-    );
-    expect(
-      () => controller.validateActionCommand(
-        actionCommand: AiAuthorizedCommand(
-          protocolVersion: wrongKind.protocolVersion,
-          commandId: wrongKind.commandId,
-          proposalId: wrongKind.proposalId,
-          actionKind: 'create_book_presentation',
-          definitionVersion: wrongKind.definitionVersion,
-          commandSchemaVersion: wrongKind.commandSchemaVersion,
-          workflowVersion: wrongKind.workflowVersion,
-          authorizationSource: wrongKind.authorizationSource,
-          authorizationSubmissionId: wrongKind.authorizationSubmissionId,
-          authorizationEvidence: wrongKind.authorizationEvidence,
-          authorizedAt: wrongKind.authorizedAt,
-          idempotencyKey: wrongKind.idempotencyKey,
-          arguments: wrongKind.arguments,
-          originalUserText: wrongKind.originalUserText,
-          scopeSectionIndices: wrongKind.scopeSectionIndices,
-        ),
-        units: const [firstUnit],
-      ),
-      throwsStateError,
-    );
-    controller.dispose();
-    conversation.dispose();
-  });
 }

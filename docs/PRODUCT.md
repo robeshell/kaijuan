@@ -289,7 +289,7 @@
 | AI 产品动作控制协议 | **已有（v1 平台能力）** | Proposal → Policy → Command → Journal → Receipt，供**重任务**（整本译、导出、外写等）使用。**图书思维导图默认不再以完整确认/工单流为产品主路径**（轻会话，见 [ai-mind-map.md](./specs/ai-mind-map.md)）。知识图谱为 Domain Job（自有 `ai_graph/`，见 [ai-product-actions.md](./specs/ai-product-actions.md) §3.6）。 |
 | AI Workflow 扩展契约 | **已有（v1 契约；领域按需接入）** | 注册化 Domain/Tool 解析、能力门禁、持久 checkpoint/Artifact/lineage head、第二测试 Workflow 全链路证明。PPT 只是协议参考场景，**不是当前已立项能力**；见 [ai-workflow-extension.md](./specs/ai-workflow-extension.md) |
 | AI 大纲 | **已有（对话快捷操作）** | 本书 AI「对话」中的「生成本书大纲」快捷操作，直接复用对话的书内上下文、检索工具与流式回答；回答作为普通对话消息保存。**不再提供**独立结构化大纲生成任务或主入口；会话 JSON 中的历史 `outline` 字段可忽略。 |
-| 图书思维导图 | **已有（MVP）；轻会话路径** | 本书对话内原生主题树 + 画布（非独立 Tab）。快捷或自然语言生成后**直接出图**；**接着聊即可改细**（默认最近/preferred 一张），无「继续修改」按钮门槛，自由输入**不弹确认生成卡**。App 冻结章/作品/全书范围；`AiBookMindMapService` 一次结构化生成；支持布局/折叠/导出等。普通 Mermaid 独立。不引入 LangChain。规格见 [ai-mind-map.md](./specs/ai-mind-map.md)。 |
+| 图书思维导图 | **已有（MVP）；会话产物** | 本书对话内原生主题树 + 画布。快捷或自然语言 → 冻结范围 → 直接生成/改细（默认最近/preferred），无确认卡、无「继续修改」、**不经 Product Action Journal**。`AiBookMindMapService` 一次结构化生成。普通 Mermaid 独立。见 [ai-mind-map.md](./specs/ai-mind-map.md)。 |
 | 整本 / 按章翻译任务 | **中** | 后台队列、进度、可取消；**复用翻译偏好**；契约 `fullBookTranslation` 已预留 |
 | 知识图谱 | **已有（v3）** | 保留本书 AI 入口与单本/分段单本/文件内多作品识别；识别后由用户先选作品、再选该作品的具体内容单元。程序可以把前言、目录、附言、索引等标为“建议排除”并默认取消，但必须完整展示并允许重新选择，不能把范围绑定到当前阅读位置。确认范围后逐节抽取、逐节原子快照；实体覆盖人物、地点、事件、组织、物件、概念与非人角色，关系和可定位出处以稳定 ID 相连；家族树只接收证据复核后的代际亲属边并全程按 ID 构建。展示采用固定索引 + 关系图/家族树探索层。见 [ai-graph.md](./specs/ai-graph.md)、[ai-graph-pipeline.md](./specs/ai-graph-pipeline.md)、[ai-graph-narration.md](./specs/ai-graph-narration.md)。 |
 | 导出个人知识库（Obsidian 等） | **中** | 单向 Markdown 导出（划线、笔记、大纲、钉选回答）；先不做双向同步 |

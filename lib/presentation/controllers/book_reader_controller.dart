@@ -812,8 +812,7 @@ class BookReaderController extends ChangeNotifier {
         (frozenCurrentChapter == null
             ? await bookMindMapSections(work: target, useFrozenWork: true)
             : <AiBookSectionSlice>[frozenCurrentChapter]);
-    // Content hook only — product intents must go through
-    // generateMindMapsInConversation / runMindMapProductAction.
+    // Content hook only — session intents use generateMindMapsInConversation.
     return _aiWorkspace.generateMindMapContent(
       contentHash: item.contentHash,
       workKey: target == null ? null : workKeyFor(target),
@@ -842,13 +841,8 @@ class BookReaderController extends ChangeNotifier {
     String? retryTurnId,
     AiConversationCommand? command,
     void Function(AiBookMindMap artifact)? onArtifact,
-    required String actionProposalId,
-    required AiAuthorizedCommand actionCommand,
-    int? attempt,
   }) {
-    return _aiWorkspace.runMindMapProductAction(
-      proposalId: actionProposalId,
-      actionCommand: actionCommand,
+    return _aiWorkspace.runMindMapSession(
       turnId: turnId,
       workKey: workKey,
       text: text,
@@ -858,7 +852,6 @@ class BookReaderController extends ChangeNotifier {
       command: command,
       baseMap: baseMap,
       cancelToken: cancelToken,
-      attempt: attempt,
       segmentedPublication:
           bookStructureManifest?.kind ==
           AiBookStructureKind.segmentedSingleWork,

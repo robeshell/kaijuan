@@ -50,25 +50,9 @@ void main() {
             frozenCurrentChapter,
             retryTurnId,
             required clearComposer,
-            required actionProposalId,
-            required authorizeAction,
           }) async {
             createRuns++;
-            final unit = (
-              work: null,
-              label: '章',
-              frozenSections: const [
-                AiBookSectionSlice(
-                  index: 1,
-                  sourceSectionIndex: 1,
-                  label: '章',
-                  text: '正文',
-                ),
-              ],
-              estimatedSections: 1,
-            );
-            final entry = await authorizeAction([unit]);
-            return entry.command != null;
+            return true;
           },
       runReviseMindMap:
           ({
@@ -77,8 +61,6 @@ void main() {
             conversationWorkKey,
             retryTurnId,
             required clearComposer,
-            required actionProposalId,
-            required authorizeAction,
           }) async =>
               false,
       runGenerateUnits:
@@ -90,9 +72,6 @@ void main() {
             required conversationWorkKey,
             command,
             keepEditing = false,
-            required actionProposalId,
-            required actionCommand,
-            attempt,
           }) async {},
       mindMapEditUnit:
           (target, {required requestText, conversationWorkKey}) async => null,
@@ -140,19 +119,19 @@ void main() {
     capabilities: capabilities ?? workspace.resolveCapabilities(),
   );
 
-  test('dispatch stores-not-ready is fail-closed and user-visible', () async {
+  test('mind-map dispatch does not require Journal stores', () async {
     workspace.markAiStoresReady(ready: false, error: '存储未就绪');
     await host.dispatch(
       originalText: '生成思维导图',
       action: const AiCreateBookMindMapAction(
         instruction: '生成思维导图',
-        scope: AiBookMindMapActionScope.currentChapter,
+        scope: AiBookMindMapActionScope.wholePublication,
       ),
       productTurn: emptyTurn(),
     );
-    expect(clarifications, isNotEmpty);
-    expect(clarifications.single, contains('存储'));
-    expect(createRuns, 0);
+    // Session path: no Journal, no stores gate.
+    expect(clarifications, isEmpty);
+    expect(createRuns, 1);
     final journal = await workspace.actionController.journal.read('anything');
     expect(journal, isNull);
   });
@@ -167,113 +146,21 @@ void main() {
     expect(createRuns, 0);
   });
 
-  test(
-    'resumeAfterOpen recovers incomplete mind-map proposed work after reopen',
-    () async {
-      final proposal = AiActionProposal(
-        protocolVersion: 1,
-        proposalId: 'recover-p1',
-        parentRunId: null,
-        conversationId: 'a' * 64,
-        turnId: 't-recover',
-        actionKind: 'create_book_mind_map',
-        definitionVersion: 1,
-        proposalSchemaVersion: 1,
-        source: AiActionProposalSource.modelTool,
-        sourceSubmissionId: 'sub-r',
-        originalUserText: '生成',
-        requestedArguments: const {
-          'scope': 'wholePublication',
-          'instruction': '生成',
-        },
-        createdAt: DateTime.utc(2026, 8, 12),
-        expiresAt: DateTime.utc(2026, 8, 13),
-      );
-      final evaluation = await workspace.actionController.propose(
-        proposal,
-        capabilities: const AiCapabilitySet({
-          'book.read',
-          'structuredOutput',
-        }),
-      );
-      // Live light path: no chat confirmation card.
-      expect(evaluation.needsConfirmation, isFalse);
-      expect(evaluation.canProceedWithoutConfirmation, isTrue);
-      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
-
-      await host.resumeAfterOpen();
-      // Crash recovery still asks once before resuming incomplete work.
-      expect(confirmations, ['recover-p1']);
-      expect(createRuns, 1);
-    },
-  );
-
-  test('dispatchProposed skips confirmation for mind-map light path', () async {
-    final turn = emptyTurn(
-      capabilities: const AiCapabilitySet({
-        'book.read',
-        'structuredOutput',
-      }),
-    );
+  test('resumeAfterOpen abandons legacy mind-map Journal rows', () async {
     final proposal = AiActionProposal(
       protocolVersion: 1,
-      proposalId: 'live-light-p1',
+      proposalId: 'recover-p1',
       parentRunId: null,
       conversationId: 'a' * 64,
-      turnId: 't-live',
+      turnId: 't-recover',
       actionKind: 'create_book_mind_map',
       definitionVersion: 1,
       proposalSchemaVersion: 1,
       source: AiActionProposalSource.modelTool,
-      sourceSubmissionId: 'sub-live',
-      originalUserText: '生成思维导图',
-      requestedArguments: const {
-        'scope': 'wholePublication',
-        'instruction': '生成思维导图',
-      },
-      createdAt: DateTime.utc(2026, 8, 12),
-      expiresAt: DateTime.utc(2026, 8, 13),
-    );
-    // Seed journal with full caps (workspace resolveCapabilities is empty in
-    // this harness without settings). dispatchProposed is idempotent on id.
-    final seeded = await workspace.actionController.propose(
-      proposal,
-      capabilities: const AiCapabilitySet({
-        'book.read',
-        'structuredOutput',
-      }),
-    );
-    expect(seeded.canProceedWithoutConfirmation, isTrue);
-    expect(seeded.needsConfirmation, isFalse);
-
-    await host.dispatchProposed(
-      originalText: '生成思维导图',
-      action: const AiCreateBookMindMapAction(
-        instruction: '生成思维导图',
-        scope: AiBookMindMapActionScope.wholePublication,
-      ),
-      productTurn: turn,
-      proposal: proposal,
-    );
-    expect(confirmations, isEmpty);
-    expect(createRuns, 1);
-  });
-
-  test('authorizeAfterFreeze issues one command with frozen scope', () async {
-    final proposal = AiActionProposal(
-      protocolVersion: 1,
-      proposalId: 'p1',
-      parentRunId: null,
-      conversationId: 'a' * 64,
-      turnId: 't1',
-      actionKind: 'create_book_mind_map',
-      definitionVersion: 1,
-      proposalSchemaVersion: 1,
-      source: AiActionProposalSource.explicitUi,
-      sourceSubmissionId: 'sub',
+      sourceSubmissionId: 'sub-r',
       originalUserText: '生成',
       requestedArguments: const {
-        'scope': 'currentChapter',
+        'scope': 'wholePublication',
         'instruction': '生成',
       },
       createdAt: DateTime.utc(2026, 8, 12),
@@ -281,51 +168,50 @@ void main() {
     );
     await workspace.actionController.propose(
       proposal,
-      deferExplicitAuthorization: true,
       capabilities: const AiCapabilitySet({
         'book.read',
         'structuredOutput',
       }),
     );
-    final entry = await host.authorizeAfterFreeze(
-      proposal,
-      units: [
-        (
-          work: null,
-          label: '当前章',
-          frozenSections: const [
-            AiBookSectionSlice(
-              index: 3,
-              sourceSectionIndex: 3,
-              label: '当前章',
-              text: '正文',
-            ),
-          ],
-          estimatedSections: 1,
-        ),
-      ],
-    );
-    expect(entry.status, AiActionJournalStatus.queued);
-    expect(entry.command, isNotNull);
-    expect(entry.command!.scopeSectionIndices, [3]);
-    expect(entry.command!.arguments['unitLabels'], ['当前章']);
+
+    await host.resumeAfterOpen();
+    expect(confirmations, isEmpty);
+    expect(createRuns, 0);
+    final entry = await workspace.actionController.journal.read('recover-p1');
+    expect(entry?.status, AiActionJournalStatus.abandoned);
   });
 
-  test('dispatchExplicitCreate uses registry definition versions', () async {
-    final def = workspace.actionController.registry.lookup(
-      'create_book_mind_map',
-    )!;
-    // Without structuredOutput capability, Host fails closed with user message
-    // (settings not bound). Registry versions still drive definition lookup.
+  test('dispatch runs mind-map session without confirmation or Journal',
+      () async {
+    final turn = emptyTurn(
+      capabilities: const AiCapabilitySet({
+        'book.read',
+        'structuredOutput',
+      }),
+    );
+    await host.dispatch(
+      originalText: '生成思维导图',
+      action: const AiCreateBookMindMapAction(
+        instruction: '生成思维导图',
+        scope: AiBookMindMapActionScope.wholePublication,
+      ),
+      productTurn: turn,
+    );
+    expect(confirmations, isEmpty);
+    expect(createRuns, 1);
+    final all = await workspace.actionController.journal.readAll();
+    expect(all, isEmpty);
+  });
+
+  test('dispatchExplicitCreate runs session path without Journal', () async {
     await host.dispatchExplicitCreate(
       originalText: '请为当前章生成思维导图',
       requestScope: AiMindMapRequestScope.currentChapter,
     );
-    expect(createRuns, 0);
-    expect(clarifications, isNotEmpty);
-    expect(def.definitionVersion, greaterThanOrEqualTo(1));
-    expect(def.proposalSchemaVersion, greaterThanOrEqualTo(1));
-    expect(def.actionKind, 'create_book_mind_map');
+    expect(createRuns, 1);
+    expect(clarifications, isEmpty);
+    final all = await workspace.actionController.journal.readAll();
+    expect(all, isEmpty);
   });
 
   test('missing structuredOutput hides tools and denies propose', () async {
