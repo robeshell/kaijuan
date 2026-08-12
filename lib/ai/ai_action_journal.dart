@@ -17,6 +17,8 @@ class JsonAiActionJournalStore implements AiActionJournalStore {
   File _backupFor(String proposalId) =>
       File('${_fileFor(proposalId).path}.bak');
 
+  Future<void> _writeQueue = Future<void>.value();
+
   Future<AiActionJournalEntry?> _readFile(File file) async {
     if (!await file.exists()) return null;
     final raw = jsonDecode(await file.readAsString());
@@ -25,19 +27,39 @@ class JsonAiActionJournalStore implements AiActionJournalStore {
 
   @override
   Future<AiActionJournalEntry?> read(String proposalId) async {
-    final primary = await _readFile(_fileFor(proposalId));
-    if (primary != null) return primary;
-    return _readFile(_backupFor(proposalId));
+    Object? primaryError;
+    try {
+      final primary = await _readFile(_fileFor(proposalId));
+      if (primary != null) return primary;
+    } catch (error) {
+      primaryError = error;
+    }
+    try {
+      final backup = await _readFile(_backupFor(proposalId));
+      if (backup != null) return backup;
+    } catch (_) {
+      if (primaryError != null) throw primaryError;
+    }
+    return null;
   }
 
   @override
   Future<List<AiActionJournalEntry>> readAll() async {
     if (!await directory.exists()) return const [];
-    final result = <AiActionJournalEntry>[];
+    final proposalIds = <String>{};
     await for (final entity in directory.list()) {
-      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      if (name.endsWith('.json')) {
+        proposalIds.add(name.substring(0, name.length - '.json'.length));
+      } else if (name.endsWith('.json.bak')) {
+        proposalIds.add(name.substring(0, name.length - '.json.bak'.length));
+      }
+    }
+    final result = <AiActionJournalEntry>[];
+    for (final proposalId in proposalIds) {
       try {
-        final entry = await _readFile(entity);
+        final entry = await read(proposalId);
         if (entry != null) result.add(entry);
       } catch (_) {
         // A corrupt entry remains inspectable on disk and does not prevent
@@ -49,7 +71,13 @@ class JsonAiActionJournalStore implements AiActionJournalStore {
   }
 
   @override
-  Future<void> write(AiActionJournalEntry entry) async {
+  Future<void> write(AiActionJournalEntry entry) {
+    final operation = _writeQueue.then<void>((_) => _writeEntry(entry));
+    _writeQueue = operation.catchError((_) {});
+    return operation;
+  }
+
+  Future<void> _writeEntry(AiActionJournalEntry entry) async {
     await directory.create(recursive: true);
     final current = await read(entry.proposal.proposalId);
     if (current != null && entry.stateVersion <= current.stateVersion) {

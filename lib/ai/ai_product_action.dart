@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'ai_model_adapter.dart';
+import 'ai_product_action_protocol.dart';
 
 abstract final class AiProductToolNames {
   static const createBookMindMap = 'create_book_mind_map';
@@ -83,68 +84,124 @@ class AiChatProductContext {
   const AiChatProductContext({
     this.artifacts = const [],
     this.works = const [],
+    this.actionRegistry,
   });
 
   final List<AiProductArtifactAlias> artifacts;
   final List<AiProductWorkAlias> works;
+  final AiProductActionRegistry? actionRegistry;
 
-  List<AiModelToolDefinition> get toolDefinitions => [
-    AiModelToolDefinition(
-      name: AiProductToolNames.createBookMindMap,
-      description:
-          'Create a native book mind map when the reader asks to generate, '
-          'draw, make, or obtain one. This is a terminal product action and '
-          'must be the only tool call in the response. Do not call it for '
-          'discussion, critique, instructions, or an explicit Mermaid request.',
-      inputSchema: {
-        'type': 'object',
-        'properties': {
-          'scope': {
-            'type': 'string',
-            'enum': [
-              'currentChapter',
-              'currentWork',
-              if (works.isNotEmpty) 'specificWork',
-              'wholePublication',
-              'unspecified',
-            ],
-          },
-          if (works.isNotEmpty)
-            'workRef': {
-              'type': 'string',
-              'enum': [for (final work in works) work.alias],
-            },
-          'instruction': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
-        },
-        'required': ['scope', 'instruction'],
-      },
-    ),
-    if (artifacts.isNotEmpty)
+  List<AiModelToolDefinition> get toolDefinitions {
+    final registryTools = actionRegistry?.toolDescriptors(
+      source: AiActionProposalSource.modelTool,
+      capabilities: const AiCapabilitySet({}),
+    );
+    if (registryTools != null) {
+      return [
+        for (final tool in registryTools)
+          AiModelToolDefinition(
+            name: tool.name,
+            description: tool.description,
+            inputSchema: _contextualizeToolSchema(tool.inputSchema),
+          ),
+      ];
+    }
+    return [
       AiModelToolDefinition(
-        name: AiProductToolNames.reviseBookMindMap,
+        name: AiProductToolNames.createBookMindMap,
         description:
-            'Revise one existing native book mind map when the reader asks '
-            'for a content change. Use the temporary artifactRef exactly as '
-            'listed in trusted product context. This is a terminal product '
-            'action and must be the only tool call in the response. Do not '
-            'call it merely to discuss or evaluate the map.',
+            'Create a native book mind map when the reader asks to generate, '
+            'draw, make, or obtain one. This is a terminal product action and '
+            'must be the only tool call in the response. Do not call it for '
+            'discussion, critique, instructions, or an explicit Mermaid request.',
         inputSchema: {
           'type': 'object',
           'properties': {
-            'artifactRef': {
+            'scope': {
               'type': 'string',
-              'enum': [for (final artifact in artifacts) artifact.alias],
+              'enum': [
+                'currentChapter',
+                'currentWork',
+                if (works.isNotEmpty) 'specificWork',
+                'wholePublication',
+                'unspecified',
+              ],
             },
+            if (works.isNotEmpty)
+              'workRef': {
+                'type': 'string',
+                'enum': [for (final work in works) work.alias],
+              },
             'instruction': {
               'type': 'string',
               'minLength': 1,
               'maxLength': 2000,
             },
           },
-          'required': ['artifactRef', 'instruction'],
+          'required': ['scope', 'instruction'],
         },
       ),
-  ];
+      if (artifacts.isNotEmpty)
+        AiModelToolDefinition(
+          name: AiProductToolNames.reviseBookMindMap,
+          description:
+              'Revise one existing native book mind map when the reader asks '
+              'for a content change. Use the temporary artifactRef exactly as '
+              'listed in trusted product context. This is a terminal product '
+              'action and must be the only tool call in the response. Do not '
+              'call it merely to discuss or evaluate the map.',
+          inputSchema: {
+            'type': 'object',
+            'properties': {
+              'artifactRef': {
+                'type': 'string',
+                'enum': [for (final artifact in artifacts) artifact.alias],
+              },
+              'instruction': {
+                'type': 'string',
+                'minLength': 1,
+                'maxLength': 2000,
+              },
+            },
+            'required': ['artifactRef', 'instruction'],
+          },
+        ),
+    ];
+  }
+
+  Map<String, Object?> _contextualizeToolSchema(Map<String, Object?> schema) {
+    final copy = <String, Object?>{...schema};
+    final properties = <String, Object?>{
+      if (schema['properties'] is Map)
+        ...Map<String, Object?>.from(schema['properties'] as Map),
+    };
+    if (schema['properties'] is Map && properties.containsKey('scope')) {
+      properties['scope'] = {
+        'type': 'string',
+        'enum': [
+          'currentChapter',
+          'currentWork',
+          if (works.isNotEmpty) 'specificWork',
+          'wholePublication',
+          'unspecified',
+        ],
+      };
+    }
+    if (schema['properties'] is Map && properties.containsKey('workRef')) {
+      properties['workRef'] = {
+        'type': 'string',
+        'enum': [for (final work in works) work.alias],
+      };
+    }
+    if (schema['properties'] is Map && properties.containsKey('artifactRef')) {
+      properties['artifactRef'] = {
+        'type': 'string',
+        'enum': [for (final artifact in artifacts) artifact.alias],
+      };
+    }
+    if (properties.isNotEmpty) copy['properties'] = properties;
+    return copy;
+  }
 
   String get trustedPrompt {
     final lines = <String>[

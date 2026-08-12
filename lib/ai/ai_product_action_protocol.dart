@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 /// The source of a product-action proposal. A model can only propose; an
 /// explicit App gesture may be eligible for immediate authorization.
 enum AiActionProposalSource { modelTool, explicitUi }
@@ -30,6 +32,19 @@ enum AiActionJournalStatus {
   rejected,
   expired,
   abandoned,
+}
+
+extension AiActionJournalStatusX on AiActionJournalStatus {
+  bool get isTerminal => switch (this) {
+    AiActionJournalStatus.succeeded ||
+    AiActionJournalStatus.partiallySucceeded ||
+    AiActionJournalStatus.failed ||
+    AiActionJournalStatus.cancelled ||
+    AiActionJournalStatus.rejected ||
+    AiActionJournalStatus.expired ||
+    AiActionJournalStatus.abandoned => true,
+    _ => false,
+  };
 }
 
 class AiActionProposal {
@@ -76,6 +91,30 @@ class AiActionProposal {
   final String? capabilitySnapshotRef;
   final DateTime createdAt;
   final DateTime expiresAt;
+
+  AiActionProposal copyWith({String? capabilitySnapshotRef}) =>
+      AiActionProposal(
+        protocolVersion: protocolVersion,
+        proposalId: proposalId,
+        parentRunId: parentRunId,
+        conversationId: conversationId,
+        turnId: turnId,
+        actionKind: actionKind,
+        definitionVersion: definitionVersion,
+        proposalSchemaVersion: proposalSchemaVersion,
+        source: source,
+        sourceSubmissionId: sourceSubmissionId,
+        originalUserText: originalUserText,
+        requestedArguments: requestedArguments,
+        scopeRef: scopeRef,
+        targetRef: targetRef,
+        expectedRevision: expectedRevision,
+        frozenContextRef: frozenContextRef,
+        capabilitySnapshotRef:
+            capabilitySnapshotRef ?? this.capabilitySnapshotRef,
+        createdAt: createdAt,
+        expiresAt: expiresAt,
+      );
 
   Map<String, Object?> toJson() => {
     'protocolVersion': protocolVersion,
@@ -349,6 +388,7 @@ class AiActionJournalEntry {
     this.command,
     this.receipt,
     this.attempt = 0,
+    this.terminalReasonCode,
   });
 
   factory AiActionJournalEntry.proposed(AiActionProposal proposal) =>
@@ -369,6 +409,7 @@ class AiActionJournalEntry {
   final int eventSequence;
   final int attempt;
   final DateTime updatedAt;
+  final String? terminalReasonCode;
 
   AiActionJournalEntry transition(
     AiActionJournalStatus next, {
@@ -377,7 +418,31 @@ class AiActionJournalEntry {
     AiActionReceipt? receipt,
     int? attempt,
     DateTime? now,
+    String? terminalReasonCode,
   }) {
+    if (this.command != null &&
+        command != null &&
+        jsonEncode(this.command!.toJson()) != jsonEncode(command.toJson())) {
+      throw StateError('Authorized command is immutable');
+    }
+    if (this.receipt != null && receipt != null) {
+      throw StateError('Action receipt is immutable');
+    }
+    if (receipt != null) {
+      if (receipt.status != next) {
+        throw StateError('Receipt status does not match journal transition');
+      }
+      if (!_terminalStatuses.contains(receipt.status)) {
+        throw StateError('Only terminal receipts can be committed');
+      }
+      if (command == null && this.command == null) {
+        throw StateError('Receipt requires an authorized command');
+      }
+      final effectiveCommand = command ?? this.command;
+      if (effectiveCommand?.commandId != receipt.commandId) {
+        throw StateError('Receipt command does not match journal command');
+      }
+    }
     if (next != status && !_allowedTransitions[status]!.contains(next)) {
       throw StateError(
         'Invalid action transition: ${status.name} -> ${next.name}',
@@ -393,6 +458,7 @@ class AiActionJournalEntry {
       eventSequence: eventSequence + 1,
       attempt: attempt ?? this.attempt,
       updatedAt: now ?? DateTime.now(),
+      terminalReasonCode: terminalReasonCode ?? this.terminalReasonCode,
     );
   }
 
@@ -407,6 +473,7 @@ class AiActionJournalEntry {
     'eventSequence': eventSequence,
     'attempt': attempt,
     'updatedAt': updatedAt.toUtc().toIso8601String(),
+    if (terminalReasonCode != null) 'terminalReasonCode': terminalReasonCode,
   };
 
   static AiActionJournalEntry? fromJson(Object? raw) {
@@ -427,6 +494,7 @@ class AiActionJournalEntry {
       eventSequence: _int(json['eventSequence']) ?? 0,
       attempt: _int(json['attempt']) ?? 0,
       updatedAt: updatedAt,
+      terminalReasonCode: _string(json['terminalReasonCode']),
     );
   }
 
@@ -438,24 +506,31 @@ class AiActionJournalEntry {
           AiActionJournalStatus.authorized,
           AiActionJournalStatus.rejected,
           AiActionJournalStatus.expired,
+          AiActionJournalStatus.abandoned,
         },
         AiActionJournalStatus.awaitingConfirmation: {
           AiActionJournalStatus.authorized,
           AiActionJournalStatus.rejected,
           AiActionJournalStatus.expired,
+          AiActionJournalStatus.abandoned,
         },
         AiActionJournalStatus.awaitingClarification: {
           AiActionJournalStatus.rejected,
           AiActionJournalStatus.expired,
+          AiActionJournalStatus.abandoned,
         },
         AiActionJournalStatus.authorized: {
           AiActionJournalStatus.queued,
+          AiActionJournalStatus.cancelRequested,
+          AiActionJournalStatus.failed,
           AiActionJournalStatus.cancelled,
+          AiActionJournalStatus.abandoned,
         },
         AiActionJournalStatus.queued: {
           AiActionJournalStatus.executing,
           AiActionJournalStatus.cancelRequested,
           AiActionJournalStatus.failed,
+          AiActionJournalStatus.abandoned,
         },
         AiActionJournalStatus.executing: {
           AiActionJournalStatus.cancelRequested,
@@ -463,10 +538,12 @@ class AiActionJournalEntry {
           AiActionJournalStatus.partiallySucceeded,
           AiActionJournalStatus.failed,
           AiActionJournalStatus.cancelled,
+          AiActionJournalStatus.abandoned,
         },
         AiActionJournalStatus.cancelRequested: {
           AiActionJournalStatus.cancelled,
           AiActionJournalStatus.failed,
+          AiActionJournalStatus.abandoned,
         },
         AiActionJournalStatus.succeeded: {},
         AiActionJournalStatus.partiallySucceeded: {},
@@ -476,6 +553,16 @@ class AiActionJournalEntry {
         AiActionJournalStatus.expired: {},
         AiActionJournalStatus.abandoned: {},
       };
+
+  static const _terminalStatuses = <AiActionJournalStatus>{
+    AiActionJournalStatus.succeeded,
+    AiActionJournalStatus.partiallySucceeded,
+    AiActionJournalStatus.failed,
+    AiActionJournalStatus.cancelled,
+    AiActionJournalStatus.rejected,
+    AiActionJournalStatus.expired,
+    AiActionJournalStatus.abandoned,
+  };
 }
 
 class AiCapabilitySet {
@@ -485,6 +572,10 @@ class AiCapabilitySet {
 
   bool containsAll(Iterable<String> required) =>
       required.every(values.contains);
+
+  String get fingerprint => sha256
+      .convert(utf8.encode((values.toList()..sort()).join('|')))
+      .toString();
 }
 
 class AiProductActionDefinition {
@@ -497,6 +588,13 @@ class AiProductActionDefinition {
     required this.riskClass,
     required this.supportedSources,
     this.requiredCapabilities = const {},
+    this.optionalCapabilities = const {},
+    this.anyOfCapabilities = const [],
+    this.supportedScopes = const {},
+    this.argumentSchema = const {},
+    this.artifactKind,
+    this.artifactSchemaVersion,
+    this.toolDescription,
     this.toolName,
     this.displayNameKey = '',
   });
@@ -509,6 +607,13 @@ class AiProductActionDefinition {
   final AiActionRiskClass riskClass;
   final Set<AiActionProposalSource> supportedSources;
   final Set<String> requiredCapabilities;
+  final Set<String> optionalCapabilities;
+  final List<Set<String>> anyOfCapabilities;
+  final Set<String> supportedScopes;
+  final Map<String, Object?> argumentSchema;
+  final String? artifactKind;
+  final int? artifactSchemaVersion;
+  final String? toolDescription;
   final String? toolName;
   final String displayNameKey;
 }
@@ -544,9 +649,39 @@ class AiProductActionRegistry {
   }) => [
     for (final definition in definitions)
       if (definition.supportedSources.contains(source) &&
-          capabilities.containsAll(definition.requiredCapabilities))
+          capabilities.containsAll(definition.requiredCapabilities) &&
+          (definition.anyOfCapabilities.isEmpty ||
+              definition.anyOfCapabilities.any(capabilities.containsAll)))
         definition,
   ];
+
+  List<AiProductActionToolDescriptor> toolDescriptors({
+    required AiActionProposalSource source,
+    required AiCapabilitySet capabilities,
+  }) => [
+    for (final definition in available(
+      source: source,
+      capabilities: capabilities,
+    ))
+      if (definition.toolName != null)
+        AiProductActionToolDescriptor(
+          name: definition.toolName!,
+          description: definition.toolDescription ?? definition.displayNameKey,
+          inputSchema: definition.argumentSchema,
+        ),
+  ];
+}
+
+class AiProductActionToolDescriptor {
+  const AiProductActionToolDescriptor({
+    required this.name,
+    required this.description,
+    required this.inputSchema,
+  });
+
+  final String name;
+  final String description;
+  final Map<String, Object?> inputSchema;
 }
 
 class AiActionPolicy {

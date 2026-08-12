@@ -23,11 +23,19 @@ class BookAiProductActionPrompt {
     required this.proposalId,
     required this.title,
     required this.summary,
+    this.scopeLabel,
+    this.targetLabel,
+    this.revisionLabel,
+    this.externalWrite = false,
   });
 
   final String proposalId;
   final String title;
   final String summary;
+  final String? scopeLabel;
+  final String? targetLabel;
+  final String? revisionLabel;
+  final bool externalWrite;
   final Completer<bool?> completer = Completer<bool?>();
   bool? selected;
 }
@@ -143,6 +151,10 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
     required String proposalId,
     required String title,
     required String summary,
+    String? scopeLabel,
+    String? targetLabel,
+    String? revisionLabel,
+    bool externalWrite = false,
     VoidCallback? onOpened,
   }) async {
     cancelActionPrompt();
@@ -150,6 +162,10 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
       proposalId: proposalId,
       title: title,
       summary: summary,
+      scopeLabel: scopeLabel,
+      targetLabel: targetLabel,
+      revisionLabel: revisionLabel,
+      externalWrite: externalWrite,
     );
     _actionPrompt = prompt;
     notifyListeners();

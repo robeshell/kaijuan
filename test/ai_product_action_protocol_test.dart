@@ -1,6 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 import 'package:kaijuan/ai/ai_product_action_controller.dart';
+import 'package:kaijuan/ai/ai_cancel.dart';
+import 'package:kaijuan/ai/ai_workflow_contract.dart';
+import 'package:kaijuan/ai/ai_workflow_executor.dart';
+import 'package:kaijuan/ai/ai_product_action.dart';
+import 'package:kaijuan/ai/ai_action_journal.dart';
+import 'dart:io';
 
 void main() {
   final now = DateTime.utc(2026, 8, 12, 12);
@@ -214,4 +220,416 @@ void main() {
       expect(authorized.command?.scopeSectionIndices, [1, 2]);
     },
   );
+
+  test(
+    'approval and authorization are idempotent for the same submission',
+    () async {
+      final journal = MemoryAiActionJournalStore();
+      final controller = AiProductActionController(
+        registry: AiProductActionRegistry([
+          const AiProductActionDefinition(
+            actionKind: 'create_book_mind_map',
+            definitionVersion: 1,
+            proposalSchemaVersion: 1,
+            commandSchemaVersion: 1,
+            workflowVersion: 1,
+            riskClass: AiActionRiskClass.reversible,
+            supportedSources: {AiActionProposalSource.modelTool},
+          ),
+        ]),
+        journal: journal,
+        now: () => now,
+        idGenerator: () => 'command-idempotent',
+      );
+      await controller.propose(proposal());
+      final first = await controller.approve(
+        proposalId: 'proposal-1',
+        authorizationSubmissionId: 'approval-1',
+        authorizationEvidence: 'button:approve',
+      );
+      final second = await controller.approve(
+        proposalId: 'proposal-1',
+        authorizationSubmissionId: 'approval-1',
+        authorizationEvidence: 'button:approve',
+      );
+      expect(second.command?.commandId, first.command?.commandId);
+      expect(
+        (await journal.read('proposal-1'))?.stateVersion,
+        first.stateVersion,
+      );
+    },
+  );
+
+  test('cancel-requested actions reject a late success receipt', () async {
+    final journal = MemoryAiActionJournalStore();
+    final controller = AiProductActionController(
+      registry: AiProductActionRegistry([
+        const AiProductActionDefinition(
+          actionKind: 'create_book_mind_map',
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          commandSchemaVersion: 1,
+          workflowVersion: 1,
+          riskClass: AiActionRiskClass.reversible,
+          supportedSources: {AiActionProposalSource.modelTool},
+        ),
+      ]),
+      journal: journal,
+      now: () => now,
+      idGenerator: () => 'command-cancel',
+    );
+    await controller.propose(proposal());
+    await controller.approve(
+      proposalId: 'proposal-1',
+      authorizationSubmissionId: 'approval-1',
+      authorizationEvidence: 'button:approve',
+    );
+    await controller.queue('proposal-1');
+    await controller.markExecuting('proposal-1');
+    await controller.requestCancel('proposal-1');
+    expect(
+      () => controller.completeForProposal(
+        proposalId: 'proposal-1',
+        status: AiActionJournalStatus.succeeded,
+        artifactRefs: const ['late-artifact'],
+      ),
+      throwsStateError,
+    );
+    final cancelled = await controller.completeForProposal(
+      proposalId: 'proposal-1',
+      status: AiActionJournalStatus.cancelled,
+      artifactRefs: const [],
+    );
+    expect(cancelled.status, AiActionJournalStatus.cancelled);
+  });
+
+  test('generic Workflow executor commits one terminal receipt', () async {
+    final journal = MemoryAiActionJournalStore();
+    final controller = AiProductActionController(
+      registry: AiProductActionRegistry([
+        const AiProductActionDefinition(
+          actionKind: 'test_workflow',
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          commandSchemaVersion: 1,
+          workflowVersion: 1,
+          riskClass: AiActionRiskClass.reversible,
+          supportedSources: {AiActionProposalSource.explicitUi},
+        ),
+      ]),
+      journal: journal,
+      now: () => now,
+      idGenerator: () => 'command-workflow',
+    );
+    final testProposal = AiActionProposal(
+      protocolVersion: 1,
+      proposalId: 'workflow-proposal',
+      parentRunId: null,
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      actionKind: 'test_workflow',
+      definitionVersion: 1,
+      proposalSchemaVersion: 1,
+      source: AiActionProposalSource.explicitUi,
+      sourceSubmissionId: 'ui-1',
+      originalUserText: 'run',
+      requestedArguments: const {},
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+    );
+    await controller.propose(testProposal);
+    final adapter = _FakeWorkflowAdapter('test_workflow');
+    final executor = AiProductWorkflowExecutor(
+      actions: controller,
+      adapters: AiWorkflowAdapterRegistry([adapter]),
+      environment: AiWorkflowEnvironment(
+        capabilities: const AiCapabilitySet({}),
+        checkpoints: MemoryAiWorkflowCheckpointStore(),
+        now: () => now,
+      ),
+    );
+    final completed = await executor.execute('workflow-proposal');
+    expect(completed.status, AiActionJournalStatus.succeeded);
+    expect(completed.receipt?.artifactRefs, ['artifact-1']);
+    expect(adapter.started, 1);
+    expect(
+      (await executor.execute('workflow-proposal')).stateVersion,
+      completed.stateVersion,
+    );
+  });
+
+  test('workflow executor coalesces concurrent recovery starts', () async {
+    final journal = MemoryAiActionJournalStore();
+    final controller = AiProductActionController(
+      registry: AiProductActionRegistry([
+        const AiProductActionDefinition(
+          actionKind: 'test_workflow',
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          commandSchemaVersion: 1,
+          workflowVersion: 1,
+          riskClass: AiActionRiskClass.reversible,
+          supportedSources: {AiActionProposalSource.explicitUi},
+        ),
+      ]),
+      journal: journal,
+      now: () => now,
+      idGenerator: () => 'command-concurrent',
+    );
+    final concurrentProposal = AiActionProposal(
+      protocolVersion: 1,
+      proposalId: 'concurrent-proposal',
+      parentRunId: null,
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      actionKind: 'test_workflow',
+      definitionVersion: 1,
+      proposalSchemaVersion: 1,
+      source: AiActionProposalSource.explicitUi,
+      sourceSubmissionId: 'ui-2',
+      originalUserText: 'run',
+      requestedArguments: const {},
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+    );
+    await controller.propose(concurrentProposal);
+    final adapter = _SlowWorkflowAdapter();
+    final executor = AiProductWorkflowExecutor(
+      actions: controller,
+      adapters: AiWorkflowAdapterRegistry([adapter]),
+      environment: AiWorkflowEnvironment(
+        capabilities: const AiCapabilitySet({}),
+        checkpoints: MemoryAiWorkflowCheckpointStore(),
+        now: () => now,
+      ),
+    );
+    final results = await Future.wait([
+      executor.execute('concurrent-proposal'),
+      executor.execute('concurrent-proposal'),
+    ]);
+    expect(results[0].status, AiActionJournalStatus.succeeded);
+    expect(results[1].stateVersion, results[0].stateVersion);
+    expect(adapter.started, 1);
+  });
+
+  test('artifact repository uses compare-and-set revisions', () async {
+    final repository = MemoryAiArtifactRepository();
+    final first = AiArtifactEnvelope(
+      artifactId: 'artifact',
+      kind: 'book_mind_map',
+      schemaVersion: 1,
+      revision: 1,
+      contentHash: 'book',
+      payload: const {'title': 'v1'},
+      createdAt: now,
+    );
+    await repository.commit(first);
+    expect(
+      () => repository.commit(
+        AiArtifactEnvelope(
+          artifactId: 'artifact',
+          kind: 'book_mind_map',
+          schemaVersion: 1,
+          revision: 2,
+          contentHash: 'book',
+          payload: const {'title': 'v2'},
+          createdAt: now,
+        ),
+        expectedRevision: 0,
+      ),
+      throwsStateError,
+    );
+    final second = await repository.commit(
+      AiArtifactEnvelope(
+        artifactId: 'artifact',
+        kind: 'book_mind_map',
+        schemaVersion: 1,
+        revision: 2,
+        contentHash: 'book',
+        payload: const {'title': 'v2'},
+        createdAt: now,
+      ),
+      expectedRevision: 1,
+    );
+    expect(second.revision, 2);
+  });
+
+  test('registered product actions build the contextual tool directory', () {
+    final context = AiChatProductContext(
+      works: const [
+        AiProductWorkAlias(alias: 'work_1', workId: 'w1', title: '作品'),
+      ],
+      artifacts: const [
+        AiProductArtifactAlias(
+          alias: 'artifact_1',
+          artifactId: 'a1',
+          title: '导图',
+          revision: 2,
+        ),
+      ],
+      actionRegistry: AiProductActionRegistry([
+        const AiProductActionDefinition(
+          actionKind: AiProductToolNames.createBookMindMap,
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          commandSchemaVersion: 1,
+          workflowVersion: 1,
+          riskClass: AiActionRiskClass.reversible,
+          supportedSources: {AiActionProposalSource.modelTool},
+          toolName: AiProductToolNames.createBookMindMap,
+          toolDescription: 'create',
+          argumentSchema: {
+            'type': 'object',
+            'properties': {
+              'scope': {'type': 'string'},
+              'workRef': {'type': 'string'},
+              'instruction': {'type': 'string'},
+            },
+          },
+        ),
+      ]),
+    );
+    final tool = context.toolDefinitions.single;
+    expect(tool.name, AiProductToolNames.createBookMindMap);
+    final properties = Map<String, Object?>.from(
+      tool.inputSchema['properties'] as Map,
+    );
+    expect((properties['scope'] as Map)['enum'], contains('currentChapter'));
+    expect((properties['workRef'] as Map)['enum'], ['work_1']);
+  });
+
+  test(
+    'capability gates hide actions until required and any-of capabilities exist',
+    () {
+      const definition = AiProductActionDefinition(
+        actionKind: 'capability_action',
+        definitionVersion: 1,
+        proposalSchemaVersion: 1,
+        commandSchemaVersion: 1,
+        workflowVersion: 1,
+        riskClass: AiActionRiskClass.external,
+        supportedSources: {AiActionProposalSource.modelTool},
+        requiredCapabilities: {'book.read'},
+        anyOfCapabilities: [
+          {'export.markdown'},
+          {'export.obsidian'},
+        ],
+      );
+      final registry = AiProductActionRegistry([definition]);
+      expect(
+        registry.available(
+          source: AiActionProposalSource.modelTool,
+          capabilities: const AiCapabilitySet({'book.read'}),
+        ),
+        isEmpty,
+      );
+      expect(
+        registry.available(
+          source: AiActionProposalSource.modelTool,
+          capabilities: const AiCapabilitySet({'book.read', 'export.obsidian'}),
+        ),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
+    'file journal recovers an entry from its backup when primary is missing',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'ai-journal-test',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final store = JsonAiActionJournalStore(directory);
+      final first = AiActionJournalEntry.proposed(proposal());
+      await store.write(first);
+      final second = first.transition(
+        AiActionJournalStatus.awaitingConfirmation,
+        decision: AiActionDecision(
+          proposalId: 'proposal-1',
+          outcome: AiActionDecisionOutcome.requireConfirmation,
+          reasonCode: 'test',
+          riskClass: AiActionRiskClass.reversible,
+          decidedAt: now,
+        ),
+        now: now,
+      );
+      await store.write(second);
+      final primary = File('${directory.path}/proposal-1.json');
+      await primary.delete();
+      final recovered = await store.readAll();
+      expect(recovered.single.status, AiActionJournalStatus.proposed);
+    },
+  );
+}
+
+class _FakeWorkflowAdapter implements AiWorkflowAdapter {
+  _FakeWorkflowAdapter(this.actionKind);
+
+  @override
+  final String actionKind;
+  var started = 0;
+
+  @override
+  Future<AiWorkflowPreflightResult> preflight(
+    AiAuthorizedCommand command,
+    AiWorkflowEnvironment environment,
+  ) async => const AiWorkflowPreflightResult.accepted();
+
+  @override
+  Stream<AiWorkflowEvent> start(
+    AiAuthorizedCommand command,
+    AiWorkflowRunContext context,
+  ) async* {
+    started++;
+    yield AiWorkflowArtifactReady(
+      workflowRunId: context.workflowRunId,
+      sequence: 1,
+      attempt: context.attempt,
+      artifactRef: 'artifact-1',
+    );
+    yield AiWorkflowSucceeded(
+      workflowRunId: context.workflowRunId,
+      sequence: 2,
+      attempt: context.attempt,
+      artifactRefs: const [],
+    );
+  }
+
+  @override
+  Stream<AiWorkflowEvent> recover(AiWorkflowRecoveryRequest request) => start(
+    request.command,
+    AiWorkflowRunContext(
+      workflowRunId: request.workflowRunId,
+      attempt: request.attempt,
+      environment: request.environment,
+      cancelToken: CancelToken(),
+    ),
+  );
+
+  @override
+  Future<void> requestCancel(String workflowRunId, String reason) async {}
+
+  @override
+  Future<AiWorkflowInspection> inspect(String workflowRunId) async =>
+      AiWorkflowInspection(workflowRunId: workflowRunId, active: false);
+}
+
+class _SlowWorkflowAdapter extends _FakeWorkflowAdapter {
+  _SlowWorkflowAdapter() : super('test_workflow');
+
+  @override
+  Stream<AiWorkflowEvent> start(
+    AiAuthorizedCommand command,
+    AiWorkflowRunContext context,
+  ) async* {
+    started++;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    yield AiWorkflowSucceeded(
+      workflowRunId: context.workflowRunId,
+      sequence: 1,
+      attempt: context.attempt,
+      artifactRefs: const ['artifact-concurrent'],
+    );
+  }
 }

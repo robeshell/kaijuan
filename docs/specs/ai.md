@@ -40,7 +40,7 @@
 - 本书对话，按 `contentHash` 持久化，支持当前章节、选区、目录、全文取样和书内检索工具。
 - 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。停止与关闭必须在第一次点击时立即更新界面并撤销请求，不等待 transport / stream 的异步清理完成。
 - AI 对话纳入用户主动执行的 WebDAV 备份；恢复时按书籍 `contentHash` 合并并去重。
-- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。自由输入不使用关键词或第二意图模型，由同一对话模型正常回答、调用只读工具或提出结构化产品动作。当前兼容路径会在产品工具通过范围校验后直接启动 Workflow，并把“继续修改”附件后的输入直送修订；这两点已纳入 [Product Action Protocol v1](./ai-product-actions.md) 迁移：模型工具只产生 Proposal，附件只绑定目标，自由输入的创建/修订首阶段经对话内确认后才执行。当前章、普通单书或合集中的单部作品仍将完整有效正文与用户原始要求一次发送给 `AiBookMindMapService`；分卷单书按卷依次生成，多作品合集先在对话流中纵向展示范围，生成服务不拥有字符批次、reduce、checkpoint 或独立缓存。
+- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。自由输入不使用关键词或第二意图模型，由同一对话模型正常回答、调用只读工具或提出结构化产品动作。产品工具只产生 Proposal；图书思维导图经 Policy、对话内确认/显式 UI、Journal 持久化 Command 和预检后才启动 Workflow；“继续修改”只绑定目标 Artifact。恢复、重试、取消和晚到结果继续复用同一 Journal。当前章、普通单书或合集中的单部作品仍将完整有效正文与用户原始要求一次发送给 `AiBookMindMapService`；分卷单书按卷依次生成，多作品合集先在对话流中纵向展示范围，生成服务不拥有字符批次、reduce 或独立结果缓存。
 - 大纲回答作为普通对话消息按 `contentHash` 缓存。历史结构化大纲数据继续随手动 WebDAV 快照备份和恢复，以兼容旧版本；Key 仍不备份。
 - 可选联网搜索（Tavily / Brave，独立搜索 Key）注入本书对话；Ollama 本地后端免 Key（`AiProviderKind.ollama`，模型经 `GET /v1/models` 列出）。
 - 知识图谱 M5：实体（人物/地点/事件）+ 关系 + 出处，章级增量；文件内多作品先由用户选作品，再确认具体内容单元，`allowUnreadContext` 只负责限制未读内容；随手动 WebDAV 快照备份（Key 永不备份）。规格与验收见 [ai-graph.md](./ai-graph.md)。
@@ -75,7 +75,7 @@
   → 确定性 Workflow → AiActionReceipt + Artifact
 ```
 
-当前代码的 `AiRunProductActionRequested → Controller 校验 → Workflow` 是兼容链，迁移时保留行为适配但不得继续扩展。目标链中，产品工具调用必须是该模型响应唯一的终止动作；`AiRunOrchestrator` 或未来 Genkit Interrupt 把它投影为 Proposal。Controller 解析本轮临时别名、冻结范围、预算、取消和运行状态后交给 Policy；校验成功不等于授权。自由输入产生的思维导图创建/修订 Proposal 首阶段必须在对话内确认，快捷按钮和范围卡片等明确 UI 手势可以按 Policy 预授权。
+当前 `AiRunProductActionRequested → AiProductActionController` 是 Proposal 入口适配；Controller 之后统一写 Journal、签发 Command，并由领域 Workflow/通用 `AiProductWorkflowExecutor` 读取 Command。产品工具调用必须是该模型响应唯一的终止动作；`AiRunOrchestrator` 或未来 Genkit Interrupt 只负责投影 Proposal。Controller 解析本轮临时别名、冻结范围、预算、取消和运行状态后交给 Policy；校验成功不等于授权。自由输入产生的思维导图创建/修订 Proposal 首阶段必须在对话内确认，快捷按钮和范围卡片等明确 UI 手势可以按 Policy 预授权。
 
 模型没有返回产品工具调用、却在可见正文中明确声称已经交付原生产物时，属于协议伪完成。App 可以撤回草稿并进行至多一次只暴露相关产品工具的协议修复；修复成功也只得到 Proposal，仍须经过相同 Policy 和授权链。该守卫不扫描用户关键词决定范围，不拦截明确 Mermaid、教程、评价或概念讨论。
 

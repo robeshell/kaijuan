@@ -14,6 +14,10 @@ import 'package:kaijuan/ai/ai_chat_tools.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_model_adapter_factory.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
+import 'package:kaijuan/ai/ai_product_action_controller.dart';
+import 'package:kaijuan/ai/ai_product_action_protocol.dart';
+import 'package:kaijuan/ai/ai_workflow_contract.dart';
+import 'package:kaijuan/ai/ai_workflow_executor.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
@@ -74,6 +78,8 @@ Future<Map<String, Object?>> _runHarness(
   final scenarios = <String, Map<String, Object?>>{};
   scenarios['bookTool'] = await _runBookToolScenario(config);
   scenarios['productAction'] = await _runProductActionScenario(config);
+  scenarios['productActionControlPlane'] =
+      await _runProductActionControlPlaneScenario();
   scenarios['mindMapWorkflow'] = await _runMindMapScenario(config);
   scenarios['continuation'] = await _runContinuationScenario(
     config,
@@ -95,6 +101,108 @@ Future<Map<String, Object?>> _runHarness(
     'passed': true,
     'scenarios': scenarios,
   };
+}
+
+Future<Map<String, Object?>> _runProductActionControlPlaneScenario() async {
+  final now = DateTime.utc(2026, 8, 12);
+  final journal = MemoryAiActionJournalStore();
+  final controller = AiProductActionController(
+    registry: AiProductActionRegistry([
+      const AiProductActionDefinition(
+        actionKind: 'harness_workflow',
+        definitionVersion: 1,
+        proposalSchemaVersion: 1,
+        commandSchemaVersion: 1,
+        workflowVersion: 1,
+        riskClass: AiActionRiskClass.reversible,
+        supportedSources: {AiActionProposalSource.explicitUi},
+      ),
+    ]),
+    journal: journal,
+    now: () => now,
+    idGenerator: () => 'harness-command',
+  );
+  final proposal = AiActionProposal(
+    protocolVersion: 1,
+    proposalId: 'harness-proposal',
+    parentRunId: null,
+    conversationId: 'harness',
+    turnId: 'turn',
+    actionKind: 'harness_workflow',
+    definitionVersion: 1,
+    proposalSchemaVersion: 1,
+    source: AiActionProposalSource.explicitUi,
+    sourceSubmissionId: 'ui',
+    originalUserText: 'harness',
+    requestedArguments: const {},
+    createdAt: now,
+    expiresAt: now.add(const Duration(hours: 1)),
+  );
+  await controller.propose(proposal);
+  final adapter = _HarnessWorkflowAdapter();
+  final executor = AiProductWorkflowExecutor(
+    actions: controller,
+    adapters: AiWorkflowAdapterRegistry([adapter]),
+    environment: AiWorkflowEnvironment(
+      capabilities: const AiCapabilitySet({}),
+      checkpoints: MemoryAiWorkflowCheckpointStore(),
+      now: () => now,
+    ),
+  );
+  final completed = await executor.execute(proposal.proposalId);
+  final passed =
+      completed.status == AiActionJournalStatus.succeeded &&
+      completed.receipt?.artifactRefs.contains('harness-artifact') == true &&
+      adapter.started == 1;
+  return {
+    'passed': passed,
+    'terminal': completed.status.name,
+    'artifactRefs': completed.receipt?.artifactRefs.length ?? 0,
+  };
+}
+
+class _HarnessWorkflowAdapter implements AiWorkflowAdapter {
+  var started = 0;
+
+  @override
+  String get actionKind => 'harness_workflow';
+
+  @override
+  Future<AiWorkflowPreflightResult> preflight(
+    AiAuthorizedCommand command,
+    AiWorkflowEnvironment environment,
+  ) async => const AiWorkflowPreflightResult.accepted();
+
+  @override
+  Stream<AiWorkflowEvent> start(
+    AiAuthorizedCommand command,
+    AiWorkflowRunContext context,
+  ) async* {
+    started++;
+    yield AiWorkflowArtifactReady(
+      workflowRunId: context.workflowRunId,
+      sequence: 1,
+      attempt: context.attempt,
+      artifactRef: 'harness-artifact',
+    );
+    yield AiWorkflowSucceeded(
+      workflowRunId: context.workflowRunId,
+      sequence: 2,
+      attempt: context.attempt,
+      artifactRefs: const [],
+    );
+  }
+
+  @override
+  Stream<AiWorkflowEvent> recover(AiWorkflowRecoveryRequest request) =>
+      const Stream.empty();
+
+  @override
+  Future<void> requestCancel(String workflowRunId, String reason) async {}
+
+  @override
+  Future<AiWorkflowInspection> inspect(String workflowRunId) async =>
+      AiWorkflowInspection(workflowRunId: workflowRunId, active: false);
 }
 
 Future<Map<String, Object?>> _runBookToolScenario(_HarnessConfig config) async {

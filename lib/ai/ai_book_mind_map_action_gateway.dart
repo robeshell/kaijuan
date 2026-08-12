@@ -4,6 +4,7 @@ import 'ai_chat_retrieve.dart';
 import 'ai_mind_map.dart';
 import 'ai_models.dart';
 import 'ai_product_action.dart';
+import 'ai_book_mind_map_product_actions.dart';
 
 class AiBookMindMapTurnSnapshot {
   const AiBookMindMapTurnSnapshot({
@@ -91,6 +92,7 @@ abstract final class AiBookMindMapActionGateway {
       modelContext: AiChatProductContext(
         artifacts: List.unmodifiable(aliases),
         works: List.unmodifiable(workAliases),
+        actionRegistry: AiBookMindMapProductActions.registry,
       ),
       scopeSnapshot: scopeSnapshot,
       artifactsById: Map.unmodifiable(artifactsById),

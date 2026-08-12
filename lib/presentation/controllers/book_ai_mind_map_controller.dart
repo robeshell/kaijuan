@@ -121,6 +121,7 @@ class BookAiMindMapController extends ChangeNotifier {
         }
       }
       if (requestedSections.isEmpty ||
+          requestedSections.length != frozenScope.length ||
           !requestedSections.every(frozenScope.contains)) {
         throw StateError('Mind-map action command scope does not match input');
       }

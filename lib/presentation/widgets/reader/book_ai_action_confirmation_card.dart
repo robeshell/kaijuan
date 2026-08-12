@@ -46,6 +46,26 @@ class BookAiActionConfirmationCard extends StatelessWidget {
                 height: 1.4,
               ),
             ),
+            if (prompt.scopeLabel != null ||
+                prompt.targetLabel != null ||
+                prompt.revisionLabel != null ||
+                prompt.externalWrite) ...[
+              const SizedBox(height: 5),
+              Text(
+                [
+                  if (prompt.scopeLabel != null) '范围：${prompt.scopeLabel}',
+                  if (prompt.targetLabel != null) '目标：${prompt.targetLabel}',
+                  if (prompt.revisionLabel != null) prompt.revisionLabel!,
+                  if (prompt.externalWrite) '会写入外部服务',
+                ].join('  ·  '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: context.appSecondaryText,
+                  fontSize: context.aiCaptionSize,
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             if (selected == null)
               Row(

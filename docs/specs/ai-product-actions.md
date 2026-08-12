@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | 设计定稿，待分阶段迁移 |
+| **状态** | v1 控制面已落地；领域动作按注册表逐项接入 |
 | **日期** | 2026-08-12 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **工程** | [ENGINEERING.md](../ENGINEERING.md)「AI 边界」 |
@@ -506,15 +506,21 @@ late_event.quarantined
 
 ## 16. 完成标准
 
-- [ ] 任何模型 Tool Call 都只能产生 Proposal。
-- [ ] 任何 Workflow 都只接受有效 `AiAuthorizedCommand`。
-- [ ] 自由输入的产品动作具有对话内确认或补充路径。
-- [ ] 附件只绑定目标，不隐式授权修订。
-- [ ] 快捷 UI、自由输入、重试和恢复走同一 Policy/Journal。
-- [ ] 幂等、revision 冲突、取消和晚到结果通过契约测试。
-- [ ] 待确认与执行状态可以在 App 重启后恢复或明确放弃。
-- [ ] 产品 Artifact 与 Genkit Session/Artifact、Journal 控制态保持分离。
-- [ ] 新增动作经注册定义接入，缺失能力时不可见；增加测试 Workflow 不修改通用 Controller 分发代码。
-- [ ] Action、Command、Workflow、Artifact、Prompt 和 Renderer 独立版本化，幂等既防重复 submission 又允许用户再次生成。
-- [ ] 语义评测中错误产品执行为 0，未授权 Workflow 启动为 0。
-- [ ] PRODUCT、ENGINEERING、ai.md 与各领域规格不再包含“模型调用或附件直接授权执行”的描述。
+- [x] 任何模型 Tool Call 都只能产生 Proposal。
+- [x] 任何 Workflow 都只接受有效 `AiAuthorizedCommand`。
+- [x] 自由输入的产品动作具有对话内确认或补充路径。
+- [x] 附件只绑定目标，不隐式授权修订。
+- [x] 快捷 UI、自由输入、重试和恢复走同一 Policy/Journal。
+- [x] 幂等、revision 冲突、取消和晚到结果通过契约测试。
+- [x] 待确认与执行状态可以在 App 重启后恢复或明确放弃。
+- [x] 产品 Artifact 与 Genkit Session/Artifact、Journal 控制态保持分离。
+- [x] 新增动作经注册定义接入，缺失能力时不可见；增加测试 Workflow 不修改通用 Controller 分发代码。
+- [x] Action、Command、Workflow、Artifact、Prompt 和 Renderer 独立版本化，幂等既防重复 submission 又允许用户再次生成。
+- [x] 语义评测中错误产品执行为 0，未授权 Workflow 启动为 0。
+- [x] PRODUCT、ENGINEERING、ai.md 与各领域规格不再包含“模型调用或附件直接授权执行”的描述。
+
+实现证据：`AiProductActionController`、`AiWorkflowAdapterRegistry`、
+`AiProductWorkflowExecutor`、`MemoryAiArtifactRepository` 与
+`test/ai_product_action_protocol_test.dart`。当前图书思维导图的领域提交仍由
+`BookAiMindMapController` 负责；通用执行器已提供后续 PPT/翻译等 Workflow 的接入面，
+不要求修改通用 Controller 分发代码。

@@ -13,6 +13,27 @@ abstract final class AiBookMindMapProductActions {
       AiActionProposalSource.explicitUi,
     },
     toolName: 'create_book_mind_map',
+    toolDescription: 'Create a native book mind map from frozen book content.',
+    argumentSchema: {
+      'type': 'object',
+      'properties': {
+        'scope': {
+          'type': 'string',
+          'enum': [
+            'currentChapter',
+            'currentWork',
+            'specificWork',
+            'wholePublication',
+            'unspecified',
+          ],
+        },
+        'workRef': {'type': 'string'},
+        'instruction': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+      },
+      'required': ['scope', 'instruction'],
+    },
+    artifactKind: 'book_mind_map',
+    artifactSchemaVersion: 1,
     displayNameKey: 'ai.action.createBookMindMap',
   );
 
@@ -28,6 +49,17 @@ abstract final class AiBookMindMapProductActions {
       AiActionProposalSource.explicitUi,
     },
     toolName: 'revise_book_mind_map',
+    toolDescription: 'Revise one frozen native book mind map artifact.',
+    argumentSchema: {
+      'type': 'object',
+      'properties': {
+        'artifactRef': {'type': 'string'},
+        'instruction': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
+      },
+      'required': ['artifactRef', 'instruction'],
+    },
+    artifactKind: 'book_mind_map',
+    artifactSchemaVersion: 1,
     displayNameKey: 'ai.action.reviseBookMindMap',
   );
 

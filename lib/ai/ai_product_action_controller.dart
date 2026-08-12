@@ -16,6 +16,25 @@ class AiActionEvaluation {
   bool get authorized => entry.status == AiActionJournalStatus.authorized;
 }
 
+enum AiActionRecoveryDisposition {
+  terminal,
+  waitingForHuman,
+  recoverable,
+  abandoned,
+}
+
+class AiActionRecoveryCandidate {
+  const AiActionRecoveryCandidate({
+    required this.entry,
+    required this.disposition,
+    this.reasonCode,
+  });
+
+  final AiActionJournalEntry entry;
+  final AiActionRecoveryDisposition disposition;
+  final String? reasonCode;
+}
+
 /// App-owned control plane for product actions. It never calls a model or a
 /// domain Workflow; it only validates, journals and authorizes immutable
 /// commands for a separate executor.
@@ -34,6 +53,7 @@ class AiProductActionController {
   final AiActionPolicy policy;
   final DateTime Function() _now;
   final String Function() _idGenerator;
+  Future<void> _operationQueue = Future<void>.value();
 
   void replaceJournal(AiActionJournalStore next) {
     journal = next;
@@ -43,7 +63,7 @@ class AiProductActionController {
     AiActionProposal proposal, {
     AiCapabilitySet capabilities = const AiCapabilitySet({}),
     bool deferExplicitAuthorization = false,
-  }) async {
+  }) => _exclusive(() async {
     final existing = await journal.read(proposal.proposalId);
     if (existing != null) {
       final decision =
@@ -58,9 +78,12 @@ class AiProductActionController {
       return AiActionEvaluation(entry: existing, decision: decision);
     }
 
-    var entry = AiActionJournalEntry.proposed(proposal);
+    final snapshotProposal = proposal.copyWith(
+      capabilitySnapshotRef: capabilities.fingerprint,
+    );
+    var entry = AiActionJournalEntry.proposed(snapshotProposal);
     await journal.write(entry);
-    final definition = registry.lookup(proposal.actionKind);
+    final definition = registry.lookup(snapshotProposal.actionKind);
     final decision = definition == null
         ? AiActionDecision(
             proposalId: proposal.proposalId,
@@ -78,14 +101,14 @@ class AiProductActionController {
             decidedAt: _now(),
           )
         : policy.decide(
-            proposal: proposal,
+            proposal: snapshotProposal,
             definition: definition,
             now: _now(),
           );
     final status = switch (decision.outcome) {
       AiActionDecisionOutcome.allow =>
         deferExplicitAuthorization &&
-                proposal.source == AiActionProposalSource.explicitUi
+                snapshotProposal.source == AiActionProposalSource.explicitUi
             ? AiActionJournalStatus.proposed
             : AiActionJournalStatus.authorized,
       AiActionDecisionOutcome.requireConfirmation =>
@@ -93,17 +116,17 @@ class AiProductActionController {
       AiActionDecisionOutcome.requireClarification =>
         AiActionJournalStatus.awaitingClarification,
       AiActionDecisionOutcome.deny =>
-        proposal.expiresAt.isBefore(_now())
+        snapshotProposal.expiresAt.isBefore(_now())
             ? AiActionJournalStatus.expired
             : AiActionJournalStatus.rejected,
     };
     AiAuthorizedCommand? command;
     if (status == AiActionJournalStatus.authorized) {
       command = _commandFor(
-        proposal: proposal,
+        proposal: snapshotProposal,
         decision: decision,
-        authorizationSubmissionId: proposal.sourceSubmissionId,
-        authorizationEvidence: 'proposal:${proposal.proposalId}',
+        authorizationSubmissionId: snapshotProposal.sourceSubmissionId,
+        authorizationEvidence: 'proposal:${snapshotProposal.proposalId}',
       );
     }
     entry = entry.transition(
@@ -114,15 +137,19 @@ class AiProductActionController {
     );
     await journal.write(entry);
     return AiActionEvaluation(entry: entry, decision: decision);
-  }
+  });
 
   Future<AiActionJournalEntry> approve({
     required String proposalId,
     required String authorizationSubmissionId,
     required String authorizationEvidence,
     Map<String, Object?> normalizedArguments = const {},
-  }) async {
+  }) => _exclusive(() async {
     var entry = await _requiredEntry(proposalId);
+    if (entry.status == AiActionJournalStatus.authorized &&
+        entry.command?.authorizationSubmissionId == authorizationSubmissionId) {
+      return entry;
+    }
     if (entry.status != AiActionJournalStatus.awaitingConfirmation) {
       throw StateError('Action is not awaiting confirmation');
     }
@@ -155,15 +182,19 @@ class AiProductActionController {
       authorizationSubmissionId: authorizationSubmissionId,
       authorizationEvidence: authorizationEvidence,
     );
-  }
+  });
 
   Future<AiActionJournalEntry> authorize({
     required String proposalId,
     required String authorizationSubmissionId,
     required String authorizationEvidence,
     Map<String, Object?> normalizedArguments = const {},
-  }) async {
+  }) => _exclusive(() async {
     var entry = await _requiredEntry(proposalId);
+    if (entry.status == AiActionJournalStatus.authorized &&
+        entry.command?.authorizationSubmissionId == authorizationSubmissionId) {
+      return entry;
+    }
     if (entry.status != AiActionJournalStatus.proposed) {
       throw StateError('Action is not awaiting explicit authorization');
     }
@@ -195,7 +226,7 @@ class AiProductActionController {
       authorizationSubmissionId: authorizationSubmissionId,
       authorizationEvidence: authorizationEvidence,
     );
-  }
+  });
 
   Future<AiActionJournalEntry> _authorizeEntry({
     required AiActionJournalEntry entry,
@@ -219,25 +250,53 @@ class AiProductActionController {
     return entry;
   }
 
-  Future<AiActionJournalEntry> queue(String proposalId) =>
-      _transition(proposalId, AiActionJournalStatus.queued);
+  Future<AiActionJournalEntry> queue(String proposalId) => _exclusive(() async {
+    final entry = await _requiredEntry(proposalId);
+    if (entry.status == AiActionJournalStatus.queued ||
+        entry.status == AiActionJournalStatus.executing ||
+        entry.status == AiActionJournalStatus.cancelRequested) {
+      return entry;
+    }
+    return _transition(proposalId, AiActionJournalStatus.queued);
+  });
 
   Future<AiActionJournalEntry> markExecuting(
     String proposalId, {
     int? attempt,
-  }) => _transition(
-    proposalId,
-    AiActionJournalStatus.executing,
-    attempt: attempt ?? 1,
-  );
+  }) => _exclusive(() async {
+    final entry = await _requiredEntry(proposalId);
+    if (entry.status == AiActionJournalStatus.executing ||
+        entry.status == AiActionJournalStatus.cancelRequested) {
+      return entry;
+    }
+    if (entry.status == AiActionJournalStatus.authorized) {
+      final queued = entry.transition(
+        AiActionJournalStatus.queued,
+        now: _now(),
+      );
+      await journal.write(queued);
+    }
+    return _transition(
+      proposalId,
+      AiActionJournalStatus.executing,
+      attempt: attempt ?? (entry.attempt == 0 ? 1 : entry.attempt),
+    );
+  });
 
-  Future<AiActionJournalEntry> requestCancel(String proposalId) =>
-      _transition(proposalId, AiActionJournalStatus.cancelRequested);
+  /// Moves an authorized/queued command to the executable state without
+  /// creating a second command. This is the recovery-safe entry point used by
+  /// generic Workflow executors.
+  Future<AiActionJournalEntry> ensureExecuting(String proposalId) =>
+      markExecuting(proposalId);
+
+  Future<AiActionJournalEntry> requestCancel(String proposalId) => _exclusive(
+    () => _transition(proposalId, AiActionJournalStatus.cancelRequested),
+  );
 
   Future<AiAuthorizedCommand> requireExecutingCommand({
     required String proposalId,
     required String commandId,
-  }) async {
+  }) => _exclusive(() async {
     final entry = await _requiredEntry(proposalId);
     final command = entry.command;
     if (command == null || command.commandId != commandId) {
@@ -248,39 +307,80 @@ class AiProductActionController {
       throw StateError('Action command is not executable');
     }
     return command;
-  }
+  });
 
-  Future<AiActionJournalEntry> reject(String proposalId) async {
+  Future<AiActionJournalEntry> reject(String proposalId) =>
+      _exclusive(() async {
+        final entry = await _requiredEntry(proposalId);
+        if (entry.status != AiActionJournalStatus.proposed &&
+            entry.status != AiActionJournalStatus.awaitingConfirmation &&
+            entry.status != AiActionJournalStatus.awaitingClarification) {
+          throw StateError('Action is not awaiting a human decision');
+        }
+        final next = entry.transition(
+          AiActionJournalStatus.rejected,
+          now: _now(),
+        );
+        await journal.write(next);
+        return next;
+      });
+
+  Future<List<AiActionRecoveryCandidate>> inspectRecovery() =>
+      _exclusive(() async {
+        final entries = await journal.readAll();
+        return [
+          for (final entry in entries)
+            AiActionRecoveryCandidate(
+              entry: entry,
+              disposition: _recoveryDisposition(entry),
+              reasonCode: _recoveryReason(entry),
+            ),
+        ];
+      });
+
+  Future<AiActionJournalEntry> abandon(
+    String proposalId, {
+    String reasonCode = 'recovery_not_safe',
+  }) => _exclusive(() async {
     final entry = await _requiredEntry(proposalId);
-    if (entry.status != AiActionJournalStatus.proposed &&
-        entry.status != AiActionJournalStatus.awaitingConfirmation &&
-        entry.status != AiActionJournalStatus.awaitingClarification) {
-      throw StateError('Action is not awaiting a human decision');
-    }
-    final next = entry.transition(AiActionJournalStatus.rejected, now: _now());
+    if (entry.status.isTerminal) return entry;
+    final next = entry.transition(
+      AiActionJournalStatus.abandoned,
+      terminalReasonCode: reasonCode,
+      now: _now(),
+    );
     await journal.write(next);
     return next;
+  });
+
+  AiActionRecoveryDisposition _recoveryDisposition(AiActionJournalEntry entry) {
+    if (entry.status.isTerminal) return AiActionRecoveryDisposition.terminal;
+    if (entry.status == AiActionJournalStatus.proposed ||
+        entry.status == AiActionJournalStatus.awaitingConfirmation ||
+        entry.status == AiActionJournalStatus.awaitingClarification) {
+      return AiActionRecoveryDisposition.waitingForHuman;
+    }
+    return entry.command == null
+        ? AiActionRecoveryDisposition.abandoned
+        : AiActionRecoveryDisposition.recoverable;
   }
 
-  Future<AiActionJournalEntry> complete(AiActionReceipt receipt) async {
-    final entries = await journal.readAll();
-    AiActionJournalEntry? entry = entries
-        .cast<AiActionJournalEntry?>()
-        .firstWhere(
-          (candidate) => candidate?.command?.commandId == receipt.commandId,
-          orElse: () => null,
-        );
-    if (entry == null) {
-      throw StateError('Unknown action command: ${receipt.commandId}');
+  String? _recoveryReason(AiActionJournalEntry entry) {
+    if (entry.command == null &&
+        !entry.status.isTerminal &&
+        entry.status != AiActionJournalStatus.proposed &&
+        entry.status != AiActionJournalStatus.awaitingConfirmation &&
+        entry.status != AiActionJournalStatus.awaitingClarification) {
+      return 'authorized_command_missing';
     }
-    if (entry.command?.commandId != receipt.commandId) {
-      throw StateError('Receipt command does not match journal command');
+    if (entry.command?.contentHash == null && entry.command != null) {
+      return 'content_hash_missing';
     }
-    if (entry.status.isTerminal) return entry;
-    entry = entry.transition(receipt.status, receipt: receipt, now: _now());
-    await journal.write(entry);
-    return entry;
+    return null;
   }
+
+  Future<AiActionJournalEntry> complete(AiActionReceipt receipt) =>
+      _exclusive(() => _completeReceipt(receipt));
 
   Future<AiActionJournalEntry> completeForProposal({
     required String proposalId,
@@ -289,11 +389,11 @@ class AiProductActionController {
     String workflowRunId = '',
     int attempt = 1,
     String? publicErrorCode,
-  }) async {
+  }) => _exclusive(() async {
     final entry = await _requiredEntry(proposalId);
     final command = entry.command;
     if (command == null) throw StateError('Action has no authorized command');
-    return complete(
+    return _completeReceipt(
       AiActionReceipt(
         commandId: command.commandId,
         workflowRunId: workflowRunId.isEmpty
@@ -308,6 +408,42 @@ class AiProductActionController {
         finishedAt: _now(),
       ),
     );
+  });
+
+  Future<AiActionJournalEntry> _completeReceipt(AiActionReceipt receipt) async {
+    final entries = await journal.readAll();
+    AiActionJournalEntry? entry = entries
+        .cast<AiActionJournalEntry?>()
+        .firstWhere(
+          (candidate) => candidate?.command?.commandId == receipt.commandId,
+          orElse: () => null,
+        );
+    if (entry == null) {
+      throw StateError('Unknown action command: ${receipt.commandId}');
+    }
+    if (entry.command?.commandId != receipt.commandId) {
+      throw StateError('Receipt command does not match journal command');
+    }
+    if (entry.status.isTerminal) {
+      if (entry.receipt == null || entry.receipt!.status != receipt.status) {
+        throw StateError('Conflicting terminal receipt');
+      }
+      return entry;
+    }
+    if (entry.status == AiActionJournalStatus.cancelRequested &&
+        receipt.status != AiActionJournalStatus.cancelled &&
+        receipt.status != AiActionJournalStatus.failed) {
+      throw StateError('A cancel-requested action cannot succeed');
+    }
+    entry = entry.transition(receipt.status, receipt: receipt, now: _now());
+    await journal.write(entry);
+    return entry;
+  }
+
+  Future<T> _exclusive<T>(Future<T> Function() operation) {
+    final result = _operationQueue.then<T>((_) => operation());
+    _operationQueue = result.then<void>((_) {}, onError: (_) {});
+    return result;
   }
 
   Future<AiActionJournalEntry> _transition(
@@ -391,17 +527,4 @@ class AiProductActionController {
 
   static String? _string(Object? value) =>
       value is String && value.trim().isNotEmpty ? value.trim() : null;
-}
-
-extension on AiActionJournalStatus {
-  bool get isTerminal => switch (this) {
-    AiActionJournalStatus.succeeded ||
-    AiActionJournalStatus.partiallySucceeded ||
-    AiActionJournalStatus.failed ||
-    AiActionJournalStatus.cancelled ||
-    AiActionJournalStatus.rejected ||
-    AiActionJournalStatus.expired ||
-    AiActionJournalStatus.abandoned => true,
-    _ => false,
-  };
 }
