@@ -4,21 +4,21 @@ import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_product_action_protocol.dart';
-import 'package:kaijuan/presentation/controllers/book_ai_product_action_host.dart';
+import 'package:kaijuan/presentation/controllers/book_ai_action_host.dart';
 import 'package:kaijuan/presentation/controllers/book_ai_workspace_controller.dart';
 
 void main() {
   late BookAiWorkspaceController workspace;
-  late BookAiProductActionHost host;
+  late BookAiActionHost host;
   final clarifications = <String>[];
   final confirmations = <String>[];
   var createRuns = 0;
 
-  BookAiProductActionUi buildUi({
+  BookAiActionHostUi buildUi({
     List<String>? clarificationSink,
     bool Function()? isMounted,
   }) {
-    return BookAiProductActionUi(
+    return BookAiActionHostUi(
       isMounted: isMounted ?? () => true,
       contentHash: () => 'a' * 64,
       publicationTitle: () => '测试书',
@@ -102,7 +102,7 @@ void main() {
       saveChatSession: (_) async {},
       aiStoresReady: true,
     );
-    host = BookAiProductActionHost(workspace: workspace, ui: buildUi());
+    host = BookAiActionHost(workspace: workspace, ui: buildUi());
   });
 
   AiBookMindMapProductTurn emptyTurn({

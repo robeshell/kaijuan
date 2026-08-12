@@ -90,7 +90,7 @@ class BookAiMindMapController extends ChangeNotifier {
     AiConversationCommand? command,
   }) {
     if (_activeTurnId != null) {
-      throw StateError('A mind-map product turn is already active');
+      throw StateError('A mind-map session turn is already active');
     }
     _activeTurnId = turnId;
     _conversation.beginTurn(

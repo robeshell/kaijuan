@@ -7,6 +7,7 @@ import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_outline.dart';
+import 'package:kaijuan/ai/legacy/ai_book_outline_service.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
 
 void main() {

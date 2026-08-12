@@ -136,17 +136,12 @@ class AiProductActionController {
             definition: definition,
             now: _now(),
           );
-    // Mind-map (and explicit UI with defer) stay [proposed] until scope is
-    // frozen and authorizeAfterFreeze issues the real Command.
-    final isBookMindMap =
-        snapshotProposal.actionKind == 'create_book_mind_map' ||
-        snapshotProposal.actionKind == 'revise_book_mind_map';
+    // Explicit UI may defer Command until scope freeze (heavy domains).
+    // Mind maps do not use this controller for the production session path.
     final status = switch (decision.outcome) {
       AiActionDecisionOutcome.allow =>
-        isBookMindMap ||
-                (deferExplicitAuthorization &&
-                    snapshotProposal.source ==
-                        AiActionProposalSource.explicitUi)
+        deferExplicitAuthorization &&
+                snapshotProposal.source == AiActionProposalSource.explicitUi
             ? AiActionJournalStatus.proposed
             : AiActionJournalStatus.authorized,
       AiActionDecisionOutcome.requireConfirmation =>

@@ -13,8 +13,8 @@ import 'book_ai_mind_map_controller.dart';
 import 'book_ai_workspace_controller.dart';
 
 /// UI bridge for mind-map session runs and (optional) heavy product actions.
-class BookAiProductActionUi {
-  const BookAiProductActionUi({
+class BookAiActionHostUi {
+  const BookAiActionHostUi({
     required this.isMounted,
     required this.contentHash,
     required this.publicationTitle,
@@ -120,14 +120,14 @@ class BookAiProductActionUi {
 ///
 /// Mind maps never enter Product Action Journal. Heavy domains (export, etc.)
 /// still use propose → authorize → Workflow when present.
-class BookAiProductActionHost {
-  BookAiProductActionHost({
+class BookAiActionHost {
+  BookAiActionHost({
     required this.workspace,
     required this.ui,
   });
 
   final BookAiWorkspaceController workspace;
-  final BookAiProductActionUi ui;
+  final BookAiActionHostUi ui;
 
   AiProductActionDomainRegistry get domains => workspace.actionDomains;
 

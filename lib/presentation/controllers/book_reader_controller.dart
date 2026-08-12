@@ -1143,7 +1143,7 @@ class BookReaderController extends ChangeNotifier {
 
   Future<List<AiBookWork>?> _resolveWorks(CancelToken? cancel) async {
     final works = await _aiStructure.resolve(
-      maxChars: AiBookOutlineService.maxBookBodyChars,
+      maxChars: AiBookBodyLimits.maxBookBodyChars,
       cancel: cancel,
     );
     if (!_disposed) notifyListeners();

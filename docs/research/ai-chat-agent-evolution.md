@@ -2,17 +2,17 @@
 
 | | |
 |---|---|
-| **状态** | 历史实现基线 + Genkit 落地复盘（更新于 2026-08-10） |
-| **代码基线** | `ba745865587` |
-| **落地基线** | `1f0da2b3024`（完整迁移与验证记录） |
-| **研究对象** | 本书 AI 对话的输入、上下文、流式输出、工具调用、多轮循环、持久化与下一代编排 |
-| **产品规范** | [ai.md](../specs/ai.md) |
+| **状态** | 历史实现基线 + Genkit 落地 + **导图会话化**（更新于 2026-08-12） |
+| **代码基线** | `ba745865587`（对话 Agent 史） |
+| **落地基线** | `1f0da2b3024`（Genkit）；导图会话化见 `899b658` / `6806cb3` 一带 |
+| **研究对象** | 本书 AI 对话的输入、上下文、流式输出、工具调用、多轮循环、持久化；导图从工单栈回到会话产物 |
+| **产品规范** | [ai.md](../specs/ai.md)、[ai-mind-map.md](../specs/ai-mind-map.md) |
 | **横向对照** | [ai-chat-anxreader-comparison.md](./ai-chat-anxreader-comparison.md) |
 | **实施记录** | [ai-runtime-genkit-completion-plan.md](./ai-runtime-genkit-completion-plan.md) |
 
-> 本文不是未来方案的需求清单，而是一份实现复盘。它记录开卷如何从“调用一次模型”逐步走到“手写工具 Agent”，每一步解决了什么问题、又产生了什么新问题。后续可以在此基础上改写为技术文章。
+> 本文不是未来方案的需求清单，而是一份实现复盘。它记录开卷如何从“调用一次模型”逐步走到“手写工具 Agent”，再把思维导图从 Product Action 工单栈收回**会话产物**。后续可改写为技术文章。
 
-> **阅读提示：** 第 3–5 章复盘 `ba745865587` 的历史实现，第 6–7 章记录已经落地的统一运行时与 Genkit 迁移。旧 fenced、手写 Messages 对话 adapter 和对话 Provider 回退已删除；当前权威行为以 [ai.md](../specs/ai.md) 为准。
+> **阅读提示：** 第 3–5 章复盘历史对话 Agent；第 6–7 章 Genkit 运行时；**当前**导图主路径见 [ai-mind-map.md](../specs/ai-mind-map.md)（不经 Journal）。`lib/ai/legacy/` 仅测试与考古，不是产品主路径。
 
 ---
 
@@ -37,6 +37,7 @@
 | 3. 多轮 Tool Agent | 一次检索不足以回答复杂问题 | 模型可依据 observation 继续选择工具 | 四轮行动—观察循环 | `ba745865587` |
 | 4. 统一运行时 | 对话、语言、大纲、图谱各自管理状态 | App 统一 scope、事件、预算、取消与 checkpoint | `AiRunOrchestrator` / `AiRunState` | `41d35817cae`（运行时基础） |
 | 5. Genkit 全迁移 | 文本工具协议与手写 Provider 成为重复基础设施 | Genkit 归一化模型协议，业务仍依赖 App 契约 | 原生工具 + 结构化 Workflow + trace | `41d35817cae`—`1f0da2b3024` |
+| 6. 导图会话化 | 工单确认/Journal 对「会话出图」过重 | 导图退出 Product Action 主路径 | `runMindMapSession` + 消息附件；Journal 留给重任务 | `899b658` 一带 |
 
 ```mermaid
 flowchart LR

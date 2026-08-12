@@ -32,19 +32,8 @@ void main() {
     expiresAt: expiresAt ?? now.add(const Duration(hours: 1)),
   );
 
-  test('mind-map model proposals auto-allow; non-mind-map tools still confirm', () {
-    const mindMap = AiProductActionDefinition(
-      actionKind: 'create_book_mind_map',
-      definitionVersion: 1,
-      proposalSchemaVersion: 1,
-      commandSchemaVersion: 1,
-      workflowVersion: 1,
-      riskClass: AiActionRiskClass.reversible,
-      supportedSources: {
-        AiActionProposalSource.modelTool,
-        AiActionProposalSource.explicitUi,
-      },
-    );
+  test('policy: model-tool proposals confirm; explicit UI allows', () {
+    // Mind maps no longer use Policy (session path). Policy is for heavy domains.
     const heavy = AiProductActionDefinition(
       actionKind: 'export_book_notes',
       definitionVersion: 1,
@@ -73,19 +62,23 @@ void main() {
       createdAt: now,
       expiresAt: now.add(const Duration(hours: 1)),
     );
+    final explicitExport = AiActionProposal(
+      protocolVersion: 1,
+      proposalId: 'proposal-export-ui',
+      parentRunId: 'run-1',
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      actionKind: 'export_book_notes',
+      definitionVersion: 1,
+      proposalSchemaVersion: 1,
+      source: AiActionProposalSource.explicitUi,
+      sourceSubmissionId: 'submission-export-ui',
+      originalUserText: '导出笔记',
+      requestedArguments: const {},
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+    );
     const policy = AiActionPolicy();
-    expect(
-      policy
-          .decide(proposal: proposal(), definition: mindMap, now: now)
-          .outcome,
-      AiActionDecisionOutcome.allow,
-    );
-    expect(
-      policy
-          .decide(proposal: proposal(), definition: mindMap, now: now)
-          .reasonCode,
-      'mind_map_light_path',
-    );
     expect(
       policy
           .decide(proposal: exportProposal, definition: heavy, now: now)
@@ -94,11 +87,7 @@ void main() {
     );
     expect(
       policy
-          .decide(
-            proposal: proposal(source: AiActionProposalSource.explicitUi),
-            definition: mindMap,
-            now: now,
-          )
+          .decide(proposal: explicitExport, definition: heavy, now: now)
           .outcome,
       AiActionDecisionOutcome.allow,
     );
@@ -163,18 +152,18 @@ void main() {
   });
 
   test(
-    'controller journals mind-map light path then authorizes after freeze',
+    'controller: model-tool heavy proposal needs confirmation then approval',
     () async {
       final journal = MemoryAiActionJournalStore();
       final controller = AiProductActionController(
         registry: AiProductActionRegistry([
           const AiProductActionDefinition(
-            actionKind: 'create_book_mind_map',
+            actionKind: 'export_book_notes',
             definitionVersion: 1,
             proposalSchemaVersion: 1,
             commandSchemaVersion: 1,
             workflowVersion: 1,
-            riskClass: AiActionRiskClass.reversible,
+            riskClass: AiActionRiskClass.external,
             supportedSources: {AiActionProposalSource.modelTool},
           ),
         ]),
@@ -182,28 +171,37 @@ void main() {
         now: () => now,
         idGenerator: () => 'command-1',
       );
+      final export = AiActionProposal(
+        protocolVersion: 1,
+        proposalId: 'proposal-1',
+        parentRunId: 'run-1',
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        actionKind: 'export_book_notes',
+        definitionVersion: 1,
+        proposalSchemaVersion: 1,
+        source: AiActionProposalSource.modelTool,
+        sourceSubmissionId: 'submission-1',
+        originalUserText: '导出',
+        requestedArguments: const {},
+        createdAt: now,
+        expiresAt: now.add(const Duration(hours: 1)),
+      );
       final evaluation = await controller.propose(
-        proposal(),
+        export,
         capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
-      expect(evaluation.needsConfirmation, isFalse);
-      expect(evaluation.canProceedWithoutConfirmation, isTrue);
-      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
+      expect(evaluation.needsConfirmation, isTrue);
+      expect(evaluation.entry.status, AiActionJournalStatus.awaitingConfirmation);
       expect(evaluation.entry.command, isNull);
-      expect(evaluation.decision.reasonCode, 'mind_map_light_path');
 
-      final authorized = await controller.authorize(
+      final approved = await controller.approve(
         proposalId: 'proposal-1',
         authorizationSubmissionId: 'approval-1',
-        authorizationEvidence: 'ui:mind-map-scope-confirmed',
-        normalizedArguments: const {
-          'scopeFingerprint': 'sections:1',
-          'scopeSectionIndices': [1],
-        },
+        authorizationEvidence: 'button:approve',
       );
-      expect(authorized.status, AiActionJournalStatus.authorized);
-      expect(authorized.command?.commandId, 'command-1');
-      expect(authorized.command?.authorizationSubmissionId, 'approval-1');
+      expect(approved.status, AiActionJournalStatus.authorized);
+      expect(approved.command?.commandId, 'command-1');
 
       await controller.queue('proposal-1');
       final executing = await controller.markExecuting('proposal-1');
@@ -270,7 +268,7 @@ void main() {
   );
 
   test(
-    'authorization is idempotent for the same submission on light path',
+    'authorization is idempotent for the same submission',
     () async {
       final journal = MemoryAiActionJournalStore();
       final controller = AiProductActionController(
@@ -282,7 +280,7 @@ void main() {
             commandSchemaVersion: 1,
             workflowVersion: 1,
             riskClass: AiActionRiskClass.reversible,
-            supportedSources: {AiActionProposalSource.modelTool},
+            supportedSources: {AiActionProposalSource.explicitUi},
           ),
         ]),
         journal: journal,
@@ -290,13 +288,14 @@ void main() {
         idGenerator: () => 'command-idempotent',
       );
       await controller.propose(
-        proposal(),
+        proposal(source: AiActionProposalSource.explicitUi),
+        deferExplicitAuthorization: true,
         capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
       final first = await controller.authorize(
         proposalId: 'proposal-1',
         authorizationSubmissionId: 'approval-1',
-        authorizationEvidence: 'ui:mind-map-scope-confirmed',
+        authorizationEvidence: 'ui:scope-confirmed',
         normalizedArguments: const {
           'scopeFingerprint': 'sections:1',
           'scopeSectionIndices': [1],
@@ -305,7 +304,7 @@ void main() {
       final second = await controller.authorize(
         proposalId: 'proposal-1',
         authorizationSubmissionId: 'approval-1',
-        authorizationEvidence: 'ui:mind-map-scope-confirmed',
+        authorizationEvidence: 'ui:scope-confirmed',
         normalizedArguments: const {
           'scopeFingerprint': 'sections:1',
           'scopeSectionIndices': [1],
@@ -330,7 +329,7 @@ void main() {
           commandSchemaVersion: 1,
           workflowVersion: 1,
           riskClass: AiActionRiskClass.reversible,
-          supportedSources: {AiActionProposalSource.modelTool},
+          supportedSources: {AiActionProposalSource.explicitUi},
         ),
       ]),
       journal: journal,
@@ -338,13 +337,14 @@ void main() {
       idGenerator: () => 'command-cancel',
     );
     await controller.propose(
-      proposal(),
+      proposal(source: AiActionProposalSource.explicitUi),
+      deferExplicitAuthorization: true,
       capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
     );
     await controller.authorize(
       proposalId: 'proposal-1',
       authorizationSubmissionId: 'approval-1',
-      authorizationEvidence: 'ui:mind-map-scope-confirmed',
+      authorizationEvidence: 'ui:scope-confirmed',
       normalizedArguments: const {
         'scopeFingerprint': 'sections:1',
         'scopeSectionIndices': [1],

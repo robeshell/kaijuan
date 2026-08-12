@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../ai/ai_agent_runtime.dart';
 import '../../ai/ai_agent_runtime_gate.dart';
 import '../../ai/ai_book_mind_map_service.dart';
-import '../../ai/ai_book_mind_map_workflow.dart'; // AiBookMindMapArtifactCodec for heavy projection
+import '../../ai/ai_book_mind_map_artifact.dart'; // AiBookMindMapArtifactCodec for heavy projection
 import '../../ai/ai_cancel.dart';
 import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_conversation_intent.dart';

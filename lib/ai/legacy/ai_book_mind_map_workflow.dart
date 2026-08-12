@@ -1,49 +1,20 @@
-import 'ai_book_mind_map_product_actions.dart';
-import 'ai_book_structure.dart';
-import 'ai_cancel.dart';
-import 'ai_chat_retrieve.dart';
-import 'ai_mind_map.dart';
-import 'ai_product_action_protocol.dart';
-import 'ai_workflow_contract.dart';
+export '../ai_book_mind_map_artifact.dart';
 
-/// Strong-typed domain payload for a book mind map, carried inside the generic
-/// [AiArtifactEnvelope] only as serialized metadata. Domain code keeps using
-/// [AiBookMindMap] rather than raw maps.
-abstract final class AiBookMindMapArtifactCodec {
-  static const kind = 'book_mind_map';
+import '../ai_book_mind_map_artifact.dart';
+import '../ai_book_mind_map_product_actions.dart';
+import '../ai_book_structure.dart';
+import '../ai_cancel.dart';
+import '../ai_chat_retrieve.dart';
+import '../ai_mind_map.dart';
+import '../ai_product_action_protocol.dart';
+import '../ai_workflow_contract.dart';
 
-  static Map<String, Object?> encode(AiBookMindMap map) => map.toJson();
-
-  static AiBookMindMap? decode(Map<String, Object?> payload) =>
-      AiBookMindMap.fromJson(payload);
-
-  static AiArtifactEnvelope envelopeFor({
-    required AiBookMindMap map,
-    required String artifactId,
-    required String lineageRootId,
-    required int revision,
-    required DateTime createdAt,
-  }) {
-    final body = map.copyWith(artifactId: artifactId, revision: revision);
-    return AiArtifactEnvelope(
-      artifactId: artifactId,
-      kind: kind,
-      schemaVersion:
-          AiBookMindMapProductActions.create.artifactSchemaVersion ?? 1,
-      revision: revision,
-      contentHash: body.contentHash,
-      payload: encode(body),
-      createdAt: createdAt,
-      lineageRootId: lineageRootId,
-    );
-  }
-
-  static String lineageRootOf(AiBookMindMap map) =>
-      map.sourceArtifactId ??
-      map.artifactId ??
-      'mind-map:${map.scopeFingerprint}';
-}
-
+// ignore_for_file: public_member_api_docs
+/// **Legacy / test-only** mind-map Product Workflow adapter.
+///
+/// Production mind maps use [BookAiWorkspaceController.runMindMapSession]
+/// (chat session path). This adapter remains for protocol/fault-injection
+/// tests and historical platform proofs — do not wire it into production domains.
 /// Run-scoped inputs that cannot live on the immutable command (full section
 /// text, generation callbacks). Staged immediately before executor start.
 ///

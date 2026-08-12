@@ -769,25 +769,16 @@ class AiActionPolicy {
         decidedAt: now,
       );
     }
-    // Book mind-map is a light conversational artifact: model proposals
-    // auto-allow (no confirmation card). Heavier product actions still
-    // require confirmation when proposed via model tools.
-    final isBookMindMap =
-        definition.actionKind == 'create_book_mind_map' ||
-        definition.actionKind == 'revise_book_mind_map';
+    // Model-tool proposals for heavy product domains require confirmation.
+    // Book mind maps do not use this Policy path (session generation instead).
     final requiresConfirmation =
-        proposal.source == AiActionProposalSource.modelTool && !isBookMindMap;
+        proposal.source == AiActionProposalSource.modelTool;
     return AiActionDecision(
       proposalId: proposal.proposalId,
       outcome: requiresConfirmation
           ? AiActionDecisionOutcome.requireConfirmation
           : AiActionDecisionOutcome.allow,
-      reasonCode: requiresConfirmation
-          ? 'model_proposal'
-          : isBookMindMap &&
-                proposal.source == AiActionProposalSource.modelTool
-          ? 'mind_map_light_path'
-          : 'explicit_ui',
+      reasonCode: requiresConfirmation ? 'model_proposal' : 'explicit_ui',
       riskClass: definition.riskClass,
       resolvedActionKind: definition.actionKind,
       normalizedArguments: proposal.requestedArguments,

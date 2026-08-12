@@ -227,81 +227,12 @@ class AiChatProductContext {
 
   AiProductActionRequest parse(AiModelToolCall call) {
     final parser = toolParser;
-    if (parser != null) {
-      return parser(call, this);
-    }
-    // Compatibility fallback for callers that still use the mind-map tools
-    // without injecting a domain registry parser.
-    final knownTools = actionRegistry == null
-        ? AiProductToolNames.all
-        : {
-            for (final definition in actionRegistry!.definitions)
-              if (definition.toolName != null) definition.toolName!,
-          };
-    if (!knownTools.contains(call.name)) {
-      throw const FormatException('Unknown product tool');
-    }
-    final instruction = '${call.arguments['instruction'] ?? ''}'.trim();
-    if (instruction.isEmpty || instruction.length > 2000) {
-      throw const FormatException('Invalid product instruction');
-    }
-    if (call.name == AiProductToolNames.createBookMindMap) {
-      final rawScope = '${call.arguments['scope'] ?? 'unspecified'}';
-      final scope = AiBookMindMapActionScope.values.where(
-        (value) => value.name == rawScope,
-      );
-      if (scope.isEmpty) throw const FormatException('Invalid mind-map scope');
-      final rawWorkAlias = '${call.arguments['workRef'] ?? ''}'.trim();
-      AiProductWorkAlias? work;
-      if (scope.single == AiBookMindMapActionScope.specificWork) {
-        final matches = works.where(
-          (candidate) => candidate.alias == rawWorkAlias,
-        );
-        if (matches.length != 1) {
-          throw const FormatException('Unknown book-work alias');
-        }
-        work = matches.single;
-      } else if (rawWorkAlias.isNotEmpty) {
-        throw const FormatException(
-          'workRef is only valid with specificWork scope',
-        );
-      }
-      return AiCreateBookMindMapAction(
-        instruction: instruction,
-        scope: scope.single,
-        workAlias: work?.alias,
-        workId: work?.workId,
+    if (parser == null) {
+      throw const FormatException(
+        'Product tool parser is not configured (domain registry required)',
       );
     }
-    if (call.name == AiProductToolNames.reviseBookMindMap) {
-      final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
-      final AiProductArtifactAlias artifact;
-      if (alias.isEmpty) {
-        final preferred = artifacts.where((a) => a.isPreferred).firstOrNull;
-        final chosen =
-            preferred ?? (artifacts.isEmpty ? null : artifacts.last);
-        if (chosen == null) {
-          throw const FormatException(
-            'No mind-map artifact available to revise',
-          );
-        }
-        artifact = chosen;
-      } else {
-        final matches = artifacts
-            .where((a) => a.alias == alias)
-            .toList(growable: false);
-        if (matches.length != 1) {
-          throw FormatException('Unknown mind-map artifact alias: $alias');
-        }
-        artifact = matches.single;
-      }
-      return AiReviseBookMindMapAction(
-        instruction: instruction,
-        artifactAlias: artifact.alias,
-        artifactId: artifact.artifactId,
-      );
-    }
-    throw FormatException('No domain parser for product tool: ${call.name}');
+    return parser(call, this);
   }
 
   bool shouldRepairNativeMindMapImitation({

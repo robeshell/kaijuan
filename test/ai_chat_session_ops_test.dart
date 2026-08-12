@@ -8,6 +8,7 @@ import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
 import 'package:kaijuan/ai/ai_book_mind_map_product_actions.dart';
+import 'package:kaijuan/ai/ai_product_action_domain.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 
@@ -98,6 +99,7 @@ void main() {
         ),
       ],
       actionRegistry: AiBookMindMapProductActions.registry,
+      toolParser: kaijuanProductionActionDomains().parseToolCall,
       capabilities: const AiCapabilitySet({
         'book.read',
         'structuredOutput',
@@ -135,7 +137,22 @@ void main() {
   });
 
   test('product context rejects invented artifact aliases', () {
-    const context = AiChatProductContext();
+    final context = AiChatProductContext(
+      artifacts: const [
+        AiProductArtifactAlias(
+          alias: 'artifact_1',
+          artifactId: 'map-1',
+          title: '导图',
+          revision: 1,
+        ),
+      ],
+      actionRegistry: AiBookMindMapProductActions.registry,
+      toolParser: kaijuanProductionActionDomains().parseToolCall,
+      capabilities: const AiCapabilitySet({
+        'book.read',
+        'structuredOutput',
+      }),
+    );
     expect(
       () => context.parse(
         const AiModelToolCall(
@@ -215,8 +232,8 @@ void main() {
   });
 
   test('specific work actions resolve only App-issued aliases', () {
-    const context = AiChatProductContext(
-      works: [
+    final context = AiChatProductContext(
+      works: const [
         AiProductWorkAlias(
           alias: 'work_1',
           workId: 'work-real-id',
@@ -224,6 +241,12 @@ void main() {
           isCurrent: true,
         ),
       ],
+      actionRegistry: AiBookMindMapProductActions.registry,
+      toolParser: kaijuanProductionActionDomains().parseToolCall,
+      capabilities: const AiCapabilitySet({
+        'book.read',
+        'structuredOutput',
+      }),
     );
 
     final request = context.parse(

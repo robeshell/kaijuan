@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_mind_map_product_actions.dart';
-import 'package:kaijuan/ai/ai_book_mind_map_workflow.dart';
+import 'package:kaijuan/ai/legacy/ai_book_mind_map_workflow.dart';
 import 'package:kaijuan/ai/ai_cancel.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';

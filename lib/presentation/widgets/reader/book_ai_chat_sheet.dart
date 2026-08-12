@@ -26,7 +26,7 @@ import '../../controllers/book_reader_controller.dart';
 import '../../controllers/book_ai_conversation_controller.dart';
 import '../../controllers/book_ai_mind_map_coordinator.dart';
 import '../../controllers/book_ai_mind_map_controller.dart';
-import '../../controllers/book_ai_product_action_host.dart';
+import '../../controllers/book_ai_action_host.dart';
 import '../../screens/ai_settings_screen.dart';
 import '../ai_typography.dart';
 import '../app_components.dart';
@@ -130,9 +130,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String? _retryTurnId;
   int _turnSerial = 0;
   String? _mindMapTurnId;
-  String? _activeActionProposalId;
   late final BookAiMindMapCoordinator _mindMapCoordinator;
-  late final BookAiProductActionHost _productHost;
+  late final BookAiActionHost _productHost;
   BookReaderController get _c => widget.controller;
 
   BookAiConversationController get _conversation => _c.aiWorkspace.conversation;
@@ -244,9 +243,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       currentWorkKey: () => _chatWorkKey,
       persist: _persist,
     )..addListener(_onMindMapCoordinatorChanged);
-    _productHost = BookAiProductActionHost(
+    _productHost = BookAiActionHost(
       workspace: _c.aiWorkspace,
-      ui: BookAiProductActionUi(
+      ui: BookAiActionHostUi(
         isMounted: () => mounted,
         contentHash: () => _c.item.contentHash,
         publicationTitle: () => _c.item.title,
@@ -571,7 +570,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ? null
         : _mindMapForArtifact(frozenTargetId);
     if (retrying && retryCommand?.object == AiIntentObject.mindMap) {
-      await _retryMindMapProductAction(
+      await _retryMindMapSession(
         text: text,
         retryTurnId: retryTurnId,
         retryCommand: retryCommand!,
@@ -969,23 +968,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _mindMapCoordinator.cancelActionPrompt();
     final turnId = _activeTurnId;
     final turnWorkKey = _activeTurnWorkKey;
-    final actionProposalId = _activeActionProposalId;
-    if (actionProposalId != null) {
-      try {
-        final entry = await _c.aiWorkspace.actionController.journal.read(
-          actionProposalId,
-        );
-        if (entry != null &&
-            (entry.status == AiActionJournalStatus.authorized ||
-                entry.status == AiActionJournalStatus.queued ||
-                entry.status == AiActionJournalStatus.executing)) {
-          await _c.aiWorkspace.actionController.requestCancel(actionProposalId);
-        }
-      } catch (_) {
-        // The workflow completion path remains authoritative if the stop
-        // races a terminal journal write.
-      }
-    }
     if (_mindMapTurnId == turnId) {
       _c.cancelBookMindMapGeneration();
       _mindMapTurnId = null;
@@ -1251,7 +1233,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   AiBookMindMap? _lastFailedBaseMap;
   String? _lastFailedWorkKey;
 
-  Future<void> _retryMindMapProductAction({
+  Future<void> _retryMindMapSession({
     required String text,
     required String? retryTurnId,
     required AiConversationCommand retryCommand,
@@ -1561,7 +1543,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _toolStatus = null;
       _activeTurnId = null;
       _activeTurnWorkKey = null;
-      _activeActionProposalId = null;
       _mindMapTurnId = null;
     });
     if (!failed) {

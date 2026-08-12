@@ -6,7 +6,7 @@
 | **作者** | （待填） |
 | **日期** | 2026-08-12 |
 | **状态** | **部分过时**：平台收口仍有用；**图书思维导图产品主路径已改为轻会话**（2026-08-12 文档转向） |
-| **修订** | Rev3 Host/控制面；**Rev4 注**：导图不再以确认工单/Journal 为产品默认，见 [../specs/ai-mind-map.md](../specs/ai-mind-map.md) |
+| **修订** | Rev3 Host/控制面；**Rev4**：导图会话路径已落地（不经 Journal）；**Rev5 清理**：死栈迁 `lib/ai/legacy/`，Host 更名 `BookAiActionHost`。**本文中段 PR 计划与行数统计可能过时**，以 [ENGINEERING.md](../ENGINEERING.md) 与 [ai-mind-map.md](../specs/ai-mind-map.md) 为准。 |
 | **基线 commit** | `3048a835f36` 及后续收口提交 |
 | **权威产品规格** | **导图以 `ai-mind-map.md` 为准**；重任务以 `ai-product-actions.md` 为准 |
 | **读者** | 熟悉本仓库的工程师 |

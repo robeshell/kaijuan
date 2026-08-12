@@ -3,6 +3,7 @@ import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_product_action_controller.dart';
 import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 import 'package:kaijuan/ai/ai_book_mind_map_product_actions.dart';
+import 'package:kaijuan/ai/ai_product_action_domain.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 
 /// Semantic minimal pairs for product-action proposals.
@@ -90,22 +91,21 @@ void main() {
       );
     }
 
-    test('"生成思维导图" model tool auto-allows without confirmation card', () async {
+    // Production mind maps never call controller.propose (session path).
+    // If a mind-map kind were proposed via Journal, model tools need confirmation.
+    test('journal propose of mind-map model tool would need confirmation',
+        () async {
       final evaluation = await evaluate(
         text: '生成思维导图',
         source: AiActionProposalSource.modelTool,
         actionKind: 'create_book_mind_map',
         args: const {'scope': 'currentChapter', 'instruction': '生成思维导图'},
       );
-      expect(evaluation.needsConfirmation, isFalse);
-      expect(evaluation.canProceedWithoutConfirmation, isTrue);
-      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
+      expect(evaluation.needsConfirmation, isTrue);
       expect(evaluation.entry.command, isNull);
-      expect(evaluation.decision.reasonCode, 'mind_map_light_path');
     });
 
-    test('explicit UI create stays proposed until freeze (no chat confirm)',
-        () async {
+    test('explicit UI mind-map propose authorizes when not deferred', () async {
       final evaluation = await evaluate(
         text: '请为当前章生成思维导图',
         source: AiActionProposalSource.explicitUi,
@@ -113,23 +113,8 @@ void main() {
         args: const {'scope': 'currentChapter', 'instruction': '请为当前章生成思维导图'},
       );
       expect(evaluation.needsConfirmation, isFalse);
-      expect(evaluation.canProceedWithoutConfirmation, isTrue);
-      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
-      expect(evaluation.entry.command, isNull);
-    });
-
-    test('revise model tool auto-allows without confirmation card', () async {
-      final evaluation = await evaluate(
-        text: '把这张图再详细一点',
-        source: AiActionProposalSource.modelTool,
-        actionKind: 'revise_book_mind_map',
-        args: const {'instruction': '把这张图再详细一点', 'targetArtifactId': 'map-1'},
-        targetRef: 'map-1',
-        expectedRevision: 1,
-      );
-      expect(evaluation.needsConfirmation, isFalse);
-      expect(evaluation.canProceedWithoutConfirmation, isTrue);
-      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
+      expect(evaluation.authorized, isTrue);
+      expect(evaluation.entry.command, isNotNull);
     });
   });
 
@@ -175,6 +160,7 @@ void main() {
     test('parses create against registry tool names', () {
       final context = AiChatProductContext(
         actionRegistry: AiBookMindMapProductActions.registry,
+        toolParser: kaijuanProductionActionDomains().parseToolCall,
         capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
       final request = context.parse(
@@ -198,6 +184,7 @@ void main() {
           ),
         ],
         actionRegistry: AiBookMindMapProductActions.registry,
+        toolParser: kaijuanProductionActionDomains().parseToolCall,
         capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
       final request = context.parse(
@@ -229,6 +216,7 @@ void main() {
           ),
         ],
         actionRegistry: AiBookMindMapProductActions.registry,
+        toolParser: kaijuanProductionActionDomains().parseToolCall,
         capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
       final request = context.parse(
@@ -260,6 +248,7 @@ void main() {
           ),
         ],
         actionRegistry: AiBookMindMapProductActions.registry,
+        toolParser: kaijuanProductionActionDomains().parseToolCall,
         capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       ).parse(
         const AiModelToolCall(
@@ -283,6 +272,7 @@ void main() {
           ),
         ],
         actionRegistry: AiBookMindMapProductActions.registry,
+        toolParser: kaijuanProductionActionDomains().parseToolCall,
         capabilities: const AiCapabilitySet({
           'book.read',
           'structuredOutput',
