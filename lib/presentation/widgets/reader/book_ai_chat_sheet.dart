@@ -413,6 +413,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   Future<void> _bootstrap() async {
     try {
+      // Must not load until chat/history stores attach; otherwise an empty
+      // session can later overwrite durable history on first save.
+      await _c.aiWorkspace.whenStoresSettled;
+      if (!mounted) return;
+      if (_c.aiWorkspace.aiStoresError != null &&
+          !_c.aiWorkspace.aiStoresReady) {
+        // Chat history may still be usable if only journal failed; continue.
+      }
       final loadedSession = await _c.loadChatSession();
       final session = AiChatSessionOps.recoverInterruptedTurns(loadedSession);
       if (!identical(session, loadedSession)) {

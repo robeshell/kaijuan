@@ -166,8 +166,8 @@ void main() {
     );
   });
 
-  test('resolveRevision falls back to preferred then latest map', () {
-    final older = AiBookMindMap(
+  test('resolveRevision requires the action artifact id to exist', () {
+    final map = AiBookMindMap(
       contentHash: 'hash',
       workKey: 'work-1',
       createdAt: DateTime.utc(2026, 8, 11),
@@ -189,49 +189,30 @@ void main() {
         ),
       ],
     );
-    final newer = AiBookMindMap(
-      contentHash: 'hash',
-      workKey: 'work-1',
-      createdAt: DateTime.utc(2026, 8, 12),
-      model: 'test',
-      scopeSectionIndices: const [1],
-      scopeFingerprint: 'scope-b',
-      contentKind: AiMindMapContentKind.narrative,
-      layout: AiMindMapLayout.bidirectional,
-      artifactId: 'map-new',
-      revision: 1,
-      nodes: const [
-        AiBookMindMapNode(
-          nodeId: 'root',
-          parentId: null,
-          order: 0,
-          level: 0,
-          title: '新',
-          summary: '',
+    final byId = {'map-old': map};
+    expect(
+      AiBookMindMapActionGateway.resolveRevision(
+        const AiReviseBookMindMapAction(
+          instruction: '再详细一点',
+          artifactAlias: 'artifact_1',
+          artifactId: 'map-old',
         ),
-      ],
+        byId,
+      ).artifactId,
+      'map-old',
     );
-    final byId = {'map-old': older, 'map-new': newer};
-    // Action points at unknown id → preferredArtifactId wins.
-    final preferred = AiBookMindMapActionGateway.resolveRevision(
-      const AiReviseBookMindMapAction(
-        instruction: '再详细一点',
-        artifactAlias: 'artifact_x',
-        artifactId: 'missing',
+    // Unknown explicit id must not retarget another map.
+    expect(
+      () => AiBookMindMapActionGateway.resolveRevision(
+        const AiReviseBookMindMapAction(
+          instruction: '再详细一点',
+          artifactAlias: 'artifact_x',
+          artifactId: 'missing',
+        ),
+        byId,
+        preferredArtifactId: 'map-old',
       ),
-      byId,
-      preferredArtifactId: 'map-old',
+      throwsA(isA<AiProviderException>()),
     );
-    expect(preferred.artifactId, 'map-old');
-    // No preferred → latest value in map.
-    final latest = AiBookMindMapActionGateway.resolveRevision(
-      const AiReviseBookMindMapAction(
-        instruction: '再详细一点',
-        artifactAlias: 'artifact_x',
-        artifactId: 'missing',
-      ),
-      byId,
-    );
-    expect(latest.artifactId, 'map-new');
   });
 }

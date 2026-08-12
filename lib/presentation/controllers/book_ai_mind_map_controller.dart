@@ -43,7 +43,9 @@ class BookAiMindMapBatchOutcome {
   final Object? error;
   final String? userMessage;
 
-  bool get succeeded => !cancelled && completed == total;
+  /// True only when every unit projected durably and no failure was recorded.
+  bool get succeeded =>
+      !cancelled && error == null && completed == total && total > 0;
 }
 
 /// Owns a native mind-map **session turn** inside chat (not a Journal job).
@@ -249,7 +251,6 @@ class BookAiMindMapController extends ChangeNotifier {
           failedUnit = unit;
           break;
         }
-        completed++;
         final artifactTurnId = '$turnId-mind-map-${index + 1}';
         final artifact = result.copyWith(
           artifactId: artifactTurnId,
@@ -259,6 +260,8 @@ class BookAiMindMapController extends ChangeNotifier {
           revision: baseMap == null ? 1 : baseMap.revision + 1,
         );
         try {
+          // Count only after durable projection; a write failure must not look
+          // like a successful unit.
           await projectArtifact(
             turnId: turnId,
             workKey: workKey,
@@ -271,6 +274,7 @@ class BookAiMindMapController extends ChangeNotifier {
           failedUnit = unit;
           break;
         }
+        completed++;
         try {
           onArtifact?.call(artifact);
         } catch (_) {
@@ -279,12 +283,17 @@ class BookAiMindMapController extends ChangeNotifier {
       }
 
       final cancelled = isCancelled() || !_owns(turnId, workKey);
+      final ok =
+          !cancelled &&
+          failure == null &&
+          completed == units.length &&
+          units.isNotEmpty;
       finishProductTurn(
         turnId: turnId,
         workKey: workKey,
         status: cancelled
             ? AiChatTurnStatus.cancelled
-            : completed == units.length
+            : ok
             ? AiChatTurnStatus.completed
             : AiChatTurnStatus.failed,
         error: failure,

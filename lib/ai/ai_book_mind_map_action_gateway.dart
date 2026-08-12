@@ -193,15 +193,23 @@ abstract final class AiBookMindMapActionGateway {
     Map<String, AiBookMindMap> artifactsById, {
     String? preferredArtifactId,
   }) {
-    final target =
-        artifactsById[action.artifactId] ??
-        (preferredArtifactId != null
-            ? artifactsById[preferredArtifactId]
-            : null) ??
-        (artifactsById.isEmpty ? null : artifactsById.values.last);
-    if (target == null) {
-      throw AiProviderException('当前对话还没有可修改的思维导图');
+    // action.artifactId is App-resolved (explicit alias or preferred/latest).
+    // Do not retarget a missing id to another map — that would rewrite the
+    // wrong artifact after the model named a specific alias.
+    final byId = artifactsById[action.artifactId];
+    if (byId != null) return byId;
+    // Preferred only when the action id itself was the preferred/latest fallback
+    // id that is no longer in the map (conversation pruned). Still do not
+    // invent a different named target.
+    if (preferredArtifactId != null &&
+        preferredArtifactId == action.artifactId) {
+      final preferred = artifactsById[preferredArtifactId];
+      if (preferred != null) return preferred;
     }
-    return target;
+    throw AiProviderException(
+      artifactsById.isEmpty
+          ? '当前对话还没有可修改的思维导图'
+          : '要修改的思维导图已不在当前对话中，请重新指定',
+    );
   }
 }

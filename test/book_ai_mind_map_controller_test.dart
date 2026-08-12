@@ -178,4 +178,39 @@ void main() {
     },
   );
 
+  test('persist failure marks turn failed and not succeeded', () async {
+    // Fail the first durable write that includes a mind-map (projection).
+    // Subsequent finishProductTurn may persist again without throwing.
+    var mapWriteFailsLeft = 1;
+    final conversation = BookAiConversationController((session) async {
+      final hasMap =
+          session.messages.any((m) => m.mindMap != null) ||
+          session.workMessages.values.any(
+            (list) => list.any((m) => m.mindMap != null),
+          );
+      if (hasMap && mapWriteFailsLeft > 0) {
+        mapWriteFailsLeft--;
+        throw StateError('disk full');
+      }
+    })..hydrate(const AiChatSession(contentHash: 'hash', itemId: 'item'));
+    final controller = BookAiMindMapController(conversation);
+
+    final outcome = await controller.generate(
+      turnId: 'turn-1',
+      workKey: null,
+      text: '生成第一部',
+      publicationTitle: '合集',
+      units: const [firstUnit],
+      isCancelled: () => false,
+      loadSections: (_) => throw StateError('frozen sections must be used'),
+      generateMap: (unit, _, _) async => mapFor(unit),
+    );
+
+    expect(outcome.succeeded, isFalse);
+    expect(outcome.completed, 0);
+    expect(outcome.error, isNotNull);
+    expect(conversation.messagesFor(null).first.status, AiChatTurnStatus.failed);
+    controller.dispose();
+    conversation.dispose();
+  });
 }

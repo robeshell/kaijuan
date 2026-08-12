@@ -509,7 +509,12 @@ class BookReaderController extends ChangeNotifier {
   void detachTtsBridge() => _tts.detachBridge();
 
   /// Load or create the chat session for this book (isolated by contentHash).
+  ///
+  /// Waits until durable AI stores have finished attaching so a fast open of
+  /// the AI panel cannot load an empty in-memory session and later overwrite
+  /// disk history.
   Future<AiChatSession> loadChatSession() async {
+    await _aiWorkspace.whenStoresSettled;
     final hash = item.contentHash;
     final store = _chatHistoryStore;
     if (store == null) {

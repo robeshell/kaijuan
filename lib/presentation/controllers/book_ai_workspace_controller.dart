@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../ai/ai_agent_runtime.dart';
@@ -56,7 +58,10 @@ class BookAiWorkspaceController {
        workflowCheckpoints =
            workflowCheckpoints ?? MemoryAiWorkflowCheckpointStore(),
        _aiStoresReady = aiStoresReady,
-       _aiStoresError = null {
+       _aiStoresError = null,
+       _storesSettled = aiStoresReady
+           ? (Completer<void>()..complete())
+           : Completer<void>() {
     actionController = AiProductActionController(
       registry: actionDomains.asActionRegistry(productionOnly: true),
       journal: actionJournal ?? MemoryAiActionJournalStore(),
@@ -87,6 +92,7 @@ class BookAiWorkspaceController {
 
   bool _aiStoresReady;
   String? _aiStoresError;
+  final Completer<void> _storesSettled;
 
   /// Durable Journal/Artifact/Checkpoint stores are attached and usable.
   bool get aiStoresReady => _aiStoresReady;
@@ -94,12 +100,19 @@ class BookAiWorkspaceController {
   /// User-visible reason when attach failed; null when ready or not yet tried.
   String? get aiStoresError => _aiStoresError;
 
+  /// Completes once [markAiStoresReady] has been called (success or failure).
+  /// Chat bootstrap must await this so load never races an empty Memory session.
+  Future<void> get whenStoresSettled => _storesSettled.future;
+
   /// Marks durable AI control stores as ready (or failed). Fail-closed: never
   /// silently treat Memory defaults as durable production state after a failed
   /// attach attempt.
   void markAiStoresReady({required bool ready, String? error}) {
     _aiStoresReady = ready;
     _aiStoresError = ready ? null : (error ?? _aiStoresError);
+    if (!_storesSettled.isCompleted) {
+      _storesSettled.complete();
+    }
     onChanged?.call();
   }
 
@@ -350,6 +363,9 @@ class BookAiWorkspaceController {
             openModelAdapter: () => settings.openModelAdapter(),
             settings: () => settings.settings,
           );
+    // Capability snapshot is baked into the Workflow environment; rebuild so
+    // heavy domains see structuredOutput after settings bind.
+    _rebuildExecutor();
     return true;
   }
 

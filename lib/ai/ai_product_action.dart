@@ -275,15 +275,25 @@ class AiChatProductContext {
     }
     if (call.name == AiProductToolNames.reviseBookMindMap) {
       final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
-      final matches = alias.isEmpty
-          ? const <AiProductArtifactAlias>[]
-          : artifacts.where((a) => a.alias == alias).toList();
-      final artifact = matches.length == 1
-          ? matches.single
-          : artifacts.where((a) => a.isPreferred).firstOrNull ??
-                (artifacts.isEmpty ? null : artifacts.last);
-      if (artifact == null) {
-        throw const FormatException('No mind-map artifact available to revise');
+      final AiProductArtifactAlias artifact;
+      if (alias.isEmpty) {
+        final preferred = artifacts.where((a) => a.isPreferred).firstOrNull;
+        final chosen =
+            preferred ?? (artifacts.isEmpty ? null : artifacts.last);
+        if (chosen == null) {
+          throw const FormatException(
+            'No mind-map artifact available to revise',
+          );
+        }
+        artifact = chosen;
+      } else {
+        final matches = artifacts
+            .where((a) => a.alias == alias)
+            .toList(growable: false);
+        if (matches.length != 1) {
+          throw FormatException('Unknown mind-map artifact alias: $alias');
+        }
+        artifact = matches.single;
       }
       return AiReviseBookMindMapAction(
         instruction: instruction,

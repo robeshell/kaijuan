@@ -270,5 +270,37 @@ void main() {
       );
       expect((latestOnly as AiReviseBookMindMapAction).artifactId, 'map-b');
     });
+
+    test('rejects unknown artifactRef instead of retargeting', () {
+      final context = AiChatProductContext(
+        artifacts: const [
+          AiProductArtifactAlias(
+            alias: 'artifact_1',
+            artifactId: 'map-1',
+            title: '导图',
+            revision: 1,
+            isPreferred: true,
+          ),
+        ],
+        actionRegistry: AiBookMindMapProductActions.registry,
+        capabilities: const AiCapabilitySet({
+          'book.read',
+          'structuredOutput',
+        }),
+      );
+      expect(
+        () => context.parse(
+          const AiModelToolCall(
+            id: '1',
+            name: 'revise_book_mind_map',
+            arguments: {
+              'instruction': '再详细一点',
+              'artifactRef': 'artifact_99',
+            },
+          ),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 }

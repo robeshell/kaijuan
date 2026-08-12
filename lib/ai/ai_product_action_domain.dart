@@ -224,16 +224,27 @@ class AiBookMindMapReviseDomain implements AiProductActionDomain {
       throw const FormatException('Invalid product instruction');
     }
     final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
-    final matches = alias.isEmpty
-        ? const <AiProductArtifactAlias>[]
-        : context.artifacts.where((a) => a.alias == alias).toList();
-    // Light path: empty or unknown alias → preferred, else latest artifact.
-    final artifact = matches.length == 1
-        ? matches.single
-        : context.artifacts.where((a) => a.isPreferred).firstOrNull ??
-              (context.artifacts.isEmpty ? null : context.artifacts.last);
-    if (artifact == null) {
-      throw const FormatException('No mind-map artifact available to revise');
+    final AiProductArtifactAlias artifact;
+    if (alias.isEmpty) {
+      // Omit artifactRef → preferred, else latest.
+      final preferred = context.artifacts.where((a) => a.isPreferred).firstOrNull;
+      final fallback = context.artifacts.isEmpty
+          ? null
+          : context.artifacts.last;
+      final chosen = preferred ?? fallback;
+      if (chosen == null) {
+        throw const FormatException('No mind-map artifact available to revise');
+      }
+      artifact = chosen;
+    } else {
+      final matches = context.artifacts
+          .where((a) => a.alias == alias)
+          .toList(growable: false);
+      if (matches.length != 1) {
+        // Explicit unknown alias must not silently retarget another map.
+        throw FormatException('Unknown mind-map artifact alias: $alias');
+      }
+      artifact = matches.single;
     }
     return AiReviseBookMindMapAction(
       instruction: instruction,

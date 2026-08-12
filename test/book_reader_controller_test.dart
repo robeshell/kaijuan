@@ -228,6 +228,7 @@ void main() {
     await controller.attachEngine(sectionMap, tocTitles);
     final store = JsonAiChatHistoryStore(tempDir);
     controller.attachChatHistoryStore(store);
+    controller.aiWorkspace.markAiStoresReady(ready: true);
 
     final outline = AiBookOutline(
       createdAt: DateTime.utc(2026, 1, 1),
@@ -265,6 +266,7 @@ void main() {
       await controller.attachEngine(sectionMap, tocTitles);
       final store = JsonAiChatHistoryStore(tempDir);
       controller.attachChatHistoryStore(store);
+      controller.aiWorkspace.markAiStoresReady(ready: true);
 
       final v1 = AiBookOutline(
         createdAt: DateTime.utc(2026, 1, 1),
@@ -315,6 +317,7 @@ void main() {
     await controller.attachEngine(sectionMap, tocTitles);
     final store = JsonAiChatHistoryStore(tempDir);
     controller.attachChatHistoryStore(store);
+    controller.aiWorkspace.markAiStoresReady(ready: true);
 
     final deletedSnapshot = AiChatSession(
       contentHash: item.contentHash,
