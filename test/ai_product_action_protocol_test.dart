@@ -510,7 +510,7 @@ void main() {
         ),
         expectedRevision: 0,
       ),
-      throwsStateError,
+      throwsA(isA<AiArtifactRevisionConflict>()),
     );
     final second = await repository.commit(
       AiArtifactEnvelope(

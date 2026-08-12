@@ -141,6 +141,9 @@ class BookAiWorkspaceController {
   }
 
   /// Runs an authorized mind-map command through the generic product executor.
+  ///
+  /// Order is fixed: generate → Artifact commit → checkpoint → Receipt →
+  /// conversation projection. Projection never runs before Receipt.
   Future<BookAiMindMapBatchOutcome> runMindMapProductAction({
     required String proposalId,
     required AiAuthorizedCommand actionCommand,
@@ -157,6 +160,7 @@ class BookAiWorkspaceController {
     AiConversationCommand? command,
     bool segmentedPublication = false,
     void Function(AiBookMindMap artifact)? onArtifact,
+    int? attempt,
   }) async {
     mindMapConversation.validateActionCommand(
       actionCommand: actionCommand,
@@ -178,7 +182,6 @@ class BookAiWorkspaceController {
     }
 
     final adapter = mindMapAdapterFor(actionCommand.actionKind);
-    final committed = <AiBookMindMap>[];
     mindMapConversation.beginProductTurn(
       turnId: turnId,
       workKey: workKey,
@@ -215,27 +218,6 @@ class BookAiWorkspaceController {
               );
             },
         onProgress: mindMapConversation.setProgress,
-        onArtifact: (artifact) async {
-          committed.add(artifact);
-          final matching = preparedUnits
-              .where(
-                (unit) =>
-                    unit.sections.map((s) => s.index).join(',') ==
-                    artifact.scopeSectionIndices.join(','),
-              )
-              .map((unit) => unit.label);
-          final unitLabel = matching.isEmpty
-              ? publicationTitle
-              : matching.first;
-          await mindMapConversation.projectArtifact(
-            turnId: turnId,
-            workKey: workKey,
-            unitLabel: unitLabel,
-            sectionCount: artifact.scopeSectionIndices.length,
-            artifact: artifact,
-          );
-          onArtifact?.call(artifact);
-        },
       ),
     );
 
@@ -243,6 +225,7 @@ class BookAiWorkspaceController {
       final entry = await workflowExecutor.execute(
         proposalId,
         cancelToken: cancelToken,
+        attempt: attempt ?? 1,
       );
       final cancelled =
           entry.status == AiActionJournalStatus.cancelled ||
@@ -250,6 +233,59 @@ class BookAiWorkspaceController {
       final succeeded = entry.status == AiActionJournalStatus.succeeded;
       final partially =
           entry.status == AiActionJournalStatus.partiallySucceeded;
+
+      final projected = <AiBookMindMap>[];
+      // Projection is App-owned and happens only after a non-cancelled Receipt.
+      if (!cancelled &&
+          (succeeded || partially) &&
+          entry.receipt != null &&
+          entry.receipt!.artifactRefs.isNotEmpty) {
+        try {
+          final refs = entry.receipt!.artifactRefs;
+          for (var index = 0; index < refs.length; index++) {
+            final ref = refs[index];
+            final envelope = await artifactRepository.read(ref);
+            if (envelope == null) continue;
+            final map = AiBookMindMapArtifactCodec.decode(envelope.payload);
+            if (map == null) continue;
+            // Prefer the frozen unit order from this run; section index matching
+            // is unreliable across originSectionIndex vs index encodings.
+            final unitLabel = index < preparedUnits.length
+                ? preparedUnits[index].label
+                : publicationTitle;
+            final sectionCount = index < preparedUnits.length
+                ? preparedUnits[index].sections.length
+                : map.scopeSectionIndices.length;
+            await mindMapConversation.projectArtifact(
+              turnId: turnId,
+              workKey: workKey,
+              unitLabel: unitLabel,
+              sectionCount: sectionCount,
+              artifact: map,
+            );
+            projected.add(map);
+            onArtifact?.call(map);
+          }
+        } catch (projectionError) {
+          // Durable Workflow already succeeded. Projection is retryable and
+          // must not rewrite the journal terminal state as a generation failure.
+          AiLog.d('mind map projection failed: $projectionError');
+          mindMapConversation.finishProductTurn(
+            turnId: turnId,
+            workKey: workKey,
+            status: AiChatTurnStatus.completed,
+            allowRetry: false,
+          );
+          return BookAiMindMapBatchOutcome(
+            completed: projected.length,
+            total: preparedUnits.length,
+            cancelled: false,
+            userMessage: 'mind_map_projection_failed',
+            error: projectionError,
+          );
+        }
+      }
+
       mindMapConversation.finishProductTurn(
         turnId: turnId,
         workKey: workKey,
@@ -258,10 +294,10 @@ class BookAiWorkspaceController {
             : succeeded || partially
             ? AiChatTurnStatus.completed
             : AiChatTurnStatus.failed,
-        allowRetry: !cancelled && committed.isEmpty,
+        allowRetry: !cancelled && projected.isEmpty && !succeeded,
       );
       return BookAiMindMapBatchOutcome(
-        completed: committed.length,
+        completed: projected.length,
         total: preparedUnits.length,
         cancelled: cancelled,
         failedUnit: succeeded || partially || cancelled
@@ -279,10 +315,10 @@ class BookAiWorkspaceController {
             ? AiChatTurnStatus.cancelled
             : AiChatTurnStatus.failed,
         error: error,
-        allowRetry: !cancelToken.isCancelled && committed.isEmpty,
+        allowRetry: !cancelToken.isCancelled,
       );
       return BookAiMindMapBatchOutcome(
-        completed: committed.length,
+        completed: 0,
         total: preparedUnits.length,
         cancelled: cancelToken.isCancelled,
         error: error,

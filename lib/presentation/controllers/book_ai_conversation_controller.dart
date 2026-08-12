@@ -518,6 +518,17 @@ class BookAiConversationController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True when a durable mind-map message already projects [artifactId].
+  bool hasMindMapArtifact(String artifactId, {String? workKey}) {
+    for (final message in _session.messagesFor(workKey)) {
+      final map = message.mindMap;
+      if (map == null) continue;
+      final id = map.artifactId ?? message.turnId;
+      if (id == artifactId) return true;
+    }
+    return false;
+  }
+
   void finishProductTurn({
     required String turnId,
     required String? workKey,

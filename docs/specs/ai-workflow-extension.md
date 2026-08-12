@@ -525,8 +525,7 @@ scope preflight
 - [ ] PPT 参考场景的语义最小对、能力降级和多阶段恢复由可执行契约测试证明。
 - [x] Genkit/Legacy/未来远端 Runtime 切换不改变产品动作与 Artifact 契约。
 
-当前证据：`lib/ai/ai_workflow_contract.dart`、`lib/ai/ai_workflow_executor.dart`、
-`AiBookMindMapWorkflowAdapter`、`JsonAi*Store`、
-`AiTestBookExportWorkflowAdapter` 与对应测试。派生文件 PNG 导出仍由既有思维导图
-renderer 负责，不经通用 Artifact envelope 写二进制。PPT 仍是协议参考场景，
-没有虚构为已交付的产品能力。
+证据：`AiBookMindMapWorkflowAdapter`（无对话副作用）、`JsonAiArtifactRepository`
+谱系 head + 文件锁、`AiProductActionDomainRegistry` + `toolParser`、
+`test_book_export` 从 Tool Call 到 Receipt。派生 PNG 仍由既有 renderer 负责。
+PPT 仍是协议参考场景。

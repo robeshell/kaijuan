@@ -4,7 +4,7 @@ import 'ai_chat_retrieve.dart';
 import 'ai_mind_map.dart';
 import 'ai_models.dart';
 import 'ai_product_action.dart';
-import 'ai_book_mind_map_product_actions.dart';
+import 'ai_product_action_domain.dart';
 
 class AiBookMindMapTurnSnapshot {
   const AiBookMindMapTurnSnapshot({
@@ -50,7 +50,9 @@ abstract final class AiBookMindMapActionGateway {
     required List<AiChatMessage> history,
     required AiBookMindMapTurnSnapshot scopeSnapshot,
     String? preferredArtifactId,
+    AiProductActionDomainRegistry? domainRegistry,
   }) {
+    final domains = domainRegistry ?? kaijuanProductionActionDomains();
     final nativeMessages = history
         .where((message) => message.mindMap != null)
         .toList(growable: false);
@@ -92,7 +94,8 @@ abstract final class AiBookMindMapActionGateway {
       modelContext: AiChatProductContext(
         artifacts: List.unmodifiable(aliases),
         works: List.unmodifiable(workAliases),
-        actionRegistry: AiBookMindMapProductActions.registry,
+        actionRegistry: domains.asActionRegistry(productionOnly: true),
+        toolParser: domains.parseToolCall,
       ),
       scopeSnapshot: scopeSnapshot,
       artifactsById: Map.unmodifiable(artifactsById),

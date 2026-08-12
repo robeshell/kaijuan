@@ -3,6 +3,12 @@ import 'dart:convert';
 import 'ai_model_adapter.dart';
 import 'ai_product_action_protocol.dart';
 
+typedef AiProductToolParser =
+    AiProductActionRequest Function(
+      AiModelToolCall call,
+      AiChatProductContext context,
+    );
+
 abstract final class AiProductToolNames {
   static const createBookMindMap = 'create_book_mind_map';
   static const reviseBookMindMap = 'revise_book_mind_map';
@@ -48,6 +54,19 @@ final class AiReviseBookMindMapAction extends AiProductActionRequest {
   final String artifactId;
 }
 
+/// Registered non-mind-map product request. Domains attach frozen arguments;
+/// generic chat code only reads [actionKind] and [instruction].
+final class AiRegisteredProductAction extends AiProductActionRequest {
+  const AiRegisteredProductAction({
+    required this.actionKind,
+    required super.instruction,
+    required this.arguments,
+  });
+
+  final String actionKind;
+  final Map<String, Object?> arguments;
+}
+
 class AiProductArtifactAlias {
   const AiProductArtifactAlias({
     required this.alias,
@@ -85,11 +104,16 @@ class AiChatProductContext {
     this.artifacts = const [],
     this.works = const [],
     this.actionRegistry,
+    this.toolParser,
   });
 
   final List<AiProductArtifactAlias> artifacts;
   final List<AiProductWorkAlias> works;
   final AiProductActionRegistry? actionRegistry;
+
+  /// When set, tool parsing is fully registration-driven and must not require
+  /// edits to this class for new domains.
+  final AiProductToolParser? toolParser;
 
   List<AiModelToolDefinition> get toolDefinitions {
     final registryTools = actionRegistry?.toolDescriptors(
@@ -250,6 +274,12 @@ class AiChatProductContext {
   }
 
   AiProductActionRequest parse(AiModelToolCall call) {
+    final parser = toolParser;
+    if (parser != null) {
+      return parser(call, this);
+    }
+    // Compatibility fallback for callers that still use the mind-map tools
+    // without injecting a domain registry parser.
     final knownTools = actionRegistry == null
         ? AiProductToolNames.all
         : {
@@ -263,11 +293,7 @@ class AiChatProductContext {
     if (instruction.isEmpty || instruction.length > 2000) {
       throw const FormatException('Invalid product instruction');
     }
-    // Domain gateways resolve frozen aliases. Generic parsing only recognizes
-    // registered mind-map tools today; new domains register their own gateway
-    // without editing this switch once the shared request envelope lands.
-    if (call.name == AiProductToolNames.createBookMindMap ||
-        call.name == 'create_book_mind_map') {
+    if (call.name == AiProductToolNames.createBookMindMap) {
       final rawScope = '${call.arguments['scope'] ?? 'unspecified'}';
       final scope = AiBookMindMapActionScope.values.where(
         (value) => value.name == rawScope,
@@ -295,8 +321,7 @@ class AiChatProductContext {
         workId: work?.workId,
       );
     }
-    if (call.name == AiProductToolNames.reviseBookMindMap ||
-        call.name == 'revise_book_mind_map') {
+    if (call.name == AiProductToolNames.reviseBookMindMap) {
       final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
       final matches = artifacts.where((artifact) => artifact.alias == alias);
       if (matches.length != 1) {

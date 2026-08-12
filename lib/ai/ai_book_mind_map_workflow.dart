@@ -20,6 +20,7 @@ abstract final class AiBookMindMapArtifactCodec {
   static AiArtifactEnvelope envelopeFor({
     required AiBookMindMap map,
     required String artifactId,
+    required String lineageRootId,
     required int revision,
     required DateTime createdAt,
   }) {
@@ -33,12 +34,21 @@ abstract final class AiBookMindMapArtifactCodec {
       contentHash: body.contentHash,
       payload: encode(body),
       createdAt: createdAt,
+      lineageRootId: lineageRootId,
     );
   }
+
+  static String lineageRootOf(AiBookMindMap map) =>
+      map.sourceArtifactId ??
+      map.artifactId ??
+      'mind-map:${map.scopeFingerprint}';
 }
 
 /// Run-scoped inputs that cannot live on the immutable command (full section
 /// text, generation callbacks). Staged immediately before executor start.
+///
+/// Intentionally has **no** conversation projector: adapters only produce
+/// domain artifacts; App projects after Receipt.
 class AiBookMindMapStagedRun {
   const AiBookMindMapStagedRun({
     required this.units,
@@ -46,7 +56,6 @@ class AiBookMindMapStagedRun {
     required this.publicationTitle,
     required this.generateUnit,
     this.baseMap,
-    this.onArtifact,
     this.onProgress,
   });
 
@@ -65,15 +74,10 @@ class AiBookMindMapStagedRun {
     required CancelToken cancelToken,
   })
   generateUnit;
-  final Future<void> Function(AiBookMindMap artifact)? onArtifact;
   final void Function(String progress)? onProgress;
 }
 
 /// Deterministic domain Workflow for create/revise book mind maps.
-///
-/// Genkit is only used inside the injected generation callback for structured
-/// model output. Authorization, journal, artifact CAS and receipts stay App-
-/// owned.
 class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
   AiBookMindMapWorkflowAdapter({
     required this.actionKind,
@@ -179,24 +183,34 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
         attempt: attempt,
       );
 
-      final recoveredRefs = _artifactRefsFromCheckpoint(checkpoint);
-      if (recoveredRefs.isNotEmpty) {
+      // Prefer durable checkpoint; if missing, recover orphaned artifacts that
+      // were committed before the checkpoint write.
+      var recoveredRefs = _artifactRefsFromCheckpoint(checkpoint);
+      var unitTotal = (checkpoint?.payload['unitTotal'] as num?)?.toInt() ?? 0;
+      if (recoveredRefs.isEmpty) {
+        final orphaned = await artifacts.listByCommandPrefix(command.commandId);
+        if (orphaned.isNotEmpty) {
+          recoveredRefs = [for (final item in orphaned) item.artifactId];
+          unitTotal = orphaned.length;
+        }
+      }
+
+      final staged = _staged[command.commandId];
+      final expectedTotal = staged?.units.length ?? unitTotal;
+
+      if (recoveredRefs.isNotEmpty &&
+          expectedTotal > 0 &&
+          recoveredRefs.length >= expectedTotal) {
         final verified = <String>[];
-        for (final ref in recoveredRefs) {
+        for (final ref in recoveredRefs.take(expectedTotal)) {
           final existing = await artifacts.read(ref);
           if (existing == null) {
             verified.clear();
             break;
           }
           verified.add(ref);
-          final map = AiBookMindMapArtifactCodec.decode(existing.payload);
-          if (map != null) {
-            await _staged[command.commandId]?.onArtifact?.call(map);
-          }
         }
-        if (verified.isNotEmpty &&
-            verified.length ==
-                (checkpoint?.payload['unitTotal'] as num?)?.toInt()) {
+        if (verified.length == expectedTotal) {
           for (final ref in verified) {
             yield AiWorkflowArtifactReady(
               workflowRunId: workflowRunId,
@@ -215,8 +229,18 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
         }
       }
 
-      final staged = _staged[command.commandId];
       if (staged == null) {
+        if (recoveredRefs.isNotEmpty) {
+          // Partial orphans without staged input: surface what we have.
+          yield AiWorkflowPartiallySucceeded(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+            artifactRefs: recoveredRefs,
+            publicErrorCode: 'workflow_input_missing_after_partial_commit',
+          );
+          return;
+        }
         yield AiWorkflowFailed(
           workflowRunId: workflowRunId,
           sequence: nextSequence(),
@@ -227,8 +251,9 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
       }
 
       final startUnit =
-          (checkpoint?.payload['completedUnits'] as num?)?.toInt() ?? 0;
-      final artifactRefs = List<String>.from(recoveredRefs);
+          (checkpoint?.payload['completedUnits'] as num?)?.toInt() ??
+          recoveredRefs.length;
+      final artifactRefs = List<String>.from(recoveredRefs.take(startUnit));
       final total = staged.units.length;
 
       yield AiWorkflowStageStarted(
@@ -263,6 +288,38 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
           unit: 'scope',
           messageKey: 'mind_map.generating',
         );
+
+        final artifactId = '${command.commandId}-mind-map-${index + 1}';
+        // Crash window: artifact committed, checkpoint not yet written.
+        final existing = await artifacts.read(artifactId);
+        if (existing != null) {
+          artifactRefs.add(existing.artifactId);
+          yield AiWorkflowCheckpointCommitted(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+            checkpoint: AiWorkflowCheckpoint(
+              checkpointId: '$workflowRunId:unit-${index + 1}',
+              workflowRunId: workflowRunId,
+              attempt: attempt,
+              workflowVersion: command.workflowVersion,
+              stageId: 'unit_committed',
+              payload: {
+                'completedUnits': index + 1,
+                'unitTotal': total,
+                'artifactRefs': List<String>.from(artifactRefs),
+              },
+              createdAt: environment.now(),
+            ),
+          );
+          yield AiWorkflowArtifactReady(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+            artifactRef: existing.artifactId,
+          );
+          continue;
+        }
 
         final result = await staged.generateUnit(
           work: unit.work,
@@ -301,14 +358,88 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
           return;
         }
 
-        final artifactId = '${command.commandId}-mind-map-${index + 1}';
-        final revision = staged.baseMap == null
-            ? 1
-            : staged.baseMap!.revision + 1;
+        // Re-check cancel after model returns, before any durable side effect.
+        if (_isCancelled(workflowRunId, cancelToken)) {
+          yield AiWorkflowCancelled(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+          );
+          return;
+        }
+
         final base = staged.baseMap;
-        // Each mind-map generation writes a new artifact id (lineage via
-        // sourceArtifactId + revision). CAS expectedRevision applies only when
-        // overwriting an existing id; new ids always start from absence.
+        final isRevise =
+            actionKind == AiBookMindMapProductActions.revise.actionKind;
+        final lineageRootId = isRevise
+            ? (command.targetArtifactId == null
+                  ? AiBookMindMapArtifactCodec.lineageRootOf(base!)
+                  : (base != null
+                        ? AiBookMindMapArtifactCodec.lineageRootOf(base)
+                        : command.targetArtifactId!))
+            : artifactId;
+        final revision = isRevise ? (command.expectedRevision! + 1) : 1;
+
+        try {
+          if (isRevise) {
+            final baseRevision = command.expectedRevision!;
+            // Legacy/history targets may not yet have a durable lineage head.
+            // Seed it at the frozen expected revision before CAS advance.
+            final currentHead = await artifacts.readLineageHead(lineageRootId);
+            if (currentHead == null) {
+              try {
+                await artifacts.commitLineageHead(
+                  AiArtifactLineageHead(
+                    lineageRootId: lineageRootId,
+                    headArtifactId: command.targetArtifactId!,
+                    revision: baseRevision,
+                    updatedAt: environment.now(),
+                  ),
+                  expectedRevision: null,
+                );
+              } on AiArtifactRevisionConflict {
+                // Concurrent worker seeded the head.
+              }
+            }
+            await artifacts.commitLineageHead(
+              AiArtifactLineageHead(
+                lineageRootId: lineageRootId,
+                headArtifactId: artifactId,
+                revision: revision,
+                updatedAt: environment.now(),
+              ),
+              expectedRevision: baseRevision,
+            );
+          } else {
+            await artifacts.commitLineageHead(
+              AiArtifactLineageHead(
+                lineageRootId: lineageRootId,
+                headArtifactId: artifactId,
+                revision: 1,
+                updatedAt: environment.now(),
+              ),
+              expectedRevision: null,
+            );
+          }
+        } on AiArtifactRevisionConflict {
+          yield AiWorkflowFailed(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+            publicErrorCode: 'mind_map_revision_conflict',
+          );
+          return;
+        }
+
+        if (_isCancelled(workflowRunId, cancelToken)) {
+          yield AiWorkflowCancelled(
+            workflowRunId: workflowRunId,
+            sequence: nextSequence(),
+            attempt: attempt,
+          );
+          return;
+        }
+
         final committed = await artifacts.commit(
           AiBookMindMapArtifactCodec.envelopeFor(
             map: result.copyWith(
@@ -319,19 +450,15 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
               revision: revision,
             ),
             artifactId: artifactId,
+            lineageRootId: lineageRootId,
             revision: revision,
             createdAt: environment.now(),
           ),
         );
-        final map = AiBookMindMapArtifactCodec.decode(committed.payload)!;
         artifactRefs.add(committed.artifactId);
-        await staged.onArtifact?.call(map);
 
-        final checkpointPayload = <String, Object?>{
-          'completedUnits': index + 1,
-          'unitTotal': total,
-          'artifactRefs': List<String>.from(artifactRefs),
-        };
+        // Checkpoint before Receipt. Conversation projection happens only
+        // after the executor commits a terminal Receipt.
         yield AiWorkflowCheckpointCommitted(
           workflowRunId: workflowRunId,
           sequence: nextSequence(),
@@ -342,7 +469,11 @@ class AiBookMindMapWorkflowAdapter implements AiWorkflowAdapter {
             attempt: attempt,
             workflowVersion: command.workflowVersion,
             stageId: 'unit_committed',
-            payload: checkpointPayload,
+            payload: {
+              'completedUnits': index + 1,
+              'unitTotal': total,
+              'artifactRefs': List<String>.from(artifactRefs),
+            },
             createdAt: environment.now(),
           ),
         );

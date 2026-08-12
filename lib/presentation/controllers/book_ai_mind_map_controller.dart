@@ -163,8 +163,14 @@ class BookAiMindMapController extends ChangeNotifier {
     required int sectionCount,
     required AiBookMindMap artifact,
   }) async {
+    final artifactId = artifact.artifactId;
+    if (artifactId != null &&
+        _conversation.hasMindMapArtifact(artifactId, workKey: workKey)) {
+      // Idempotent: recovery / re-projection must not duplicate messages.
+      return;
+    }
     final artifactTurnId =
-        artifact.artifactId ??
+        artifactId ??
         '$turnId-mind-map-${DateTime.now().microsecondsSinceEpoch}';
     _conversation.appendMessage(
       AiChatMessage(

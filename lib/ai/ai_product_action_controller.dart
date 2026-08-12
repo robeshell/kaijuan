@@ -399,6 +399,48 @@ class AiProductActionController {
     return null;
   }
 
+  /// Re-arms a failed/cancelled command for another Workflow attempt without
+  /// creating a new Proposal, Command, or idempotency key.
+  ///
+  /// Already-succeeded entries are returned unchanged so UI "retry" is a no-op
+  /// that surfaces the existing Receipt.
+  Future<AiActionJournalEntry> prepareRetry(String proposalId) => _exclusive(
+    () async {
+      final entry = await _requiredEntry(proposalId);
+      if (entry.status == AiActionJournalStatus.succeeded ||
+          entry.status == AiActionJournalStatus.partiallySucceeded) {
+        return entry;
+      }
+      if (entry.status != AiActionJournalStatus.failed &&
+          entry.status != AiActionJournalStatus.cancelled) {
+        throw StateError(
+          'Only failed or cancelled actions can be retried: ${entry.status}',
+        );
+      }
+      if (entry.command == null) {
+        throw StateError('Retry requires an authorized command');
+      }
+      final refs = entry.receipt?.artifactRefs ?? const <String>[];
+      if (refs.isNotEmpty) {
+        // Durable artifacts already exist for this command; do not regenerate.
+        return entry;
+      }
+      final next = AiActionJournalEntry(
+        proposal: entry.proposal,
+        decision: entry.decision,
+        command: entry.command,
+        receipt: null,
+        status: AiActionJournalStatus.authorized,
+        stateVersion: entry.stateVersion + 1,
+        eventSequence: entry.eventSequence + 1,
+        attempt: entry.attempt + 1,
+        updatedAt: _now(),
+      );
+      await journal.write(next);
+      return next;
+    },
+  );
+
   Future<AiActionJournalEntry> complete(AiActionReceipt receipt) =>
       _exclusive(() => _completeReceipt(receipt));
 

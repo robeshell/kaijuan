@@ -325,6 +325,7 @@ class AiArtifactEnvelope {
     required this.contentHash,
     required this.payload,
     required this.createdAt,
+    this.lineageRootId,
   });
 
   final String artifactId;
@@ -335,6 +336,9 @@ class AiArtifactEnvelope {
   final Map<String, Object?> payload;
   final DateTime createdAt;
 
+  /// Stable lineage identity used for head CAS. Revisions share one root.
+  final String? lineageRootId;
+
   Map<String, Object?> toJson() => {
     'artifactId': artifactId,
     'kind': kind,
@@ -343,6 +347,7 @@ class AiArtifactEnvelope {
     'contentHash': contentHash,
     'payload': payload,
     'createdAt': createdAt.toUtc().toIso8601String(),
+    if (lineageRootId != null) 'lineageRootId': lineageRootId,
   };
 
   static AiArtifactEnvelope? fromJson(Object? raw) {
@@ -359,8 +364,60 @@ class AiArtifactEnvelope {
       contentHash: '${json['contentHash'] ?? ''}',
       payload: Map<String, Object?>.from(payload),
       createdAt: createdAt,
+      lineageRootId: _nullableString(json['lineageRootId']),
     );
   }
+}
+
+/// Atomic current-head pointer for one artifact lineage.
+class AiArtifactLineageHead {
+  const AiArtifactLineageHead({
+    required this.lineageRootId,
+    required this.headArtifactId,
+    required this.revision,
+    required this.updatedAt,
+  });
+
+  final String lineageRootId;
+  final String headArtifactId;
+  final int revision;
+  final DateTime updatedAt;
+
+  Map<String, Object?> toJson() => {
+    'lineageRootId': lineageRootId,
+    'headArtifactId': headArtifactId,
+    'revision': revision,
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
+  };
+
+  static AiArtifactLineageHead? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final json = Map<String, Object?>.from(raw);
+    final updatedAt = DateTime.tryParse('${json['updatedAt'] ?? ''}');
+    final root = _nullableString(json['lineageRootId']);
+    final head = _nullableString(json['headArtifactId']);
+    final revision = (json['revision'] as num?)?.toInt();
+    if (root == null || head == null || revision == null || updatedAt == null) {
+      return null;
+    }
+    return AiArtifactLineageHead(
+      lineageRootId: root,
+      headArtifactId: head,
+      revision: revision,
+      updatedAt: updatedAt,
+    );
+  }
+}
+
+class AiArtifactRevisionConflict implements Exception {
+  AiArtifactRevisionConflict(this.lineageRootId, this.expectedRevision);
+
+  final String lineageRootId;
+  final int? expectedRevision;
+
+  @override
+  String toString() =>
+      'Artifact revision conflict: $lineageRootId expected=$expectedRevision';
 }
 
 abstract interface class AiArtifactRepository {
@@ -370,10 +427,30 @@ abstract interface class AiArtifactRepository {
     AiArtifactEnvelope artifact, {
     int? expectedRevision,
   });
+
+  Future<AiArtifactLineageHead?> readLineageHead(String lineageRootId);
+
+  /// Compare-and-set the lineage head. [expectedRevision] is the head revision
+  /// that must currently exist (`null` means the lineage must not exist yet).
+  Future<AiArtifactLineageHead> commitLineageHead(
+    AiArtifactLineageHead head, {
+    required int? expectedRevision,
+  });
+
+  /// Finds content artifacts produced by a command when checkpoint is missing.
+  Future<List<AiArtifactEnvelope>> listByCommandPrefix(String commandId);
 }
 
 class MemoryAiArtifactRepository implements AiArtifactRepository {
   final Map<String, AiArtifactEnvelope> _artifacts = {};
+  final Map<String, AiArtifactLineageHead> _heads = {};
+  Future<void> _queue = Future<void>.value();
+
+  Future<T> _exclusive<T>(Future<T> Function() body) {
+    final result = _queue.then((_) => body());
+    _queue = result.then<void>((_) {}, onError: (_) {});
+    return result;
+  }
 
   @override
   Future<AiArtifactEnvelope?> read(String artifactId) async =>
@@ -383,17 +460,48 @@ class MemoryAiArtifactRepository implements AiArtifactRepository {
   Future<AiArtifactEnvelope> commit(
     AiArtifactEnvelope artifact, {
     int? expectedRevision,
-  }) async {
+  }) => _exclusive(() async {
     final current = _artifacts[artifact.artifactId];
     if (expectedRevision != null &&
         (current == null || current.revision != expectedRevision)) {
-      throw StateError('Artifact revision conflict: ${artifact.artifactId}');
+      throw AiArtifactRevisionConflict(artifact.artifactId, expectedRevision);
     }
     if (current != null && artifact.revision <= current.revision) {
       throw StateError('Artifact revision must increase');
     }
     _artifacts[artifact.artifactId] = artifact;
     return artifact;
+  });
+
+  @override
+  Future<AiArtifactLineageHead?> readLineageHead(String lineageRootId) async =>
+      _heads[lineageRootId];
+
+  @override
+  Future<AiArtifactLineageHead> commitLineageHead(
+    AiArtifactLineageHead head, {
+    required int? expectedRevision,
+  }) => _exclusive(() async {
+    final current = _heads[head.lineageRootId];
+    if (expectedRevision == null) {
+      if (current != null) {
+        throw AiArtifactRevisionConflict(head.lineageRootId, expectedRevision);
+      }
+    } else if (current == null || current.revision != expectedRevision) {
+      throw AiArtifactRevisionConflict(head.lineageRootId, expectedRevision);
+    }
+    _heads[head.lineageRootId] = head;
+    return head;
+  });
+
+  @override
+  Future<List<AiArtifactEnvelope>> listByCommandPrefix(String commandId) async {
+    final prefix = '$commandId-';
+    final matches = _artifacts.values
+        .where((artifact) => artifact.artifactId.startsWith(prefix))
+        .toList(growable: false);
+    matches.sort((a, b) => a.artifactId.compareTo(b.artifactId));
+    return matches;
   }
 }
 
@@ -401,11 +509,30 @@ class JsonAiArtifactRepository implements AiArtifactRepository {
   JsonAiArtifactRepository(this.directory);
 
   final Directory directory;
-  Future<void> _writeQueue = Future<void>.value();
 
   File _fileFor(String artifactId) => File(
     '${directory.path}${Platform.pathSeparator}${_safeName(artifactId)}.json',
   );
+
+  File _headFileFor(String lineageRootId) => File(
+    '${directory.path}${Platform.pathSeparator}head_${_safeName(lineageRootId)}.json',
+  );
+
+  File _lockFileFor(String key) =>
+      File('${directory.path}${Platform.pathSeparator}${_safeName(key)}.lock');
+
+  Future<T> _withExclusiveLock<T>(String key, Future<T> Function() body) async {
+    await directory.create(recursive: true);
+    final lockFile = _lockFileFor(key);
+    final raf = await lockFile.open(mode: FileMode.write);
+    await raf.lock(FileLock.exclusive);
+    try {
+      return await body();
+    } finally {
+      await raf.unlock();
+      await raf.close();
+    }
+  }
 
   @override
   Future<AiArtifactEnvelope?> read(String artifactId) async {
@@ -418,26 +545,79 @@ class JsonAiArtifactRepository implements AiArtifactRepository {
   Future<AiArtifactEnvelope> commit(
     AiArtifactEnvelope artifact, {
     int? expectedRevision,
-  }) {
-    final operation = _writeQueue.then<AiArtifactEnvelope>((_) async {
-      await directory.create(recursive: true);
-      final current = await read(artifact.artifactId);
-      if (expectedRevision != null &&
-          (current == null || current.revision != expectedRevision)) {
-        throw StateError('Artifact revision conflict: ${artifact.artifactId}');
-      }
-      if (current != null && artifact.revision <= current.revision) {
-        throw StateError('Artifact revision must increase');
-      }
-      final file = _fileFor(artifact.artifactId);
-      final temporary = File('${file.path}.tmp');
-      await temporary.writeAsString(jsonEncode(artifact.toJson()), flush: true);
-      await _replaceFile(temporary, file);
-      return artifact;
-    });
-    _writeQueue = operation.then<void>((_) {}, onError: (_) {});
-    return operation;
+  }) => _withExclusiveLock(artifact.artifactId, () async {
+    final current = await read(artifact.artifactId);
+    if (expectedRevision != null &&
+        (current == null || current.revision != expectedRevision)) {
+      throw AiArtifactRevisionConflict(artifact.artifactId, expectedRevision);
+    }
+    if (current != null && artifact.revision <= current.revision) {
+      throw StateError('Artifact revision must increase');
+    }
+    final file = _fileFor(artifact.artifactId);
+    final temporary = File('${file.path}.tmp');
+    await temporary.writeAsString(jsonEncode(artifact.toJson()), flush: true);
+    await _replaceFile(temporary, file);
+    return artifact;
+  });
+
+  @override
+  Future<AiArtifactLineageHead?> readLineageHead(String lineageRootId) async {
+    final file = _headFileFor(lineageRootId);
+    if (!await file.exists()) return null;
+    return AiArtifactLineageHead.fromJson(
+      jsonDecode(await file.readAsString()),
+    );
   }
+
+  @override
+  Future<AiArtifactLineageHead> commitLineageHead(
+    AiArtifactLineageHead head, {
+    required int? expectedRevision,
+  }) => _withExclusiveLock('head:${head.lineageRootId}', () async {
+    final current = await readLineageHead(head.lineageRootId);
+    if (expectedRevision == null) {
+      if (current != null) {
+        throw AiArtifactRevisionConflict(head.lineageRootId, expectedRevision);
+      }
+    } else if (current == null || current.revision != expectedRevision) {
+      throw AiArtifactRevisionConflict(head.lineageRootId, expectedRevision);
+    }
+    final file = _headFileFor(head.lineageRootId);
+    final temporary = File('${file.path}.tmp');
+    await temporary.writeAsString(jsonEncode(head.toJson()), flush: true);
+    await _replaceFile(temporary, file);
+    return head;
+  });
+
+  @override
+  Future<List<AiArtifactEnvelope>> listByCommandPrefix(String commandId) async {
+    if (!await directory.exists()) return const [];
+    final result = <AiArtifactEnvelope>[];
+    await for (final entity in directory.list()) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      if (!name.endsWith('.json') || name.startsWith('head_')) continue;
+      // File names are base64url of full artifact ids; read and filter by id.
+      try {
+        final envelope = AiArtifactEnvelope.fromJson(
+          jsonDecode(await entity.readAsString()),
+        );
+        if (envelope != null && envelope.artifactId.startsWith('$commandId-')) {
+          result.add(envelope);
+        }
+      } catch (_) {
+        // Corrupt content is ignored for recovery listing.
+      }
+    }
+    result.sort((a, b) => a.artifactId.compareTo(b.artifactId));
+    return result;
+  }
+}
+
+String? _nullableString(Object? value) {
+  final text = '$value'.trim();
+  return text.isEmpty || text == 'null' ? null : text;
 }
 
 class AiWorkflowAdapterRegistry {
@@ -447,6 +627,11 @@ class AiWorkflowAdapterRegistry {
   final Map<String, AiWorkflowAdapter> _adapters;
 
   AiWorkflowAdapter? lookup(String actionKind) => _adapters[actionKind];
+
+  Iterable<AiWorkflowAdapter> get adapters => _adapters.values;
+
+  AiWorkflowAdapterRegistry extended(Iterable<AiWorkflowAdapter> extra) =>
+      AiWorkflowAdapterRegistry([..._adapters.values, ...extra]);
 
   static Map<String, AiWorkflowAdapter> _index(
     Iterable<AiWorkflowAdapter> source,

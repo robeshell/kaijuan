@@ -519,16 +519,16 @@ late_event.quarantined
 - [ ] 语义评测中错误产品执行为 0，未授权 Workflow 启动为 0。
 - [x] PRODUCT、ENGINEERING、ai.md 与各领域规格不再包含“模型调用或附件直接授权执行”的描述。
 
-当前证据：
+本轮证据：
 
-- 控制面：`AiProductActionController`、`AiProductWorkflowExecutor`、
-  `JsonAiWorkflowCheckpointStore`、`JsonAiArtifactRepository`
-- 图书思维导图生产链：`AiBookMindMapWorkflowAdapter` +
-  `BookAiWorkspaceController.runMindMapProductAction`；对话入口要求非空
-  `AiAuthorizedCommand`，附件不再直接修订
-- 第二测试 Workflow：`AiTestBookExportProductActions` /
-  `AiTestBookExportWorkflowAdapter`（不改通用 Controller/Executor/主 Widget）
-- 契约与恢复：`test/ai_product_action_protocol_test.dart`、
-  `test/ai_book_mind_map_workflow_test.dart`
-- 语义最小对骨架：`test/ai_product_action_semantics_test.dart`（尚未达到 200–300
-  条完整评测集，故语义零误触发项仍保持未完成）
+- 提交顺序：Adapter 只写 Artifact/checkpoint 事件；对话投影在 Receipt 之后
+  （`BookAiWorkspaceController.runMindMapProductAction`）
+- 崩溃窗口：`artifact committed before checkpoint is recovered without regenerating`
+- 谱系 head CAS：`two concurrent revisions of v1 only one becomes v2 head`
+- 原 Command 重试：`prepareRetry reuses commandId and increments attempt`
+- 第二 Workflow Tool Call 全链路：`test/ai_product_action_domain_test.dart`
+- 投影幂等：`projection is idempotent for the same artifact id`
+- 取消零 Artifact：`cancel after model return before commit leaves zero artifacts`
+
+仍未完成：200–300 条真实模型语义评测；Chat Sheet 仍保留 mind-map 与
+`AiRegisteredProductAction` 的 sealed 分支（新领域走 Registered，不再扩 switch）。
