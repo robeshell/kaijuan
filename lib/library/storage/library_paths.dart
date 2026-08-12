@@ -45,6 +45,9 @@ class LibraryPaths {
   Directory get aiGraphDirectory =>
       Directory(p.join(supportDirectory.path, 'ai_graph'));
 
+  Directory get aiActionJournalDirectory =>
+      Directory(p.join(supportDirectory.path, 'ai_action_journal'));
+
   /// Path to store in the DB: relative to [supportDirectory] when possible.
   String toStoragePath(String absolutePath) {
     final root = supportDirectory.path;
