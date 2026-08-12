@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'ai_chat.dart';
 import 'ai_chat_retrieve.dart';
+import 'ai_chat_tool_markup.dart';
 import 'ai_chat_tools.dart';
 import 'ai_cancel.dart';
 import 'ai_log.dart';
@@ -44,9 +45,20 @@ class AiChatService {
   static const maxHistoryMessageChars = 4000;
   static const maxHistoryTotalChars = 24000;
 
-  static const maxToolRounds = 4;
-  static const maxToolContextChars = 48000;
-  static const maxToolRoundChars = 18000;
+  /// Default tool loop budget — metadata + toc + search + several chapters.
+  /// One-chapter-at-a-time models burn rounds quickly; keep room for recovery.
+  static const maxToolRounds = 14;
+
+  /// Extra rounds for whole-book / multi-chapter evidence gathering.
+  static const maxToolRoundsDeep = 24;
+
+  static const maxToolContextChars = 64000;
+
+  static int toolRoundsFor(String userText) =>
+      AiChatRetrieve.isWholeBookQuery(userText)
+      ? maxToolRoundsDeep
+      : maxToolRounds;
+  static const maxToolRoundChars = 24000;
 
   /// Per-call answer budget. A prose answer that reaches this limit is
   /// continued automatically.
@@ -186,33 +198,36 @@ class AiChatService {
     AiChatProductContext productContext = const AiChatProductContext(),
     bool? reasoningEnabled,
     CancelToken? cancelToken,
-  }) => const AiRunOrchestrator().run(
-    descriptor: run,
-    budget: const AiRunBudget(
-      maxModelCalls: maxToolRounds * 2 + 3 + maxAnswerContinuationRounds,
-      maxToolRounds: maxToolRounds,
-      maxContinuationRounds: maxAnswerContinuationRounds,
-      maxToolResultChars: maxToolContextChars,
-      maxElapsed: Duration(minutes: 10),
-    ),
-    cancelToken: cancelToken,
-    body: (execution) async {
-      await for (final snapshot in _streamReplySnapshots(
-        userText: userText,
-        history: history,
-        context: context,
-        bookTitle: bookTitle,
-        bookAuthor: bookAuthor,
-        webHits: webHits,
-        tools: tools,
-        productContext: productContext,
-        reasoningEnabled: reasoningEnabled,
-        execution: execution,
-      )) {
-        execution.textSnapshot(snapshot);
-      }
-    },
-  );
+  }) {
+    final rounds = toolRoundsFor(userText);
+    return AiRunOrchestrator().run(
+      descriptor: run,
+      budget: AiRunBudget(
+        maxModelCalls: rounds * 2 + 3 + maxAnswerContinuationRounds,
+        maxToolRounds: rounds,
+        maxContinuationRounds: maxAnswerContinuationRounds,
+        maxToolResultChars: maxToolContextChars,
+        maxElapsed: const Duration(minutes: 10),
+      ),
+      cancelToken: cancelToken,
+      body: (execution) async {
+        await for (final snapshot in _streamReplySnapshots(
+          userText: userText,
+          history: history,
+          context: context,
+          bookTitle: bookTitle,
+          bookAuthor: bookAuthor,
+          webHits: webHits,
+          tools: tools,
+          productContext: productContext,
+          reasoningEnabled: reasoningEnabled,
+          execution: execution,
+        )) {
+          execution.textSnapshot(snapshot);
+        }
+      },
+    );
+  }
 
   Stream<String> _streamReplySnapshots({
     required String userText,
@@ -284,42 +299,62 @@ class AiChatService {
     final reasoning = _AiReasoningCollector(execution);
     var repairingProductAction = false;
     var productRepairAttempted = false;
+    final toolRoundLimit = toolRoundsFor(userText);
 
-    for (var round = 0; round < maxToolRounds; round++) {
+    for (var round = 0; round < toolRoundLimit; round++) {
       execution.ensureActive();
       if (remainingToolChars <= 0) break;
       execution.modelStarted(AiRunModelPurpose.toolDecision);
       reasoning.startTurn();
+      // Live-stream clean prose so the bubble still scrolls as tokens arrive.
+      // If the turn ends as tools / DSML, retract with yield '' so tool-round
+      // prefaces ("让我再读一章…") never stick as the final answer.
       final streamed = StringBuffer();
+      var publishedLive = false;
       AiModelTurnCompleted? completed;
-      await for (final event in adapter.streamTurn(
-        AiModelTurnRequest(
-          messages: working,
-          tools: repairingProductAction
-              ? productContext.toolDefinitions
-              : [
-                  ...AiChatTools.nativeDefinitions,
-                  ...productContext.toolDefinitions,
-                ],
-          toolChoice: repairingProductAction
-              ? AiModelToolChoice.required
-              : AiModelToolChoice.auto,
-          maxTokens: toolIntentProbeMaxTokens,
-          temperature: 0.2,
-        ),
-        cancelToken: execution.cancelToken,
-      )) {
-        switch (event) {
-          case AiModelTextDelta():
-            if (event.text.isNotEmpty) {
-              streamed.write(event.text);
-              yield streamed.toString();
-            }
-          case AiModelReasoningDelta():
-            reasoning.addDelta(event.text, kind: event.kind);
-          case AiModelTurnCompleted():
-            completed = event;
+      try {
+        await for (final event in adapter.streamTurn(
+          AiModelTurnRequest(
+            messages: working,
+            tools: repairingProductAction
+                ? productContext.toolDefinitions
+                : [
+                    ...AiChatTools.nativeDefinitions,
+                    ...productContext.toolDefinitions,
+                  ],
+            toolChoice: repairingProductAction
+                ? AiModelToolChoice.required
+                : AiModelToolChoice.auto,
+            maxTokens: toolIntentProbeMaxTokens,
+            temperature: 0.2,
+          ),
+          cancelToken: execution.cancelToken,
+        )) {
+          switch (event) {
+            case AiModelTextDelta():
+              if (event.text.isNotEmpty) {
+                streamed.write(event.text);
+                final raw = streamed.toString();
+                // Hold DSML / pseudo tool markup off the bubble while streaming.
+                if (!AiChatToolMarkup.looksLikeLeakedToolCall(raw)) {
+                  publishedLive = true;
+                  yield raw;
+                }
+              }
+            case AiModelReasoningDelta():
+              reasoning.addDelta(event.text, kind: event.kind);
+            case AiModelTurnCompleted():
+              completed = event;
+          }
         }
+      } catch (error) {
+        final partial = streamed.toString().trim();
+        if (partial.isNotEmpty &&
+            !AiChatToolMarkup.looksLikeLeakedToolCall(partial) &&
+            !publishedLive) {
+          yield partial;
+        }
+        rethrow;
       }
       final result = completed;
       if (result == null) throw AiProviderException('模型响应未完整结束');
@@ -332,11 +367,56 @@ class AiChatService {
           ? result.text
           : streamed.toString();
 
-      if (result.toolCalls.isEmpty) {
+      // Recover when the model prints DSML/XML tool markup as plain text
+      // instead of native function calling (common on weak OpenAI-compatible
+      // endpoints). Prefer parse → execute; otherwise repair or strip.
+      var effectiveCalls = result.toolCalls;
+      if (effectiveCalls.isEmpty &&
+          AiChatToolMarkup.looksLikeLeakedToolCall(resultText)) {
+        final recovered = AiChatToolMarkup.tryParseLeakedCalls(resultText);
+        if (recovered.isNotEmpty) {
+          AiLog.d(
+            'recovered ${recovered.length} tool call(s) from leaked markup',
+          );
+          effectiveCalls = recovered;
+        } else if (!repairingProductAction && round + 1 < toolRoundLimit) {
+          if (publishedLive || streamed.isNotEmpty) yield '';
+          working
+            ..add(
+              AiModelMessage(
+                role: AiModelRole.assistant,
+                text: resultText,
+                reasoningText: result.reasoningText,
+                reasoningMetadata: result.reasoningMetadata,
+              ),
+            )
+            ..add(
+              const AiModelMessage(
+                role: AiModelRole.user,
+                text: AiChatToolMarkup.repairUserMessage,
+              ),
+            );
+          continue;
+        } else {
+          // No more tool rounds — strip markup and try to keep any prose.
+          final cleaned = AiChatToolMarkup.stripLeakedToolCall(resultText);
+          if (cleaned.isEmpty) {
+            if (publishedLive || streamed.isNotEmpty) yield '';
+            // Fall through to forced final answer after the loop.
+            break;
+          }
+          execution.progress(null);
+          // Replace any live partial / DSML with the cleaned answer once.
+          yield cleaned;
+          return;
+        }
+      }
+
+      if (effectiveCalls.isEmpty) {
         final answer = resultText;
         if (answer.trim().isEmpty) throw AiProviderException('没有生成内容');
         if (repairingProductAction) {
-          if (streamed.isNotEmpty) yield '';
+          if (publishedLive || streamed.isNotEmpty) yield '';
           throw AiProviderException('模型未按要求返回原生思维导图操作，请重试');
         }
         if (productContext.shouldRepairNativeMindMapImitation(
@@ -344,10 +424,10 @@ class AiChatService {
           assistantText: answer,
         )) {
           if (productRepairAttempted) {
-            if (streamed.isNotEmpty) yield '';
+            if (publishedLive || streamed.isNotEmpty) yield '';
             throw AiProviderException('模型未按要求返回原生思维导图操作，请重试');
           }
-          if (streamed.isNotEmpty) yield '';
+          if (publishedLive || streamed.isNotEmpty) yield '';
           productRepairAttempted = true;
           repairingProductAction = true;
           working
@@ -374,12 +454,24 @@ class AiChatService {
           continue;
         }
         execution.progress(null);
-        if (streamed.isEmpty || streamed.toString() != answer) yield answer;
+        // Never leave leaked tool markup in the reader-facing bubble.
+        final visible = AiChatToolMarkup.looksLikeLeakedToolCall(answer)
+            ? AiChatToolMarkup.stripLeakedToolCall(answer)
+            : answer;
+        if (visible.trim().isEmpty) {
+          if (publishedLive || streamed.isNotEmpty) yield '';
+          throw AiProviderException('模型返回了无效的工具调用文本，请重试');
+        }
+        // Live stream already published the same prose — do not re-yield the
+        // whole answer (that looked like a duplicate dump after streaming).
+        if (!publishedLive || streamed.toString() != visible) {
+          yield visible;
+        }
         if (result.truncated) {
           yield* _continueNativeProse(
             adapter: adapter,
             baseMessages: working,
-            partial: answer,
+            partial: visible,
             execution: execution,
             reasoning: reasoning,
           );
@@ -387,14 +479,12 @@ class AiChatService {
         return;
       }
 
-      // Native responses that request tools are not user-visible prose. A
-      // provider may have streamed a short preface before the structured call;
-      // retract it through the snapshot contract before executing anything.
-      if (streamed.isNotEmpty) yield '';
-      if (result.truncated) {
+      // Tool path: retract any live preface so only the tool timeline remains.
+      if (publishedLive || streamed.isNotEmpty) yield '';
+      if (result.truncated && result.toolCalls.isNotEmpty) {
         throw AiProviderException('工具调用响应被截断，未执行任何工具');
       }
-      final calls = result.toolCalls;
+      final calls = effectiveCalls;
       final productCalls = calls
           .where((call) {
             final registry = productContext.actionRegistry;
@@ -529,6 +619,13 @@ class AiChatService {
     }
 
     execution.progress(null);
+    // Force a reader-facing answer with tools disabled after the tool budget.
+    working.add(
+      const AiModelMessage(
+        role: AiModelRole.user,
+        text: AiChatToolMarkup.budgetExhaustedUserMessage,
+      ),
+    );
     yield* _streamNativeAnswer(
       adapter: adapter,
       messages: working,
@@ -550,6 +647,9 @@ class AiChatService {
     await for (final event in adapter.streamTurn(
       AiModelTurnRequest(
         messages: messages,
+        // No tools: some models otherwise re-emit DSML as "tool calls" in text.
+        tools: const [],
+        toolChoice: AiModelToolChoice.none,
         maxTokens: answerMaxTokens,
         temperature: 0.45,
       ),
@@ -559,7 +659,11 @@ class AiChatService {
         case AiModelTextDelta():
           if (event.text.isNotEmpty) {
             buffer.write(event.text);
-            yield buffer.toString();
+            final raw = buffer.toString();
+            // Hold back raw DSML mid-stream; only publish clean prose.
+            if (!AiChatToolMarkup.looksLikeLeakedToolCall(raw)) {
+              yield raw;
+            }
           }
         case AiModelReasoningDelta():
           reasoning.addDelta(event.text, kind: event.kind);
@@ -583,9 +687,22 @@ class AiChatService {
     var answer = buffer.toString();
     if (answer.isEmpty && completed.text.trim().isNotEmpty) {
       answer = completed.text.trim();
+    }
+    if (AiChatToolMarkup.looksLikeLeakedToolCall(answer)) {
+      answer = AiChatToolMarkup.stripLeakedToolCall(answer);
+    }
+    if (answer.trim().isEmpty) {
+      throw AiProviderException('模型未给出可用回答，请重试或缩小问题范围');
+    }
+    // Skip a duplicate full snapshot when clean prose was already streamed.
+    final rawBuffer = buffer.toString();
+    final alreadyStreamedClean =
+        rawBuffer.isNotEmpty &&
+        rawBuffer == answer &&
+        !AiChatToolMarkup.looksLikeLeakedToolCall(rawBuffer);
+    if (!alreadyStreamedClean) {
       yield answer;
     }
-    if (answer.trim().isEmpty) throw AiProviderException('没有生成内容');
     if (completed.truncated) {
       yield* _continueNativeProse(
         adapter: adapter,
@@ -748,9 +865,47 @@ class AiChatService {
       ..writeln(
         '- Do not invent book-only plot. Refuse pure off-topic homework.',
       )
-      ..writeln('- Be concise. No filler greetings.');
+      ..writeln('- No filler greetings.')
+      ..writeln()
+      ..writeln('Answer formatting (product quality):')
+      ..writeln(
+        '- Open with a short framing line when useful: book/work name, '
+        'progress, and whether tools only cover the current scoped work.',
+      )
+      ..writeln(
+        '- Prefer scannable structure: markdown headings, numbered lists, '
+        'short paragraphs, and small tables for comparisons or "要点".',
+      )
+      ..writeln(
+        '- For digests / summaries: core conflict, 3 key people (motive + '
+        'critical choice), theme keywords; mark uncertain parts as 基于取样.',
+      )
+      ..writeln(
+        '- For close reading: quote short passages, then craft/analysis.',
+      )
+      ..writeln(
+        '- End with 1–2 concrete next steps the reader can accept in one '
+        'tap (e.g. 精读某节、生成本章思维导图、对照另一人物). '
+        'Do not invent UI buttons; plain Chinese is enough.',
+      );
 
-    if (scopeLabel.isNotEmpty) {
+    if (context.corpusScope == AiChatCorpusScope.wholePublication) {
+      system
+        ..writeln()
+        ..writeln(
+          'Scope: tools for this turn cover the WHOLE publication file '
+          '(all works/volumes inside the same file). The reader may still be '
+          'physically mid-collection — state which volume a citation comes from '
+          'when the TOC makes that clear.',
+        )
+        ..writeln(
+          '- Prefer get_toc / search_book / get_chapter across the full file.',
+        )
+        ..writeln(
+          '- If progress is early, still warn before spoiling later volumes.',
+        );
+    } else if (scopeLabel.isNotEmpty &&
+        context.corpusScope == AiChatCorpusScope.currentWork) {
       system
         ..writeln()
         ..writeln(
@@ -765,33 +920,74 @@ class AiChatService {
         )
         ..writeln(
           '- Answer from that work\'s text only; other works are out of scope '
-          'unless the reader explicitly asks across works.',
+          'unless the reader switches tool scope to the whole publication.',
+        )
+        ..writeln(
+          '- Say this scope limit in plain language when the reader expects '
+          'the whole collection or later volumes.',
         );
     }
 
     system
       ..writeln()
       ..writeln(
-        'Book tools are available through native function calling. Use only '
-        'the supplied tools, prefer few calls, use search_book for a named '
-        'person or phrase, call get_toc before get_chapter unless an exact §n '
-        'is known, and use sample_book for whole-book questions.',
+        'Multi-round tool use (required for grounded answers):',
+      )
+      ..writeln(
+        '- Do not answer from memory when the book text is available via tools.',
+      )
+      ..writeln(
+        '- Typical loop: get_reading_metadata → get_toc and/or search_book → '
+        'several get_chapter in the same round for passages you will quote → '
+        'then answer.',
+      )
+      ..writeln(
+        '- Batch: prefer multiple get_chapter calls in one response over '
+        'one chapter per round. Stop tools as soon as evidence is enough.',
+      )
+      ..writeln(
+        '- Never write tool-call markup in the answer text (no DSML, no XML '
+        'invoke, no fenced tool_call JSON). Tools must use the native tool '
+        'interface only. If you are ready to answer, write plain prose only.',
+      )
+      ..writeln(
+        '- search_book for names/phrases — results are mid-hit windows with '
+        'charOffset, not chapter openings. Follow with '
+        'get_chapter(sectionIndex, charOffset or focusQuery) for more context.',
+      )
+      ..writeln(
+        '- get_chapter truncates long sections: use focusQuery / charOffset '
+        'for mid- or late-chapter evidence. sample_book is only for a broad '
+        'overview after you know the structure.',
       );
     if (wholeBookHint) {
       system.writeln(
-        'Hint: this looks like a whole-book question — prefer sample_book '
-        '(and get_toc) before answering.',
+        'Hint: whole-book style question — plan several tool rounds '
+        '(metadata, toc, sample/search, then batched get_chapter).',
       );
     }
+    system
+      ..writeln()
+      ..writeln('Spoiler care:')
+      ..writeln(
+        '- If reading progress is low (see <untrusted_context>) and the '
+        'question spans later plot, open with a brief spoiler note, then answer.',
+      )
+      ..writeln(
+        '- Do not claim tool evidence for text outside the scoped work; '
+        'if you use general knowledge for later volumes, say so.',
+      );
 
     system
       ..writeln()
       ..writeln('Native product actions:')
       ..writeln(
         '- For a request to create a native book mind map, call '
-        'create_book_mind_map directly. The App runs it without a confirmation '
-        'card. The App workflow will load the body; do not fetch or sample book '
-        'text first.',
+        'create_book_mind_map directly as the only tool in that response. '
+        'The App runs it without a confirmation card and loads the body itself. '
+        'Do not fetch or sample book text first. Do not write a multi-part '
+        'essay with a section titled 思维导图 / mind map; do not outline the map '
+        'in Markdown lists or headings — the App renders a native canvas.',
       )
       ..writeln(
         '- For a requested content revision (e.g. more detail, expand a branch), '
@@ -802,7 +998,8 @@ class AiChatService {
       )
       ..writeln(
         '- A product action must be the sole tool call in that response and '
-        'ends this model run. Do not mix it with read tools.',
+        'ends this model run. Do not mix it with read tools. Do not preface it '
+        'with long analysis that pretends to deliver the map.',
       )
       ..writeln(
         '- Questions, critique, comparisons, tutorials, and explicit Mermaid '
@@ -872,6 +1069,31 @@ class AiChatService {
     if (chapter.isNotEmpty && chapter != title) {
       contextPayload.writeln(
         '- Reader is currently in: ${_escapeUntrusted(chapter)}',
+      );
+    }
+    if (context.chapterSectionIndex != null) {
+      contextPayload.writeln(
+        '- Current section index (1-based): ${context.chapterSectionIndex}',
+      );
+    }
+    final progress = context.readingProgressFraction;
+    if (progress != null) {
+      final pct = (progress.clamp(0.0, 1.0) * 100).toStringAsFixed(1);
+      contextPayload.writeln('- Reading progress: $pct% of publication');
+    }
+    if (context.corpusScope == AiChatCorpusScope.wholePublication) {
+      contextPayload.writeln(
+        '- Tool corpus: WHOLE publication file (all works/volumes in this file)',
+      );
+      if (scopeLabel.isNotEmpty) {
+        contextPayload.writeln(
+          '- Reader is currently sitting in work: ${_escapeUntrusted(scopeLabel)}',
+        );
+      }
+    } else if (scopeLabel.isNotEmpty) {
+      contextPayload.writeln(
+        '- Active work scope (tools limited to this work): '
+        '${_escapeUntrusted(scopeLabel)}',
       );
     }
     if (context.tocOutline.isNotEmpty) {

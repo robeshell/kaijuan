@@ -511,6 +511,11 @@ class _HarnessToolHost implements AiChatToolHost {
   final queries = <String>[];
 
   @override
+  Future<String> toolGetReadingMetadata() async =>
+      'publication: harness\nreadingProgressPercent: 10.0\n'
+      'toolCorpus: limited to the scoped work only';
+
+  @override
   Future<String> toolGetToc() async => '§1 测试章节';
 
   @override
@@ -521,6 +526,8 @@ class _HarnessToolHost implements AiChatToolHost {
   Future<String> toolGetChapter(
     int sectionIndex1Based, {
     int maxChars = 10000,
+    int? charOffset,
+    String? focusQuery,
   }) async => '张居正推行考成法。';
 
   @override

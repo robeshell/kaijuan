@@ -28,8 +28,36 @@ bool get _isDesktop {
   };
 }
 
+/// True while the platform IME / dictation still owns a composing region.
+///
+/// Programmatic [TextEditingController] writes or WebView `clearFocus` during
+/// composition drop the first dictation chunk and can garble Backspace/Enter.
+bool textEditingIsComposing(TextEditingController controller) {
+  final range = controller.value.composing;
+  return range.isValid && !range.isCollapsed;
+}
+
+/// Replace [controller] text only when it is safe for IME (not mid-compose).
+///
+/// Returns false when the write was skipped because composition is active.
+bool setControllerTextIfIdle(
+  TextEditingController controller,
+  String text, {
+  int? selectionOffset,
+}) {
+  if (textEditingIsComposing(controller)) return false;
+  final offset = (selectionOffset ?? text.length).clamp(0, text.length);
+  controller.value = TextEditingValue(
+    text: text,
+    selection: TextSelection.collapsed(offset: offset),
+    composing: TextRange.empty,
+  );
+  return true;
+}
+
 /// Insert clipboard text into [controller] at the current selection.
 Future<void> pasteIntoController(TextEditingController controller) async {
+  if (textEditingIsComposing(controller)) return;
   final data = await Clipboard.getData(Clipboard.kTextPlain);
   final clip = data?.text;
   if (clip == null || clip.isEmpty) return;
@@ -57,6 +85,7 @@ void copyFromController(TextEditingController controller) {
 }
 
 void cutFromController(TextEditingController controller) {
+  if (textEditingIsComposing(controller)) return;
   final sel = controller.selection;
   if (!sel.isValid || sel.isCollapsed) return;
   final text = controller.text;
@@ -72,6 +101,7 @@ void cutFromController(TextEditingController controller) {
 }
 
 void selectAllInController(TextEditingController controller) {
+  if (textEditingIsComposing(controller)) return;
   final text = controller.text;
   controller.selection = TextSelection(
     baseOffset: 0,

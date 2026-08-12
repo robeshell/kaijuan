@@ -15,6 +15,49 @@ import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 void main() {
   const base = AiChatSession(contentHash: 'hash', itemId: 'book');
 
+  test('visibleMessages uses work thread when structure key is known', () {
+    const workMsg = AiChatMessage(
+      role: AiMessageRole.user,
+      content: '合集作品里的问题',
+    );
+    final session = base.copyWith(
+      workMessages: const {
+        's1': [workMsg],
+      },
+    );
+    expect(
+      AiChatSessionOps.visibleMessages(session, workKey: 's1'),
+      [workMsg],
+    );
+  });
+
+  test(
+    'visibleMessages falls back to sole non-empty work thread before structure',
+    () {
+      const workMsg = AiChatMessage(
+        role: AiMessageRole.assistant,
+        content: '已根据第7章生成思维导图。',
+      );
+      final session = base.copyWith(
+        workMessages: const {
+          's1': [workMsg],
+          's2': <AiChatMessage>[],
+        },
+      );
+      expect(
+        AiChatSessionOps.visibleMessages(session, workKey: null),
+        [workMsg],
+        reason: 'reopen must not show empty whole-book list for collections',
+      );
+    },
+  );
+
+  test('visibleMessages keeps whole-book list when present', () {
+    const whole = AiChatMessage(role: AiMessageRole.user, content: '单书问题');
+    final session = base.copyWith(messages: const [whole]);
+    expect(AiChatSessionOps.visibleMessages(session, workKey: null), [whole]);
+  });
+
   test('recovery cancels pending turns in whole-book and work scopes', () {
     const pending = AiChatMessage(
       role: AiMessageRole.user,
@@ -190,6 +233,19 @@ void main() {
         assistantText: '思维导图强调层级，知识图谱强调实体关系。',
       ),
       isFalse,
+    );
+    expect(
+      context.shouldRepairNativeMindMapImitation(
+        userText: '总结这一章',
+        assistantText: '''
+一、主要情节
+- A
+二、人物
+- B
+''',
+      ),
+      isFalse,
+      reason: 'ordinary structured answers are not mind-map create requests',
     );
     expect(
       context.shouldRepairNativeMindMapImitation(

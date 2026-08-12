@@ -227,9 +227,14 @@ class _E2eToolHost implements AiChatToolHost {
   }
 
   @override
+  Future<String> toolGetReadingMetadata() async => 'unused';
+
+  @override
   Future<String> toolGetChapter(
     int sectionIndex1Based, {
     int maxChars = 10000,
+    int? charOffset,
+    String? focusQuery,
   }) async => 'unused';
 
   @override

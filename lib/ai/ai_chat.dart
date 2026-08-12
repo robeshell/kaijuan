@@ -46,6 +46,30 @@ AiMindMapStructureRoute resolveAiMindMapStructureRoute(
 }
 
 /// One user or assistant bubble in the book chat.
+/// One tool step shown in the chat timeline (and optionally stored on a message).
+class AiChatToolStep {
+  const AiChatToolStep({required this.label, this.done = false});
+
+  final String label;
+  final bool done;
+
+  AiChatToolStep copyWith({String? label, bool? done}) =>
+      AiChatToolStep(label: label ?? this.label, done: done ?? this.done);
+
+  Map<String, Object?> toJson() => {
+    'label': label,
+    'done': done,
+  };
+
+  static AiChatToolStep? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final map = Map<String, dynamic>.from(raw);
+    final label = '${map['label'] ?? ''}'.trim();
+    if (label.isEmpty) return null;
+    return AiChatToolStep(label: label, done: map['done'] == true);
+  }
+}
+
 class AiChatMessage {
   const AiChatMessage({
     required this.role,
@@ -61,6 +85,7 @@ class AiChatMessage {
     this.mindMap,
     this.command,
     this.richArtifactKind,
+    this.toolSteps = const [],
   });
 
   final AiMessageRole role;
@@ -100,6 +125,9 @@ class AiChatMessage {
   /// artifact. Legacy messages without metadata are inspected on demand.
   final AiRichArtifactKind? richArtifactKind;
 
+  /// Tool steps taken while producing this assistant reply (UI only).
+  final List<AiChatToolStep> toolSteps;
+
   AiRichArtifactKind? get resolvedRichArtifactKind =>
       richArtifactKind ?? inspectAiRichArtifact(content);
 
@@ -117,6 +145,7 @@ class AiChatMessage {
     AiBookMindMap? mindMap,
     AiConversationCommand? command,
     AiRichArtifactKind? richArtifactKind,
+    List<AiChatToolStep>? toolSteps,
     bool clearWebHitCount = false,
     bool clearMindMap = false,
     bool clearCommand = false,
@@ -138,6 +167,7 @@ class AiChatMessage {
       richArtifactKind: clearRichArtifactKind
           ? null
           : (richArtifactKind ?? this.richArtifactKind),
+      toolSteps: toolSteps ?? this.toolSteps,
     );
   }
 
@@ -156,6 +186,10 @@ class AiChatMessage {
     if (mindMap != null) 'mindMap': mindMap!.toJson(),
     if (command != null) 'command': command!.toJson(),
     if (richArtifactKind != null) 'richArtifactKind': richArtifactKind!.name,
+    if (toolSteps.isNotEmpty)
+      'toolSteps': [
+        for (final step in toolSteps) step.toJson(),
+      ],
   };
 
   static AiChatMessage fromJson(Map<String, dynamic> json) {
@@ -167,6 +201,7 @@ class AiChatMessage {
     final createdRaw = json['createdAt'] as String?;
     final rawHits = json['webHitCount'];
     final rawSuggestions = json['suggestedQuestions'];
+    final rawSteps = json['toolSteps'];
     return AiChatMessage(
       role: role,
       content: json['content'] as String? ?? '',
@@ -189,11 +224,26 @@ class AiChatMessage {
       richArtifactKind: AiRichArtifactKind.fromStorage(
         json['richArtifactKind'],
       ),
+      toolSteps: rawSteps is List
+          ? [
+              for (final item in rawSteps)
+                if (AiChatToolStep.fromJson(item) case final step?) step,
+            ]
+          : const [],
     );
   }
 }
 
 /// Context for one chat turn — lean seed + tools for more body.
+/// How far book-chat tools may read inside a multi-work publication.
+enum AiChatCorpusScope {
+  /// Default: freeze tools to the work the reader is currently in.
+  currentWork,
+
+  /// Tools search/read the whole publication file (Anx-like omnibus access).
+  wholePublication,
+}
+
 class AiChatContextBundle {
   const AiChatContextBundle({
     this.chapterTitle = '',
@@ -203,6 +253,9 @@ class AiChatContextBundle {
     this.tocOutline = const [],
     this.scopeLabel,
     this.chapterSectionIndex,
+    this.readingProgressFraction,
+    this.publicationTitle = '',
+    this.corpusScope = AiChatCorpusScope.currentWork,
   });
 
   /// Where the reader is now (for "这一章" questions).
@@ -220,13 +273,22 @@ class AiChatContextBundle {
   /// Section titles only (cheap). Full list also available via get_toc tool.
   final List<String> tocOutline;
 
-  /// When set (collections / volume-split books), chat is scoped to this one
-  /// work inside the book — the model must answer for this work alone, not
-  /// the whole set. TOC and tool bodies are already trimmed to its range.
+  /// Work the reader is currently sitting in (title), when known. Not the same
+  /// as tool corpus: see [corpusScope]. Under [AiChatCorpusScope.currentWork]
+  /// tools are trimmed to this work; under wholePublication they are not.
   final String? scopeLabel;
 
   /// Frozen 1-based renderer section captured with [chapterText].
   final int? chapterSectionIndex;
+
+  /// Whole-publication reading progress in \[0, 1\], when known.
+  final double? readingProgressFraction;
+
+  /// Library item title (may name a multi-work collection).
+  final String publicationTitle;
+
+  /// Tool corpus breadth for this turn (current work vs whole file).
+  final AiChatCorpusScope corpusScope;
 }
 
 /// One-tap prompts shown at contextual points in the book chat.
@@ -244,8 +306,49 @@ class AiChatShortcut {
   final AiMindMapRequestScope? mindMapScope;
 }
 
+/// Task-style prompts (structured deliverables). Prefer these over bare
+/// natural-language chips when the product wants Anx-like "finished" answers.
+const kAiChatBookDigestPrompt =
+    '请为当前阅读范围内的这本书生成一份书摘（不是逐章流水账）。\n'
+    '【要求】\n'
+    '1. 开头用一两句说明：书名/当前作品名、阅读进度（若已知）、若是合集则只写当前这一部，'
+    '不要假装覆盖合集中其它作品。\n'
+    '2. 用「»」标出核心冲突（一两句）。\n'
+    '3. 列出 3 个核心人物：每人一行——姓名、动机、一个关键抉择（须有书中依据；'
+    '依据不足时标明「基于取样」）。\n'
+    '4. 3–5 个主题关键词，用间隔号或顿号连接。\n'
+    '5. 避免剧透最终结局；进度较低时先简短提醒可能涉及后文。\n'
+    '6. 优先 get_reading_metadata、get_toc、sample_book / search_book 取证后再写；'
+    '不要编造未读到的情节。\n'
+    '7. 文末可问读者是否需要本章精读或思维导图。';
+
+const kAiChatChapterSummaryPrompt =
+    '请总结我正在读的这一章。\n'
+    '【要求】语言与正文一致；约 6–10 句；三段：主要情节 / 人物与关系 / 主题或写法；'
+    '避免「本章讲述了」套话；先 get_current_chapter（必要时 get_toc）再写。';
+
+const kAiChatChapterCloseReadPrompt =
+    '请精读我正在读的这一章：先 get_current_chapter 取原文；'
+    '用小标题组织——情节要点、关键原文摘句（短引）、叙事/手法、与前后文关系（不确定则说明）；'
+    '不要剧透未读部分。';
+
 /// Shortcuts for a whole-book companion (not progress-gated).
 const kAiChatShortcuts = <AiChatShortcut>[
+  AiChatShortcut(label: '本书书摘', prompt: kAiChatBookDigestPrompt),
+  AiChatShortcut(
+    label: '生成本章思维导图',
+    prompt: '请为当前章生成思维导图',
+    mindMapScope: AiMindMapRequestScope.currentChapter,
+  ),
+  AiChatShortcut(label: '总结这一章', prompt: kAiChatChapterSummaryPrompt),
+  AiChatShortcut(label: '精读这一章', prompt: kAiChatChapterCloseReadPrompt),
+  AiChatShortcut(
+    label: '回忆前文',
+    prompt:
+        '请根据 get_reading_metadata 与 get_toc，总结我当前位置之前的主要情节（3–6 句）。'
+        '优先 get_chapter 取更早章节的关键段落；合集请遵守当前检索范围。'
+        '不要剧透我尚未读到的部分。',
+  ),
   AiChatShortcut(
     label: '生成本书大纲',
     prompt:
@@ -253,19 +356,7 @@ const kAiChatShortcuts = <AiChatShortcut>[
         '先用一段话概括主线与核心主题，再按内容推进列出主要结构阶段；'
         '每一项包含简短标题和说明。优先使用 sample_book / get_toc 把握全书结构；'
         '若取样有限，请标明是基于取样的概览，不要假装读完每一章。'
-        '请直接基于书中内容回答。',
-  ),
-  AiChatShortcut(
-    label: '生成本章思维导图',
-    prompt: '请为当前章生成思维导图',
-    mindMapScope: AiMindMapRequestScope.currentChapter,
-  ),
-  AiChatShortcut(label: '总结这一章', prompt: '请总结我正在读的这一章：主线、关键转折，尽量简短。'),
-  AiChatShortcut(
-    label: '这本书在讲什么',
-    prompt:
-        '请根据提供的各部分正文，概括整本书的主线与主题，用几句话即可。'
-        '必须覆盖全书结构（例如多讲/多时代），不要只写我正在读的那一讲。',
+        '合集请只覆盖当前作品范围。请直接基于书中内容回答。',
   ),
   AiChatShortcut(
     label: '解释这段',
@@ -276,7 +367,7 @@ const kAiChatShortcuts = <AiChatShortcut>[
     label: '人物关系',
     prompt:
         '请根据提供的各部分正文，梳理整本书的主要人物及其关系。'
-        '按书中结构组织，不要只列当前这一讲的人物。',
+        '按书中结构组织，不要只列当前这一讲的人物。合集请只写当前作品。',
   ),
   AiChatShortcut(
     label: '时代背景',
@@ -284,6 +375,15 @@ const kAiChatShortcuts = <AiChatShortcut>[
         '结合书里写到的内容，谈谈相关的时代、制度或社会背景。'
         '书里没写的部分用「补充说明」；若本轮已联网，请用检索结果充实补充说明并简述来源。',
   ),
+];
+
+/// Fixed post-answer action chips (label short; prompt is what gets sent).
+const kAiChatActionChips = <AiChatShortcut>[
+  AiChatShortcut(label: '解释', prompt: '请解释刚才回答里最关键的几点。'),
+  AiChatShortcut(label: '你的看法', prompt: '你对刚才讨论的内容有什么看法？'),
+  AiChatShortcut(label: '总结', prompt: '请用更短的条目总结刚才的回答。'),
+  AiChatShortcut(label: '分析', prompt: '请再深入分析刚才的问题，补充书中依据。'),
+  AiChatShortcut(label: '建议', prompt: '基于刚才的内容，接下来我可以怎么读或问什么？'),
 ];
 
 const _kAiChatSelectionShortcuts = <AiChatShortcut>[

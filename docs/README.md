@@ -12,8 +12,8 @@
 | 工程结构 / 单入口 / 数据沿用 | [ENGINEERING.md](./ENGINEERING.md) |
 | Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | LLM 三元组抽取研究与学习路径 | [research/kg-llm-extraction.md](./research/kg-llm-extraction.md)（服务 ai-graph） |
-| 本书 AI 从普通对话到 Tool Agent 的实现演进 | [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)（当前全流程 + 后续文章主线） |
-| 图书 AI 助手演进系列文章 | [articles/book-ai-assistant-evolution/](./articles/book-ai-assistant-evolution/)（第一篇：从模型调用到可靠对话） |
+| 本书 AI 从普通对话到受控 Agent / 导图会话化的实现演进 | [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)（全流程复盘 + 系列文章主线 §9） |
+| 图书 AI 助手演进系列文章 | [articles/book-ai-assistant-evolution/](./articles/book-ai-assistant-evolution/)（第 1 篇已写；第 2–6 篇提纲见 evolution §9） |
 | AI 运行时 Genkit 完整收口计划 | [research/ai-runtime-genkit-completion-plan.md](./research/ai-runtime-genkit-completion-plan.md)（词典/翻译/大纲/图谱迁移与旧 Provider 删除边界） |
 | Genkit Agent 生产切换门禁 | [research/ai-agent-runtime-readiness.md](./research/ai-agent-runtime-readiness.md)（当前版本证据、Harness 与解除门禁顺序） |
 | 某屏交互 | [specs/](./specs/) |

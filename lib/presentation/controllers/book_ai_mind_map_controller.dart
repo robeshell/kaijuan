@@ -118,9 +118,11 @@ class BookAiMindMapController extends ChangeNotifier {
 
   /// Projects one mind-map artifact into conversation and durably persists it.
   ///
-  /// Memory is updated only after a successful durable write, so a failed
-  /// projection cannot leave a "failed turn + saved map" split brain (and a
-  /// later [finishProductTurn] persist cannot smuggle the map onto disk).
+  /// Stages the artifact message, then persists. On write failure only that
+  /// staged [artifactTurnId] is removed — concurrent session updates during
+  /// the await (cancel, other turns, layout-driven message edits) are kept.
+  /// A failed projection must not leave a map that a later [finishProductTurn]
+  /// persist could smuggle onto disk.
   Future<void> projectArtifact({
     required String turnId,
     required String? workKey,
@@ -133,8 +135,7 @@ class BookAiMindMapController extends ChangeNotifier {
         artifactId != null &&
         _conversation.hasMindMapArtifact(artifactId, workKey: workKey);
     if (alreadyInMemory) {
-      // Retry of a durable write that previously failed mid-flight is not
-      // expected after rollback-on-fail; still re-persist for safety.
+      // Already committed in memory; re-persist for a prior durable miss.
       await _conversation.persist();
       return;
     }
@@ -149,13 +150,12 @@ class BookAiMindMapController extends ChangeNotifier {
       status: AiChatTurnStatus.completed,
       mindMap: artifact.copyWith(artifactId: artifactTurnId),
     );
-    // Stage → persist → commit. On write failure, leave memory unchanged.
-    final previous = _conversation.session;
+    // Stage → persist → keep. On write failure, unstage only this message.
     _conversation.appendMessage(message, workKey: workKey);
     try {
       await _conversation.persist();
     } catch (error) {
-      _conversation.hydrate(previous);
+      _conversation.removeMessagesWithTurnId(artifactTurnId, workKey: workKey);
       rethrow;
     }
   }

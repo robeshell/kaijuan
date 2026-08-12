@@ -33,6 +33,35 @@ class AiBookChatToolHost implements AiChatToolHost {
   }
 
   @override
+  Future<String> toolGetReadingMetadata() async {
+    final publication = turnContext.publicationTitle.trim();
+    final scope = turnContext.scopeLabel?.trim() ?? '';
+    final chapter = turnContext.chapterTitle.trim();
+    final section = turnContext.chapterSectionIndex;
+    final progress = turnContext.readingProgressFraction;
+    final progressPct = progress == null
+        ? null
+        : (progress.clamp(0.0, 1.0) * 100).toStringAsFixed(1);
+    final lines = <String>[
+      if (publication.isNotEmpty) 'publication: $publication',
+      if (scope.isNotEmpty)
+        'scopedWork: $scope'
+      else
+        'scopedWork: (whole publication or single work)',
+      if (chapter.isNotEmpty) 'currentChapter: $chapter',
+      if (section != null) 'currentSectionIndex: $section',
+      if (progressPct != null) 'readingProgressPercent: $progressPct',
+      if (turnContext.corpusScope == AiChatCorpusScope.wholePublication)
+        'toolCorpus: WHOLE publication file — search/read may span all works '
+            'in this file.'
+      else
+        'toolCorpus: limited to the scoped work only; other works in a '
+            'collection are not searchable unless the reader switches scope.',
+    ];
+    return lines.join('\n');
+  }
+
+  @override
   Future<String> toolGetToc() async {
     final sections = await _sections();
     if (sections.isEmpty) return '(目录不可用)';
@@ -44,17 +73,23 @@ class AiBookChatToolHost implements AiChatToolHost {
     final text = turnContext.chapterText.trim();
     if (text.isEmpty) return '(当前章正文不可用)';
     final title = turnContext.chapterTitle.trim();
+    // Prefer head+tail over pure head so late-chapter material is visible.
     final body = text.length > maxChars
-        ? '${text.substring(0, maxChars)}…'
+        ? AiChatRetrieve.windowAroundQuery(text, query: '', maxChars: maxChars)
         : text;
+    final meta = text.length > maxChars
+        ? ' · truncated head+tail · sectionLength=${text.length}'
+        : '';
     if (title.isEmpty) return body;
-    return '[$title]\n$body';
+    return '[$title$meta]\n$body';
   }
 
   @override
   Future<String> toolGetChapter(
     int sectionIndex1Based, {
     int maxChars = 10000,
+    int? charOffset,
+    String? focusQuery,
   }) async {
     final sections = await _sections();
     if (sections.isEmpty) {
@@ -64,25 +99,20 @@ class AiBookChatToolHost implements AiChatToolHost {
       sections,
       sectionIndex1Based,
       maxChars: maxChars,
+      charOffset: charOffset,
+      focusQuery: focusQuery,
     );
   }
 
   @override
   Future<String> toolSearchBook(String query, {int maxChars = 12000}) async {
-    final body = await _body();
-    if (body.isEmpty) return '(书中无正文可检索)';
-    final packed = AiChatRetrieve.pack(
-      userText: query,
-      selection: '',
-      bookBody: body,
-      maxSections: 10,
-      maxRelatedChars: maxChars,
+    final sections = await _sections();
+    if (sections.isEmpty) return '(书中无正文可检索)';
+    return AiChatRetrieve.formatSearchHits(
+      query: query,
+      sections: sections,
+      maxChars: maxChars,
     );
-    final formatted = packed.formatRelatedForPrompt(maxChars: maxChars);
-    if (formatted.isEmpty) {
-      return 'No keyword hits for "$query". Try sample_book or get_toc.';
-    }
-    return 'Search "$query" (${packed.note}):\n$formatted';
   }
 
   @override

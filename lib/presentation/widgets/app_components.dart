@@ -859,13 +859,14 @@ class _AppSideSheetHost extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final panelWidth = resolveAppSideSheetWidth(context);
+    // Use a plain [SizedBox], not [AnimatedContainer]: animating width/height
+    // on every MediaQuery tick rebuilds the sheet (and its TextField) mid-IME
+    // and contributes to "Build scheduled during frame" while typing.
     return Align(
       alignment: AlignmentDirectional.centerEnd,
       child: Material(
         color: Colors.transparent,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
+        child: SizedBox(
           width: panelWidth,
           height: size.height,
           child: AppSideSheet(

@@ -142,4 +142,46 @@ void main() {
     expect(packed.relatedSections, isNotEmpty);
     expect(packed.relatedSections.first.index, 1);
   });
+
+  test('windowAroundQuery centers on mid-chapter hits not the opening', () {
+    final long = '${'章首填充。' * 400}石神遇见靖子并想起轻生的念头。${'章尾填充。' * 400}';
+    expect(long.length, greaterThan(3000));
+    final window = AiChatRetrieve.windowAroundQuery(
+      long,
+      query: '石神遇见靖子',
+      maxChars: 200,
+    );
+    expect(window, contains('石神遇见靖子'));
+    // Window must not be the pure chapter opening.
+    expect(window.startsWith('章首填充'), isFalse);
+    expect(window, contains('…'));
+  });
+
+  test('formatSearchHits reports charOffset for follow-up get_chapter', () {
+    final body = StringBuffer();
+    for (var i = 1; i <= 5; i++) {
+      body.writeln('[§$i 第$i章]');
+      body.writeln('${'无关内容。' * 50}唯一标记句$i。${'后续。' * 50}');
+    }
+    final formatted = AiChatRetrieve.formatSearchHits(
+      query: '唯一标记句3',
+      sections: AiChatRetrieve.splitSections(body.toString()),
+      maxChars: 4000,
+    );
+    expect(formatted, contains('charOffset='));
+    expect(formatted, contains('§3'));
+    expect(formatted, contains('唯一标记句3'));
+    expect(formatted, isNot(contains('唯一标记句1')));
+  });
+
+  test('windowAtOffset pages through a long section', () {
+    final text = List.generate(20, (i) => '段$i。').join();
+    final mid = AiChatRetrieve.windowAtOffset(
+      text,
+      charOffset: 20,
+      maxChars: 12,
+    );
+    expect(mid, contains('…'));
+    expect(mid.length, lessThan(text.length));
+  });
 }

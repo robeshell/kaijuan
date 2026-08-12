@@ -42,6 +42,7 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
   final _viewportKey = GlobalKey();
   final _exportBoundaryKey = GlobalKey();
   late AiMindMapLayout _layout;
+  bool _didInitialFit = false;
   bool _fitAfterLayoutChange = false;
   bool _revealScheduled = false;
   bool _exporting = false;
@@ -74,6 +75,7 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
         oldWidget.map.nodes.length != widget.map.nodes.length) {
       _applyLargeMapDefaults();
       _transformation.value = Matrix4.identity();
+      _didInitialFit = false;
     }
   }
 
@@ -247,7 +249,12 @@ class _BookAiMindMapViewState extends State<BookAiMindMapView> {
                 } else if (_fitAfterLayoutChange) {
                   _fitAfterLayoutChange = false;
                   _fit(layout.size);
-                } else if (_transformation.value.isIdentity()) {
+                } else if (!_didInitialFit &&
+                    _transformation.value.isIdentity()) {
+                  // Fit once on first layout only. Re-fitting on every parent
+                  // rebuild (stream tokens, tool steps) reflows the list and
+                  // makes the AI panel appear to shake.
+                  _didInitialFit = true;
                   _fit(layout.size);
                 }
               });

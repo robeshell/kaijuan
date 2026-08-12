@@ -48,6 +48,51 @@ void main() {
         isTrue,
       );
     });
+
+    test('flags multi-part answer with a 思维导图 section heading', () {
+      expect(
+        product.shouldRepairNativeMindMapImitation(
+          userText: '请分析第7章并生成思维导图',
+          assistantText: '''
+一、情节分析
+悬念不是靠不知道，而是靠知道一半。
+
+下一步建议
+1. 带着问题去读下一章
+
+二、第7章「分院帽」思维导图
+- 哈利的分院
+  - 关键抉择
+- 邓布利多致辞
+''',
+        ),
+        isTrue,
+      );
+    });
+
+    test('flags create request answered as long outline without delivery claim',
+        () {
+      expect(
+        product.shouldRepairNativeMindMapImitation(
+          userText: '请为当前章生成思维导图',
+          assistantText: '''
+第7章结构如下：
+
+一、分院仪式
+- 帽子评语
+- 关键抉择
+
+二、开学宴
+- 四楼走廊警告
+- 人物登场
+
+三、主题
+- 选择塑造身份
+''',
+        ),
+        isTrue,
+      );
+    });
   });
 
   group('policy outcomes for free-input vs explicit UI', () {

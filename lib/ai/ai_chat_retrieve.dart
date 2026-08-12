@@ -439,4 +439,260 @@ abstract final class AiChatRetrieve {
     }
     return score;
   }
+
+  /// Clip [text] to [maxChars], centering on the best match of [query].
+  ///
+  /// Without this, long chapters always feed the model their **opening**
+  /// (substring 0..maxChars), so mid-chapter evidence is invisible to tools.
+  static String windowAroundQuery(
+    String text, {
+    required String query,
+    required int maxChars,
+  }) {
+    final body = text.trim();
+    if (body.isEmpty) return '';
+    if (body.length <= maxChars) return body;
+    if (maxChars < 16) return '${body.substring(0, maxChars)}…';
+
+    final hit = firstHitOffset(body, query);
+    if (hit < 0) {
+      // No hit: keep head + tail so late-chapter material still appears.
+      return _headAndTail(body, maxChars);
+    }
+
+    // Prefer more context after the hit (recall/plot usually continues forward).
+    final before = (maxChars * 0.35).floor();
+    var start = hit - before;
+    if (start < 0) start = 0;
+    var end = start + maxChars;
+    if (end > body.length) {
+      end = body.length;
+      start = (end - maxChars).clamp(0, body.length);
+    }
+    // Snap to nearby newlines so we do not start mid-sentence when possible.
+    start = _snapStart(body, start);
+    end = _snapEnd(body, end, start + 40);
+    if (end <= start) {
+      start = hit.clamp(0, body.length - 1);
+      end = (start + maxChars).clamp(0, body.length);
+    }
+
+    final prefix = start > 0 ? '…' : '';
+    final suffix = end < body.length ? '…' : '';
+    return '$prefix${body.substring(start, end)}$suffix';
+  }
+
+  /// Page through a long section: `[charOffset, charOffset + maxChars)`.
+  static String windowAtOffset(
+    String text, {
+    required int charOffset,
+    required int maxChars,
+  }) {
+    final body = text.trim();
+    if (body.isEmpty) return '';
+    if (body.length <= maxChars) return body;
+    final start = charOffset.clamp(0, body.length);
+    if (start >= body.length) {
+      return '(charOffset $charOffset past end; section length ${body.length})';
+    }
+    final end = (start + maxChars).clamp(0, body.length);
+    final prefix = start > 0 ? '…' : '';
+    final suffix = end < body.length ? '…' : '';
+    return '$prefix${body.substring(start, end)}$suffix';
+  }
+
+  /// First character offset of a useful query hit, or -1.
+  ///
+  /// Prefers longer phrases. [minPhraseLength] raises the bar so search does
+  /// not treat every section sharing a 2-char digram as a hit.
+  static int firstHitOffset(
+    String text,
+    String query, {
+    int minPhraseLength = 2,
+  }) {
+    final q = query.trim();
+    if (q.isEmpty || text.isEmpty) return -1;
+    final minLen = minPhraseLength.clamp(2, 12);
+
+    String? bestPhrase;
+    var bestAt = -1;
+    void consider(String phrase) {
+      if (phrase.length < minLen) return;
+      final at = text.indexOf(phrase);
+      if (at < 0) return;
+      if (bestPhrase == null ||
+          phrase.length > bestPhrase!.length ||
+          (phrase.length == bestPhrase!.length && at < bestAt)) {
+        bestPhrase = phrase;
+        bestAt = at;
+      }
+    }
+
+    final compact = q.replaceAll(RegExp(r'\s+'), '');
+    // Exact compact query first (strongest).
+    if (compact.length >= minLen) consider(compact);
+    for (final phrase in _phraseCandidates(q)) {
+      consider(phrase);
+    }
+    // Contiguous runs from the compact query, longest first.
+    for (var len = compact.length.clamp(0, 12); len >= minLen; len--) {
+      for (var i = 0; i + len <= compact.length; i++) {
+        consider(compact.substring(i, i + len));
+      }
+    }
+    if (bestAt >= 0) return bestAt;
+
+    final tokens = _tokens(q).where((t) => t.length >= minLen).toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    for (final t in tokens) {
+      final at = text.indexOf(t);
+      if (at >= 0) return at;
+    }
+    return -1;
+  }
+
+  /// Local keyword search: mid-chapter windows around hits, not chapter heads.
+  static String formatSearchHits({
+    required String query,
+    required List<AiBookSectionSlice> sections,
+    int maxChars = 12000,
+    int maxHits = 12,
+    int windowChars = 1400,
+  }) {
+    final q = query.trim();
+    if (q.isEmpty) return 'Error: empty query.';
+    if (sections.isEmpty) return '(no sections)';
+
+    final compact = q.replaceAll(RegExp(r'\s+'), '');
+
+    int? hitOffsetIn(String body) {
+      // Prefer the full compact query so「唯一标记句3」does not also hit「唯一标记句1」.
+      if (compact.length >= 2) {
+        final exact = body.indexOf(compact);
+        if (exact >= 0) return exact;
+      }
+      // Fallback: longest phrase ≥ 3 chars (or 2 for very short queries).
+      final minLen = compact.length >= 3 ? 3 : 2;
+      final loose = firstHitOffset(body, q, minPhraseLength: minLen);
+      return loose >= 0 ? loose : null;
+    }
+
+    final hits = <({int sectionIndex, String label, int offset, String snippet})>[];
+    // Pass 1 — exact compact matches only.
+    for (final section in sections) {
+      final body = section.text.trim();
+      if (body.isEmpty || compact.length < 2) continue;
+      final exact = body.indexOf(compact);
+      if (exact < 0) continue;
+      hits.add((
+        sectionIndex: section.index,
+        label: section.label.trim().isEmpty
+            ? '§${section.index}'
+            : section.label.trim(),
+        offset: exact,
+        snippet: windowAroundQuery(
+          body,
+          query: q,
+          maxChars: windowChars.clamp(256, 4000),
+        ),
+      ));
+    }
+    // Pass 2 — looser phrases only when the exact query hit nothing.
+    if (hits.isEmpty) {
+      for (final section in sections) {
+        final body = section.text.trim();
+        if (body.isEmpty) continue;
+        final offset = hitOffsetIn(body);
+        if (offset == null) continue;
+        hits.add((
+          sectionIndex: section.index,
+          label: section.label.trim().isEmpty
+              ? '§${section.index}'
+              : section.label.trim(),
+          offset: offset,
+          snippet: windowAroundQuery(
+            body,
+            query: q,
+            maxChars: windowChars.clamp(256, 4000),
+          ),
+        ));
+        if (hits.length >= maxHits * 3) break;
+      }
+    }
+
+    if (hits.isEmpty) {
+      return 'No keyword hits for "$q". Try get_toc + get_chapter(charOffset), '
+          'or sample_book.';
+    }
+
+    // Prefer earlier offsets only as a weak signal; keep section order stable.
+    hits.sort((a, b) {
+      final bySection = a.sectionIndex.compareTo(b.sectionIndex);
+      if (bySection != 0) return bySection;
+      return a.offset.compareTo(b.offset);
+    });
+
+    final buf = StringBuffer()
+      ..writeln(
+        'Search "$q": ${hits.length.clamp(0, maxHits)} hit window(s). '
+        'Each snippet is centered on the match (not the chapter opening). '
+        'Use get_chapter(sectionIndex, charOffset) to page further.',
+      );
+    var used = buf.length;
+    var count = 0;
+    for (final hit in hits) {
+      if (count >= maxHits) break;
+      final block =
+          '\n[§${hit.sectionIndex} ${hit.label} · charOffset=${hit.offset}]\n'
+          '${hit.snippet}\n';
+      if (used + block.length > maxChars && count > 0) break;
+      if (used + block.length > maxChars) {
+        final room = maxChars - used;
+        if (room > 100) {
+          buf.write(block.substring(0, room));
+          buf.write('…');
+        }
+        break;
+      }
+      buf.write(block);
+      used += block.length;
+      count++;
+    }
+    return buf.toString().trimRight();
+  }
+
+  static Iterable<String> _phraseCandidates(String query) sync* {
+    final compact = query.replaceAll(RegExp(r'\s+'), '');
+    if (compact.length >= 2 && compact.length <= 24) yield compact;
+    // Quoted spans
+    for (final m in RegExp(r'[「『"“]([^」』"”]{2,24})[」』"”]').allMatches(query)) {
+      final g = m.group(1)?.trim();
+      if (g != null && g.isNotEmpty) yield g;
+    }
+    // Space-separated tokens of length >= 2
+    for (final part in query.split(RegExp(r'[\s,，、；;]+'))) {
+      final t = part.trim();
+      if (t.length >= 2 && t.length <= 16) yield t;
+    }
+  }
+
+  static int _snapStart(String text, int start) {
+    if (start <= 0) return 0;
+    final window = text.substring(start, (start + 80).clamp(0, text.length));
+    final nl = window.indexOf('\n');
+    if (nl >= 0 && nl < 40) return start + nl + 1;
+    return start;
+  }
+
+  static int _snapEnd(String text, int end, int minEnd) {
+    if (end >= text.length) return text.length;
+    final from = end.clamp(0, text.length);
+    final back = text.substring((from - 60).clamp(0, text.length), from);
+    final nl = back.lastIndexOf('\n');
+    if (nl >= 0) {
+      final candidate = from - (back.length - nl);
+      if (candidate >= minEnd) return candidate;
+    }
+    return end;
+  }
 }

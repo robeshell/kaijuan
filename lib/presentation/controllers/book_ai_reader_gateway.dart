@@ -32,10 +32,13 @@ class BookAiReaderGateway {
     required String chapterTitle,
     required List<String> tocTitles,
     required AiBookWork? workScope,
+    AiChatCorpusScope corpusScope = AiChatCorpusScope.currentWork,
     String? selectionOverride,
     String? currentSelection,
     Future<String?> Function()? loadSelectedText,
     Future<String?> Function()? loadChapterText,
+    double? readingProgressFraction,
+    String publicationTitle = '',
   }) async {
     try {
       var selection = selectionOverride?.trim() ?? '';
@@ -48,26 +51,36 @@ class BookAiReaderGateway {
           .map((title) => title.trim())
           .where((title) => title.isNotEmpty)
           .toList(growable: false);
-      final work = workScope;
-      if (work != null) {
+      // Whole-publication mode keeps the full TOC; current-work trims it.
+      if (corpusScope == AiChatCorpusScope.currentWork && workScope != null) {
         outline = [
           for (var index = 0; index < tocTitles.length; index++)
-            if (work.contains(index + 1) && tocTitles[index].trim().isNotEmpty)
+            if (workScope.contains(index + 1) &&
+                tocTitles[index].trim().isNotEmpty)
               tocTitles[index].trim(),
         ];
       }
+      // scopeLabel always names where the reader is sitting (when known).
+      final scopeLabel =
+          workScope?.title.trim().isNotEmpty == true ? workScope!.title : null;
       return AiChatContextBundle(
         chapterTitle: chapterTitle,
         chapterText: chapter,
         selectionText: selection,
         tocOutline: outline,
-        scopeLabel: work?.title.trim().isNotEmpty == true ? work!.title : null,
+        scopeLabel: scopeLabel,
         chapterSectionIndex: chapterSectionIndex,
+        readingProgressFraction: readingProgressFraction,
+        publicationTitle: publicationTitle,
+        corpusScope: corpusScope,
       );
     } catch (_) {
       return AiChatContextBundle(
         chapterTitle: chapterTitle,
         chapterSectionIndex: chapterSectionIndex,
+        readingProgressFraction: readingProgressFraction,
+        publicationTitle: publicationTitle,
+        corpusScope: corpusScope,
       );
     }
   }
@@ -139,7 +152,13 @@ class BookAiReaderGateway {
         webHits: webHits,
         productContext: productContext,
         reasoningEnabled: reasoningEnabled,
-        tools: createToolHost(context: context, work: workScope),
+        tools: createToolHost(
+          context: context,
+          // null work ⇒ host does not crop the corpus (whole publication).
+          work: context.corpusScope == AiChatCorpusScope.wholePublication
+              ? null
+              : workScope,
+        ),
         cancelToken: cancelToken,
       ),
     )) {

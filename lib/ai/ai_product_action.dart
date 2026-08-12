@@ -241,12 +241,18 @@ class AiChatProductContext {
     required String assistantText,
   }) {
     final answer = assistantText.trim();
-    if (answer.isEmpty || userText.toLowerCase().contains('mermaid')) {
+    final user = userText.trim();
+    if (answer.isEmpty || user.toLowerCase().contains('mermaid')) {
       return false;
     }
     if (RegExp(r'```\s*mermaid\b', caseSensitive: false).hasMatch(answer)) {
       return false;
     }
+
+    final outlineMarkers = RegExp(
+      r'^\s*(?:#{1,6}\s+|[-*•]\s+|\d+[.、]\s*|[一二三四五六七八九十]+[、.]\s*)',
+      multiLine: true,
+    ).allMatches(answer).length;
 
     final claimsDelivery = RegExp(
       r'(?:^|[\n。！？])\s*(?:好的|当然|可以|已(?:经)?|现在|下面|以下|我(?:已(?:经)?)?|根据)[^。！？\n]{0,180}(?:为你)?(?:生成|绘制|整理)(?:了|出)?(?:一份|一张|这份|这张)?[^。！？\n]{0,80}(?:思维导图|心智图|脑图)'
@@ -254,13 +260,34 @@ class AiChatProductContext {
       r"|\bi(?:\s+have|['’]ve)?\s+(?:created|generated|drawn)[^.!?\n]{0,120}\bmind\s*map\b",
       caseSensitive: false,
     ).hasMatch(answer);
-    if (!claimsDelivery) return false;
 
-    final outlineMarkers = RegExp(
-      r'^\s*(?:#{1,6}\s+|[-*•]\s+|\d+[.、]\s*|[一二三四五六七八九十]+[、.]\s*)',
+    // Section heading that presents a mind map as part of a multi-part answer
+    // (e.g. "二、第7章「分院帽」思维导图") without calling the native tool.
+    final sectionDeliversMap = RegExp(
+      r'^\s*(?:#{1,6}\s+|[一二三四五六七八九十]+[、.]\s*|\d+[.、]\s*)[^\n]{0,80}'
+      r'(?:思维导图|心智图|脑图|mind\s*map)',
       multiLine: true,
-    ).allMatches(answer).length;
-    return outlineMarkers >= 2;
+      caseSensitive: false,
+    ).hasMatch(answer);
+
+    if (claimsDelivery && outlineMarkers >= 2) return true;
+    if (sectionDeliversMap && outlineMarkers >= 2) return true;
+
+    // Explicit create request + hierarchical prose (no product tool) is always
+    // a broken path: the App owns native maps via create_book_mind_map.
+    final userRequestsCreate = RegExp(
+      r'(?:生成|做一[个张份]|画一[个张]|整理|创建|make|generate|draw).{0,24}'
+      r'(?:思维导图|心智图|脑图|mind\s*map)'
+      r'|(?:思维导图|心智图|脑图|mind\s*map).{0,16}(?:生成|一下|吧)',
+      caseSensitive: false,
+    ).hasMatch(user);
+    if (!userRequestsCreate) return false;
+
+    // Conceptual Q&A ("导图和图谱有什么区别") is not a create request above.
+    // Long structured answers or map-section headings still need repair.
+    if (sectionDeliversMap) return true;
+    if (outlineMarkers >= 3) return true;
+    return false;
   }
 
   static String _safeJson(Object? value) => jsonEncode(value)

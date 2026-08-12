@@ -21,6 +21,7 @@ import '../../../ai/ai_product_action_protocol.dart';
 import '../../../ai/ai_rich_content_inspector.dart';
 import '../../../ai/ai_user_error.dart';
 import '../../../core/kaijuan_icons.dart';
+import '../../../core/text_editing_focus.dart';
 import '../../../core/theme.dart';
 import '../../controllers/book_reader_controller.dart';
 import '../../controllers/book_ai_conversation_controller.dart';
@@ -106,6 +107,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   late bool _deepThinkingOn;
   bool _searchingWeb = false;
 
+  /// Tool corpus: current work (default) vs whole multi-work publication file.
+  AiChatCorpusScope _corpusScope = AiChatCorpusScope.currentWork;
+
   /// Last completed search hit count (null = no search this turn yet).
   int? _lastWebHitCount;
 
@@ -159,8 +163,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   /// Messages of the current conversation: per-work for collections, the
-  /// shared whole-book list for plain books.
-  List<AiChatMessage> get _messages => _session.messagesFor(_chatWorkKey);
+  /// shared whole-book list for plain books. See
+  /// [AiChatSessionOps.visibleMessages] for structure-not-ready fallback.
+  List<AiChatMessage> get _messages =>
+      AiChatSessionOps.visibleMessages(_session, workKey: _chatWorkKey);
 
   AiBookMindMap? _mindMapForArtifact(String artifactId) =>
       _mindMapCoordinator.mapForArtifact(artifactId);
@@ -196,8 +202,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       _activeTurnVisible &&
       (_searchingWeb || _toolStatus != null || _showThinkingIndicator);
 
-  bool get _activeTurnVisible =>
-      _activeTurnId == null || _activeTurnWorkKey == _chatWorkKey;
+  /// In-flight turn stays visible even if structure has not resolved a work key
+  /// yet (null current vs non-null freeze). Only hide when the reader is in a
+  /// *different* resolved work than the one this turn was started in.
+  bool get _activeTurnVisible {
+    if (_activeTurnId == null) return true;
+    final current = _chatWorkKey;
+    final turn = _activeTurnWorkKey;
+    if (current == null || turn == null) return true;
+    return current == turn;
+  }
 
   OrbState get _statusOrbState {
     if (_searchingWeb) return OrbState.searching;
@@ -368,9 +382,34 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     setState(() => _activeTab = _BookAiWorkspaceTab.values[_tabs.index]);
   }
 
+  /// Last AI-relevant reader snapshot. Foliate progress ticks notify often; a
+  /// full panel rebuild on every tick reflows ListView + mind-map canvases and
+  /// looks like the whole side sheet is shaking.
+  String? _readerUiFingerprint;
+
+  String _computeReaderUiFingerprint() {
+    final manifest = _c.bookStructureManifest;
+    return [
+      _c.canUseAiChat,
+      _c.canUseWebSearch,
+      _c.bookMindMapProgress ?? '',
+      _c.isGeneratingBookMindMap,
+      _chatWorkKey ?? '',
+      manifest?.works.length ?? 0,
+      manifest?.kind.name ?? '',
+      _c.supportsDeepThinking,
+    ].join('|');
+  }
+
   void _onReaderControllerChanged() {
     if (!mounted) return;
-    if (_mindMapTurnId != null) {
+    final fingerprint = _computeReaderUiFingerprint();
+    final mindMapTurn = _mindMapConversation.activeTurnId;
+    if (fingerprint == _readerUiFingerprint && mindMapTurn == null) {
+      return;
+    }
+    _readerUiFingerprint = fingerprint;
+    if (mindMapTurn != null) {
       _toolStatus =
           _c.bookMindMapProgress ??
           (_c.isGeneratingBookMindMap ? '正在生成思维导图' : _toolStatus);
@@ -379,35 +418,92 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   void _onConversationChanged() {
-    if (!mounted || !_chatRunActive) return;
+    if (!mounted) return;
+    // Outside an active model run, still rebuild for hydrate / product
+    // projection — otherwise a loaded session stays invisible until some other
+    // setState (e.g. switching tabs) happens to fire.
+    if (!_chatRunActive) {
+      setState(() {
+        _sending = _conversation.sending;
+        _searchingWeb = _conversation.searchingWeb;
+        _toolStatus = _conversation.toolStatus;
+      });
+      return;
+    }
     final previousText = _streaming;
     final shouldFollowTail = _isNearMessageTail;
     final previousOffset = _scroll.hasClients ? _scroll.offset : null;
+    final nextStreaming = _conversation.streaming;
+    final nextReasoning = _conversation.streamingReasoning;
+    final nextTool = _conversation.toolStatus;
+    final nextSearching = _conversation.searchingWeb;
+    final nextHitCount = _conversation.lastWebHitCount;
+    final nextKind = _conversation.streamingReasoningKind;
+    final nextSending = _conversation.sending;
+    final nextStepsSig = _toolStepsSignature(_conversation.toolSteps);
+    // Skip pure no-op notifies so we do not reflow ListView/mind-map canvases
+    // for free. Tool-step timeline is included in the signature.
+    if (nextStreaming == _streaming &&
+        nextReasoning == _streamingReasoning &&
+        nextTool == _toolStatus &&
+        nextSearching == _searchingWeb &&
+        nextHitCount == _lastWebHitCount &&
+        nextKind == _streamingReasoningKind &&
+        nextSending == _sending &&
+        nextStepsSig == _lastToolStepsSignature) {
+      return;
+    }
+    _lastToolStepsSignature = nextStepsSig;
     setState(() {
-      _sending = _conversation.sending;
-      _searchingWeb = _conversation.searchingWeb;
-      _lastWebHitCount = _conversation.lastWebHitCount;
-      _streaming = _conversation.streaming;
-      _streamingReasoning = _conversation.streamingReasoning;
-      _streamingReasoningKind = _conversation.streamingReasoningKind;
-      _toolStatus = _conversation.toolStatus;
+      _sending = nextSending;
+      _searchingWeb = nextSearching;
+      _lastWebHitCount = nextHitCount;
+      _streaming = nextStreaming;
+      _streamingReasoning = nextReasoning;
+      _streamingReasoningKind = nextKind;
+      _toolStatus = nextTool;
     });
-    if (shouldFollowTail && previousText != _streaming) {
+    if (shouldFollowTail && previousText != nextStreaming) {
       _followStreamingTail(previousOffset: previousOffset);
     }
   }
 
+  String? _lastToolStepsSignature;
+
+  static String _toolStepsSignature(List<AiChatToolStep> steps) {
+    if (steps.isEmpty) return '';
+    final buffer = StringBuffer();
+    for (final step in steps) {
+      buffer
+        ..write(step.label)
+        ..write(step.done ? '1' : '0')
+        ..write(';');
+    }
+    return buffer.toString();
+  }
+
   void _onMindMapConversationChanged() {
     if (!mounted) return;
+    final turnId = _mindMapConversation.activeTurnId;
+    final progress = _mindMapConversation.progress;
+    final sending = _conversation.sending;
+    if (turnId == _mindMapTurnId &&
+        progress == _toolStatus &&
+        sending == _sending) {
+      return;
+    }
     setState(() {
-      _mindMapTurnId = _mindMapConversation.activeTurnId;
-      _toolStatus = _mindMapConversation.progress;
-      _sending = _conversation.sending;
+      _mindMapTurnId = turnId;
+      _toolStatus = progress;
+      _sending = sending;
     });
   }
 
   void _onMindMapCoordinatorChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // Pointer-enter/exit only toggles ListView physics; apply without a full
+    // ancestor rebuild when nothing else in the coordinator changed.
+    setState(() {});
   }
 
   Future<void> _bootstrap() async {
@@ -420,12 +516,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           !_c.aiWorkspace.aiStoresReady) {
         // Chat history may still be usable if only journal failed; continue.
       }
+      // Critical path: durable session only. Structure/graph are heavier and
+      // must not block the history spinner — [visibleMessages] already falls
+      // back to the sole non-empty work thread while [_chatWorkKey] is null.
       final loadedSession = await _c.loadChatSession();
       final session = AiChatSessionOps.recoverInterruptedTurns(loadedSession);
       if (!identical(session, loadedSession)) {
         await _c.saveChatSession(session);
       }
-      await _c.loadBookGraph();
       if (!mounted) return;
       setState(() {
         _session = session;
@@ -440,6 +538,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         if (!mounted) return;
         unawaited(_focusComposer());
       });
+      // Align collection workKey / corpus scope after first paint.
+      unawaited(_resolveStructureAfterHistory());
     } catch (error) {
       // A read/decode failure must not leave the sheet on an eternal
       // spinner: show the error with a retry instead.
@@ -452,6 +552,20 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         );
       });
     }
+  }
+
+  /// Resolves book structure off the history critical path so reopen does not
+  /// wait on navigation/spine extraction. Refreshes once ready so collection
+  /// [_chatWorkKey] matches durable [workMessages].
+  Future<void> _resolveStructureAfterHistory() async {
+    try {
+      await _c.resolveBookStructure();
+    } catch (_) {
+      // Structure failure must not wedge chat; visibleMessages fallback stays.
+      return;
+    }
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _restorePendingProductAction() async {
@@ -471,8 +585,12 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _focusComposer() async {
-    _focus.requestFocus();
-    await _c.clearPlatformFocus();
+    if (!mounted) return;
+    // Only request Flutter focus. WebView clear is deferred via the focus
+    // listener so dictation / IME can attach without a first-responder fight.
+    if (!_focus.hasFocus) {
+      _focus.requestFocus();
+    }
   }
 
   Future<void> _persist() => _conversation.persist();
@@ -614,6 +732,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final chatContext = await _c.loadAiChatContext(
       selectionOverride: _attachedSelection.isEmpty ? null : _attachedSelection,
       workScope: turnWork,
+      corpusScope: _corpusScope,
     );
     if (!mounted) return;
 
@@ -869,6 +988,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   void _clearComposerAfterFrame(String submittedText) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _input.text.trim() != submittedText) return;
+      if (textEditingIsComposing(_input)) return;
       _input.clear();
     });
   }
@@ -955,10 +1075,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final draft = _pendingDraft;
     if (draft == null) return;
     if (_input.text.trim().isEmpty) {
-      _input.value = TextEditingValue(
-        text: draft,
-        selection: TextSelection.collapsed(offset: draft.length),
-      );
+      setControllerTextIfIdle(_input, draft);
     }
     _pendingDraft = null;
   }
@@ -1358,10 +1475,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   void _restoreComposerText(String text) {
-    _input.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
+    setControllerTextIfIdle(_input, text);
   }
 
   Future<List<BookAiMindMapGenerationUnit>?>
@@ -1668,6 +1782,50 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             ],
           ),
         ),
+        if (_activeTab == _BookAiWorkspaceTab.chat &&
+            (_c.bookStructureManifest?.works.length ?? 0) >= 2)
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, compact ? 6 : 8),
+            child: Row(
+              children: [
+                Text(
+                  '检索范围',
+                  style: TextStyle(
+                    fontSize: context.aiDetailSize,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SegmentedButton<AiChatCorpusScope>(
+                    segments: const [
+                      ButtonSegment(
+                        value: AiChatCorpusScope.currentWork,
+                        label: Text('当前作品'),
+                      ),
+                      ButtonSegment(
+                        value: AiChatCorpusScope.wholePublication,
+                        label: Text('整本文件'),
+                      ),
+                    ],
+                    selected: {_corpusScope},
+                    onSelectionChanged: conversationInputLocked
+                        ? null
+                        : (next) {
+                            if (next.isEmpty) return;
+                            setState(() => _corpusScope = next.first);
+                          },
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      textStyle: WidgetStatePropertyAll(
+                        TextStyle(fontSize: context.aiDetailSize),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (_activeTab == _BookAiWorkspaceTab.graph)
           Expanded(
             child: BookAiGraphWorkspace(
@@ -1772,6 +1930,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     streamingReasoning: _streamingReasoning,
                     streamingReasoningKind: _streamingReasoningKind,
                     searchingWeb: _searchingWeb,
+                    toolSteps: _conversation.toolSteps,
+                    // Chips only on the composer (avoid double strip under the
+                    // last bubble — same list lives next to send).
+                    actionChips: const [],
                     error: _error,
                     canRetry: _canRetry,
                     mindMapRevealTurnId: _mindMapCoordinator.revealArtifactId,
@@ -1789,6 +1951,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     },
                     onShortcutSelected: (shortcut) =>
                         unawaited(_handleOpeningShortcut(shortcut)),
+                    onActionChip: (chip) => unawaited(_send(chip.prompt)),
                     onCopy: (message) => unawaited(_copy(message.content)),
                     onMindMapLayoutChanged: _mindMapCoordinator.updateLayout,
                     onOpenMindMapEvidence: (evidence) =>
@@ -1816,6 +1979,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                   ),
           ),
           BookAiComposer(
+            key: const ValueKey<String>('book-ai-composer'),
             controller: _input,
             focusNode: _focus,
             locked: conversationInputLocked,
@@ -1830,7 +1994,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                 : '正在修改：${_activeMindMap!.root.title}',
             activeMindMapRevision: _activeMindMap?.revision,
             onMindMapDetached: _mindMapCoordinator.detachArtifact,
-            onFocusRequested: () => unawaited(_focusComposer()),
             onSend: () => unawaited(_send()),
             onStop: () => unawaited(_stop()),
             onWebSearchChanged: (value) =>
@@ -1838,13 +2001,20 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             onDeepThinkingChanged: (value) =>
                 setState(() => _deepThinkingOn = value),
             onSelectionRemoved: () => setState(() => _selection = null),
+            actionChips: showFollowUpShortcuts
+                ? kAiChatActionChips
+                : const [],
+            onActionChip: (chip) => unawaited(_send(chip.prompt)),
           ),
         ],
       ],
     );
 
+    // Side sheet is already full window height; applying viewInsets again
+    // shifts the whole panel when IME/focus flicker. Bottom sheet still needs
+    // the keyboard inset so the composer stays visible.
     return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
+      padding: EdgeInsets.only(bottom: compact ? bottomInset : 0),
       child: compact
           ? ConstrainedBox(
               constraints: BoxConstraints(

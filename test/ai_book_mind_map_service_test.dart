@@ -190,15 +190,12 @@ void main() {
       );
 
       expect(adapter.calls, 1);
-      expect(result.nodes, hasLength(3));
-      expect(result.nodes.first.title, '测试书');
+      // Multi-root forest promotes the largest root (no synthetic hub).
+      expect(result.nodes, hasLength(2));
       expect(result.nodes.first.parentId, isNull);
-      expect(result.nodes.skip(1).map((node) => node.parentId), [
-        'mm001',
-        'mm001',
-      ]);
-      expect(result.nodes.skip(1).map((node) => node.level), [1, 1]);
-      expect(result.nodes.first.summary, contains('短期保护能够稳定就业'));
+      expect(result.nodes.last.parentId, 'mm001');
+      expect(result.nodes.last.level, 1);
+      expect(result.nodes.first.summary, isNotEmpty);
     },
   );
 

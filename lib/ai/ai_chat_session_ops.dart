@@ -59,6 +59,26 @@ abstract final class AiChatSessionOps {
     ]);
   }
 
+  /// Visible thread for the AI panel given an optional resolved work key.
+  ///
+  /// Collection history lives in [AiChatSession.workMessages]. Before structure
+  /// resolves, [workKey] is null; prefer the sole non-empty work thread over
+  /// the empty whole-book list so reopen does not look blank.
+  static List<AiChatMessage> visibleMessages(
+    AiChatSession session, {
+    String? workKey,
+  }) {
+    if (workKey != null) return session.messagesFor(workKey);
+    final whole = session.messages;
+    if (whole.isNotEmpty) return whole;
+    final nonEmpty = [
+      for (final entry in session.workMessages.entries)
+        if (entry.value.isNotEmpty) entry.value,
+    ];
+    if (nonEmpty.length == 1) return nonEmpty.single;
+    return whole;
+  }
+
   static bool _identicalMessageLists(
     List<AiChatMessage> left,
     List<AiChatMessage> right,

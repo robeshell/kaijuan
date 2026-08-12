@@ -212,7 +212,7 @@ void main() {
   );
 
   test(
-    'projection persist failure is retriable and not blocked by memory',
+    'projection persist failure unstages map and retries by restaging',
     () async {
       var persistCalls = 0;
       final conversation = BookAiConversationController((session) async {
@@ -233,7 +233,8 @@ void main() {
         ),
         throwsStateError,
       );
-      expect(conversation.hasMindMapArtifact('art-persist'), isTrue);
+      // Failed write must not leave a map that finishProductTurn could save.
+      expect(conversation.hasMindMapArtifact('art-persist'), isFalse);
       expect(persistCalls, 1);
       await mindMap.projectArtifact(
         turnId: 'turn',
@@ -243,6 +244,7 @@ void main() {
         artifact: map,
       );
       expect(persistCalls, 2);
+      expect(conversation.hasMindMapArtifact('art-persist'), isTrue);
       expect(
         conversation.messagesFor(null).where((m) => m.mindMap != null).length,
         1,

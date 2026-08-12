@@ -227,6 +227,74 @@ void main() {
     conversation.dispose();
   });
 
+  test(
+    'persist failure unstages only the projection, keeps concurrent edits',
+    () async {
+      late BookAiConversationController conversation;
+      conversation = BookAiConversationController((session) async {
+        final hasMap =
+            session.messages.any((m) => m.mindMap != null) ||
+            session.workMessages.values.any(
+              (list) => list.any((m) => m.mindMap != null),
+            );
+        if (!hasMap) return;
+        // Simulate cancel / other turn landing while disk write is in flight.
+        conversation.appendMessage(
+          const AiChatMessage(
+            role: AiMessageRole.user,
+            content: '先停一下',
+            turnId: 'concurrent-user',
+            status: AiChatTurnStatus.completed,
+          ),
+        );
+        conversation.replaceMessages(null, [
+          ...conversation.messagesFor(null).map((message) {
+            if (message.turnId == 'turn-1') {
+              return message.copyWith(status: AiChatTurnStatus.cancelled);
+            }
+            return message;
+          }),
+        ]);
+        throw StateError('disk full');
+      })..hydrate(
+        AiChatSession(
+          contentHash: 'hash',
+          itemId: 'item',
+          messages: [
+            AiChatMessage(
+              role: AiMessageRole.user,
+              content: '生成',
+              turnId: 'turn-1',
+              status: AiChatTurnStatus.pending,
+            ),
+          ],
+        ),
+      );
+      final controller = BookAiMindMapController(conversation);
+
+      await expectLater(
+        controller.projectArtifact(
+          turnId: 'turn-1',
+          workKey: null,
+          unitLabel: '第一部',
+          sectionCount: 1,
+          artifact: mapFor(firstUnit).copyWith(artifactId: 'turn-1-mind-map-1'),
+        ),
+        throwsStateError,
+      );
+
+      final messages = conversation.messagesFor(null);
+      expect(messages.any((m) => m.mindMap != null), isFalse);
+      expect(
+        messages.singleWhere((m) => m.turnId == 'turn-1').status,
+        AiChatTurnStatus.cancelled,
+      );
+      expect(messages.any((m) => m.turnId == 'concurrent-user'), isTrue);
+      controller.dispose();
+      conversation.dispose();
+    },
+  );
+
   test('retry removes prior mind-map projections for the same turn', () async {
     final conversation = BookAiConversationController((_) async {})
       ..hydrate(

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../ai/ai_chat.dart';
 import '../../ai/ai_chat_session_ops.dart';
+import '../../ai/ai_chat_tools.dart';
 import '../../ai/ai_cancel.dart';
 import '../../ai/ai_conversation_intent.dart';
 import '../../ai/ai_models.dart';
@@ -126,6 +127,10 @@ class BookAiConversationController extends ChangeNotifier {
   String? _toolStatus;
   String? get toolStatus => _toolStatus;
 
+  /// Completed / in-flight tool steps for the active turn (timeline UI).
+  final List<AiChatToolStep> _toolSteps = [];
+  List<AiChatToolStep> get toolSteps => List.unmodifiable(_toolSteps);
+
   Object? _failure;
   Object? get failure => _failure;
 
@@ -145,6 +150,9 @@ class BookAiConversationController extends ChangeNotifier {
   StreamSubscription<AiRunEvent>? _runSubscription;
   Completer<BookAiRunOutcome>? _runCompleter;
   DateTime? _lastCheckpointAt;
+  /// Bumped on every durable session write start so a late checkpoint cannot
+  /// overwrite a product-action wipe or map projection.
+  int _sessionWriteEpoch = 0;
   bool _disposed = false;
 
   List<AiChatMessage> messagesFor(String? workKey) =>
@@ -155,7 +163,11 @@ class BookAiConversationController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> persist() => _saveSession(_session);
+  Future<void> persist() {
+    // Invalidate in-flight checkpoints before writing the live session.
+    _sessionWriteEpoch++;
+    return _saveSession(_session);
+  }
 
   BookAiTurnStart beginTurn({
     required String turnId,
@@ -211,6 +223,7 @@ class BookAiConversationController extends ChangeNotifier {
     _streamingReasoning = '';
     _streamingReasoningKind = AiReasoningContentKind.process;
     _toolStatus = null;
+    _toolSteps.clear();
     _runState = null;
     notifyListeners();
     unawaited(persist());
@@ -248,6 +261,25 @@ class BookAiConversationController extends ChangeNotifier {
       _ => _runState,
     };
     if (current == null) return false;
+    if (event is AiRunToolStarted) {
+      // One timeline row per tool call (same name may run many times).
+      if (_toolSteps.isNotEmpty && !_toolSteps.last.done) {
+        _toolSteps[_toolSteps.length - 1] = _toolSteps.last.copyWith(
+          done: true,
+        );
+      }
+      for (final name in event.toolNames) {
+        _toolSteps.add(
+          AiChatToolStep(label: AiChatTools.displayNameFor(name), done: false),
+        );
+      }
+    } else if (event is AiRunToolCompleted) {
+      for (var i = 0; i < _toolSteps.length; i++) {
+        if (!_toolSteps[i].done) {
+          _toolSteps[i] = _toolSteps[i].copyWith(done: true);
+        }
+      }
+    }
     final next = current.apply(event);
     _runState = next;
     _streaming = next.text;
@@ -412,9 +444,11 @@ class BookAiConversationController extends ChangeNotifier {
     if (turnId == null) return;
     _cancelCheckpoint();
     _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: workKey);
-    if (_streaming.trim().isNotEmpty || _streamingReasoning.trim().isNotEmpty) {
+    final hasProse =
+        _streaming.trim().isNotEmpty || _streamingReasoning.trim().isNotEmpty;
+    if (hasProse || _toolSteps.isNotEmpty) {
       _commitAssistant(
-        _streaming,
+        hasProse ? _streaming : '（未生成文字回答）',
         reasoningContent: _streamingReasoning,
         reasoningKind: _streamingReasoningKind,
         workKey: workKey,
@@ -458,6 +492,18 @@ class BookAiConversationController extends ChangeNotifier {
       _retryText = null;
       _retryTurnId = null;
       _failure = null;
+    } else if (_toolSteps.isNotEmpty) {
+      // Tools ran but no prose — still persist the timeline for S7 visibility.
+      _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: workKey);
+      _commitAssistant(
+        '（未生成文字回答）',
+        workKey: workKey,
+        turnId: turnId,
+        status: AiChatTurnStatus.failed,
+      );
+      _failure = StateError('没有生成内容，请重试');
+      _retryText = _userTextForTurn(turnId, workKey: workKey);
+      _retryTurnId = turnId;
     } else {
       _setTurnStatus(turnId, AiChatTurnStatus.failed, workKey: workKey);
       _failure = StateError('没有生成内容，请重试');
@@ -479,6 +525,8 @@ class BookAiConversationController extends ChangeNotifier {
     final turnId = _activeTurnId;
     final workKey = _activeTurnWorkKey;
     if (turnId == null) return;
+    // Drop any in-flight prose checkpoint for this chat turn so a later
+    // checkpoint write cannot resurrect a free-chat imitation beside the map.
     _cancelCheckpoint();
     final messages = List<AiChatMessage>.from(_session.messagesFor(workKey))
       ..removeWhere((message) => message.turnId == turnId);
@@ -497,11 +545,11 @@ class BookAiConversationController extends ChangeNotifier {
     if (turnId == null) return;
     _cancelCheckpoint();
     _setTurnStatus(turnId, AiChatTurnStatus.cancelled, workKey: workKey);
-    if (commitPartial &&
-        (_streaming.trim().isNotEmpty ||
-            _streamingReasoning.trim().isNotEmpty)) {
+    final hasProse =
+        _streaming.trim().isNotEmpty || _streamingReasoning.trim().isNotEmpty;
+    if (commitPartial && (hasProse || _toolSteps.isNotEmpty)) {
       _commitAssistant(
-        _streaming,
+        hasProse ? _streaming : '（已停止）',
         reasoningContent: _streamingReasoning,
         reasoningKind: _streamingReasoningKind,
         workKey: workKey,
@@ -521,6 +569,20 @@ class BookAiConversationController extends ChangeNotifier {
 
   void appendMessage(AiChatMessage message, {String? workKey}) {
     _session = _append(message, workKey: workKey);
+    notifyListeners();
+  }
+
+  /// Removes messages with [turnId] from the given work scope only.
+  ///
+  /// Used to unstage a failed mind-map projection without wiping concurrent
+  /// session edits (cancel, layout, other turns) that landed during persist.
+  void removeMessagesWithTurnId(String turnId, {String? workKey}) {
+    final history = _session.messagesFor(workKey);
+    final next = history
+        .where((message) => message.turnId != turnId)
+        .toList(growable: false);
+    if (next.length == history.length) return;
+    _session = _session.withMessagesFor(workKey, next);
     notifyListeners();
   }
 
@@ -607,11 +669,19 @@ class BookAiConversationController extends ChangeNotifier {
         createdAt: _now(),
         turnId: turnId,
         status: AiChatTurnStatus.pending,
+        toolSteps: [
+          for (final step in _toolSteps) step.copyWith(done: true),
+        ],
       ),
       workKey: _activeTurnWorkKey,
       maxMessages: maxStoredMessages,
     );
-    unawaited(_saveSession(snapshot));
+    final epoch = _sessionWriteEpoch;
+    unawaited(() async {
+      // Product-action wipe / map projection may have advanced the epoch.
+      if (epoch != _sessionWriteEpoch) return;
+      await _saveSession(snapshot);
+    }());
   }
 
   void _cancelCheckpoint() {
@@ -649,6 +719,9 @@ class BookAiConversationController extends ChangeNotifier {
     AiReasoningContentKind reasoningKind = AiReasoningContentKind.process,
     AiChatTurnStatus status = AiChatTurnStatus.completed,
   }) {
+    final steps = [
+      for (final step in _toolSteps) step.copyWith(done: true),
+    ];
     _session = _append(
       AiChatMessage(
         role: AiMessageRole.assistant,
@@ -659,6 +732,7 @@ class BookAiConversationController extends ChangeNotifier {
         turnId: turnId,
         status: status,
         richArtifactKind: inspectAiRichArtifact(body),
+        toolSteps: steps,
       ),
       workKey: workKey,
     );
@@ -677,6 +751,8 @@ class BookAiConversationController extends ChangeNotifier {
     _sending = false;
     _searchingWeb = false;
     _toolStatus = null;
+    // Live steps are snapshotted onto the assistant message in [_commitAssistant].
+    _toolSteps.clear();
     _runState = null;
     _streaming = '';
     _streamingReasoning = '';

@@ -4,6 +4,7 @@ import 'ai_model_adapter.dart';
 
 /// Names the model may call during book chat through native function calling.
 abstract final class AiChatToolNames {
+  static const getReadingMetadata = 'get_reading_metadata';
   static const getToc = 'get_toc';
   static const getCurrentChapter = 'get_current_chapter';
   static const getChapter = 'get_chapter';
@@ -11,6 +12,7 @@ abstract final class AiChatToolNames {
   static const sampleBook = 'sample_book';
 
   static const all = <String>{
+    getReadingMetadata,
     getToc,
     getCurrentChapter,
     getChapter,
@@ -39,10 +41,23 @@ class AiChatToolCall {
     if (raw is int) return raw;
     return int.tryParse('$raw');
   }
+
+  int? get charOffset {
+    final raw = args['charOffset'] ?? args['char_offset'] ?? args['offset'];
+    if (raw is int) return raw;
+    return int.tryParse('$raw');
+  }
+
+  String get focusQuery =>
+      '${args['focusQuery'] ?? args['focus_query'] ?? args['focus'] ?? ''}'
+          .trim();
 }
 
 /// App-side handlers. Implemented by [BookReaderController] / tests.
 abstract interface class AiChatToolHost {
+  /// Frozen reading position, scope, and progress for this turn.
+  Future<String> toolGetReadingMetadata();
+
   /// Directory lines: `§1 标题`.
   Future<String> toolGetToc();
 
@@ -50,7 +65,15 @@ abstract interface class AiChatToolHost {
   Future<String> toolGetCurrentChapter({int maxChars = 10000});
 
   /// One spine section by 1-based index (from get_toc / sample labels).
-  Future<String> toolGetChapter(int sectionIndex1Based, {int maxChars = 10000});
+  ///
+  /// [charOffset] pages from that character; [focusQuery] windows around a
+  /// match so mid-chapter evidence is not lost to head truncation.
+  Future<String> toolGetChapter(
+    int sectionIndex1Based, {
+    int maxChars = 10000,
+    int? charOffset,
+    String? focusQuery,
+  });
 
   /// Keyword hits inside the book (local plain-text search).
   Future<String> toolSearchBook(String query, {int maxChars = 12000});
@@ -62,6 +85,14 @@ abstract interface class AiChatToolHost {
 /// Native tool schemas and app-owned execution.
 abstract final class AiChatTools {
   static const nativeDefinitions = <AiModelToolDefinition>[
+    AiModelToolDefinition(
+      name: AiChatToolNames.getReadingMetadata,
+      description:
+          'Reading session metadata: publication title, scoped work, '
+          'current chapter, section index, and reading progress percent. '
+          'Call when you need position or to decide spoiler caution.',
+      inputSchema: {'type': 'object', 'properties': <String, Object?>{}},
+    ),
     AiModelToolDefinition(
       name: AiChatToolNames.getToc,
       description: 'List this work\'s section indices and titles.',
@@ -80,19 +111,39 @@ abstract final class AiChatTools {
     AiModelToolDefinition(
       name: AiChatToolNames.getChapter,
       description:
-          'Read one section by the 1-based sectionIndex returned by get_toc.',
+          'Read one section by the 1-based sectionIndex from get_toc. '
+          'Long chapters are truncated: pass focusQuery to center on a phrase, '
+          'or charOffset (from search_book hit windows) to page mid-chapter. '
+          'Do not assume the opening equals the whole chapter.',
       inputSchema: {
         'type': 'object',
         'properties': {
           'sectionIndex': {'type': 'integer', 'minimum': 1},
           'maxChars': {'type': 'integer', 'minimum': 256, 'maximum': 12000},
+          'charOffset': {
+            'type': 'integer',
+            'minimum': 0,
+            'description':
+                '0-based character offset into the section body. '
+                'Use values reported by search_book hit windows.',
+          },
+          'focusQuery': {
+            'type': 'string',
+            'maxLength': 80,
+            'description':
+                'Optional phrase to center the returned window on '
+                '(mid-chapter evidence).',
+          },
         },
         'required': ['sectionIndex'],
       },
     ),
     AiModelToolDefinition(
       name: AiChatToolNames.searchBook,
-      description: 'Search for a keyword or phrase inside this work.',
+      description:
+          'Search for a keyword or phrase inside this work. Returns short '
+          'snippets **centered on each hit** (not chapter openings), with '
+          'sectionIndex and charOffset so you can call get_chapter to read more.',
       inputSchema: {
         'type': 'object',
         'properties': {
@@ -105,7 +156,8 @@ abstract final class AiChatTools {
     AiModelToolDefinition(
       name: AiChatToolNames.sampleBook,
       description:
-          'Read an even sample across this work for whole-book questions.',
+          'Read an even sample across this work for whole-book questions. '
+          'Prefer get_chapter for close reading of specific sections.',
       inputSchema: {
         'type': 'object',
         'properties': {
@@ -128,7 +180,8 @@ abstract final class AiChatTools {
     for (var index = 0; index < calls.length; index++) {
       final modelCall = calls[index];
       cancelToken?.throwIfCancelled();
-      if (index >= 6) {
+      // Allow a fuller batch of get_chapter in one model turn (was 6).
+      if (index >= 10) {
         out.add(
           AiModelToolResult(
             callId: modelCall.id,
@@ -193,7 +246,9 @@ abstract final class AiChatTools {
   }
 
   static String _signature(AiChatToolCall call) => switch (call.name) {
-    AiChatToolNames.getChapter => '${call.name}:${call.sectionIndex}',
+    // Allow re-reading the same section at a different offset / focus.
+    AiChatToolNames.getChapter =>
+      '${call.name}:${call.sectionIndex}:${call.charOffset ?? 0}:${call.focusQuery}',
     AiChatToolNames.searchBook => '${call.name}:${_clipQuery(call.query)}',
     _ => call.name,
   };
@@ -208,6 +263,7 @@ abstract final class AiChatTools {
 
   static Future<String> _runOne(AiChatToolCall call, AiChatToolHost host) {
     return switch (call.name) {
+      AiChatToolNames.getReadingMetadata => host.toolGetReadingMetadata(),
       AiChatToolNames.getToc => host.toolGetToc(),
       AiChatToolNames.getCurrentChapter => host.toolGetCurrentChapter(
         maxChars: _boundedMax(call.maxChars, 10000, 12000),
@@ -217,9 +273,12 @@ abstract final class AiChatTools {
         if (idx == null || idx < 1) {
           return 'Error: get_chapter needs sectionIndex (1-based from get_toc).';
         }
+        final focus = call.focusQuery;
         return host.toolGetChapter(
           idx,
           maxChars: _boundedMax(call.maxChars, 10000, 12000),
+          charOffset: call.charOffset,
+          focusQuery: focus.isEmpty ? null : focus,
         );
       }(),
       AiChatToolNames.searchBook => () async {
@@ -237,6 +296,19 @@ abstract final class AiChatTools {
     };
   }
 
+  /// Short Chinese tile label for one native tool name (timeline UI).
+  static String displayNameFor(String name) => switch (name) {
+    AiChatToolNames.getReadingMetadata => '当前阅读元数据',
+    AiChatToolNames.getToc => '当前书籍目录',
+    AiChatToolNames.getCurrentChapter => '当前章节内容',
+    AiChatToolNames.getChapter => '按节读取章节',
+    AiChatToolNames.searchBook => '书内搜索',
+    AiChatToolNames.sampleBook => '全书取样',
+    'create_book_mind_map' => '生成思维导图',
+    'revise_book_mind_map' => '修订思维导图',
+    _ => name,
+  };
+
   /// Human-readable status for the UI while tools run (e.g. "正在检索「张居正」…").
   /// Falls back to the raw names so a new tool still shows *something*.
   static String describeCalls(List<AiChatToolCall> calls) {
@@ -244,12 +316,13 @@ abstract final class AiChatTools {
     final parts = <String>[];
     for (final call in calls) {
       parts.add(switch (call.name) {
+        AiChatToolNames.getReadingMetadata => '读取阅读位置',
         AiChatToolNames.getToc => '查询目录',
         AiChatToolNames.getCurrentChapter => '读取当前章',
         AiChatToolNames.getChapter => '读取章节 §${call.sectionIndex ?? '?'}',
         AiChatToolNames.searchBook => '检索「${call.query}」',
         AiChatToolNames.sampleBook => '全书取样',
-        _ => call.name,
+        _ => displayNameFor(call.name),
       });
     }
     return '正在${parts.join('、')}…';
@@ -272,12 +345,45 @@ abstract final class AiChatBookCorpus {
     List<AiBookSectionSlice> sections,
     int index1Based, {
     int maxChars = 10000,
+    int? charOffset,
+    String? focusQuery,
   }) {
     for (final s in sections) {
       if (s.index == index1Based) {
         final t = s.text.trim();
-        if (t.length <= maxChars) return '[§${s.index} ${s.label}]\n$t';
-        return '[§${s.index} ${s.label}]\n${t.substring(0, maxChars)}…';
+        final label = s.label.trim().isEmpty ? '§${s.index}' : s.label.trim();
+        final focus = focusQuery?.trim() ?? '';
+        late final String body;
+        late final String mode;
+        if (focus.isNotEmpty) {
+          body = AiChatRetrieve.windowAroundQuery(
+            t,
+            query: focus,
+            maxChars: maxChars,
+          );
+          mode = 'focusQuery="$focus"';
+        } else if (charOffset != null && charOffset > 0) {
+          body = AiChatRetrieve.windowAtOffset(
+            t,
+            charOffset: charOffset,
+            maxChars: maxChars,
+          );
+          mode = 'charOffset=$charOffset · sectionLength=${t.length}';
+        } else if (t.length <= maxChars) {
+          body = t;
+          mode = 'full · sectionLength=${t.length}';
+        } else {
+          // Default: head+tail so late-chapter material is not invisible.
+          body = AiChatRetrieve.windowAroundQuery(
+            t,
+            query: '',
+            maxChars: maxChars,
+          );
+          mode =
+              'head+tail truncate · sectionLength=${t.length} · '
+              'pass focusQuery or charOffset for mid-chapter';
+        }
+        return '[§${s.index} $label · $mode]\n$body';
       }
     }
     return 'Error: section $index1Based not found.';

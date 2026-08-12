@@ -260,29 +260,60 @@ final class AiBookMindMapService {
     final effectiveParentById = <String, String?>{
       for (final node in parsed.values) node.id: node.parentId,
     };
+    // Temporary children by raw parent ids — used only to size forest roots.
+    final rawChildren = <String, List<_RawMindMapNode>>{};
+    for (final node in parsed.values.where((n) => n.parentId != null)) {
+      rawChildren.putIfAbsent(node.parentId!, () => []).add(node);
+    }
+    int subtreeSize(_RawMindMapNode node, Set<String> stack) {
+      if (!stack.add(node.id)) return 1;
+      final kids = rawChildren[node.id] ?? const <_RawMindMapNode>[];
+      final total = 1 +
+          kids.fold<int>(0, (sum, child) => sum + subtreeSize(child, stack));
+      stack.remove(node.id);
+      return total;
+    }
+
     _RawMindMapNode root;
     if (roots.length == 1) {
       root = roots.single;
       root.evidence.clear();
     } else {
-      var syntheticId = '__kaijuan_root__';
-      while (parsed.containsKey(syntheticId)) {
-        syntheticId = '_$syntheticId';
+      // Prefer promoting the largest meaningful root over a synthetic hub.
+      // A synthetic root + two equal hubs reads as "two disconnected trees"
+      // in bidirectional layout; one promoted root keeps a single spine.
+      final ranked = [...roots]
+        ..sort((left, right) {
+          final sizeOrder =
+              subtreeSize(right, {}).compareTo(subtreeSize(left, {}));
+          if (sizeOrder != 0) return sizeOrder;
+          final order = left.order.compareTo(right.order);
+          return order != 0 ? order : left.title.compareTo(right.title);
+        });
+      root = ranked.first;
+      root.evidence.clear();
+      // If the promoted root's title is a useless placeholder, retitle it.
+      final bare = root.title.trim();
+      if (bare.isEmpty || bare == '根' || bare.toLowerCase() == 'root') {
+        root = _RawMindMapNode(
+          id: root.id,
+          parentId: null,
+          order: root.order,
+          title: rootTitle,
+          summary: root.summary.trim().isEmpty
+              ? _forestSummary(ranked)
+              : root.summary,
+          evidence: [],
+        );
+        parsed[root.id] = root;
       }
-      root = _RawMindMapNode(
-        id: syntheticId,
-        parentId: null,
-        order: 0,
-        title: rootTitle,
-        summary: _forestSummary(roots),
-        evidence: [],
+      for (final branch in ranked.skip(1)) {
+        effectiveParentById[branch.id] = root.id;
+      }
+      AiLog.d(
+        'mind map promoted forest root: roots=${roots.length} '
+        'kept=${root.title}',
       );
-      parsed[syntheticId] = root;
-      effectiveParentById[syntheticId] = null;
-      for (final branch in roots) {
-        effectiveParentById[branch.id] = syntheticId;
-      }
-      AiLog.d('mind map normalized forest: roots=${roots.length}');
     }
     final children = <String, List<_RawMindMapNode>>{};
     for (final node in parsed.values.where((node) => node.id != root.id)) {

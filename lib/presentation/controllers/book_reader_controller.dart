@@ -1611,15 +1611,19 @@ class BookReaderController extends ChangeNotifier {
   Future<AiChatContextBundle> loadAiChatContext({
     String? selectionOverride,
     required AiBookWork? workScope,
+    AiChatCorpusScope corpusScope = AiChatCorpusScope.currentWork,
   }) => _aiReaderGateway.loadContext(
     chapterSectionIndex: _sectionIndex + 1,
     chapterTitle: currentChapterTitle,
     tocTitles: _tocTitles,
     workScope: workScope,
+    corpusScope: corpusScope,
     selectionOverride: selectionOverride,
     currentSelection: _annotationState.selectionMenu?.text,
     loadSelectedText: _annotationState.peekSelectedText,
     loadChapterText: bridge.loadChapterText,
+    readingProgressFraction: progressFraction,
+    publicationTitle: item.title,
   );
 
   /// Stream an assistant reply for book chat. Null when AI is unavailable.

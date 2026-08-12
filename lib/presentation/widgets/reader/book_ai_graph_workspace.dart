@@ -882,13 +882,23 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
   }
 
   Future<void> _ensureGraphWorks() async {
-    if (_c.bookStructureManifest != null) return;
     if (_graphWorksLoading || !mounted) return;
     _graphWorksLoading = true;
-    await _c.resolveGraphWorkCandidates();
-    if (!mounted) return;
-    _graphWorksLoading = false;
-    setState(() {});
+    try {
+      // Chat bootstrap no longer loads the graph for first paint; this tab is
+      // the owner of durable graph hydrate + work-scope resolution.
+      await Future.wait([
+        _c.loadBookGraph(),
+        if (_c.bookStructureManifest == null) _c.resolveGraphWorkCandidates(),
+      ]);
+    } finally {
+      if (mounted) {
+        _graphWorksLoading = false;
+        setState(() {});
+      } else {
+        _graphWorksLoading = false;
+      }
+    }
   }
 
   Future<void> _generateGraph({

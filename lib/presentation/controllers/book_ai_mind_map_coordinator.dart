@@ -57,6 +57,7 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
 
   String? _revealArtifactId;
   bool _pointerActive = false;
+  Timer? _pointerIdleTimer;
   BookAiMindMapScopePrompt? _scopePrompt;
   BookAiProductActionPrompt? _actionPrompt;
 
@@ -94,9 +95,20 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
   void detachArtifact() => mindMapConversation.detachArtifact();
 
   void setPointerActive(bool active) {
-    if (_pointerActive == active) return;
-    _pointerActive = active;
-    notifyListeners();
+    // Debounce leave events: MouseRegion enter/exit fires around dense node
+    // cards and was swapping ListView physics every frame → whole-panel jump.
+    _pointerIdleTimer?.cancel();
+    if (active) {
+      if (_pointerActive) return;
+      _pointerActive = true;
+      notifyListeners();
+      return;
+    }
+    _pointerIdleTimer = Timer(const Duration(milliseconds: 120), () {
+      if (!_pointerActive) return;
+      _pointerActive = false;
+      notifyListeners();
+    });
   }
 
   void reveal(String artifactId) {
@@ -224,6 +236,7 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
 
   @override
   void dispose() {
+    _pointerIdleTimer?.cancel();
     cancelScope();
     cancelActionPrompt();
     super.dispose();

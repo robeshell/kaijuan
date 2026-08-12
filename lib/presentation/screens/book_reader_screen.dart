@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../../ai/ai_chat_store.dart';
@@ -179,10 +180,53 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     }
   }
 
+  Timer? _platformFocusClearTimer;
+  bool _primaryWasTextEditing = false;
+
+  /// When a Flutter [TextField] gains focus, optionally nudge the book
+  /// WebView to resign first-responder so desktop paste shortcuts work.
+  ///
+  /// Critical rules (macOS + InAppWebView):
+  /// - Only on the **edge** into text editing, never on every FocusManager tick
+  ///   (IME / dictation fire many ticks and clearFocus races composition).
+  /// - Defer to a post-frame callback so we never schedule rebuilds while
+  ///   semantics/paint is still flushing (see "Build scheduled during frame"
+  ///   when TextEditingController notifies mid-drawFrame).
+  /// - Skip entirely when a root modal (AI side panel / sheets) is open — the
+  ///   barrier already owns input; clearing the WebView under it only hurts.
   void _onGlobalFocusChange() {
     if (!mounted) return;
-    if (!primaryFocusIsTextEditing()) return;
-    unawaited(_engine.clearPlatformFocus());
+    final editing = primaryFocusIsTextEditing();
+    if (!editing) {
+      _primaryWasTextEditing = false;
+      _platformFocusClearTimer?.cancel();
+      _platformFocusClearTimer = null;
+      return;
+    }
+    if (_primaryWasTextEditing) return;
+    _primaryWasTextEditing = true;
+
+    // AI panel / search / note sheets are root routes above the reader.
+    if (Navigator.of(context, rootNavigator: true).canPop()) {
+      return;
+    }
+
+    _platformFocusClearTimer?.cancel();
+    _platformFocusClearTimer = Timer(const Duration(milliseconds: 160), () {
+      if (!mounted || !primaryFocusIsTextEditing()) return;
+      if (Navigator.of(context, rootNavigator: true).canPop()) return;
+      // Never touch platform focus during an active frame/semantics flush.
+      final phase = SchedulerBinding.instance.schedulerPhase;
+      if (phase != SchedulerPhase.idle &&
+          phase != SchedulerPhase.postFrameCallbacks) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !primaryFocusIsTextEditing()) return;
+          unawaited(_engine.clearPlatformFocus());
+        });
+        return;
+      }
+      unawaited(_engine.clearPlatformFocus());
+    });
   }
 
   /// TTS playback must not accumulate reading time (PRODUCT §4.8).
@@ -490,6 +534,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   @override
   void dispose() {
+    _platformFocusClearTimer?.cancel();
     appRouteObserver.unsubscribe(this);
     FocusManager.instance.removeListener(_onGlobalFocusChange);
     _controller.removeListener(_onBookControllerTick);

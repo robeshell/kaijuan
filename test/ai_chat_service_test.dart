@@ -78,6 +78,10 @@ void main() {
           chapterText: '第一章本地正文。',
           bookBody: '[§1]\n全书很长的正文不应该默认出现。',
           tocOutline: ['第一章', '第二章'],
+          chapterSectionIndex: 1,
+          readingProgressFraction: 0.01,
+          scopeLabel: '第一部',
+          publicationTitle: '合集书',
         ),
         bookTitle: '万历十五年',
         bookAuthor: '黄仁宇',
@@ -86,6 +90,8 @@ void main() {
       final prompt = messages.last.content;
       expect(system, contains('Trust boundaries:'));
       expect(system, contains('untrusted_context'));
+      expect(system, contains('Spoiler care'));
+      expect(system, contains('get_reading_metadata'));
       expect(system, isNot(contains('万历十五年')));
       expect(system, isNot(contains('黄仁宇')));
       expect(system, isNot(contains('第一章本地正文')));
@@ -101,7 +107,39 @@ void main() {
       expect(prompt, contains('万历十五年'));
       expect(prompt, contains('黄仁宇'));
       expect(prompt, contains('第一章本地正文'));
+      expect(prompt, contains('Reading progress: 1.0%'));
+      expect(prompt, contains('Active work scope'));
       expect(prompt, isNot(contains('全书很长的正文不应该默认出现')));
+    });
+
+    test('toolRoundsFor deepens whole-book questions', () {
+      expect(AiChatService.toolRoundsFor('这一章讲什么'), AiChatService.maxToolRounds);
+      expect(
+        AiChatService.toolRoundsFor('请概括整本书的主线'),
+        AiChatService.maxToolRoundsDeep,
+      );
+    });
+
+    test('whole-publication corpus scope is stated in the user context', () {
+      final messages = AiChatService.buildMessages(
+        userText: '后几部斯内普怎么了？',
+        history: const [],
+        context: const AiChatContextBundle(
+          chapterTitle: '第一章',
+          scopeLabel: '魔法石',
+          publicationTitle: '哈利波特全集',
+          corpusScope: AiChatCorpusScope.wholePublication,
+          readingProgressFraction: 0.05,
+        ),
+        bookTitle: '哈利波特全集',
+      );
+      final system = messages.first.content;
+      final prompt = messages.last.content;
+      expect(system, contains('WHOLE publication file'));
+      expect(system, isNot(contains('trimmed to that work\'s range')));
+      expect(prompt, contains('WHOLE publication file'));
+      expect(prompt, contains('sitting in work'));
+      expect(prompt, contains('魔法石'));
     });
 
     test('cannot close trust boundaries from quoted reader content', () {
@@ -263,12 +301,13 @@ void main() {
   });
 
   group('AiChatTools', () {
-    test('exposes exactly five native read-only tools', () {
-      expect(AiChatTools.nativeDefinitions, hasLength(5));
+    test('exposes native read-only tools including reading metadata', () {
+      expect(AiChatTools.nativeDefinitions, hasLength(6));
       expect(
         AiChatTools.nativeDefinitions.map((tool) => tool.name).toSet(),
         AiChatToolNames.all,
       );
+      expect(AiChatToolNames.all, contains(AiChatToolNames.getReadingMetadata));
     });
 
     test('runs native tools via the app-owned host', () async {
@@ -319,7 +358,7 @@ void main() {
       () async {
         final host = _FakeHost();
         final calls = [
-          for (var index = 1; index <= 8; index++)
+          for (var index = 1; index <= 12; index++)
             AiModelToolCall(
               id: 'chapter-$index',
               name: AiChatToolNames.getChapter,
@@ -329,13 +368,17 @@ void main() {
 
         final results = await AiChatTools.runNative(calls, host);
 
-        expect(results, hasLength(8));
+        expect(results, hasLength(12));
         expect(results.map((result) => result.callId), [
-          for (var index = 1; index <= 8; index++) 'chapter-$index',
+          for (var index = 1; index <= 12; index++) 'chapter-$index',
         ]);
-        expect(host.calls.where((call) => call == 'get_chapter'), hasLength(6));
-        expect(results[6].output, contains('tool call limit exceeded'));
-        expect(results[7].output, contains('tool call limit exceeded'));
+        // Per-turn execution cap is 10 native calls.
+        expect(
+          host.calls.where((call) => call == 'get_chapter'),
+          hasLength(10),
+        );
+        expect(results[10].output, contains('tool call limit exceeded'));
+        expect(results[11].output, contains('tool call limit exceeded'));
       },
     );
   });
@@ -351,10 +394,11 @@ void main() {
       expect(outline.needsSelection, isFalse);
     });
 
-    test('overview shortcut demands whole book', () {
-      final overview = kAiChatShortcuts.firstWhere((s) => s.label == '这本书在讲什么');
-      expect(overview.prompt, contains('整本书'));
-      expect(overview.prompt, isNot(contains('收录')));
+    test('book digest shortcut is structured and scope-aware', () {
+      final digest = kAiChatShortcuts.firstWhere((s) => s.label == '本书书摘');
+      expect(digest.prompt, contains('核心冲突'));
+      expect(digest.prompt, contains('合集'));
+      expect(digest.prompt, contains('get_reading_metadata'));
     });
 
     test('opening shortcuts use quote-specific questions when selected', () {
@@ -362,11 +406,17 @@ void main() {
       final selected = aiChatOpeningShortcuts(hasSelection: true);
 
       expect(general, hasLength(3));
-      expect(general.first.label, '生成本书大纲');
+      expect(general.first.label, '本书书摘');
       expect(general.map((s) => s.label), isNot(contains('解释这段')));
       expect(selected, hasLength(3));
       expect(selected.first.label, '解释这段');
       expect(selected.every((s) => s.needsSelection), isTrue);
+    });
+
+    test('action chips stay short labels with sendable prompts', () {
+      expect(kAiChatActionChips, hasLength(5));
+      expect(kAiChatActionChips.map((c) => c.label), containsAll(['解释', '总结']));
+      expect(kAiChatActionChips.every((c) => c.prompt.trim().isNotEmpty), isTrue);
     });
 
     test(
@@ -488,7 +538,8 @@ void main() {
 
         expect(host.calls, ['search_book']);
         expect(requestedDeepThinking, isTrue);
-        expect(adapter.requests.first.tools, hasLength(6));
+        // 6 native read tools + create mind-map product tool.
+        expect(adapter.requests.first.tools, hasLength(7));
         expect(
           adapter.requests[1].messages.where(
             (message) => message.role == AiModelRole.tool,
@@ -552,11 +603,63 @@ void main() {
           )
           .toList();
 
+      // Progressive snapshots while generating; no duplicate full re-yield.
       expect(events.whereType<AiRunTextSnapshot>().map((event) => event.text), [
         '第一段',
         '第一段继续',
       ]);
       expect((events.last as AiRunCompleted).text, '第一段继续');
+    });
+
+    test('retracts live preface when the turn ends as tools', () async {
+      final adapter = _ScriptedModelAdapter([
+        [
+          const AiModelTextDelta('让我先查目录'),
+          const AiModelTurnCompleted(
+            text: '让我先查目录',
+            toolCalls: [
+              AiModelToolCall(
+                id: 'toc-1',
+                name: AiChatToolNames.getToc,
+                arguments: {},
+              ),
+            ],
+            truncated: false,
+          ),
+        ],
+        [
+          const AiModelTextDelta('目录里有这些内容。'),
+          const AiModelTurnCompleted(
+            text: '目录里有这些内容。',
+            toolCalls: [],
+            truncated: false,
+          ),
+        ],
+      ]);
+      final service = AiChatService(
+        isAvailable: () => true,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
+      );
+
+      final events = await service
+          .streamRun(
+            run: descriptor,
+            userText: '这本书讲什么',
+            history: const [],
+            context: const AiChatContextBundle(),
+            bookTitle: '书',
+            tools: _FakeHost(),
+          )
+          .toList();
+
+      final texts = events
+          .whereType<AiRunTextSnapshot>()
+          .map((event) => event.text)
+          .toList();
+      expect(texts, contains('让我先查目录'));
+      expect(texts, contains('')); // retracted before tools run
+      expect(texts.last, '目录里有这些内容。');
+      expect((events.last as AiRunCompleted).text, '目录里有这些内容。');
     });
 
     test('emits a terminal product action from the same model turn', () async {
@@ -659,6 +762,7 @@ void main() {
             .toList();
 
         expect(events.last, isA<AiRunProductActionRequested>());
+        // Imitation draft may stream briefly, then is retracted before repair.
         expect(
           events.whereType<AiRunTextSnapshot>().map((event) => event.text),
           [draft, ''],
@@ -1112,6 +1216,24 @@ void main() {
       expect(restored.reasoningKind, AiReasoningContentKind.summary);
     });
 
+    test('session JSON preserves tool steps on assistant messages', () {
+      final message = AiChatMessage(
+        role: AiMessageRole.assistant,
+        content: '答',
+        turnId: 't1',
+        toolSteps: const [
+          AiChatToolStep(label: '当前阅读元数据', done: true),
+          AiChatToolStep(label: '书内搜索', done: true),
+        ],
+      );
+      final restored = AiChatMessage.fromJson(
+        Map<String, dynamic>.from(message.toJson()),
+      );
+      expect(restored.toolSteps, hasLength(2));
+      expect(restored.toolSteps.first.label, '当前阅读元数据');
+      expect(restored.toolSteps.every((s) => s.done), isTrue);
+    });
+
     test('session JSON preserves turn identity and status', () {
       const message = AiChatMessage(
         role: AiMessageRole.user,
@@ -1176,6 +1298,12 @@ class _FakeHost implements AiChatToolHost {
   int? lastMaxChars;
 
   @override
+  Future<String> toolGetReadingMetadata() async {
+    calls.add('get_reading_metadata');
+    return 'publication: test\nreadingProgressPercent: 1.0';
+  }
+
+  @override
   Future<String> toolGetToc() async {
     calls.add('get_toc');
     return '§1 一\n§2 二';
@@ -1192,6 +1320,8 @@ class _FakeHost implements AiChatToolHost {
   Future<String> toolGetChapter(
     int sectionIndex1Based, {
     int maxChars = 10000,
+    int? charOffset,
+    String? focusQuery,
   }) async {
     calls.add('get_chapter');
     lastMaxChars = maxChars;

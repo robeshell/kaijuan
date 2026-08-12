@@ -116,6 +116,10 @@ class _SmokeToolHost implements AiChatToolHost {
   const _SmokeToolHost();
 
   @override
+  Future<String> toolGetReadingMetadata() async =>
+      'publication: smoke\nreadingProgressPercent: 0.0';
+
+  @override
   Future<String> toolGetToc() async => '§1 测试章节';
 
   @override
@@ -126,6 +130,8 @@ class _SmokeToolHost implements AiChatToolHost {
   Future<String> toolGetChapter(
     int sectionIndex1Based, {
     int maxChars = 10000,
+    int? charOffset,
+    String? focusQuery,
   }) async => '测试章节正文';
 
   @override

@@ -45,11 +45,15 @@ class AiCodeBlock extends StatelessWidget {
     required this.source,
     this.language = '',
     this.label,
+    this.ownSelection = true,
   });
 
   final String source;
   final String language;
   final String? label;
+
+  /// When false, a parent [SelectionArea] owns selection (e.g. chat transcript).
+  final bool ownSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +71,28 @@ class AiCodeBlock extends StatelessWidget {
         ? const Color(0xffc9d1d9)
         : const Color(0xff24292e);
     final displayLabel = label ?? _languageLabel(normalized);
+    final codeBody = canHighlight
+        ? HighlightView(
+            source,
+            languageId: normalized,
+            theme: isDark ? githubDarkTheme : githubTheme,
+            padding: EdgeInsets.zero,
+            textStyle: TextStyle(
+              fontSize: context.aiDetailSize,
+              height: 1.52,
+              fontFamily: 'monospace',
+            ),
+          )
+        : Text(
+            source,
+            softWrap: false,
+            style: TextStyle(
+              color: foreground,
+              fontSize: context.aiDetailSize,
+              height: 1.52,
+              fontFamily: 'monospace',
+            ),
+          );
 
     return Semantics(
       container: true,
@@ -80,37 +106,16 @@ class AiCodeBlock extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _BlockToolbar(
-              label: displayLabel,
-              onCopy: () => copyAiRichSource(context, source),
+            SelectionContainer.disabled(
+              child: _BlockToolbar(
+                label: displayLabel,
+                onCopy: () => copyAiRichSource(context, source),
+              ),
             ),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: SelectionArea(
-                child: canHighlight
-                    ? HighlightView(
-                        source,
-                        languageId: normalized,
-                        theme: isDark ? githubDarkTheme : githubTheme,
-                        padding: EdgeInsets.zero,
-                        textStyle: TextStyle(
-                          fontSize: context.aiDetailSize,
-                          height: 1.52,
-                          fontFamily: 'monospace',
-                        ),
-                      )
-                    : Text(
-                        source,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: foreground,
-                          fontSize: context.aiDetailSize,
-                          height: 1.52,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-              ),
+              child: ownSelection ? SelectionArea(child: codeBody) : codeBody,
             ),
           ],
         ),
@@ -129,14 +134,32 @@ class AiCodeBlock extends StatelessWidget {
 }
 
 class AiCalloutBlock extends StatelessWidget {
-  const AiCalloutBlock({super.key, required this.source, required this.kind});
+  const AiCalloutBlock({
+    super.key,
+    required this.source,
+    required this.kind,
+    this.ownSelection = true,
+  });
 
   final String source;
   final String kind;
 
+  /// When false, a parent [SelectionArea] owns selection (e.g. chat transcript).
+  final bool ownSelection;
+
   @override
   Widget build(BuildContext context) {
     final config = _CalloutConfig.from(kind, context);
+    final bodyStyle = TextStyle(
+      fontSize: context.aiDetailSize,
+      height: 1.5,
+      color: context.appSecondaryText,
+    );
+    final body = source.trim().isEmpty
+        ? null
+        : ownSelection
+        ? SelectableText(source.trim(), style: bodyStyle)
+        : Text(source.trim(), style: bodyStyle);
     return Semantics(
       container: true,
       label: '${config.label}：$source',
@@ -175,17 +198,7 @@ class AiCalloutBlock extends StatelessWidget {
                         color: context.appPrimaryText,
                       ),
                     ),
-                    if (source.trim().isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      SelectableText(
-                        source.trim(),
-                        style: TextStyle(
-                          fontSize: context.aiDetailSize,
-                          height: 1.5,
-                          color: context.appSecondaryText,
-                        ),
-                      ),
-                    ],
+                    if (body != null) ...[const SizedBox(height: 4), body],
                   ],
                 ),
               ),

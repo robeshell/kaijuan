@@ -15,6 +15,64 @@ import 'book_ai_mind_map_scope_card.dart';
 import 'book_ai_action_confirmation_card.dart';
 import 'book_ai_mind_map_view.dart';
 
+/// Anx-style tool step tiles (compact): one row per tool with done indicator.
+class BookAiToolStepTimeline extends StatelessWidget {
+  const BookAiToolStepTimeline({required this.steps, super.key});
+
+  final List<AiChatToolStep> steps;
+
+  @override
+  Widget build(BuildContext context) {
+    if (steps.isEmpty) return const SizedBox.shrink();
+    final colors = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < steps.length; i++) ...[
+            if (i > 0) const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: colors.surfaceContainerHighest.withValues(alpha: 0.42),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: context.appDivider),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.build_circle_outlined,
+                    size: 16,
+                    color: context.appSecondaryText,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      steps[i].label,
+                      style: TextStyle(
+                        fontSize: context.aiDetailSize,
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    steps[i].done ? Icons.check_circle : Icons.circle_outlined,
+                    size: 14,
+                    color: steps[i].done
+                        ? colors.primary
+                        : context.appSecondaryText,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class BookAiThinkingIndicator extends StatelessWidget {
   const BookAiThinkingIndicator({
     super.key,
@@ -235,7 +293,10 @@ class BookAiSuggestedQuestionList extends StatelessWidget {
   }
 }
 
-class BookAiComposer extends StatelessWidget {
+/// AI chat composer. Stateful so the [TextField] element stays stable across
+/// parent rebuilds (streaming tool steps, structure resolve, etc.) and does
+/// not re-attach the text input connection mid-IME / dictation.
+class BookAiComposer extends StatefulWidget {
   const BookAiComposer({
     required this.controller,
     required this.focusNode,
@@ -246,12 +307,13 @@ class BookAiComposer extends StatelessWidget {
     required this.deepThinkingSelected,
     required this.selection,
     required this.controlSize,
-    required this.onFocusRequested,
     required this.onSend,
     required this.onStop,
     required this.onWebSearchChanged,
     required this.onDeepThinkingChanged,
     required this.onSelectionRemoved,
+    this.actionChips = const [],
+    this.onActionChip,
     this.activeMindMapTitle,
     this.activeMindMapRevision,
     this.onMindMapDetached,
@@ -267,18 +329,43 @@ class BookAiComposer extends StatelessWidget {
   final bool deepThinkingSelected;
   final String selection;
   final double controlSize;
-  final VoidCallback onFocusRequested;
   final VoidCallback onSend;
   final VoidCallback onStop;
   final ValueChanged<bool> onWebSearchChanged;
   final ValueChanged<bool> onDeepThinkingChanged;
   final VoidCallback onSelectionRemoved;
+  final List<AiChatShortcut> actionChips;
+  final ValueChanged<AiChatShortcut>? onActionChip;
   final String? activeMindMapTitle;
   final int? activeMindMapRevision;
   final VoidCallback? onMindMapDetached;
 
   @override
+  State<BookAiComposer> createState() => _BookAiComposerState();
+}
+
+class _BookAiComposerState extends State<BookAiComposer> {
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final focusNode = widget.focusNode;
+    final locked = widget.locked;
+    final sending = widget.sending;
+    final webSearchSelected = widget.webSearchSelected;
+    final deepThinkingSupported = widget.deepThinkingSupported;
+    final deepThinkingSelected = widget.deepThinkingSelected;
+    final selection = widget.selection;
+    final controlSize = widget.controlSize;
+    final onSend = widget.onSend;
+    final onStop = widget.onStop;
+    final onWebSearchChanged = widget.onWebSearchChanged;
+    final onDeepThinkingChanged = widget.onDeepThinkingChanged;
+    final onSelectionRemoved = widget.onSelectionRemoved;
+    final actionChips = widget.actionChips;
+    final onActionChip = widget.onActionChip;
+    final activeMindMapTitle = widget.activeMindMapTitle;
+    final activeMindMapRevision = widget.activeMindMapRevision;
+    final onMindMapDetached = widget.onMindMapDetached;
     final colors = context.appColors;
     final hasSelection = selection.trim().isNotEmpty;
     return Padding(
@@ -298,6 +385,29 @@ class BookAiComposer extends StatelessWidget {
               deleteIcon: const Icon(KaijuanIcons.close, size: 16),
             ),
             const SizedBox(height: 6),
+          ],
+          if (actionChips.isNotEmpty && onActionChip != null) ...[
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                children: [
+                  for (var i = 0; i < actionChips.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    ActionChip(
+                      label: Text(
+                        actionChips[i].label,
+                        style: TextStyle(fontSize: context.aiDetailSize),
+                      ),
+                      onPressed: locked
+                          ? null
+                          : () => onActionChip(actionChips[i]),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
           Row(
             children: [
@@ -360,13 +470,20 @@ class BookAiComposer extends StatelessWidget {
                       minLines: 1,
                       maxLines: 6,
                       keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.send,
-                      textCapitalization: TextCapitalization.sentences,
+                      // newline: send is the button. Avoid send/done actions
+                      // that fight Chinese IME and system dictation.
+                      textInputAction: TextInputAction.newline,
+                      // none: sentences capitalization rewrites the first
+                      // grapheme under some IMEs / voice-to-text sessions.
+                      textCapitalization: TextCapitalization.none,
                       enableInteractiveSelection: true,
-                      onTap: locked ? null : onFocusRequested,
-                      onSubmitted: (_) {
-                        if (!sending) onSend();
-                      },
+                      // Fewer automatic rewrites while dictating or composing.
+                      smartDashesType: SmartDashesType.disabled,
+                      smartQuotesType: SmartQuotesType.disabled,
+                      spellCheckConfiguration:
+                          const SpellCheckConfiguration.disabled(),
+                      // No onTap focus/clearPlatformFocus — the field focuses
+                      // itself; WebView clear is deferred and IME-safe.
                       style: context.appInputTextStyle.copyWith(
                         color: context.appPrimaryText,
                       ),
@@ -436,11 +553,14 @@ class BookAiChatTimeline extends StatelessWidget {
     required this.streamingReasoning,
     required this.streamingReasoningKind,
     required this.searchingWeb,
+    required this.toolSteps,
+    required this.actionChips,
     required this.error,
     required this.canRetry,
     required this.mindMapRevealTurnId,
     required this.onUserDrag,
     required this.onShortcutSelected,
+    required this.onActionChip,
     required this.onCopy,
     required this.onMindMapLayoutChanged,
     required this.onOpenMindMapEvidence,
@@ -473,11 +593,14 @@ class BookAiChatTimeline extends StatelessWidget {
   final String streamingReasoning;
   final AiReasoningContentKind streamingReasoningKind;
   final bool searchingWeb;
+  final List<AiChatToolStep> toolSteps;
+  final List<AiChatShortcut> actionChips;
   final String? error;
   final bool canRetry;
   final String? mindMapRevealTurnId;
   final VoidCallback onUserDrag;
   final ValueChanged<AiChatShortcut> onShortcutSelected;
+  final ValueChanged<AiChatShortcut> onActionChip;
   final ValueChanged<AiChatMessage> onCopy;
   final void Function(AiChatMessage, AiMindMapLayout) onMindMapLayoutChanged;
   final ValueChanged<AiMindMapEvidence> onOpenMindMapEvidence;
@@ -495,23 +618,37 @@ class BookAiChatTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    return NotificationListener<ScrollStartNotification>(
-      onNotification: (notification) {
-        if (notification.dragDetails != null) onUserDrag();
-        return false;
-      },
-      child: ListView(
-        key: const ValueKey<String>('ai-chat-message-list'),
-        controller: scrollController,
-        physics: pointerActive ? const NeverScrollableScrollPhysics() : null,
-        padding: EdgeInsets.fromLTRB(16, compact ? 0 : 4, 16, compact ? 8 : 12),
-        children: [
-          Semantics(
-            container: true,
-            liveRegion: true,
-            label: liveStatus,
-            child: const SizedBox.shrink(),
-          ),
+    // One SelectionArea for the whole transcript. Nested SelectionArea +
+    // MarkdownBody(selectable: true) fight the ListView drag gesture and make
+    // desktop/macOS text selection feel broken.
+    return SelectionArea(
+      child: NotificationListener<ScrollStartNotification>(
+        onNotification: (notification) {
+          if (notification.dragDetails != null) onUserDrag();
+          return false;
+        },
+        child: ListView(
+          key: const ValueKey<String>('ai-chat-message-list'),
+          controller: scrollController,
+          // NeverScrollable only while the pointer is on a mind-map canvas so
+          // InteractiveViewer can pan/zoom. Coordinator debounces leave events;
+          // rapid physics swaps otherwise rebuild ScrollPosition and jitter the
+          // whole panel.
+          physics: pointerActive
+              ? const NeverScrollableScrollPhysics()
+              : const ClampingScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(16, compact ? 0 : 4, 16, compact ? 8 : 12),
+          children: [
+          // liveRegion only when there is status text — a permanent live region
+          // forces semantics flushes on every rebuild and can re-enter text
+          // input updates mid-frame while the user is typing.
+          if (liveStatus.isNotEmpty)
+            Semantics(
+              container: true,
+              liveRegion: true,
+              label: liveStatus,
+              child: const SizedBox.shrink(),
+            ),
           if (messages.isEmpty &&
               streamingText.isEmpty &&
               streamingReasoning.isEmpty &&
@@ -536,9 +673,11 @@ class BookAiChatTimeline extends StatelessWidget {
                   ),
                   if (scopePrompt == null && openingShortcuts.isNotEmpty) ...[
                     SizedBox(height: compact ? 12 : 16),
-                    BookAiSuggestedQuestionList(
-                      shortcuts: openingShortcuts,
-                      onSelected: onShortcutSelected,
+                    SelectionContainer.disabled(
+                      child: BookAiSuggestedQuestionList(
+                        shortcuts: openingShortcuts,
+                        onSelected: onShortcutSelected,
+                      ),
                     ),
                   ],
                 ],
@@ -587,14 +726,41 @@ class BookAiChatTimeline extends StatelessWidget {
                 onReject: onActionRejected!,
               ),
             ),
-          if (showFollowUpShortcuts)
-            Padding(
-              padding: const EdgeInsets.only(top: 2, bottom: 12),
-              child: BookAiSuggestedQuestionList(
-                shortcuts: followUpShortcuts,
-                onSelected: onShortcutSelected,
+          if (showFollowUpShortcuts) ...[
+            if (actionChips.isNotEmpty)
+              SelectionContainer.disabled(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 8),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    reverse: true,
+                    child: Row(
+                      children: [
+                        for (var i = 0; i < actionChips.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 8),
+                          ActionChip(
+                            label: Text(
+                              actionChips[i].label,
+                              style: TextStyle(fontSize: context.aiDetailSize),
+                            ),
+                            onPressed: () => onActionChip(actionChips[i]),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            SelectionContainer.disabled(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 12),
+                child: BookAiSuggestedQuestionList(
+                  shortcuts: followUpShortcuts,
+                  onSelected: onShortcutSelected,
+                ),
               ),
             ),
+          ],
           if (showStatusIndicator)
             ExcludeSemantics(
               child: BookAiThinkingIndicator(
@@ -603,7 +769,9 @@ class BookAiChatTimeline extends StatelessWidget {
               ),
             ),
           if (activeTurnVisible &&
-              (streamingText.isNotEmpty || streamingReasoning.isNotEmpty))
+              (streamingText.isNotEmpty ||
+                  streamingReasoning.isNotEmpty ||
+                  toolSteps.isNotEmpty))
             BookAiBubble(
               message: AiChatMessage(
                 role: AiMessageRole.assistant,
@@ -612,6 +780,7 @@ class BookAiChatTimeline extends StatelessWidget {
                 reasoningKind: streamingReasoningKind,
               ),
               streaming: true,
+              liveToolSteps: toolSteps,
             ),
           if (error case final message?)
             Padding(
@@ -631,12 +800,18 @@ class BookAiChatTimeline extends StatelessWidget {
                   ),
                   if (canRetry) ...[
                     const SizedBox(width: 8),
-                    OutlinedButton(onPressed: onRetry, child: const Text('重试')),
+                    SelectionContainer.disabled(
+                      child: OutlinedButton(
+                        onPressed: onRetry,
+                        child: const Text('重试'),
+                      ),
+                    ),
                   ],
                 ],
               ),
             ),
         ],
+        ),
       ),
     );
   }
@@ -648,6 +823,7 @@ class BookAiBubble extends StatelessWidget {
     required this.message,
     this.onCopy,
     this.streaming = false,
+    this.liveToolSteps = const [],
     this.onMindMapLayoutChanged,
     this.onOpenMindMapEvidence,
     this.onOpenMindMapFullscreen,
@@ -659,6 +835,8 @@ class BookAiBubble extends StatelessWidget {
   final AiChatMessage message;
   final VoidCallback? onCopy;
   final bool streaming;
+  /// In-flight tool steps while [streaming] is true.
+  final List<AiChatToolStep> liveToolSteps;
   final ValueChanged<AiMindMapLayout>? onMindMapLayoutChanged;
   final ValueChanged<AiMindMapEvidence>? onOpenMindMapEvidence;
   final VoidCallback? onOpenMindMapFullscreen;
@@ -675,6 +853,12 @@ class BookAiBubble extends StatelessWidget {
     final webHits = message.webHitCount;
     final compact = context.appIsCompact;
     final maxWidth = MediaQuery.sizeOf(context).width * (isUser ? 0.76 : 0.92);
+    final steps = streaming
+        ? liveToolSteps
+        : message.toolSteps;
+    final stepTimeline = !isUser && steps.isNotEmpty
+        ? BookAiToolStepTimeline(steps: steps)
+        : null;
 
     final bubble = Container(
       margin: EdgeInsets.only(bottom: compact ? 10 : 14),
@@ -692,14 +876,12 @@ class BookAiBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (isUser)
-            SelectionArea(
-              child: Text(
-                message.content,
-                style: TextStyle(
-                  fontSize: context.aiBodySize,
-                  height: compact ? 1.5 : 1.55,
-                  color: context.appPrimaryText,
-                ),
+            Text(
+              message.content,
+              style: TextStyle(
+                fontSize: context.aiBodySize,
+                height: compact ? 1.5 : 1.55,
+                color: context.appPrimaryText,
               ),
             )
           else ...[
@@ -713,30 +895,37 @@ class BookAiBubble extends StatelessWidget {
                 message.content.trim().isNotEmpty)
               const SizedBox(height: 8),
             if (message.content.trim().isNotEmpty)
+              // selectable:false — parent ListView is wrapped in SelectionArea;
+              // MarkdownBody's own SelectableText fights ListView drag and
+              // nested selection registries on desktop.
               AiResultBody(
                 text: message.content,
                 compact: compact,
                 streaming: streaming,
+                selectable: false,
               ),
             if (message.mindMap case final map?) ...[
               if (message.content.trim().isNotEmpty) const SizedBox(height: 8),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: context.appDivider),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: SizedBox(
-                  height: compact ? 420 : 520,
-                  child: ClipRRect(
+              // Mind-map canvas must not participate in text selection.
+              SelectionContainer.disabled(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: context.appDivider),
                     borderRadius: BorderRadius.circular(12),
-                    child: BookAiMindMapView(
-                      map: map,
-                      onLayoutChanged: onMindMapLayoutChanged ?? (_) {},
-                      onOpenEvidence: onOpenMindMapEvidence ?? (_) {},
-                      onOpenFullscreen: onOpenMindMapFullscreen,
-                      revealOnMount: revealMindMapOnMount,
-                      onRevealed: onMindMapRevealed,
-                      onPointerHoverChanged: onMindMapPointerHoverChanged,
+                  ),
+                  child: SizedBox(
+                    height: compact ? 420 : 520,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: BookAiMindMapView(
+                        map: map,
+                        onLayoutChanged: onMindMapLayoutChanged ?? (_) {},
+                        onOpenEvidence: onOpenMindMapEvidence ?? (_) {},
+                        onOpenFullscreen: onOpenMindMapFullscreen,
+                        revealOnMount: revealMindMapOnMount,
+                        onRevealed: onMindMapRevealed,
+                        onPointerHoverChanged: onMindMapPointerHoverChanged,
+                      ),
                     ),
                   ),
                 ),
@@ -776,16 +965,18 @@ class BookAiBubble extends StatelessWidget {
             const SizedBox(height: 2),
             Align(
               alignment: Alignment.centerLeft,
-              child: IconButton(
-                tooltip: '复制本条回答',
-                onPressed: onCopy,
-                icon: const Icon(KaijuanIcons.copy, size: 15),
-                style: IconButton.styleFrom(
-                  foregroundColor: context.appSecondaryText,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.all(8),
-                  minimumSize: Size.square(compact ? 30 : 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              child: SelectionContainer.disabled(
+                child: IconButton(
+                  tooltip: '复制本条回答',
+                  onPressed: onCopy,
+                  icon: const Icon(KaijuanIcons.copy, size: 15),
+                  style: IconButton.styleFrom(
+                    foregroundColor: context.appSecondaryText,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.all(8),
+                    minimumSize: Size.square(compact ? 30 : 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                 ),
               ),
             ),
@@ -794,14 +985,26 @@ class BookAiBubble extends StatelessWidget {
       ),
     );
 
+    final body = isUser
+        ? ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: IntrinsicWidth(child: bubble),
+          )
+        : SizedBox(
+            width: maxWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (stepTimeline != null)
+                  SelectionContainer.disabled(child: stepTimeline),
+                bubble,
+              ],
+            ),
+          );
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: isUser
-          ? ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxWidth),
-              child: IntrinsicWidth(child: bubble),
-            )
-          : SizedBox(width: maxWidth, child: bubble),
+      child: body,
     );
   }
 }
@@ -848,47 +1051,49 @@ class _ReasoningDisclosureState extends State<_ReasoningDisclosure> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Semantics(
-            button: true,
-            label: label,
-            value: _expanded ? '已展开' : '已折叠',
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
+          SelectionContainer.disabled(
+            child: Semantics(
+              button: true,
+              label: label,
+              value: _expanded ? '已展开' : '已折叠',
               onTap: () => setState(() => _expanded = !_expanded),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      KaijuanIcons.aiChat,
-                      size: 15,
-                      color: context.appSecondaryText,
-                    ),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: context.appCaptionSize,
-                          fontWeight: FontWeight.w600,
-                          color: context.appSecondaryText,
-                        ),
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: _expanded ? 0.25 : 0,
-                      duration: const Duration(milliseconds: 160),
-                      child: Icon(
-                        KaijuanIcons.chevronRight,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        KaijuanIcons.aiChat,
                         size: 15,
                         color: context.appSecondaryText,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: context.appCaptionSize,
+                            fontWeight: FontWeight.w600,
+                            color: context.appSecondaryText,
+                          ),
+                        ),
+                      ),
+                      AnimatedRotation(
+                        turns: _expanded ? 0.25 : 0,
+                        duration: const Duration(milliseconds: 160),
+                        child: Icon(
+                          KaijuanIcons.chevronRight,
+                          size: 15,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -896,14 +1101,13 @@ class _ReasoningDisclosureState extends State<_ReasoningDisclosure> {
           if (_expanded)
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-              child: SelectionArea(
-                child: Text(
-                  widget.text,
-                  style: TextStyle(
-                    fontSize: context.appCaptionSize,
-                    height: 1.55,
-                    color: context.appSecondaryText,
-                  ),
+              // Parent transcript SelectionArea already covers this Text.
+              child: Text(
+                widget.text,
+                style: TextStyle(
+                  fontSize: context.appCaptionSize,
+                  height: 1.55,
+                  color: context.appSecondaryText,
                 ),
               ),
             ),

@@ -4,31 +4,32 @@
 |---|---|
 | **状态** | 历史实现基线 + Genkit 落地 + **导图会话化**（更新于 2026-08-12） |
 | **代码基线** | `ba745865587`（对话 Agent 史） |
-| **落地基线** | `1f0da2b3024`（Genkit）；导图会话化见 `899b658` / `6806cb3` 一带 |
+| **落地基线** | `1f0da2b3024`（Genkit）；导图会话化 `899b658` / `6806cb3`；投影与能力硬化 `4c01d48` |
 | **研究对象** | 本书 AI 对话的输入、上下文、流式输出、工具调用、多轮循环、持久化；导图从工单栈回到会话产物 |
-| **产品规范** | [ai.md](../specs/ai.md)、[ai-mind-map.md](../specs/ai-mind-map.md) |
+| **产品规范** | [ai.md](../specs/ai.md)、[ai-mind-map.md](../specs/ai-mind-map.md)、[ai-product-actions.md](../specs/ai-product-actions.md) |
+| **系列文章** | [articles/book-ai-assistant-evolution/](../articles/book-ai-assistant-evolution/)（第 1 篇已写；主线见本文 §9） |
 | **横向对照** | [ai-chat-anxreader-comparison.md](./ai-chat-anxreader-comparison.md) |
 | **实施记录** | [ai-runtime-genkit-completion-plan.md](./ai-runtime-genkit-completion-plan.md) |
 
 > 本文不是未来方案的需求清单，而是一份实现复盘。它记录开卷如何从“调用一次模型”逐步走到“手写工具 Agent”，再把思维导图从 Product Action 工单栈收回**会话产物**。后续可改写为技术文章。
 
-> **阅读提示：** 第 3–5 章复盘历史对话 Agent；第 6–7 章 Genkit 运行时；**当前**导图主路径见 [ai-mind-map.md](../specs/ai-mind-map.md)（不经 Journal）。`lib/ai/legacy/` 仅测试与考古，不是产品主路径。
+> **阅读提示：** 第 3–5 章复盘历史对话 Agent；第 6–7 章 Genkit 运行时与推理能力层；**第 7.14 与地图阶段 7** 为当前导图主路径（不经 Journal）。`lib/ai/legacy/` 仅测试与考古，不是产品主路径。
 
 ---
 
 ## 1. 一句话结论
 
-这次演进并不是简单地“给聊天换一个框架”，而是连续完成了五次边界收敛：
+这次演进并不是简单地“给聊天换一个框架”，而是连续完成了多次边界收敛：
 
-> **从一次模型调用，走到由开卷掌握作品范围、运行状态和确定性工作流，Genkit 只承担供应商协议、原生工具调用、结构化输出与 trace 的受控 AI Runtime。**
+> **从一次模型调用，走到由开卷掌握作品范围、运行状态和确定性工作流，Genkit 只承担供应商协议、原生工具调用、结构化输出与 trace 的受控 AI Runtime；会改产物的动作再拆成「轻会话交付」与「重任务控制面」。**
 
-最终形态仍是单 Agent：普通问答允许模型在只读工具中选择下一步；词典、翻译、大纲和知识图谱采用确定性 Workflow。开卷拥有 scope、权限、预算、取消、续写、checkpoint、存储、WebDAV 和 UI 状态，模型框架不能越过这些产品边界。
+最终形态仍是单 Agent：普通问答允许模型在只读工具中选择下一步；词典、翻译、知识图谱采用确定性 Workflow；**图书思维导图是对话内的轻会话产物**（快捷或产品工具 → 冻结范围 → `completeJson` → `ai_chat` 附件），**不经** Proposal / Journal / 确认卡。Product Action 控制面留给整本译、导出等重任务。开卷拥有 scope、权限、预算、取消、续写、checkpoint、存储、WebDAV 和 UI 状态，模型框架不能越过这些产品边界。
 
-本文前半部分按 `ba745865587` 历史基线复盘前三阶段，后半部分记录统一运行时与 Genkit 迁移。阅读时应区分“当时为什么这样设计”和“最终落地为什么改变”。
+本文前半部分按 `ba745865587` 历史基线复盘前三阶段，后半部分记录统一运行时、Genkit 迁移与导图会话化。阅读时应区分“当时为什么这样设计”和“最终落地为什么改变”。
 
 ---
 
-## 2. 五个阶段的演进地图
+## 2. 演进地图（七个阶段）
 
 | 阶段 | 触发问题 | 边界变化 | 阶段产物 | 里程碑 |
 |------|----------|----------|----------|--------|
@@ -37,17 +38,20 @@
 | 3. 多轮 Tool Agent | 一次检索不足以回答复杂问题 | 模型可依据 observation 继续选择工具 | 四轮行动—观察循环 | `ba745865587` |
 | 4. 统一运行时 | 对话、语言、大纲、图谱各自管理状态 | App 统一 scope、事件、预算、取消与 checkpoint | `AiRunOrchestrator` / `AiRunState` | `41d35817cae`（运行时基础） |
 | 5. Genkit 全迁移 | 文本工具协议与手写 Provider 成为重复基础设施 | Genkit 归一化模型协议，业务仍依赖 App 契约 | 原生工具 + 结构化 Workflow + trace | `41d35817cae`—`1f0da2b3024` |
-| 6. 导图会话化 | 工单确认/Journal 对「会话出图」过重 | 导图退出 Product Action 主路径 | `runMindMapSession` + 消息附件；Journal 留给重任务 | `899b658` 一带 |
+| 6. 跨 Provider 推理层 | “深度思考”绑死在单一厂商字段 | 产品开关与可见过程/摘要中立化 | 推理能力描述 + adapter 映射 | 见 §7.13 |
+| 7. 导图会话化 | 工单确认/Journal 对「会话出图」过重 | 导图退出 Product Action 主路径；Journal 留给重任务 | `runMindMapSession` + 消息附件；投影原子性 / 工具目录门禁 | `899b658` / `4c01d48` 一带 |
 
 ```mermaid
 flowchart LR
     P1["阶段一<br/>可靠对话"] --> P2["阶段二<br/>书内工具"]
     P2 --> P3["阶段三<br/>多轮 Tool Agent"]
     P3 --> P4["阶段四<br/>统一 AiRun Runtime"]
-    P4 --> P5["阶段五<br/>Genkit 原生协议与结构化 Workflow"]
+    P4 --> P5["阶段五<br/>Genkit 与结构化 Workflow"]
+    P5 --> P6["阶段六<br/>跨 Provider 推理层"]
+    P6 --> P7["阶段七<br/>导图会话化"]
 ```
 
-五个阶段不是简单叠加依赖。可靠对话、作用域安全和行动—观察能力被保留；fenced JSON、旧 Provider 和分散运行状态则在新边界验证完成后被替换并删除。
+各阶段不是简单叠加依赖。可靠对话、作用域安全和行动—观察能力被保留；fenced JSON、旧 Provider、分散运行状态，以及导图日常的确认工单体验，则在新边界验证完成后被替换或降级为非主路径。
 
 ---
 
@@ -723,6 +727,34 @@ Anthropic 是这一阶段最能说明框架边界的案例。锁定的 `genkit_a
 
 阶段六完成后，新增协议测试覆盖六类 Provider 的请求映射、三种 OpenAI Compatible 推理字段、Anthropic adaptive summarized display、签名与加密思考块连续性、结构化输出冲突规避、设置与会话持久化。`flutter analyze` 与完整 `flutter test` 通过，结果为 **569 / 569**；Genkit CLI trace ID 为 `d17903e125ae40415121b4a1247e3eb7`。
 
+### 7.14 阶段七：图书思维导图收回会话产物
+
+工单栈（Proposal → 确认卡 → Journal → Workflow → Receipt）适合**贵、久、有副作用、要可恢复**的动作。日常「画一章导图 / 接着改细」若也走同一套，读者会感到门槛高于会话心智，实现上也会把 Widget 绑进恢复与授权细节。
+
+产品决定将图书思维导图定为**轻会话产物**（见 [ai-mind-map.md](../specs/ai-mind-map.md)）：
+
+```text
+快捷（带范围）或 自由输入 → 模型产品工具 create/revise
+  → App 冻结章节/作品范围
+  → AiBookMindMapService.completeJson（一次结构化生成）
+  → 写入 ai_chat 消息附件 + 原生画布
+```
+
+- **不经** Product Action Journal；无确认卡、无强制「继续修改」。
+- 修订默认最近 / preferred 图；评价、解释、否定、Mermaid 伪图不启动原生生成。
+- 模型正文假装「已生成导图」时，有界协议修复后再走轻路径，不为修复单独弹工单。
+- Product Action 控制面**保留**给整本译、导出等重任务；知识图谱仍为 Domain Job（`ai_graph/`）。
+- 编排入口：`BookAiActionHost`（会话 dispatch / explicit create）；内容生成：`BookAiWorkspaceController.runMindMapSession`。
+
+落地后的一致性修补（`4c01d48` 一带）同样属于本阶段边界，而不是新功能：
+
+- **投影原子性**：先 stage 消息再 persist，失败则只按 `artifactTurnId` 撤销该条投影（不整包 `hydrate`，以免覆盖等待期间的取消/其它消息），避免「turn 失败但图已在内存/可被后续 finish 写盘」。
+- **retry 清理**：重试同一 turn 时去掉 `$turnId-mind-map-*` 投影消息。
+- **工具目录 fail-closed**：`actionRegistry` 无 `toolParser` 时产品工具目录为空，避免模型看到无法解析的 tool。
+- **能力快照刷新**：阅读器不关、设置 ready/key 变化时重建 Workflow executor，避免 `structuredOutput` 陈旧。
+
+旧 batch/reduce 导图 Workflow 与独立导图 store 已删除或迁入 `lib/ai/legacy/`，不得再当产品主路径。
+
 ---
 
 ## 8. 三组容易混淆的概念
@@ -754,15 +786,27 @@ Agent 框架提供模型、工具、状态、事件、追踪与持久化抽象�
 
 开卷当前没有多 Agent 需求。多 Agent 会增加 token、延迟、不可复现性和移动端状态复杂度，而阅读问答并没有相应收益。
 
+### 8.4 轻会话产物与重任务控制面
+
+```text
+轻会话产物（导图默认）：对话工具或快捷 → 直接生成 → 消息附件
+重任务控制面：Proposal → Policy/确认 → Command → Journal → Workflow → Receipt
+```
+
+不是「有产物就进 Journal」。可逆、短时、会话内可视化的交付走轻路径；长时、外写、需跨启动恢复的才上控制面。自由输入触发导图时，模型仍可能错调产品工具——App 挡非法参数与伪交付，挡不住一切「合法但不符合用户心意」的调用；要稳可用带范围的快捷入口。
+
 ---
 
 ## 9. 适合技术文章的叙事主线
 
-未来改写文章时，可以围绕五次认知变化展开。
+成文目录：[articles/book-ai-assistant-evolution/](../articles/book-ai-assistant-evolution/)。  
+改写时按认知变化展开，而不是按 commit 列表。
 
-### 第一篇：模型 API 不是对话产品
+### 第一篇：模型 API 不是对话产品（已写）
 
 核心观点：请求成功和回答成功是两件事。
+
+文稿：`articles/book-ai-assistant-evolution/01-reliable-conversation.md`。
 
 可写案例：
 
@@ -823,13 +867,28 @@ Agent 框架提供模型、工具、状态、事件、追踪与持久化抽象�
 - 如何区分 Genkit 的协议收益与开卷编排器的产品收益；
 - 为什么 `uncertain` 比自信地猜错更有工程价值。
 
+### 第六篇：不是所有产品动作都该走工单
+
+核心观点：会话出图与重任务恢复是两种产品心智；控制面能力可以保留，默认体验必须分轻重。
+
+可写案例：
+
+- 确认卡 / 「继续修改」为何与 Anx 式会话体验冲突；
+- 快捷直接生成 vs 自由输入依赖模型选 create/revise；
+- 伪交付 repair 为何仍走轻路径；
+- 投影失败必须回滚内存，retry 必须清掉 mind-map 附件；
+- Journal 更适合整本译、导出，而不是每张导图；
+- Agent 薄、领域系统厚：书内 Companion 不只是「一个简单智能体」。
+
 ---
 
 ## 10. 代码导航
 
 | 层 | 文件 | 职责 |
 |----|------|------|
-| UI | `lib/presentation/widgets/reader/book_ai_chat_sheet.dart` | 输入、联网、等待态、流式快照、checkpoint、终态和追问 |
+| UI | `lib/presentation/widgets/reader/book_ai_chat_sheet.dart` | 输入、联网、等待态、流式快照、checkpoint、终态和追问；委托 Host 做导图会话入口 |
+| 动作 Host | `lib/presentation/controllers/book_ai_action_host.dart` | 导图会话 dispatch / explicit create；重任务才走 Journal |
+| 导图会话 | `lib/presentation/controllers/book_ai_mind_map_controller.dart`、`book_ai_workspace_controller.dart` | `runMindMapSession`、投影原子性、进度与取消 |
 | Controller | `lib/presentation/controllers/book_reader_controller.dart` | 当前章、选区、作品范围、运行事件记录与工具 Host 装配 |
 | 运行模型 | `lib/ai/ai_run.dart` | `AiRunEvent`、`AiRunState`、scope、usage 与终态 |
 | 运行编排 | `lib/ai/ai_run_orchestrator.dart` | 预算、取消、超时、事件顺序和 checkpoint 边界 |
@@ -837,7 +896,9 @@ Agent 框架提供模型、工具、状态、事件、追踪与持久化抽象�
 | Adapter 工厂 | `lib/ai/ai_model_adapter_factory.dart` | Provider 配置到 Genkit adapter 的唯一装配入口 |
 | Genkit adapters | `lib/ai/adapters/genkit_*_model_adapter.dart` | OpenAI Compatible / Anthropic 归一化、流式、工具与结构化输出 |
 | Anthropic 局部补丁 | `lib/ai/adapters/kaijuan_anthropic_plugin.dart` | 保留 thinking 签名、`redacted_thinking` 与 summarized display，不向业务层泄漏 SDK 类型 |
-| 对话服务 | `lib/ai/ai_chat_service.dart` | Prompt、原生工具循环、正文流与自动续写 |
+| 对话服务 | `lib/ai/ai_chat_service.dart` | Prompt、原生工具循环、产品工具终止、伪交付 repair、正文流与自动续写 |
+| 导图服务 | `lib/ai/ai_book_mind_map_service.dart`、`ai_book_mind_map_action_gateway.dart` | 结构化 completeJson；产品上下文 / alias / 范围解析 |
+| 产品上下文 | `lib/ai/ai_product_action.dart` | 工具目录（registry+parser）、parse、imit 检测 |
 | 工具定义 | `lib/ai/ai_chat_tools.dart` | 五个只读工具的 schema、白名单、预算与执行 |
 | 工具宿主 | `lib/ai/ai_book_chat_tool_host.dart` | 目录、章节、搜索、取样与二次范围收窄 |
 | 正文缓存 | `lib/ai/ai_book_corpus.dart` | 阅读器正文抽取缓存 |
@@ -860,7 +921,7 @@ Agent 框架提供模型、工具、状态、事件、追踪与持久化抽象�
 
 ## 11. 当前阶段的定义
 
-截至落地基线 `1f0da2b3024`：
+截至 2026-08-12（导图会话化与一致性硬化之后）：
 
 - 阶段一“商业对话基础链路”已具备主要闭环；
 - 阶段二“书内工具调用”已由 fenced JSON 升级为原生协议；
@@ -868,9 +929,9 @@ Agent 框架提供模型、工具、状态、事件、追踪与持久化抽象�
 - 阶段四“开卷统一 AiRun Runtime”已完成；
 - 阶段五“Genkit adapter 与全工作流迁移”已完成；
 - 阶段六“跨 Provider 推理能力与可见摘要”已完成；
-- 词典、选区翻译、大纲、知识图谱和连接测试已迁移到统一模型契约；
-- 旧 Provider 生成双栈与协议回退已删除；
-- `dart run build_runner build`、`flutter analyze` 与完整 `flutter test` 已通过，当前测试结果为 **569 / 569**；
-- Genkit CLI 本地 smoke 已验证纯文本、结构化输出与 trace span。
+- **阶段七“图书思维导图会话产物”已完成**：默认不经 Journal；快捷/工具 → `runMindMapSession` → 消息附件；投影失败回滚、retry 清投影、工具目录与 settings 能力快照已 harden；
+- 词典、选区翻译、大纲（对话快捷）、知识图谱和连接测试在统一模型契约下运行；结构化大纲生成不再作为产品主路径；
+- 旧 Provider 生成双栈、旧导图 batch/工单主路径已删除或迁入 `lib/ai/legacy/`；
+- Product Action / Journal **平台能力保留**，产品主用场景转向整本译、导出等重任务，而非日常导图。
 
-后续工作应从“框架能否工作”转向真实阅读质量评估：用固定书目、固定问题和固定模型，分别记录 scope、工具证据、最终答案、延迟与失败恢复，避免只凭一次主观体验判断模型或框架质量。
+后续工作更宜放在：真实阅读质量评估（固定书目/问题/模型下的 scope、工具证据、答案、延迟与失败恢复）；重任务（M4/M6）真正挂上控制面；而不是把轻会话导图重新工单化。

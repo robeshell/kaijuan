@@ -66,8 +66,10 @@ class AiResultBody extends StatelessWidget {
       ),
       builders: {
         'latex': _SafeLatexElementBuilder(),
-        'pre': _AiPreElementBuilder(),
-        'div': _AiAlertElementBuilder(),
+        // When selectable:false, a parent SelectionArea owns selection; nested
+        // SelectionArea/SelectableText in custom blocks fight ListView drag.
+        'pre': _AiPreElementBuilder(ownSelection: selectable),
+        'div': _AiAlertElementBuilder(ownSelection: selectable),
       },
       listItemCrossAxisAlignment: MarkdownListItemCrossAxisAlignment.start,
       onTapLink: (_, href, _) => _handleLink(context, href),
@@ -408,6 +410,10 @@ class AiResultBody extends StatelessWidget {
 }
 
 class _AiPreElementBuilder extends MarkdownElementBuilder {
+  _AiPreElementBuilder({this.ownSelection = true});
+
+  final bool ownSelection;
+
   @override
   bool isBlockElement() => true;
 
@@ -448,7 +454,11 @@ class _AiPreElementBuilder extends MarkdownElementBuilder {
       case 'math':
         return AiLatexBlock(source: source);
       default:
-        return AiCodeBlock(source: source, language: language);
+        return AiCodeBlock(
+          source: source,
+          language: language,
+          ownSelection: ownSelection,
+        );
     }
   }
 
@@ -485,6 +495,10 @@ class _SafeLatexElementBuilder extends MarkdownElementBuilder {
 }
 
 class _AiAlertElementBuilder extends MarkdownElementBuilder {
+  _AiAlertElementBuilder({this.ownSelection = true});
+
+  final bool ownSelection;
+
   @override
   bool isBlockElement() => true;
 
@@ -512,7 +526,11 @@ class _AiAlertElementBuilder extends MarkdownElementBuilder {
       RegExp('^$englishLabel\\s*'),
       '',
     );
-    return AiCalloutBlock(source: source, kind: kind);
+    return AiCalloutBlock(
+      source: source,
+      kind: kind,
+      ownSelection: ownSelection,
+    );
   }
 }
 
