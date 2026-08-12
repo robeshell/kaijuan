@@ -118,9 +118,9 @@ class BookAiMindMapController extends ChangeNotifier {
 
   /// Projects one mind-map artifact into conversation and durably persists it.
   ///
-  /// If the message is already in memory but a previous [persist] failed, this
-  /// retries the durable write instead of no-opping. Only a successful persist
-  /// counts as a completed projection.
+  /// Memory is updated only after a successful durable write, so a failed
+  /// projection cannot leave a "failed turn + saved map" split brain (and a
+  /// later [finishProductTurn] persist cannot smuggle the map onto disk).
   Future<void> projectArtifact({
     required String turnId,
     required String? workKey,
@@ -132,25 +132,32 @@ class BookAiMindMapController extends ChangeNotifier {
     final alreadyInMemory =
         artifactId != null &&
         _conversation.hasMindMapArtifact(artifactId, workKey: workKey);
-    if (!alreadyInMemory) {
-      final artifactTurnId =
-          artifactId ??
-          '$turnId-mind-map-${DateTime.now().microsecondsSinceEpoch}';
-      _conversation.appendMessage(
-        AiChatMessage(
-          role: AiMessageRole.assistant,
-          content: '已根据《$unitLabel》的 $sectionCount 章内容生成思维导图。',
-          createdAt: DateTime.now(),
-          turnId: artifactTurnId,
-          status: AiChatTurnStatus.completed,
-          mindMap: artifact,
-        ),
-        workKey: workKey,
-      );
+    if (alreadyInMemory) {
+      // Retry of a durable write that previously failed mid-flight is not
+      // expected after rollback-on-fail; still re-persist for safety.
+      await _conversation.persist();
+      return;
     }
-    // Always attempt durable write. A failed previous persist leaves the
-    // in-memory message; retry must re-run persist rather than skip.
-    await _conversation.persist();
+    final artifactTurnId =
+        artifactId ??
+        '$turnId-mind-map-${DateTime.now().microsecondsSinceEpoch}';
+    final message = AiChatMessage(
+      role: AiMessageRole.assistant,
+      content: '已根据《$unitLabel》的 $sectionCount 章内容生成思维导图。',
+      createdAt: DateTime.now(),
+      turnId: artifactTurnId,
+      status: AiChatTurnStatus.completed,
+      mindMap: artifact.copyWith(artifactId: artifactTurnId),
+    );
+    // Stage → persist → commit. On write failure, leave memory unchanged.
+    final previous = _conversation.session;
+    _conversation.appendMessage(message, workKey: workKey);
+    try {
+      await _conversation.persist();
+    } catch (error) {
+      _conversation.hydrate(previous);
+      rethrow;
+    }
   }
 
   void finishProductTurn({

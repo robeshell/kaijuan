@@ -320,6 +320,10 @@ class BookAiWorkspaceController {
 
   /// Rebuilds provider-bound services when the settings controller identity
   /// changes. Returns true when consumers should rebuild.
+  ///
+  /// Also listens to [AiSettingsController] so Workflow capability snapshots
+  /// refresh when the user enables AI, changes provider, or edits keys while
+  /// a reader stays open (identity of the controller often stays the same).
   bool bindSettings(AiSettingsController? settings) {
     if (identical(_settings, settings) &&
         (settings == null) == (_language == null) &&
@@ -328,7 +332,9 @@ class BookAiWorkspaceController {
         (settings == null) == (_graph == null)) {
       return false;
     }
+    _settings?.removeListener(_onSettingsControllerChanged);
     _settings = settings;
+    _settings?.addListener(_onSettingsControllerChanged);
     _language = settings == null
         ? null
         : AiLanguageService(
@@ -367,6 +373,12 @@ class BookAiWorkspaceController {
     // heavy domains see structuredOutput after settings bind.
     _rebuildExecutor();
     return true;
+  }
+
+  void _onSettingsControllerChanged() {
+    // Readiness / model / key changes do not replace the controller identity.
+    _rebuildExecutor();
+    onChanged?.call();
   }
 
   AiSettingsController? get settingsController => _settings;
@@ -599,6 +611,7 @@ class BookAiWorkspaceController {
   }
 
   void dispose() {
+    _settings?.removeListener(_onSettingsControllerChanged);
     _mindMapCancel?.cancel();
     mindMapConversation.dispose();
     conversation.dispose();

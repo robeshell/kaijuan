@@ -168,7 +168,13 @@ class BookAiConversationController extends ChangeNotifier {
   }) {
     final history = List<AiChatMessage>.from(_session.messagesFor(workKey));
     if (retryTurnId != null) {
-      history.removeWhere((message) => message.turnId == retryTurnId);
+      // User/assistant turn plus session mind-map projections
+      // (`$turnId-mind-map-N`) from the failed run.
+      history.removeWhere((message) {
+        final id = message.turnId;
+        if (id == null) return false;
+        return id == retryTurnId || id.startsWith('$retryTurnId-mind-map-');
+      });
       _session = _session.withMessagesFor(workKey, history);
     } else if (retrying) {
       if (history.isNotEmpty && history.last.role == AiMessageRole.assistant) {

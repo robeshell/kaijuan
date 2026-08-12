@@ -3,6 +3,7 @@ import 'package:kaijuan/ai/ai_book_structure.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
 import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
+import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/presentation/controllers/book_ai_conversation_controller.dart';
 import 'package:kaijuan/presentation/controllers/book_ai_mind_map_controller.dart';
 
@@ -178,20 +179,17 @@ void main() {
     },
   );
 
-  test('persist failure marks turn failed and not succeeded', () async {
-    // Fail the first durable write that includes a mind-map (projection).
-    // Subsequent finishProductTurn may persist again without throwing.
-    var mapWriteFailsLeft = 1;
+  test('persist failure marks turn failed and rolls back memory', () async {
+    // Fail any durable write that includes a mind-map (projection).
+    final written = <AiChatSession>[];
     final conversation = BookAiConversationController((session) async {
       final hasMap =
           session.messages.any((m) => m.mindMap != null) ||
           session.workMessages.values.any(
             (list) => list.any((m) => m.mindMap != null),
           );
-      if (hasMap && mapWriteFailsLeft > 0) {
-        mapWriteFailsLeft--;
-        throw StateError('disk full');
-      }
+      if (hasMap) throw StateError('disk full');
+      written.add(session);
     })..hydrate(const AiChatSession(contentHash: 'hash', itemId: 'item'));
     final controller = BookAiMindMapController(conversation);
 
@@ -210,7 +208,60 @@ void main() {
     expect(outcome.completed, 0);
     expect(outcome.error, isNotNull);
     expect(conversation.messagesFor(null).first.status, AiChatTurnStatus.failed);
+    // Failed projection must not leave a native map in memory (or later saves).
+    expect(
+      conversation.messagesFor(null).any((m) => m.mindMap != null),
+      isFalse,
+    );
+    expect(
+      written.any(
+        (s) =>
+            s.messages.any((m) => m.mindMap != null) ||
+            s.workMessages.values.any(
+              (list) => list.any((m) => m.mindMap != null),
+            ),
+      ),
+      isFalse,
+    );
     controller.dispose();
+    conversation.dispose();
+  });
+
+  test('retry removes prior mind-map projections for the same turn', () async {
+    final conversation = BookAiConversationController((_) async {})
+      ..hydrate(
+        AiChatSession(
+          contentHash: 'hash',
+          itemId: 'item',
+          messages: [
+            AiChatMessage(
+              role: AiMessageRole.user,
+              content: '生成',
+              turnId: 'turn-1',
+              status: AiChatTurnStatus.failed,
+            ),
+            AiChatMessage(
+              role: AiMessageRole.assistant,
+              content: '已根据《第一部》的 1 章内容生成思维导图。',
+              turnId: 'turn-1-mind-map-1',
+              status: AiChatTurnStatus.completed,
+              mindMap: mapFor(firstUnit).copyWith(artifactId: 'turn-1-mind-map-1'),
+            ),
+          ],
+        ),
+      );
+    // Retry beginTurn is owned by conversation; assert cleanup contract.
+    conversation.beginTurn(
+      turnId: 'turn-2',
+      workKey: null,
+      text: '生成',
+      wantsWebSearch: false,
+      retryTurnId: 'turn-1',
+    );
+    final messages = conversation.messagesFor(null);
+    expect(messages.any((m) => m.turnId == 'turn-1'), isFalse);
+    expect(messages.any((m) => m.turnId == 'turn-1-mind-map-1'), isFalse);
+    expect(messages.single.turnId, 'turn-2');
     conversation.dispose();
   });
 }

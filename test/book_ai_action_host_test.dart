@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaijuan/ai/ai_book_mind_map_action_gateway.dart';
 import 'package:kaijuan/ai/ai_chat.dart';
-import 'package:kaijuan/ai/ai_chat_retrieve.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
+import 'package:kaijuan/ai/ai_product_action_domain.dart';
 import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 import 'package:kaijuan/presentation/controllers/book_ai_action_host.dart';
 import 'package:kaijuan/presentation/controllers/book_ai_workspace_controller.dart';
@@ -248,8 +248,19 @@ void main() {
     expect(evaluation.entry.command, isNull);
     expect(evaluation.entry.status, isNot(AiActionJournalStatus.authorized));
 
+    // Registry alone is not enough: tools must also have a parser.
+    final registryOnly = AiChatProductContext(
+      actionRegistry: workspace.actionController.registry,
+      capabilities: const AiCapabilitySet({
+        'book.read',
+        'structuredOutput',
+      }),
+    );
+    expect(registryOnly.toolDefinitions, isEmpty);
+
     final ready = AiChatProductContext(
       actionRegistry: workspace.actionController.registry,
+      toolParser: kaijuanProductionActionDomains().parseToolCall,
       capabilities: const AiCapabilitySet({
         'book.read',
         'structuredOutput',

@@ -11,6 +11,7 @@ import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
+import 'package:kaijuan/ai/ai_product_action_domain.dart';
 import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 import 'package:kaijuan/ai/ai_book_mind_map_product_actions.dart';
 import 'package:kaijuan/ai/ai_run.dart';
@@ -24,6 +25,7 @@ AiChatProductContext kTestProductContext({
 }) => AiChatProductContext(
   artifacts: artifacts,
   actionRegistry: AiBookMindMapProductActions.registry,
+  toolParser: kaijuanProductionActionDomains().parseToolCall,
   capabilities: kTestProductCaps,
 );
 

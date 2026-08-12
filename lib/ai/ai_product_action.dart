@@ -121,8 +121,9 @@ class AiChatProductContext {
 
   List<AiModelToolDefinition> get toolDefinitions {
     final registry = actionRegistry;
-    if (registry == null) {
-      // No hardcoded mind-map fallback: missing registry yields no product tools.
+    // Registry without a parser is half-configured: the model would see tools
+    // it cannot successfully invoke. Fail closed to an empty catalog.
+    if (registry == null || toolParser == null) {
       return const [];
     }
     final registryTools = registry.toolDescriptors(

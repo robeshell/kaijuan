@@ -631,6 +631,8 @@ void main() {
           },
         ),
       ]),
+      // Catalog is gated on parser presence; this case only asserts schemas.
+      toolParser: (call, _) => throw UnsupportedError(call.name),
     );
     final tool = context.toolDefinitions.single;
     expect(tool.name, AiProductToolNames.createBookMindMap);
