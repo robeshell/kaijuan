@@ -16,9 +16,7 @@ import '../../../ai/ai_models.dart';
 import '../../../ai/ai_mind_map.dart';
 import '../../../ai/ai_provider_kind.dart';
 import '../../../ai/ai_product_action.dart';
-import '../../../ai/ai_product_action_domain.dart';
 import '../../../ai/ai_product_action_protocol.dart';
-import '../../../ai/ai_product_action_controller.dart';
 
 import '../../../ai/ai_rich_content_inspector.dart';
 import '../../../ai/ai_user_error.dart';
@@ -28,6 +26,7 @@ import '../../controllers/book_reader_controller.dart';
 import '../../controllers/book_ai_conversation_controller.dart';
 import '../../controllers/book_ai_mind_map_coordinator.dart';
 import '../../controllers/book_ai_mind_map_controller.dart';
+import '../../controllers/book_ai_product_action_host.dart';
 import '../../screens/ai_settings_screen.dart';
 import '../ai_typography.dart';
 import '../app_components.dart';
@@ -134,6 +133,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   String? _mindMapTurnId;
   String? _activeActionProposalId;
   late final BookAiMindMapCoordinator _mindMapCoordinator;
+  late final BookAiProductActionHost _productHost;
   BookReaderController get _c => widget.controller;
 
   BookAiConversationController get _conversation => _c.aiWorkspace.conversation;
@@ -179,16 +179,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   AiBookMindMap? get _activeMindMap => _mindMapCoordinator.activeMindMap;
 
-  void _beginEditingMindMap(AiChatMessage message) {
-    if (_mindMapCoordinator.beginEditing(
-      message,
-      enabled: !_sending && !_resolvingChatScope,
-    )) {
-      unawaited(_focusComposer());
-    }
-  }
-
   bool get _ready => _c.canUseAiChat;
+
 
   bool get _canWebSearch => _c.canUseWebSearch;
 
@@ -253,6 +245,124 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       currentWorkKey: () => _chatWorkKey,
       persist: _persist,
     )..addListener(_onMindMapCoordinatorChanged);
+    _productHost = BookAiProductActionHost(
+      workspace: _c.aiWorkspace,
+      ui: BookAiProductActionUi(
+        isMounted: () => mounted,
+        contentHash: () => _c.item.contentHash,
+        publicationTitle: () => _c.item.title,
+        chatWorkKey: () => _chatWorkKey,
+        sessionMessagesFor: (workKey) => _session.messagesFor(workKey),
+        newTurnId: _newTurnId,
+        requestConfirmation:
+            ({
+              required proposalId,
+              required title,
+              required summary,
+              scopeLabel,
+              targetLabel,
+              revisionLabel,
+            }) => _mindMapCoordinator.requestActionConfirmation(
+              proposalId: proposalId,
+              title: title,
+              summary: summary,
+              scopeLabel: scopeLabel,
+              targetLabel: targetLabel,
+              revisionLabel: revisionLabel,
+              onOpened: _scrollToEnd,
+            ),
+        appendClarification: (original, body, {workKey}) =>
+            _appendMindMapClarification(original, body, workKey: workKey),
+        onArtifactRevealed: _mindMapCoordinator.reveal,
+        runCreateMindMap:
+            ({
+              required text,
+              required scope,
+              frozenTurn,
+              resolvedWork,
+              frozenCurrentChapter,
+              retryTurnId,
+              required clearComposer,
+              required actionProposalId,
+              required authorizeAction,
+            }) => _routeMindMapRequest(
+              text,
+              scope,
+              frozenTurn: frozenTurn,
+              resolvedWork: resolvedWork,
+              frozenCurrentChapter: frozenCurrentChapter,
+              retryTurnId: retryTurnId,
+              clearComposer: clearComposer,
+              actionProposalId: actionProposalId,
+              authorizeAction: authorizeAction,
+            ),
+        runReviseMindMap:
+            ({
+              required text,
+              required target,
+              conversationWorkKey,
+              retryTurnId,
+              required clearComposer,
+              required actionProposalId,
+              required authorizeAction,
+            }) => _runMindMapRevision(
+              text,
+              target,
+              conversationWorkKey: conversationWorkKey,
+              retryTurnId: retryTurnId,
+              clearComposer: clearComposer,
+              actionProposalId: actionProposalId,
+              authorizeAction: authorizeAction,
+            ),
+        runGenerateUnits:
+            ({
+              required text,
+              required units,
+              baseMap,
+              retryTurnId,
+              required conversationWorkKey,
+              command,
+              keepEditing = false,
+              required actionProposalId,
+              required actionCommand,
+              attempt,
+            }) => _generateMindMapsInChat(
+              text,
+              units,
+              baseMap: baseMap,
+              retryTurnId: retryTurnId,
+              conversationWorkKey: conversationWorkKey,
+              command: command,
+              keepEditing: keepEditing,
+              actionProposalId: actionProposalId,
+              actionCommand: actionCommand,
+              attempt: attempt,
+            ),
+        mindMapEditUnit:
+            (target, {required requestText, conversationWorkKey}) =>
+                _mindMapEditUnit(
+                  target,
+                  requestText: requestText,
+                  conversationWorkKey: conversationWorkKey,
+                ),
+        bookMindMapSections: ({work, required useFrozenWork}) =>
+            _c.bookMindMapSections(work: work, useFrozenWork: useFrozenWork),
+        workForKey: _workForKey,
+        resolveGraphWorkCandidates: () async {
+          await _c.resolveGraphWorkCandidates();
+        },
+        loadAiChatContext: ({selectionOverride, required workScope}) =>
+            _c.loadAiChatContext(
+              selectionOverride: selectionOverride,
+              workScope: workScope,
+            ),
+        freezeBookMindMapTurn: ({required workScope, required context}) =>
+            _c.freezeBookMindMapTurn(workScope: workScope, context: context),
+        currentReadingWork: () => _c.currentReadingWork,
+        bookStructureManifest: () => _c.bookStructureManifest,
+        itemTitle: () => _c.item.title,
+      ),
+    );
     _tabs = TabController(
       length: _BookAiWorkspaceTab.values.length,
       vsync: this,
@@ -353,353 +463,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   }
 
   Future<void> _restorePendingProductAction() async {
-    final candidates = await _c.aiWorkspace.actionController.inspectRecovery();
-    final scopedCandidates = candidates.where(
-      (candidate) =>
-          candidate.entry.proposal.conversationId == _c.item.contentHash,
-    );
-    // Finish conversation projection for Receipts that never reached chat.
-    final needsProjection = scopedCandidates
-        .where(
-          (candidate) =>
-              candidate.disposition ==
-              AiActionRecoveryDisposition.needsProjection,
-        )
-        .toList(growable: false);
-    for (final candidate in needsProjection) {
-      await _reconcileProjectionIfNeeded(candidate.entry);
-    }
-    final pending = scopedCandidates
-        .where(
-          (candidate) =>
-              candidate.entry.proposal.conversationId == _c.item.contentHash &&
-              (candidate.entry.status ==
-                      AiActionJournalStatus.awaitingConfirmation ||
-                  candidate.entry.status == AiActionJournalStatus.proposed),
-        )
-        .lastOrNull;
-    if (pending == null) {
-      final recoverable = scopedCandidates
-          .where(
-            (candidate) =>
-                candidate.disposition ==
-                AiActionRecoveryDisposition.recoverable,
-          )
-          .lastOrNull;
-      if (recoverable != null) {
-        await _resumeRecoverableProductAction(recoverable);
-      }
-      return;
-    }
-    if (!mounted) return;
-    final proposal = pending.entry.proposal;
-    final requestedWorkKey = '${proposal.requestedArguments['workKey'] ?? ''}'
-        .trim();
-    if (requestedWorkKey.isNotEmpty &&
-        requestedWorkKey != _chatWorkKey &&
-        !_workKeyIsAvailable(requestedWorkKey)) {
-      await _c.aiWorkspace.actionController.abandon(
-        proposal.proposalId,
-        reasonCode: 'frozen_work_context_missing',
-      );
-      return;
-    }
-    final scopeName = '${proposal.requestedArguments['scope'] ?? ''}';
-    if (scopeName == 'currentChapter') {
-      // The chapter body is intentionally not stored in the Journal. It is
-      // unsafe to silently replace a frozen chapter with the current page.
-      await _c.aiWorkspace.actionController.abandon(
-        proposal.proposalId,
-        reasonCode: 'frozen_chapter_context_missing',
-      );
-      return;
-    }
-    final approved = await _mindMapCoordinator.requestActionConfirmation(
-      proposalId: proposal.proposalId,
-      title: '恢复未完成的思维导图操作',
-      summary: '上次的操作尚未执行完成。确认后会继续使用原书籍和范围，不会重新解释你的要求。',
-      scopeLabel: scopeName == 'currentChapter' ? '当前章节' : '已冻结阅读范围',
-      targetLabel: proposal.targetRef,
-      revisionLabel: proposal.expectedRevision == null
-          ? null
-          : '基于第 ${proposal.expectedRevision} 版',
-      onOpened: _scrollToEnd,
-    );
-    if (!mounted) return;
-    if (approved != true) {
-      await _c.aiWorkspace.actionController.reject(proposal.proposalId);
-      return;
-    }
-    try {
-      await _resumePendingProductAction(proposal);
-    } catch (error) {
-      await _completeProductActionFailure(proposal.proposalId);
-      if (mounted) {
-        _appendMindMapClarification(
-          proposal.originalUserText,
-          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-        );
-      }
-    }
-  }
-
-  Future<void> _reconcileProjectionIfNeeded(AiActionJournalEntry entry) async {
-    if (!entry.needsProjection) return;
-    final workKey = entry.command?.workKey;
-    final turnId =
-        entry.proposal.turnId ?? 'projection-${entry.proposal.proposalId}';
-    try {
-      final outcome = await _c.aiWorkspace.reconcilePendingProjection(
-        entry,
-        turnId: turnId,
-        workKey: workKey,
-        publicationTitle: _c.item.title,
-        onArtifact: (artifact) {
-          final artifactId = artifact.artifactId;
-          if (!mounted || artifactId == null) return;
-          _mindMapCoordinator.reveal(artifactId);
-        },
-      );
-      if (mounted && outcome.completed > 0) {
-        setState(() {});
-      }
-    } catch (error) {
-      if (mounted) {
-        _appendMindMapClarification(
-          entry.proposal.originalUserText,
-          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-          workKey: workKey,
-        );
-      }
-    }
-  }
-
-  Future<void> _resumeRecoverableProductAction(
-    AiActionRecoveryCandidate candidate,
-  ) async {
-    final proposal = candidate.entry.proposal;
-    if (candidate.entry.status == AiActionJournalStatus.cancelRequested) {
-      await _completeProductActionCancelled(proposal.proposalId);
-      return;
-    }
-    try {
-      await _c.resolveGraphWorkCandidates();
-      final requestedWorkKey = '${proposal.requestedArguments['workKey'] ?? ''}'
-          .trim();
-      final context = await _c.loadAiChatContext(
-        selectionOverride: null,
-        workScope: requestedWorkKey.isEmpty
-            ? _c.currentReadingWork
-            : _workForKey(requestedWorkKey),
-      );
-      final snapshot = _c.freezeBookMindMapTurn(
-        workScope: requestedWorkKey.isEmpty
-            ? _c.currentReadingWork
-            : _workForKey(requestedWorkKey),
-        context: context,
-      );
-      final scopeName = scopeNameFromProposal(proposal);
-      if (scopeName == 'currentChapter') {
-        await _c.aiWorkspace.actionController.abandon(
-          proposal.proposalId,
-          reasonCode: 'frozen_chapter_context_missing',
-        );
-        return;
-      }
-      if (proposal.actionKind == 'revise_book_mind_map') {
-        final turn = AiBookMindMapActionGateway.prepareProductTurn(
-          history: _session.messagesFor(
-            requestedWorkKey.isEmpty ? null : requestedWorkKey,
-          ),
-          scopeSnapshot: snapshot,
-          preferredArtifactId: proposal.targetRef,
-        );
-        final targetId = proposal.targetRef;
-        final target = targetId == null ? null : turn.artifactsById[targetId];
-        if (target == null ||
-            (proposal.expectedRevision != null &&
-                target.revision != proposal.expectedRevision)) {
-          await _c.aiWorkspace.actionController.abandon(
-            proposal.proposalId,
-            reasonCode: 'target_revision_changed',
-          );
-          return;
-        }
-        await _runMindMapRevision(
-          proposal.originalUserText,
-          target,
-          conversationWorkKey: requestedWorkKey.isEmpty
-              ? null
-              : requestedWorkKey,
-          clearComposer: false,
-          actionProposalId: proposal.proposalId,
-          authorizeAction: (units) =>
-              _authorizeActionForExecution(proposal, units: units),
-        );
-        return;
-      }
-
-      final requestedIndices = candidate.entry.command == null
-          ? const <int>{}
-          : candidate.entry.command!.scopeSectionIndices.toSet();
-      final units = <BookAiMindMapGenerationUnit>[];
-      final works = scopeName == 'wholePublication'
-          ? (snapshot.manifest?.works ?? const <AiBookWork>[])
-          : [
-              if (requestedWorkKey.isNotEmpty) _workForKey(requestedWorkKey),
-              if (requestedWorkKey.isEmpty) snapshot.currentWork,
-            ].whereType<AiBookWork>().toList(growable: false);
-      if (scopeName == 'wholePublication' && works.isEmpty) {
-        // Ordinary single book: no multi-work manifest. Rebuild one unit from
-        // the Command's frozen section indices (never live reading position).
-        final sections = await _c.bookMindMapSections(
-          work: null,
-          useFrozenWork: true,
-        );
-        final frozen = requestedIndices.isEmpty
-            ? sections
-            : sections
-                  .where((section) => requestedIndices.contains(section.index))
-                  .toList(growable: false);
-        if (frozen.isNotEmpty) {
-          units.add((
-            work: null,
-            label: _c.item.title,
-            frozenSections: List.unmodifiable(frozen),
-            estimatedSections: frozen.length,
-          ));
-        }
-      } else {
-        for (final work in works) {
-          final sections = await _c.bookMindMapSections(
-            work: work,
-            useFrozenWork: true,
-          );
-          final frozen = requestedIndices.isEmpty
-              ? sections
-              : sections
-                    .where(
-                      (section) => requestedIndices.contains(section.index),
-                    )
-                    .toList(growable: false);
-          if (frozen.isEmpty) continue;
-          units.add((
-            work: work,
-            label: work.title,
-            frozenSections: List.unmodifiable(frozen),
-            estimatedSections: frozen.length,
-          ));
-        }
-      }
-      if (units.isEmpty) {
-        await _c.aiWorkspace.actionController.abandon(
-          proposal.proposalId,
-          reasonCode: 'frozen_scope_content_missing',
-        );
-        return;
-      }
-      final command = candidate.entry.command;
-      if (command == null) {
-        await _c.aiWorkspace.actionController.abandon(
-          proposal.proposalId,
-          reasonCode: 'authorized_command_missing',
-        );
-        return;
-      }
-      // Keep the journal at authorized/queued for a clean executor start, or
-      // leave executing so the executor recovers from the durable checkpoint.
-      if (candidate.entry.status == AiActionJournalStatus.authorized) {
-        await _c.aiWorkspace.actionController.queue(proposal.proposalId);
-      }
-      final latest = await _c.aiWorkspace.actionController.journal.read(
-        proposal.proposalId,
-      );
-      final executable = latest?.command ?? command;
-      await _generateMindMapsInChat(
-        proposal.originalUserText,
-        units,
-        conversationWorkKey: requestedWorkKey.isEmpty ? null : requestedWorkKey,
-        actionProposalId: proposal.proposalId,
-        actionCommand: executable,
-      );
-    } catch (error) {
-      await _completeProductActionFailure(proposal.proposalId);
-      if (mounted) {
-        _appendMindMapClarification(
-          proposal.originalUserText,
-          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-        );
-      }
-    }
-  }
-
-  Future<void> _resumePendingProductAction(AiActionProposal proposal) async {
-    await _c.resolveGraphWorkCandidates();
-    final requestedWorkKey = '${proposal.requestedArguments['workKey'] ?? ''}'
-        .trim();
-    final turnWork = requestedWorkKey.isEmpty
-        ? _c.currentReadingWork
-        : _workForKey(requestedWorkKey);
-    if (requestedWorkKey.isNotEmpty && turnWork == null) {
-      throw StateError('原操作所属作品已经无法恢复');
-    }
-    final context = await _c.loadAiChatContext(
-      selectionOverride: null,
-      workScope: turnWork,
-    );
-    final snapshot = _c.freezeBookMindMapTurn(
-      workScope: turnWork,
-      context: context,
-    );
-    final productTurn = AiBookMindMapActionGateway.prepareProductTurn(
-      history: _session.messagesFor(
-        requestedWorkKey.isEmpty ? null : requestedWorkKey,
-      ),
-      scopeSnapshot: snapshot,
-      preferredArtifactId: null,
-    );
-    final actionKind = proposal.actionKind;
-    if (actionKind == 'create_book_mind_map') {
-      final scope = AiBookMindMapActionScope.values.where(
-        (value) => value.name == scopeNameFromProposal(proposal),
-      );
-      final action = AiCreateBookMindMapAction(
-        instruction:
-            '${proposal.requestedArguments['instruction'] ?? proposal.originalUserText}',
-        scope: scope.singleOrNull ?? AiBookMindMapActionScope.wholePublication,
-      );
-      final input = AiBookMindMapActionGateway.resolveCreate(
-        action,
-        productTurn.scopeSnapshot,
-      );
-      final started = await _routeMindMapRequest(
-        proposal.originalUserText,
-        input.scope,
-        frozenTurn: productTurn.scopeSnapshot,
-        resolvedWork: input.work,
-        frozenCurrentChapter: input.frozenCurrentChapter,
-        clearComposer: false,
-        actionProposalId: proposal.proposalId,
-        authorizeAction: (units) =>
-            _authorizeActionForExecution(proposal, units: units),
-      );
-      if (!started) await _completeProductActionCancelled(proposal.proposalId);
-      return;
-    }
-    final targetId = proposal.targetRef;
-    final target = targetId == null
-        ? null
-        : productTurn.artifactsById[targetId];
-    if (target == null) throw StateError('待恢复的导图目标已经不在当前对话中');
-    final started = await _runMindMapRevision(
-      proposal.originalUserText,
-      target,
-      clearComposer: false,
-      actionProposalId: proposal.proposalId,
-      authorizeAction: (units) =>
-          _authorizeActionForExecution(proposal, units: units),
-    );
-    if (!started) await _completeProductActionCancelled(proposal.proposalId);
+    await _productHost.resumeAfterOpen();
+    if (mounted) setState(() {});
   }
 
   String scopeNameFromProposal(AiActionProposal proposal) =>
@@ -713,13 +478,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     return null;
   }
 
-  bool _workKeyIsAvailable(String workKey) => _workForKey(workKey) != null;
-
-  /// Focus the composer. Order matters on macOS: request Flutter focus first
-  /// (the engine makes its TextInputPlugin first responder while the field is
-  /// active), then ask the WebView to drop native focus. The engine-side
-  /// clearFocus only moves first responder away from the WebView itself, so it
-  /// can never steal text input back from a focused field.
   Future<void> _focusComposer() async {
     _focus.requestFocus();
     await _c.clearPlatformFocus();
@@ -929,6 +687,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             history: turn.history,
             scopeSnapshot: scopeSnapshot,
             preferredArtifactId: _activeMindMapArtifactId,
+            capabilities: _c.aiWorkspace.resolveCapabilities(),
           );
           return _c.streamBookChat(
             userText: text,
@@ -1483,56 +1242,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<void> _handleOpeningShortcut(AiChatShortcut shortcut) async {
     final scope = shortcut.mindMapScope;
     if (scope != null) {
-      final proposal = AiActionProposal(
-        protocolVersion: AiActionProposal.currentProtocolVersion,
-        proposalId: 'proposal-${_newTurnId()}',
-        parentRunId: _activeTurnId,
-        conversationId: _c.item.contentHash,
-        turnId: _activeTurnId,
-        actionKind: 'create_book_mind_map',
-        definitionVersion: 1,
-        proposalSchemaVersion: 1,
-        source: AiActionProposalSource.explicitUi,
-        sourceSubmissionId: _newTurnId(),
-        originalUserText: shortcut.prompt,
-        requestedArguments: {
-          'scope': scope.name,
-          'contentHash': _c.item.contentHash,
-          if (_chatWorkKey case final value? when value.isNotEmpty)
-            'workKey': value,
-        },
-        scopeRef: scope.name,
-        createdAt: DateTime.now(),
-        expiresAt: DateTime.now().add(const Duration(hours: 24)),
+      await _productHost.dispatchExplicitCreate(
+        originalText: shortcut.prompt,
+        requestScope: scope,
+        parentTurnId: _activeTurnId,
+        conversationWorkKey: _chatWorkKey,
       );
-      try {
-        final evaluation = await _c.aiWorkspace.actionController.propose(
-          proposal,
-          deferExplicitAuthorization: true,
-        );
-        if (!evaluation.authorized &&
-            evaluation.entry.status != AiActionJournalStatus.proposed) {
-          return;
-        }
-        final started = await _routeMindMapRequest(
-          shortcut.prompt,
-          scope,
-          actionProposalId: proposal.proposalId,
-          authorizeAction: (units) =>
-              _authorizeActionForExecution(proposal, units: units),
-        );
-        if (!started) {
-          await _completeProductActionCancelled(proposal.proposalId);
-        }
-      } catch (error) {
-        await _completeProductActionFailure(proposal.proposalId);
-        if (mounted) {
-          _appendMindMapClarification(
-            shortcut.prompt,
-            aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-          );
-        }
-      }
+      if (mounted) setState(() {});
       return;
     }
     await _send(shortcut.prompt);
@@ -1544,287 +1260,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required AiBookMindMapProductTurn productTurn,
     String? retryTurnId,
   }) async {
-    final proposal = _proposalForProductAction(
-      originalText,
-      action,
-      productTurn: productTurn,
-    );
-    try {
-      await _dispatchProductActionUnsafe(
-        originalText,
-        action,
-        productTurn: productTurn,
-        retryTurnId: retryTurnId,
-        proposal: proposal,
-      );
-    } catch (error) {
-      await _completeProductActionFailure(proposal.proposalId);
-      if (mounted) {
-        _appendMindMapClarification(
-          originalText,
-          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-          workKey: productTurn.scopeSnapshot.conversationWorkKey,
-        );
-      }
-    }
-  }
-
-  Future<void> _dispatchProductActionUnsafe(
-    String originalText,
-    AiProductActionRequest action, {
-    required AiBookMindMapProductTurn productTurn,
-    String? retryTurnId,
-    required AiActionProposal proposal,
-  }) async {
-    final evaluation = await _c.aiWorkspace.actionController.propose(proposal);
-    if (!evaluation.authorized && !evaluation.needsConfirmation) {
-      _appendMindMapClarification(
-        originalText,
-        evaluation.needsClarification
-            ? '还需要明确思维导图的范围或要修改的导图。'
-            : '这项思维导图操作目前未获授权，请重新发起。',
-        workKey: productTurn.scopeSnapshot.conversationWorkKey,
-      );
-      return;
-    }
-    if (evaluation.needsConfirmation) {
-      final domain = kaijuanProductionActionDomains().byActionKind(
-        proposal.actionKind,
-      );
-      final view =
-          domain?.confirmationView(
-            action,
-            contextHints: {
-              if (action is AiReviseBookMindMapAction)
-                'revision':
-                    productTurn.artifactsById[action.artifactId]?.revision,
-            },
-          ) ??
-          const AiProductActionConfirmationView(
-            title: '确认执行',
-            summary: '请确认执行此产品操作。',
-          );
-      final approved = await _mindMapCoordinator.requestActionConfirmation(
-        proposalId: proposal.proposalId,
-        title: view.title,
-        summary: view.summary,
-        scopeLabel: view.scopeLabel,
-        targetLabel: view.targetLabel,
-        revisionLabel: view.revisionLabel,
-        onOpened: _scrollToEnd,
-      );
-      if (approved != true) {
-        await _c.aiWorkspace.actionController.reject(proposal.proposalId);
-        return;
-      }
-    }
-    await _executeAuthorizedProductAction(
-      originalText,
-      action,
+    await _productHost.dispatch(
+      originalText: originalText,
+      action: action,
       productTurn: productTurn,
       retryTurnId: retryTurnId,
-      proposal: proposal,
+      parentTurnId: _activeTurnId,
     );
-  }
-
-  /// Domain dispatch by action kind. New domains register handlers without
-  /// editing this method's control flow beyond lookup.
-  Future<void> _executeAuthorizedProductAction(
-    String originalText,
-    AiProductActionRequest action, {
-    required AiBookMindMapProductTurn productTurn,
-    String? retryTurnId,
-    required AiActionProposal proposal,
-  }) async {
-    switch (action) {
-      case final AiCreateBookMindMapAction create:
-        AiBookMindMapCreateInput input;
-        try {
-          input = AiBookMindMapActionGateway.resolveCreate(
-            create,
-            productTurn.scopeSnapshot,
-          );
-        } catch (error) {
-          _appendMindMapClarification(
-            originalText,
-            aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-            workKey: productTurn.scopeSnapshot.conversationWorkKey,
-          );
-          return;
-        }
-        final started = await _routeMindMapRequest(
-          originalText,
-          input.scope,
-          frozenTurn: productTurn.scopeSnapshot,
-          resolvedWork: input.work,
-          frozenCurrentChapter: input.frozenCurrentChapter,
-          retryTurnId: retryTurnId,
-          clearComposer: true,
-          actionProposalId: proposal.proposalId,
-          authorizeAction: (units) =>
-              _authorizeActionForExecution(proposal, units: units),
-        );
-        if (!started) {
-          await _completeProductActionCancelled(proposal.proposalId);
-        }
-      case final AiReviseBookMindMapAction revise:
-        AiBookMindMap target;
-        try {
-          target = AiBookMindMapActionGateway.resolveRevision(
-            revise,
-            productTurn.artifactsById,
-          );
-        } catch (error) {
-          _appendMindMapClarification(
-            originalText,
-            aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-            workKey: productTurn.scopeSnapshot.conversationWorkKey,
-          );
-          return;
-        }
-        final started = await _runMindMapRevision(
-          originalText,
-          target,
-          conversationWorkKey: productTurn.scopeSnapshot.conversationWorkKey,
-          retryTurnId: retryTurnId,
-          clearComposer: false,
-          actionProposalId: proposal.proposalId,
-          authorizeAction: (units) =>
-              _authorizeActionForExecution(proposal, units: units),
-        );
-        if (!started) {
-          await _completeProductActionCancelled(proposal.proposalId);
-        }
-      case final AiRegisteredProductAction registered:
-        await _runRegisteredProductAction(
-          originalText,
-          registered,
-          proposal: proposal,
-          productTurn: productTurn,
-        );
-    }
-  }
-
-  Future<void> _runRegisteredProductAction(
-    String originalText,
-    AiRegisteredProductAction action, {
-    required AiActionProposal proposal,
-    required AiBookMindMapProductTurn productTurn,
-  }) async {
-    // Generic registered actions share Policy/Journal/Executor. Adapters and
-    // projection copy come from the domain registry — not a Widget switch.
-    final domains = kaijuanTestActionDomains();
-    final domain = domains.byActionKind(action.actionKind);
-    final adapter = domain?.createAdapter(_c.aiWorkspace.artifactRepository);
-    if (adapter != null &&
-        _c.aiWorkspace.workflowAdapters.lookup(action.actionKind) == null) {
-      _c.aiWorkspace.registerExtraAdapters([adapter]);
-    }
-    final entry = await _c.aiWorkspace.actionController.journal.read(
-      proposal.proposalId,
-    );
-    if (entry == null) throw StateError('产品操作日志不存在');
-    if (entry.status == AiActionJournalStatus.awaitingConfirmation ||
-        entry.status == AiActionJournalStatus.proposed) {
-      await _c.aiWorkspace.actionController.authorize(
-        proposalId: proposal.proposalId,
-        authorizationSubmissionId: '${proposal.proposalId}:approve',
-        authorizationEvidence: 'conversation:confirm',
-        normalizedArguments: {
-          ...action.arguments,
-          'contentHash': _c.item.contentHash,
-        },
-      );
-    }
-    await _c.aiWorkspace.actionController.queue(proposal.proposalId);
-    final completed = await _c.aiWorkspace.workflowExecutor.execute(
-      proposal.proposalId,
-    );
-    if (!mounted) return;
-    if (completed.status == AiActionJournalStatus.succeeded) {
-      final message =
-          domain?.projectionMessage(
-            request: action,
-            artifactRefs: completed.receipt?.artifactRefs ?? const [],
-          ) ??
-          '已完成 ${action.actionKind}';
-      _appendMindMapClarification(
-        originalText,
-        message,
-        workKey: productTurn.scopeSnapshot.conversationWorkKey,
-      );
-      if (completed.receipt != null) {
-        await _c.aiWorkspace.actionController.markProjected(
-          proposalId: proposal.proposalId,
-          refs: completed.receipt!.artifactRefs,
-        );
-      }
-    } else if (completed.status == AiActionJournalStatus.failed ||
-        completed.status == AiActionJournalStatus.abandoned) {
-      _appendMindMapClarification(
-        originalText,
-        '操作失败：${completed.receipt?.publicErrorCode ?? completed.terminalReasonCode ?? 'unknown'}',
-        workKey: productTurn.scopeSnapshot.conversationWorkKey,
-      );
-    }
-  }
-
-  Future<AiActionJournalEntry> _authorizeActionForExecution(
-    AiActionProposal proposal, {
-    required List<BookAiMindMapGenerationUnit> units,
-  }) async {
-    final entry = await _c.aiWorkspace.actionController.journal.read(
-      proposal.proposalId,
-    );
-    if (entry == null) throw StateError('产品操作日志不存在');
-    final sectionIndices = [
-      for (final unit in units)
-        for (final section in (unit.frozenSections ?? const [])) section.index,
-    ];
-    final unitLabels = [for (final unit in units) unit.label];
-    final unitSectionCounts = [
-      for (final unit in units) (unit.frozenSections ?? const []).length,
-    ];
-    final frozenArgs = <String, Object?>{
-      'scopeFingerprint': 'sections:${sectionIndices.join(',')}',
-      'scopeSectionIndices': sectionIndices,
-      'unitLabels': unitLabels,
-      'unitSectionCounts': unitSectionCounts,
-      'contentHash': _c.item.contentHash,
-      if (_chatWorkKey case final value? when value.isNotEmpty)
-        'workKey': value,
-    };
-    if (entry.status == AiActionJournalStatus.awaitingConfirmation) {
-      await _c.aiWorkspace.actionController.approve(
-        proposalId: proposal.proposalId,
-        authorizationSubmissionId: '${proposal.proposalId}:approve',
-        authorizationEvidence: 'conversation:confirm',
-        normalizedArguments: frozenArgs,
-      );
-    } else if (entry.status == AiActionJournalStatus.proposed) {
-      await _c.aiWorkspace.actionController.authorize(
-        proposalId: proposal.proposalId,
-        authorizationSubmissionId: proposal.sourceSubmissionId,
-        authorizationEvidence: 'ui:mind-map-scope-confirmed',
-        normalizedArguments: frozenArgs,
-      );
-    }
-    final latest = await _c.aiWorkspace.actionController.journal.read(
-      proposal.proposalId,
-    );
-    if (latest == null) throw StateError('产品操作日志不存在');
-    if (latest.status == AiActionJournalStatus.cancelRequested ||
-        latest.status.isTerminal) {
-      return latest;
-    }
-    if (latest.status == AiActionJournalStatus.authorized) {
-      return _c.aiWorkspace.actionController.queue(proposal.proposalId);
-    }
-    if (latest.status == AiActionJournalStatus.queued ||
-        latest.status == AiActionJournalStatus.executing) {
-      return latest;
-    }
-    throw StateError('产品操作尚未授权，不能执行');
+    if (mounted) setState(() {});
   }
 
   Future<void> _retryMindMapProductAction({
@@ -1833,58 +1276,22 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required AiConversationCommand retryCommand,
     AiBookMindMap? retryTarget,
   }) async {
-    // Retry reuses the original Proposal/Command/Journal. It does not re-parse
-    // natural language or create a new submission identity.
     final proposalId = _activeActionProposalId ?? _lastFailedActionProposalId;
     if (proposalId == null) {
-      // Legacy failures without a journal identity cannot be safely retried
-      // under the product protocol.
       if (mounted) {
         _appendMindMapClarification(text, '无法安全重试：缺少原操作记录，请重新发起。');
       }
       return;
     }
-    try {
-      final rearmed = await _c.aiWorkspace.actionController.prepareRetry(
-        proposalId,
-      );
-      if (rearmed.status == AiActionJournalStatus.succeeded ||
-          rearmed.status == AiActionJournalStatus.partiallySucceeded) {
-        // Already finished; only complete any pending conversation projection.
-        await _reconcileProjectionIfNeeded(rearmed);
-        return;
-      }
-      final command = rearmed.command;
-      if (command == null) {
-        throw StateError('重试缺少授权命令');
-      }
-      final units = await _unitsFromCommand(command, retryTarget: retryTarget);
-      if (units.isEmpty) {
-        await _c.aiWorkspace.actionController.abandon(
-          proposalId,
-          reasonCode: 'frozen_scope_content_missing',
-        );
-        return;
-      }
-      await _c.aiWorkspace.actionController.queue(proposalId);
-      await _generateMindMapsInChat(
-        text,
-        units,
-        baseMap: retryTarget,
-        retryTurnId: retryTurnId,
-        conversationWorkKey: command.workKey,
-        actionProposalId: proposalId,
-        actionCommand: command,
-        attempt: rearmed.attempt == 0 ? 1 : rearmed.attempt,
-      );
-    } catch (error) {
-      if (mounted) {
-        _appendMindMapClarification(
-          text,
-          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
-        );
-      }
-    }
+    await _productHost.retry(
+      text: text,
+      proposalId: proposalId,
+      retryTurnId: retryTurnId,
+      retryTarget: retryTarget,
+      unitsFromCommand: (command, {retryTarget}) =>
+          _unitsFromCommand(command, retryTarget: retryTarget),
+    );
+    if (mounted) setState(() {});
   }
 
   Future<List<BookAiMindMapGenerationUnit>> _unitsFromCommand(
@@ -1950,148 +1357,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         estimatedSections: frozen.length,
       ),
     ];
-  }
-
-  Future<void> _completeProductActionFailure(String proposalId) async {
-    try {
-      final entry = await _c.aiWorkspace.actionController.journal.read(
-        proposalId,
-      );
-      if (entry == null) return;
-      if (entry.status == AiActionJournalStatus.proposed ||
-          entry.status == AiActionJournalStatus.awaitingConfirmation ||
-          entry.status == AiActionJournalStatus.awaitingClarification) {
-        await _c.aiWorkspace.actionController.reject(proposalId);
-        return;
-      }
-      if (entry.status == AiActionJournalStatus.authorized) {
-        await _c.aiWorkspace.actionController.abandon(
-          proposalId,
-          reasonCode: 'mind_map_action_failed_before_execution',
-        );
-        return;
-      }
-      if (entry.status == AiActionJournalStatus.cancelRequested) {
-        await _c.aiWorkspace.actionController.completeForProposal(
-          proposalId: proposalId,
-          status: AiActionJournalStatus.cancelled,
-          artifactRefs: const [],
-        );
-        return;
-      }
-      await _c.aiWorkspace.actionController.completeForProposal(
-        proposalId: proposalId,
-        status: AiActionJournalStatus.failed,
-        artifactRefs: const [],
-        publicErrorCode: 'mind_map_action_failed',
-      );
-    } catch (_) {
-      // Keep the user-facing error. The journal remains inspectable for a
-      // future recovery pass when the command was not yet executable.
-    }
-  }
-
-  Future<void> _completeProductActionCancelled(String proposalId) async {
-    try {
-      final entry = await _c.aiWorkspace.actionController.journal.read(
-        proposalId,
-      );
-      if (entry == null) return;
-      if (entry.status == AiActionJournalStatus.proposed ||
-          entry.status == AiActionJournalStatus.awaitingConfirmation ||
-          entry.status == AiActionJournalStatus.awaitingClarification) {
-        await _c.aiWorkspace.actionController.reject(proposalId);
-        return;
-      }
-      if (entry.status == AiActionJournalStatus.authorized) {
-        await _c.aiWorkspace.actionController.requestCancel(proposalId);
-        await _c.aiWorkspace.actionController.completeForProposal(
-          proposalId: proposalId,
-          status: AiActionJournalStatus.cancelled,
-          artifactRefs: const [],
-        );
-        return;
-      }
-      await _c.aiWorkspace.actionController.completeForProposal(
-        proposalId: proposalId,
-        status: AiActionJournalStatus.cancelled,
-        artifactRefs: const [],
-      );
-    } catch (_) {
-      await _completeProductActionFailure(proposalId);
-    }
-  }
-
-  AiActionProposal _proposalForProductAction(
-    String originalText,
-    AiProductActionRequest action, {
-    required AiBookMindMapProductTurn productTurn,
-  }) {
-    final actionKind = switch (action) {
-      AiCreateBookMindMapAction() => 'create_book_mind_map',
-      AiReviseBookMindMapAction() => 'revise_book_mind_map',
-      AiRegisteredProductAction(:final actionKind) => actionKind,
-    };
-    final scope = switch (action) {
-      AiCreateBookMindMapAction() => action.scope.name,
-      AiReviseBookMindMapAction() => null,
-      AiRegisteredProductAction() => null,
-    };
-    final target = switch (action) {
-      AiCreateBookMindMapAction() => null,
-      AiReviseBookMindMapAction() => action.artifactId,
-      AiRegisteredProductAction() => null,
-    };
-    final args = <String, Object?>{
-      'instruction': action.instruction,
-      'contentHash': _c.item.contentHash,
-      if (action is AiRegisteredProductAction) ...action.arguments,
-    };
-    if (scope != null) args['scope'] = scope;
-    if (action case AiCreateBookMindMapAction(:final workId)) {
-      if (workId != null) args['workId'] = workId;
-      final selected = productTurn.scopeSnapshot.availableWorks.where(
-        (work) => work.id == workId,
-      );
-      if (selected.length == 1) {
-        args['workKey'] = BookReaderController.workKeyFor(selected.single);
-      }
-    }
-    if (target != null) args['targetArtifactId'] = target;
-    final workKey = productTurn.scopeSnapshot.conversationWorkKey;
-    final shouldFreezeConversationWork = switch (action) {
-      AiCreateBookMindMapAction(:final scope) =>
-        scope != AiBookMindMapActionScope.wholePublication,
-      AiReviseBookMindMapAction() => true,
-      AiRegisteredProductAction() => workKey != null,
-    };
-    if (workKey != null && shouldFreezeConversationWork) {
-      args['workKey'] = workKey;
-    }
-    final definition = _c.aiWorkspace.actionController.registry.lookup(
-      actionKind,
-    );
-    return AiActionProposal(
-      protocolVersion: AiActionProposal.currentProtocolVersion,
-      proposalId: 'proposal-${_newTurnId()}',
-      parentRunId: _activeTurnId,
-      conversationId: _c.item.contentHash,
-      turnId: _activeTurnId,
-      actionKind: actionKind,
-      definitionVersion: definition?.definitionVersion ?? 1,
-      proposalSchemaVersion: definition?.proposalSchemaVersion ?? 1,
-      source: AiActionProposalSource.modelTool,
-      sourceSubmissionId: _activeTurnId ?? _newTurnId(),
-      originalUserText: originalText,
-      requestedArguments: args,
-      scopeRef: scope,
-      targetRef: target,
-      expectedRevision: target == null
-          ? null
-          : productTurn.artifactsById[target]?.revision,
-      createdAt: DateTime.now(),
-      expiresAt: DateTime.now().add(const Duration(hours: 24)),
-    );
   }
 
   Future<bool> _routeMindMapRequest(
@@ -2660,7 +1925,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                                 evidence: evidence,
                               ),
                         ),
-                    onContinueEditingMindMap: _beginEditingMindMap,
                     onMindMapRevealed: _mindMapCoordinator.consumeReveal,
                     onMindMapPointerChanged:
                         _mindMapCoordinator.setPointerActive,

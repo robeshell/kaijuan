@@ -2,8 +2,9 @@
 
 | | |
 |--|--|
-| **状态** | v1 控制面迁移中；协议骨架已建立，生产 Workflow、恢复与 Artifact 提交尚未完成 |
+| **状态** | v1 控制面为**重任务平台**；**图书思维导图产品主路径改为轻会话**（见 [ai-mind-map.md](./ai-mind-map.md)，实现收敛中）；**知识图谱为 Domain Job**（§3.6） |
 | **日期** | 2026-08-12 |
+| **收口设计** | [ai-architecture-consolidation.md](../research/ai-architecture-consolidation.md) |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **工程** | [ENGINEERING.md](../ENGINEERING.md)「AI 边界」 |
 | **相关** | [ai.md](./ai.md)、[ai-workflow-extension.md](./ai-workflow-extension.md)、[ai-mind-map.md](./ai-mind-map.md)、[ai-graph.md](./ai-graph.md)、[ai-translation.md](./ai-translation.md) |
@@ -39,7 +40,7 @@ Workflow 只执行 App 签发的不可变命令，不执行原始模型 Tool Cal
   → AiActionReceipt + 领域 Artifact
 ```
 
-产品工具调用只是 `AiActionProposal` 的一种来源。它不是命令、不是审批结果，也不能直接启动思维导图、翻译、图谱重建、导出或写入笔记。
+产品工具调用只是 `AiActionProposal` 的一种来源。它不是命令、不是审批结果。**适用本协议的重任务**不得由模型 Tool Call 直接落库或外写；**图书思维导图日常生成/修订默认走轻会话路径**（见 [ai-mind-map.md](./ai-mind-map.md)），不要求用户经过本协议的确认卡。
 
 ---
 
@@ -82,6 +83,22 @@ Read Tool 不进入产品动作审批，但仍受冻结作用域、参数预算�
 - 不为每个中文说法增加关键词路由、正则矩阵或专用隐式分支。
 - 不增加第二个意图模型。普通对话的同一模型可以回答、调用 Read Tool 或提出 Product Action Proposal。
 - 显式 UI 命令可以跳过模型判断，但不能绕过 Policy、Journal 和 Workflow 预检。
+
+### 3.6 不经本协议 Journal 的 AI 能力（成文边界）
+
+并非所有 AI 能力都走 Product Action Journal。下表为**产品默认**：
+
+| 能力 | 入口 | 持久化 | Journal？ |
+|------|------|--------|-----------|
+| **图书思维导图（日常）** | 快捷 / 会话生成与修订 | `ai_chat/` 消息附件 | **否**（轻路径，见 [ai-mind-map.md](./ai-mind-map.md)） |
+| **知识图谱** | 图谱 Tab | `ai_graph/` + 服务 checkpoint | **否**（Domain Job C1） |
+| **整本译 / 导出 / 外写**（规划） | 待定 | 领域产物 | **是**（应走本协议） |
+
+约束：
+
+1. 图谱：用户确认范围、可取消、Key 不备份、结构走 `AiBookStructureSession`；详见 [ai-graph.md](./ai-graph.md)。
+2. 导图：会话体验验收，不以确认卡/强制「继续修改」为准。
+3. 不得口头发明「第三套」旁路；新重任务默认走本协议。
 
 ### 3.3 框架无关
 
@@ -270,11 +287,10 @@ Journal 至少保存 Proposal/Decision/Command/Receipt 引用、当前状态、�
 | 来源与动作 | 默认 Policy | 说明 |
 |------------|-------------|------|
 | Read Tool：目录、当前章、按节、搜索、取样 | 不进入 Product Action Policy | 只读；由只读工具策略自动执行，仍受冻结范围和预算限制 |
-| 用户点击“生成本章思维导图”等明确快捷入口 | `allow` | UI 已明确动作和范围；仍做预检并写 Journal |
-| 用户在对话内范围卡片点击“生成” | `allow` | 卡片必须显示动作、作品/章节范围；该点击同时提供授权 |
-| 自由输入后模型提出创建思维导图 | `requireConfirmation` | 首阶段必须展示对话内确认卡 |
-| 自由输入后模型提出修订思维导图 | `requireConfirmation` | 显示目标版本与修改要求 |
-| 仅附加导图后发送评价、提问或含糊文字 | 普通对话或 `requireClarification` | 附件只绑定目标，不授权修订 |
+| 用户点击“生成本章思维导图”等明确快捷入口 | **轻路径直接执行**（非本表工单） | 见 [ai-mind-map.md](./ai-mind-map.md)；无确认卡 |
+| 用户在对话内范围卡片点击“生成” | **轻路径直接执行** | 选范围即生成，非 Product Action 确认 |
+| 自由输入后模型提出创建/修订思维导图 | **轻路径直接执行**（默认） | 无确认卡；评价/解释/否定不生成 |
+| 会话内「再详细点」等修订 | **轻路径直接执行** | 默认最近一张原生图；无「继续修改」前提 |
 | 用户点击失败任务“重试” | 不创建新 Proposal | Controller 校验既有 Command、Journal 终态、能力和是否已提交，复用原 Command 与幂等键创建新的 Workflow attempt |
 | 自由输入要求整本翻译、写入笔记、导出或外部分享 | `requireConfirmation` | 展示范围、目标和可能的外部写入 |
 | 对明确 UI 按钮执行 PNG 导出/保存 | `allow` | 用户点击已明确；系统保存面板仍由平台确认目标 |
@@ -294,13 +310,10 @@ Journal 至少保存 Proposal/Decision/Command/Receipt 引用、当前状态、�
 - Product Action Proposal 必须是该模型响应中唯一的终止产品动作；不得与 Read Tool 请求并列执行。
 - 模型没有提出产品动作时，App 不因用户文字包含“导图”“生成”“修改”等词自行补执行。
 
-### 7.2 产物附件
+### 7.2 产物附件（重任务）
 
-- “继续修改”只把稳定 `artifactId` 绑定为本轮可信目标上下文，并显示可移除附件。
-- 附件不把 composer 切换成永久修订模式，不意味着后续每句话都进入 Workflow。
-- “这张图不错”“解释一下第三个分支”“不用改了”应走普通回答，不得生成新版本。
-- “再详细一点”“把第三章展开”“删除重复分支”可由同一 Agent 提出指向该附件的修订 Proposal，再经 Policy。
-- 关闭附件只移除目标上下文，不删除 Artifact，也不改变历史消息。
+- 重任务附件语义由各领域规格定义。
+- **图书思维导图**不使用「继续修改 + 确认卡」作为产品主路径；会话修订默认最近一张图，见 [ai-mind-map.md](./ai-mind-map.md)。
 - 多个可用 Artifact 或目标不明确时，显示对话内纵向选择或补充卡片；不得靠“最近一张”静默猜测。
 
 ### 7.3 歧义语言
@@ -480,9 +493,9 @@ late_event.quarantined
 
 ### P2 — 对话内确认与附件语义
 
-- 新增结构化确认/补充卡片。
-- 自由输入产生的思维导图 Proposal 默认需要确认。
-- “继续修改”附件改为目标绑定，不再把所有后续文字直送修订 Workflow。
+- 结构化确认/补充卡片用于**重任务**。
+- **图书思维导图**不按「自由输入默认确认」验收；见 [ai-mind-map.md](./ai-mind-map.md)。
+- 导图会话修订见 [ai-mind-map.md](./ai-mind-map.md)；重任务附件语义另定。
 - 快捷入口、范围卡片和失败重试走同一 Controller，但可按矩阵自动授权。
 
 ### P3 — Journal、幂等、版本与取消
@@ -506,29 +519,15 @@ late_event.quarantined
 
 ## 16. 完成标准
 
-- [x] 模型思维导图 Tool Call 只产生 Proposal。
-- [x] 任何生产 Workflow 都只接受有效 `AiAuthorizedCommand`。
-- [x] 自由输入的思维导图动作具有对话内确认路径。
-- [x] 思维导图附件只绑定目标，不隐式授权修订。
-- [x] 快捷 UI、自由输入、重试和恢复全部走同一 Policy/Journal/Executor。
-- [x] 幂等、revision 冲突、取消和晚到结果通过生产链与崩溃恢复测试。
-- [x] 待确认与执行状态可以在 App 重启后恢复或明确放弃，且不会从头重复副作用。
-- [x] 产品 Artifact 的概念边界与 Genkit Session/Artifact、Journal 控制态分离。
-- [x] 新增动作经注册定义接入，缺失能力时不可执行；增加第二个测试 Workflow 不修改通用分发代码。
-- [x] Action、Command、Workflow、Artifact、Prompt 和 Renderer 独立版本化并由注册定义实际传播。
-- [ ] 语义评测中错误产品执行为 0，未授权 Workflow 启动为 0。
-- [x] PRODUCT、ENGINEERING、ai.md 与各领域规格不再包含“模型调用或附件直接授权执行”的描述。
+- [x] 控制面平台：Proposal/Policy/Command/Journal/Receipt 可用；Domain 注册与能力门禁有实现基础。
+- [x] 第二测试 Workflow（`test_book_export`）证明扩展路径。
+- [x] **图书思维导图产品规格**改为轻会话（本文矩阵与 [ai-mind-map.md](./ai-mind-map.md) 已对齐）。
+- [x] **导图实现**去掉自由输入确认卡与强制「继续修改」，对齐轻路径验收。
+- [ ] 重任务语义评测（译/导出等）与图谱 Domain Job 文档一致性。
+- [ ] 图谱 C2 或永久例外产品决定。
 
-本轮证据（含故障注入）：
+仍未完成 / 后续：
 
-- 内容 Artifact 先于 lineage head：`head CAS happens only after content artifact exists`
-- 取消不留下悬空 head：`cancel after generate does not leave dangling lineage head`
-- Receipt 后投影可恢复：`receipt committed without projection is recovered without regenerating`
-  + Journal `projectedArtifactRefs` / `needsProjection`
-- 投影持久化失败可重试：`projection persist failure is retriable and not blocked by memory`
-- attempt 使用 Journal 值：`executor uses journaled attempt after prepareRetry`
-- 第二 Workflow：Domain 提供 Adapter + projectionMessage
-  （`second workflow tool call reaches receipt and domain projection`）
-
-仍未完成：200–300 条真实模型语义评测；单书/分册/合集/作品丢失四类
-生产恢复 Widget 级套件仍可扩充；Chat Sheet 仍有 mind-map sealed 执行分支。
+- 导图代码收敛到轻路径
+- 图谱 C2 或永久 Domain Job 例外产品决定
+- 重任务语义评测与恢复矩阵（非导图日常体验门槛）

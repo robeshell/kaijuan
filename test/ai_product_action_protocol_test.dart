@@ -32,8 +32,8 @@ void main() {
     expiresAt: expiresAt ?? now.add(const Duration(hours: 1)),
   );
 
-  test('model proposals require confirmation and explicit UI is allowed', () {
-    const definition = AiProductActionDefinition(
+  test('mind-map model proposals auto-allow; non-mind-map tools still confirm', () {
+    const mindMap = AiProductActionDefinition(
       actionKind: 'create_book_mind_map',
       definitionVersion: 1,
       proposalSchemaVersion: 1,
@@ -45,10 +45,50 @@ void main() {
         AiActionProposalSource.explicitUi,
       },
     );
+    const heavy = AiProductActionDefinition(
+      actionKind: 'export_book_notes',
+      definitionVersion: 1,
+      proposalSchemaVersion: 1,
+      commandSchemaVersion: 1,
+      workflowVersion: 1,
+      riskClass: AiActionRiskClass.external,
+      supportedSources: {
+        AiActionProposalSource.modelTool,
+        AiActionProposalSource.explicitUi,
+      },
+    );
+    final exportProposal = AiActionProposal(
+      protocolVersion: 1,
+      proposalId: 'proposal-export',
+      parentRunId: 'run-1',
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      actionKind: 'export_book_notes',
+      definitionVersion: 1,
+      proposalSchemaVersion: 1,
+      source: AiActionProposalSource.modelTool,
+      sourceSubmissionId: 'submission-export',
+      originalUserText: '导出笔记',
+      requestedArguments: const {},
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 1)),
+    );
     const policy = AiActionPolicy();
     expect(
       policy
-          .decide(proposal: proposal(), definition: definition, now: now)
+          .decide(proposal: proposal(), definition: mindMap, now: now)
+          .outcome,
+      AiActionDecisionOutcome.allow,
+    );
+    expect(
+      policy
+          .decide(proposal: proposal(), definition: mindMap, now: now)
+          .reasonCode,
+      'mind_map_light_path',
+    );
+    expect(
+      policy
+          .decide(proposal: exportProposal, definition: heavy, now: now)
           .outcome,
       AiActionDecisionOutcome.requireConfirmation,
     );
@@ -56,7 +96,7 @@ void main() {
       policy
           .decide(
             proposal: proposal(source: AiActionProposalSource.explicitUi),
-            definition: definition,
+            definition: mindMap,
             now: now,
           )
           .outcome,
@@ -123,7 +163,7 @@ void main() {
   });
 
   test(
-    'controller journals proposal and requires an explicit approval',
+    'controller journals mind-map light path then authorizes after freeze',
     () async {
       final journal = MemoryAiActionJournalStore();
       final controller = AiProductActionController(
@@ -142,22 +182,28 @@ void main() {
         now: () => now,
         idGenerator: () => 'command-1',
       );
-      final evaluation = await controller.propose(proposal());
-      expect(evaluation.needsConfirmation, isTrue);
-      expect(
-        evaluation.entry.status,
-        AiActionJournalStatus.awaitingConfirmation,
+      final evaluation = await controller.propose(
+        proposal(),
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
+      expect(evaluation.needsConfirmation, isFalse);
+      expect(evaluation.canProceedWithoutConfirmation, isTrue);
+      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
       expect(evaluation.entry.command, isNull);
+      expect(evaluation.decision.reasonCode, 'mind_map_light_path');
 
-      final approved = await controller.approve(
+      final authorized = await controller.authorize(
         proposalId: 'proposal-1',
         authorizationSubmissionId: 'approval-1',
-        authorizationEvidence: 'button:approve',
+        authorizationEvidence: 'ui:mind-map-scope-confirmed',
+        normalizedArguments: const {
+          'scopeFingerprint': 'sections:1',
+          'scopeSectionIndices': [1],
+        },
       );
-      expect(approved.status, AiActionJournalStatus.authorized);
-      expect(approved.command?.commandId, 'command-1');
-      expect(approved.command?.authorizationSubmissionId, 'approval-1');
+      expect(authorized.status, AiActionJournalStatus.authorized);
+      expect(authorized.command?.commandId, 'command-1');
+      expect(authorized.command?.authorizationSubmissionId, 'approval-1');
 
       await controller.queue('proposal-1');
       final executing = await controller.markExecuting('proposal-1');
@@ -203,7 +249,8 @@ void main() {
       final evaluation = await controller.propose(
         proposal(source: AiActionProposalSource.explicitUi),
         deferExplicitAuthorization: true,
-      );
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
       expect(evaluation.entry.status, AiActionJournalStatus.proposed);
       expect(evaluation.entry.command, isNull);
 
@@ -223,7 +270,7 @@ void main() {
   );
 
   test(
-    'approval and authorization are idempotent for the same submission',
+    'authorization is idempotent for the same submission on light path',
     () async {
       final journal = MemoryAiActionJournalStore();
       final controller = AiProductActionController(
@@ -242,16 +289,27 @@ void main() {
         now: () => now,
         idGenerator: () => 'command-idempotent',
       );
-      await controller.propose(proposal());
-      final first = await controller.approve(
-        proposalId: 'proposal-1',
-        authorizationSubmissionId: 'approval-1',
-        authorizationEvidence: 'button:approve',
+      await controller.propose(
+        proposal(),
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
-      final second = await controller.approve(
+      final first = await controller.authorize(
         proposalId: 'proposal-1',
         authorizationSubmissionId: 'approval-1',
-        authorizationEvidence: 'button:approve',
+        authorizationEvidence: 'ui:mind-map-scope-confirmed',
+        normalizedArguments: const {
+          'scopeFingerprint': 'sections:1',
+          'scopeSectionIndices': [1],
+        },
+      );
+      final second = await controller.authorize(
+        proposalId: 'proposal-1',
+        authorizationSubmissionId: 'approval-1',
+        authorizationEvidence: 'ui:mind-map-scope-confirmed',
+        normalizedArguments: const {
+          'scopeFingerprint': 'sections:1',
+          'scopeSectionIndices': [1],
+        },
       );
       expect(second.command?.commandId, first.command?.commandId);
       expect(
@@ -279,11 +337,18 @@ void main() {
       now: () => now,
       idGenerator: () => 'command-cancel',
     );
-    await controller.propose(proposal());
-    await controller.approve(
+    await controller.propose(
+      proposal(),
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
+    await controller.authorize(
       proposalId: 'proposal-1',
       authorizationSubmissionId: 'approval-1',
-      authorizationEvidence: 'button:approve',
+      authorizationEvidence: 'ui:mind-map-scope-confirmed',
+      normalizedArguments: const {
+        'scopeFingerprint': 'sections:1',
+        'scopeSectionIndices': [1],
+      },
     );
     await controller.queue('proposal-1');
     await controller.markExecuting('proposal-1');
@@ -338,7 +403,9 @@ void main() {
       createdAt: now,
       expiresAt: now.add(const Duration(hours: 1)),
     );
-    await controller.propose(testProposal);
+    await controller.propose(testProposal,
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
     final adapter = _FakeWorkflowAdapter('test_workflow');
     final executor = AiProductWorkflowExecutor(
       actions: controller,
@@ -393,7 +460,9 @@ void main() {
       createdAt: now,
       expiresAt: now.add(const Duration(hours: 1)),
     );
-    await controller.propose(concurrentProposal);
+    await controller.propose(concurrentProposal,
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
     final adapter = _SlowWorkflowAdapter();
     final executor = AiProductWorkflowExecutor(
       actions: controller,
@@ -450,7 +519,8 @@ void main() {
           createdAt: now,
           expiresAt: now.add(const Duration(hours: 1)),
         ),
-      );
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
       await controller.markExecuting('recovery-proposal', attempt: 1);
       final checkpoints = MemoryAiWorkflowCheckpointStore();
       await checkpoints.write(
@@ -758,7 +828,9 @@ void main() {
       now: () => now,
       idGenerator: () => 'command-version',
     );
-    final evaluation = await controller.propose(proposal());
+    final evaluation = await controller.propose(proposal(),
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
     expect(evaluation.decision.reasonCode, 'incompatible_proposal_version');
     expect(evaluation.entry.command, isNull);
   });
@@ -800,7 +872,8 @@ void main() {
           createdAt: now,
           expiresAt: now.add(const Duration(hours: 1)),
         ),
-      );
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
       await controller.markExecuting('bad-checkpoint', attempt: 1);
       final checkpoints = MemoryAiWorkflowCheckpointStore();
       await checkpoints.write(
@@ -873,7 +946,8 @@ void main() {
           createdAt: now,
           expiresAt: now.add(const Duration(hours: 1)),
         ),
-      );
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
       final adapter = _LateSuccessAfterCancelAdapter();
       final executor = AiProductWorkflowExecutor(
         actions: controller,
@@ -930,7 +1004,8 @@ void main() {
           createdAt: now,
           expiresAt: now.add(const Duration(hours: 1)),
         ),
-      );
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+    );
       await controller.markExecuting('artifact-first', attempt: 1);
       final checkpoints = MemoryAiWorkflowCheckpointStore();
       await checkpoints.write(

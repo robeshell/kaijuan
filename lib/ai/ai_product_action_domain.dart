@@ -1,3 +1,5 @@
+import 'ai_book_mind_map_product_actions.dart';
+import 'ai_book_mind_map_workflow.dart';
 import 'ai_model_adapter.dart';
 import 'ai_product_action.dart';
 import 'ai_product_action_protocol.dart';
@@ -129,45 +131,7 @@ class AiBookMindMapCreateDomain implements AiProductActionDomain {
   bool get productionExposed => true;
 
   @override
-  AiProductActionDefinition get definition =>
-      // Deferred import cycle: definition lives beside product actions.
-      _createDefinition;
-
-  static const _createDefinition = AiProductActionDefinition(
-    actionKind: 'create_book_mind_map',
-    definitionVersion: 1,
-    proposalSchemaVersion: 1,
-    commandSchemaVersion: 1,
-    workflowVersion: 1,
-    riskClass: AiActionRiskClass.reversible,
-    supportedSources: {
-      AiActionProposalSource.modelTool,
-      AiActionProposalSource.explicitUi,
-    },
-    toolName: 'create_book_mind_map',
-    toolDescription: 'Create a native book mind map from frozen book content.',
-    argumentSchema: {
-      'type': 'object',
-      'properties': {
-        'scope': {
-          'type': 'string',
-          'enum': [
-            'currentChapter',
-            'currentWork',
-            'specificWork',
-            'wholePublication',
-            'unspecified',
-          ],
-        },
-        'workRef': {'type': 'string'},
-        'instruction': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
-      },
-      'required': ['scope', 'instruction'],
-    },
-    artifactKind: 'book_mind_map',
-    artifactSchemaVersion: 1,
-    displayNameKey: 'ai.action.createBookMindMap',
-  );
+  AiProductActionDefinition get definition => AiBookMindMapProductActions.create;
 
   @override
   AiProductActionRequest parseToolCall(
@@ -226,7 +190,11 @@ class AiBookMindMapCreateDomain implements AiProductActionDomain {
   }
 
   @override
-  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) => null;
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) =>
+      AiBookMindMapWorkflowAdapter(
+        actionKind: actionKind,
+        artifacts: artifacts,
+      );
 
   @override
   String projectionMessage({
@@ -248,33 +216,7 @@ class AiBookMindMapReviseDomain implements AiProductActionDomain {
   bool get productionExposed => true;
 
   @override
-  AiProductActionDefinition get definition => _reviseDefinition;
-
-  static const _reviseDefinition = AiProductActionDefinition(
-    actionKind: 'revise_book_mind_map',
-    definitionVersion: 1,
-    proposalSchemaVersion: 1,
-    commandSchemaVersion: 1,
-    workflowVersion: 1,
-    riskClass: AiActionRiskClass.reversible,
-    supportedSources: {
-      AiActionProposalSource.modelTool,
-      AiActionProposalSource.explicitUi,
-    },
-    toolName: 'revise_book_mind_map',
-    toolDescription: 'Revise one frozen native book mind map artifact.',
-    argumentSchema: {
-      'type': 'object',
-      'properties': {
-        'artifactRef': {'type': 'string'},
-        'instruction': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
-      },
-      'required': ['artifactRef', 'instruction'],
-    },
-    artifactKind: 'book_mind_map',
-    artifactSchemaVersion: 1,
-    displayNameKey: 'ai.action.reviseBookMindMap',
-  );
+  AiProductActionDefinition get definition => AiBookMindMapProductActions.revise;
 
   @override
   AiProductActionRequest parseToolCall(
@@ -286,16 +228,20 @@ class AiBookMindMapReviseDomain implements AiProductActionDomain {
       throw const FormatException('Invalid product instruction');
     }
     final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
-    final matches = context.artifacts.where(
-      (artifact) => artifact.alias == alias,
-    );
-    if (matches.length != 1) {
-      throw const FormatException('Unknown mind-map artifact alias');
+    final matches = alias.isEmpty
+        ? const <AiProductArtifactAlias>[]
+        : context.artifacts.where((a) => a.alias == alias).toList();
+    // Light path: empty or unknown alias → preferred, else latest artifact.
+    final artifact = matches.length == 1
+        ? matches.single
+        : context.artifacts.where((a) => a.isPreferred).firstOrNull ??
+              (context.artifacts.isEmpty ? null : context.artifacts.last);
+    if (artifact == null) {
+      throw const FormatException('No mind-map artifact available to revise');
     }
-    final artifact = matches.single;
     return AiReviseBookMindMapAction(
       instruction: instruction,
-      artifactAlias: alias,
+      artifactAlias: artifact.alias,
       artifactId: artifact.artifactId,
     );
   }
@@ -318,7 +264,11 @@ class AiBookMindMapReviseDomain implements AiProductActionDomain {
   }
 
   @override
-  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) => null;
+  AiWorkflowAdapter? createAdapter(AiArtifactRepository artifacts) =>
+      AiBookMindMapWorkflowAdapter(
+        actionKind: actionKind,
+        artifacts: artifacts,
+      );
 
   @override
   String projectionMessage({

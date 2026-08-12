@@ -64,8 +64,8 @@ lib/
 
 全表以 **`docs/PRODUCT.md`** 为准（已按当前基线重写）。摘要：
 
-- **已有**：单入口双引擎；本地/扫描/WiFi/WebDAV/OPDS 导入；多格式 book+comic；整理三概念；漫画四模式；图书 Foliate 主链；阅读统计；WebDAV 备份；**AI M0–M3b + M5**（BYOK + 选区 AI 词典/翻译 + 本书对话 + 大纲 + **独立图书思维导图**（结构化节点、原生布局、证据跳转）+ **知识图谱**（实体/关系/出处，章级增量）；对话、思维导图与图谱随 WebDAV 快照备份，Key 不进备份）。
-- **下一程（产品）**：AI M4/M6（整本译 → Obsidian 导出），见 PRODUCT §6 / `docs/specs/ai.md`。
+- **已有**：单入口双引擎；本地/扫描/WiFi/WebDAV/OPDS 导入；多格式 book+comic；整理三概念；漫画四模式；图书 Foliate 主链；阅读统计；WebDAV 备份；**AI**（BYOK + 词典/译 + 本书对话 + 大纲快捷 + **图书思维导图（目标：轻会话直接出图/接着聊改细，见 `docs/specs/ai-mind-map.md`）** + **知识图谱**；对话/导图/图谱随 WebDAV，Key 不进备份）。**不引入 LangChain**。
+- **下一程（产品）**：导图实现收敛到轻路径；AI M4/M6（整本译 → 导出）。
 
 - **结构债（工程）**：Book god-controller；readers→presentation 依赖；仿真翻页搁置。
 

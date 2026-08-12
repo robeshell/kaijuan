@@ -109,6 +109,8 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       aiSettings: widget.aiSettings ?? AiSettingsScope.maybeOf(context),
       scrollModeEnabled: scrollModeEnabled,
     );
+    // Attach durable AI stores before opening the book so product actions do
+    // not race against Memory defaults. Failures mark workspace not-ready.
     unawaited(_attachAiStores());
     if (!scrollModeEnabled &&
         widget.readingPreferences?.readingMode == BookReadingMode.scroll) {
@@ -166,8 +168,14 @@ class _BookReaderScreenState extends State<BookReaderScreen>
         ),
         artifacts: JsonAiArtifactRepository(paths.aiArtifactDirectory),
       );
+      _controller.aiWorkspace.markAiStoresReady(ready: true);
     } catch (error) {
       debugPrint('[AI] failed to attach reader stores: $error');
+      if (!mounted) return;
+      _controller.aiWorkspace.markAiStoresReady(
+        ready: false,
+        error: 'AI 本地存储未就绪，请重新打开本书后再试',
+      );
     }
   }
 

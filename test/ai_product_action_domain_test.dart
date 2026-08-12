@@ -124,10 +124,30 @@ void main() {
     final domains = kaijuanTestActionDomains();
     final artifacts = MemoryAiArtifactRepository();
     final adapters = domains.buildAdapters(artifacts);
-    expect(adapters.map((a) => a.actionKind), contains('test_book_export'));
     expect(
       adapters.map((a) => a.actionKind),
-      isNot(contains('create_book_mind_map')),
+      containsAll([
+        'create_book_mind_map',
+        'revise_book_mind_map',
+        'test_book_export',
+      ]),
+    );
+  });
+
+  test('production registry cannot resolve test_book_export', () {
+    final production = kaijuanProductionActionDomains();
+    expect(production.byActionKind('test_book_export'), isNull);
+    expect(production.byToolName('test_book_export'), isNull);
+    expect(
+      () => production.parseToolCall(
+        const AiModelToolCall(
+          id: 'x',
+          name: 'test_book_export',
+          arguments: {'format': 'markdown', 'instruction': 'nope'},
+        ),
+        const AiChatProductContext(),
+      ),
+      throwsA(isA<FormatException>()),
     );
   });
 }

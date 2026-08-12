@@ -105,6 +105,7 @@ class AiChatProductContext {
     this.works = const [],
     this.actionRegistry,
     this.toolParser,
+    this.capabilities = const AiCapabilitySet({}),
   });
 
   final List<AiProductArtifactAlias> artifacts;
@@ -115,81 +116,28 @@ class AiChatProductContext {
   /// edits to this class for new domains.
   final AiProductToolParser? toolParser;
 
+  /// Capability snapshot for tool listing / Policy. Must match propose/env.
+  final AiCapabilitySet capabilities;
+
   List<AiModelToolDefinition> get toolDefinitions {
-    final registryTools = actionRegistry?.toolDescriptors(
+    final registry = actionRegistry;
+    if (registry == null) {
+      // No hardcoded mind-map fallback: missing registry yields no product tools.
+      return const [];
+    }
+    final registryTools = registry.toolDescriptors(
       source: AiActionProposalSource.modelTool,
-      capabilities: const AiCapabilitySet({}),
+      capabilities: capabilities,
     );
-    if (registryTools != null) {
-      return [
-        for (final tool in registryTools)
+    return [
+      for (final tool in registryTools)
+        if (tool.name != AiProductToolNames.reviseBookMindMap ||
+            artifacts.isNotEmpty)
           AiModelToolDefinition(
             name: tool.name,
             description: tool.description,
             inputSchema: _contextualizeToolSchema(tool.inputSchema),
           ),
-      ];
-    }
-    return [
-      AiModelToolDefinition(
-        name: AiProductToolNames.createBookMindMap,
-        description:
-            'Create a native book mind map when the reader asks to generate, '
-            'draw, make, or obtain one. This is a terminal product action and '
-            'must be the only tool call in the response. Do not call it for '
-            'discussion, critique, instructions, or an explicit Mermaid request.',
-        inputSchema: {
-          'type': 'object',
-          'properties': {
-            'scope': {
-              'type': 'string',
-              'enum': [
-                'currentChapter',
-                'currentWork',
-                if (works.isNotEmpty) 'specificWork',
-                'wholePublication',
-                'unspecified',
-              ],
-            },
-            if (works.isNotEmpty)
-              'workRef': {
-                'type': 'string',
-                'enum': [for (final work in works) work.alias],
-              },
-            'instruction': {
-              'type': 'string',
-              'minLength': 1,
-              'maxLength': 2000,
-            },
-          },
-          'required': ['scope', 'instruction'],
-        },
-      ),
-      if (artifacts.isNotEmpty)
-        AiModelToolDefinition(
-          name: AiProductToolNames.reviseBookMindMap,
-          description:
-              'Revise one existing native book mind map when the reader asks '
-              'for a content change. Use the temporary artifactRef exactly as '
-              'listed in trusted product context. This is a terminal product '
-              'action and must be the only tool call in the response. Do not '
-              'call it merely to discuss or evaluate the map.',
-          inputSchema: {
-            'type': 'object',
-            'properties': {
-              'artifactRef': {
-                'type': 'string',
-                'enum': [for (final artifact in artifacts) artifact.alias],
-              },
-              'instruction': {
-                'type': 'string',
-                'minLength': 1,
-                'maxLength': 2000,
-              },
-            },
-            'required': ['artifactRef', 'instruction'],
-          },
-        ),
     ];
   }
 
@@ -243,6 +191,10 @@ class AiChatProductContext {
           'preferred=${artifact.isPreferred}',
         );
       }
+      lines.add(
+        'Revise default: omit artifactRef → preferred=true alias if any, '
+        'else the last listed alias. Readers revise by chatting; no pin step.',
+      );
     }
     lines
       ..add('Book-work capabilities:')
@@ -323,14 +275,19 @@ class AiChatProductContext {
     }
     if (call.name == AiProductToolNames.reviseBookMindMap) {
       final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
-      final matches = artifacts.where((artifact) => artifact.alias == alias);
-      if (matches.length != 1) {
-        throw const FormatException('Unknown mind-map artifact alias');
+      final matches = alias.isEmpty
+          ? const <AiProductArtifactAlias>[]
+          : artifacts.where((a) => a.alias == alias).toList();
+      final artifact = matches.length == 1
+          ? matches.single
+          : artifacts.where((a) => a.isPreferred).firstOrNull ??
+                (artifacts.isEmpty ? null : artifacts.last);
+      if (artifact == null) {
+        throw const FormatException('No mind-map artifact available to revise');
       }
-      final artifact = matches.single;
       return AiReviseBookMindMapAction(
         instruction: instruction,
-        artifactAlias: alias,
+        artifactAlias: artifact.alias,
         artifactId: artifact.artifactId,
       );
     }

@@ -40,7 +40,7 @@
 - 本书对话，按 `contentHash` 持久化，支持当前章节、选区、目录、全文取样和书内检索工具。
 - 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。停止与关闭必须在第一次点击时立即更新界面并撤销请求，不等待 transport / stream 的异步清理完成。
 - AI 对话纳入用户主动执行的 WebDAV 备份；恢复时按书籍 `contentHash` 合并并去重。
-- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。自由输入不使用关键词或第二意图模型，由同一对话模型正常回答、调用只读工具或提出结构化产品动作。产品工具只产生 Proposal；图书思维导图经 Policy、对话内确认/显式 UI、Journal 持久化 Command 和预检后才启动 Workflow；“继续修改”只绑定目标 Artifact。恢复、重试、取消和晚到结果继续复用同一 Journal。当前章、普通单书或合集中的单部作品仍将完整有效正文与用户原始要求一次发送给 `AiBookMindMapService`；分卷单书按卷依次生成，多作品合集先在对话流中纵向展示范围，生成服务不拥有字符批次、reduce 或独立结果缓存。
+- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。自由输入不使用关键词或第二意图模型。**图书思维导图是轻会话产物**：快捷或明确生成/修订后直接出原生图，接着聊即可改细（默认最近一张），不要求「继续修改」门槛，自由输入默认不弹确认生成卡；由 `AiBookMindMapService` 一次结构化生成，范围由 App 冻结。不引入 LangChain。详见 [ai-mind-map.md](./ai-mind-map.md)。**Product Action 控制面**留给整本译、导出等重任务，不是导图日常必经体验。当前章/单书/合集范围与生成规则见导图规格。
 - 大纲回答作为普通对话消息按 `contentHash` 缓存。历史结构化大纲数据继续随手动 WebDAV 快照备份和恢复，以兼容旧版本；Key 仍不备份。
 - 可选联网搜索（Tavily / Brave，独立搜索 Key）注入本书对话；Ollama 本地后端免 Key（`AiProviderKind.ollama`，模型经 `GET /v1/models` 列出）。
 - 知识图谱 M5：实体（人物/地点/事件）+ 关系 + 出处，章级增量；文件内多作品先由用户选作品，再确认具体内容单元，`allowUnreadContext` 只负责限制未读内容；随手动 WebDAV 快照备份（Key 永不备份）。规格与验收见 [ai-graph.md](./ai-graph.md)。
@@ -75,15 +75,13 @@
   → 确定性 Workflow → AiActionReceipt + Artifact
 ```
 
-当前 `AiRunProductActionRequested → AiProductActionController` 是 Proposal 入口适配；Controller 之后统一写 Journal、签发 Command，并由领域 Workflow/通用 `AiProductWorkflowExecutor` 读取 Command。产品工具调用必须是该模型响应唯一的终止动作；`AiRunOrchestrator` 或未来 Genkit Interrupt 只负责投影 Proposal。Controller 解析本轮临时别名、冻结范围、预算、取消和运行状态后交给 Policy；校验成功不等于授权。自由输入产生的思维导图创建/修订 Proposal 首阶段必须在对话内确认，快捷按钮和范围卡片等明确 UI 手势可以按 Policy 预授权。
+重任务仍可经 `AiRunProductActionRequested → AiProductActionController`（Journal / Command / Receipt）。**图书思维导图默认不强制该确认工单流**（见 [ai-mind-map.md](./ai-mind-map.md)）。
 
-模型没有返回产品工具调用、却在可见正文中明确声称已经交付原生产物时，属于协议伪完成。App 可以撤回草稿并进行至多一次只暴露相关产品工具的协议修复；修复成功也只得到 Proposal，仍须经过相同 Policy 和授权链。该守卫不扫描用户关键词决定范围，不拦截明确 Mermaid、教程、评价或概念讨论。
+模型未真正交付原生导图却声称已生成时，可做有界协议修复后走轻路径生成。评价、解释、否定、Mermaid、教程不得启动原生导图生成。修订默认绑会话内最近一张原生图；不设「继续修改」为必经步骤。
 
-本轮产物目录使用不可持久化的 `artifact_1`、`work_1` 等临时别名，附带修订号和上下文标记；模型不得提交数据库 ID。标题只用于转义后的不可信展示。存在歧义时模型普通追问，或由 App 在对话内纵向展示候选项。卡片“继续修改”只把真实 `artifactId` 作为可见、可移除的目标附件绑定到 composer，不切换成永久修订模式；评价、解释、否定等文字继续普通回答，明确修改才形成指向附件的 Proposal。
+普通输入发起模型回合前冻结章节、当前作品、manifest、会话 `workKey` 与别名目录。导图轻路径在冻结范围后直接生成/修订并写入对话附件；重任务仍可走 Journal/Command。`workKey == null` 表示整本出版物。正文与上一版导图均为不可信引用材料。
 
-普通输入发起模型回合前冻结章节、当前作品、manifest、会话 `workKey`、作品别名和产物别名。Policy 授权后签发的 Command 保存真实目标、`expectedRevision`、范围指纹、原始指令和幂等键；失败重试不修改 Command，而是在 Journal 中复用幂等效果并创建新的 Workflow attempt。`workKey == null` 表示整本出版物，非空时必须精确恢复对应作品，禁止退回实时阅读位置。上一版树和正文都是不可信引用材料。
-
-普通聊天 Mermaid 仍是通用富内容能力，不进入原生导图产物目录，也不解析、导入或自动迁移为 `AiBookMindMap`。未来 Genkit Agent 只能替换普通对话运行时；Proposal、Policy、授权、Journal、确定性 Workflow、Artifact 与 WebDAV 边界继续由开卷拥有。
+普通聊天 Mermaid 仍是通用富内容，不进入原生导图。不引入 LangChain。Genkit 只做模型 I/O；产品边界由开卷拥有。
 
 ---
 
@@ -606,7 +604,8 @@ AiBookLanguageProvider（或 Composite）
 - [x] 聊天消息时间线、输入区和导图范围选择卡片使用公开 Widget 输入/回调；系统 TTS 已从 `BookReaderController` 拆入独立 Controller，公共门面行为不变。
 - [x] 图谱 Tab 的作品选择、生成确认、视图/排序、实体导航与全屏路由迁入 `BookAiGraphWorkspace`；原生导图的附件、范围等待、布局/揭示/指针状态迁入 `BookAiMindMapCoordinator`，证据与全屏路由迁入 `BookAiMindMapRoutes`。主 Sheet 不再持有第二份图谱展示或导图交互状态机。
 - [x] headless Runtime Harness 同时提供离线确定性验收与显式 BYOK live 模式，覆盖回答、读工具、现有产品行动事件、结构化思维导图、续写、transport 取消和脱敏报告。
-- [ ] Product Action Protocol v1 落地：Tool Call 只产生 Proposal；Policy/确认签发 Command；Journal/Receipt 可恢复；附件只绑定目标；幂等、revision 冲突、取消晚到和语义负例通过验收。
+- [x] Product Action Protocol v1 平台能力已具备（重任务用）；图书思维导图改为轻会话主路径，见 [ai-mind-map.md](./ai-mind-map.md)。
+- [x] 导图实现收敛：去掉自由输入确认卡与强制「继续修改」，对齐轻路径验收。
 - [ ] Workflow Extension Contract v1 落地：Action Definition、能力门禁、多层版本、通用 Adapter、强类型 Artifact 与 Receipt 投影通过契约测试；新增测试动作不修改通用 Controller 分发代码。
 - [ ] Genkit Agent 经功能开关、真实 HTTP 取消、模型矩阵和 Trace 验证后替换普通聊天循环。
 

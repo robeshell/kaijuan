@@ -83,32 +83,42 @@ void main() {
           createdAt: now,
           expiresAt: now.add(const Duration(hours: 1)),
         ),
+        capabilities: const AiCapabilitySet({
+          'book.read',
+          'structuredOutput',
+        }),
       );
     }
 
-    test('"生成思维导图" model tool requires confirmation', () async {
+    test('"生成思维导图" model tool auto-allows without confirmation card', () async {
       final evaluation = await evaluate(
         text: '生成思维导图',
         source: AiActionProposalSource.modelTool,
         actionKind: 'create_book_mind_map',
         args: const {'scope': 'currentChapter', 'instruction': '生成思维导图'},
       );
-      expect(evaluation.needsConfirmation, isTrue);
+      expect(evaluation.needsConfirmation, isFalse);
+      expect(evaluation.canProceedWithoutConfirmation, isTrue);
+      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
       expect(evaluation.entry.command, isNull);
+      expect(evaluation.decision.reasonCode, 'mind_map_light_path');
     });
 
-    test('explicit UI create is allowed without chat confirmation', () async {
+    test('explicit UI create stays proposed until freeze (no chat confirm)',
+        () async {
       final evaluation = await evaluate(
         text: '请为当前章生成思维导图',
         source: AiActionProposalSource.explicitUi,
         actionKind: 'create_book_mind_map',
         args: const {'scope': 'currentChapter', 'instruction': '请为当前章生成思维导图'},
       );
-      expect(evaluation.authorized, isTrue);
-      expect(evaluation.entry.command, isNotNull);
+      expect(evaluation.needsConfirmation, isFalse);
+      expect(evaluation.canProceedWithoutConfirmation, isTrue);
+      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
+      expect(evaluation.entry.command, isNull);
     });
 
-    test('revise with attachment still requires confirmation', () async {
+    test('revise model tool auto-allows without confirmation card', () async {
       final evaluation = await evaluate(
         text: '把这张图再详细一点',
         source: AiActionProposalSource.modelTool,
@@ -117,7 +127,9 @@ void main() {
         targetRef: 'map-1',
         expectedRevision: 1,
       );
-      expect(evaluation.needsConfirmation, isTrue);
+      expect(evaluation.needsConfirmation, isFalse);
+      expect(evaluation.canProceedWithoutConfirmation, isTrue);
+      expect(evaluation.entry.status, AiActionJournalStatus.proposed);
     });
   });
 
@@ -163,6 +175,7 @@ void main() {
     test('parses create against registry tool names', () {
       final context = AiChatProductContext(
         actionRegistry: AiBookMindMapProductActions.registry,
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
       final request = context.parse(
         const AiModelToolCall(
@@ -185,6 +198,7 @@ void main() {
           ),
         ],
         actionRegistry: AiBookMindMapProductActions.registry,
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
       );
       final request = context.parse(
         const AiModelToolCall(
@@ -195,6 +209,66 @@ void main() {
       );
       expect(request, isA<AiReviseBookMindMapAction>());
       expect((request as AiReviseBookMindMapAction).artifactId, 'map-1');
+    });
+
+    test('parses revise without artifactRef to preferred then latest', () {
+      final context = AiChatProductContext(
+        artifacts: const [
+          AiProductArtifactAlias(
+            alias: 'artifact_1',
+            artifactId: 'map-old',
+            title: '旧图',
+            revision: 1,
+          ),
+          AiProductArtifactAlias(
+            alias: 'artifact_2',
+            artifactId: 'map-preferred',
+            title: '优先图',
+            revision: 2,
+            isPreferred: true,
+          ),
+        ],
+        actionRegistry: AiBookMindMapProductActions.registry,
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+      );
+      final request = context.parse(
+        const AiModelToolCall(
+          id: '1',
+          name: 'revise_book_mind_map',
+          arguments: {'instruction': '再详细一点'},
+        ),
+      );
+      expect(request, isA<AiReviseBookMindMapAction>());
+      expect(
+        (request as AiReviseBookMindMapAction).artifactId,
+        'map-preferred',
+      );
+
+      final latestOnly = AiChatProductContext(
+        artifacts: const [
+          AiProductArtifactAlias(
+            alias: 'artifact_1',
+            artifactId: 'map-a',
+            title: 'A',
+            revision: 1,
+          ),
+          AiProductArtifactAlias(
+            alias: 'artifact_2',
+            artifactId: 'map-b',
+            title: 'B',
+            revision: 1,
+          ),
+        ],
+        actionRegistry: AiBookMindMapProductActions.registry,
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
+      ).parse(
+        const AiModelToolCall(
+          id: '2',
+          name: 'revise_book_mind_map',
+          arguments: {'instruction': '展开人物'},
+        ),
+      );
+      expect((latestOnly as AiReviseBookMindMapAction).artifactId, 'map-b');
     });
   });
 }

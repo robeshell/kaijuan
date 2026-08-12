@@ -11,8 +11,21 @@ import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_provider_kind.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
+import 'package:kaijuan/ai/ai_product_action_protocol.dart';
+import 'package:kaijuan/ai/ai_book_mind_map_product_actions.dart';
 import 'package:kaijuan/ai/ai_run.dart';
 import 'package:kaijuan/ai/ai_search.dart';
+
+
+const kTestProductCaps = AiCapabilitySet({'book.read', 'structuredOutput'});
+
+AiChatProductContext kTestProductContext({
+  List<AiProductArtifactAlias> artifacts = const [],
+}) => AiChatProductContext(
+  artifacts: artifacts,
+  actionRegistry: AiBookMindMapProductActions.registry,
+  capabilities: kTestProductCaps,
+);
 
 void main() {
   group('AiChatService.buildMessages (tool mode)', () {
@@ -467,6 +480,7 @@ void main() {
               bookTitle: '万历十五年',
               tools: host,
               reasoningEnabled: true,
+              productContext: kTestProductContext(),
             )
             .toList();
 
@@ -575,6 +589,7 @@ void main() {
             context: const AiChatContextBundle(),
             bookTitle: '书',
             tools: _FakeHost(),
+            productContext: kTestProductContext(),
           )
           .toList();
 
@@ -637,6 +652,7 @@ void main() {
               context: const AiChatContextBundle(),
               bookTitle: '万历十五年',
               tools: _FakeHost(),
+              productContext: kTestProductContext(),
             )
             .toList();
 
@@ -733,8 +749,8 @@ void main() {
               history: const [],
               context: const AiChatContextBundle(),
               bookTitle: '书',
-              productContext: const AiChatProductContext(
-                artifacts: [
+              productContext: kTestProductContext(
+                artifacts: const [
                   AiProductArtifactAlias(
                     alias: 'artifact_1',
                     artifactId: 'real-map-id',

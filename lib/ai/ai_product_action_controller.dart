@@ -14,6 +14,14 @@ class AiActionEvaluation {
   bool get needsClarification =>
       decision.outcome == AiActionDecisionOutcome.requireClarification;
   bool get authorized => entry.status == AiActionJournalStatus.authorized;
+
+  /// Allowed and ready to run freeze → authorize → execute (no human confirm).
+  /// Mind-map light path lands in [AiActionJournalStatus.proposed] with allow.
+  bool get canProceedWithoutConfirmation =>
+      decision.outcome == AiActionDecisionOutcome.allow &&
+      (entry.status == AiActionJournalStatus.authorized ||
+          entry.status == AiActionJournalStatus.proposed ||
+          entry.status == AiActionJournalStatus.queued);
 }
 
 enum AiActionRecoveryDisposition {
@@ -128,10 +136,17 @@ class AiProductActionController {
             definition: definition,
             now: _now(),
           );
+    // Mind-map (and explicit UI with defer) stay [proposed] until scope is
+    // frozen and authorizeAfterFreeze issues the real Command.
+    final isBookMindMap =
+        snapshotProposal.actionKind == 'create_book_mind_map' ||
+        snapshotProposal.actionKind == 'revise_book_mind_map';
     final status = switch (decision.outcome) {
       AiActionDecisionOutcome.allow =>
-        deferExplicitAuthorization &&
-                snapshotProposal.source == AiActionProposalSource.explicitUi
+        isBookMindMap ||
+                (deferExplicitAuthorization &&
+                    snapshotProposal.source ==
+                        AiActionProposalSource.explicitUi)
             ? AiActionJournalStatus.proposed
             : AiActionJournalStatus.authorized,
       AiActionDecisionOutcome.requireConfirmation =>

@@ -12,6 +12,7 @@ abstract final class AiBookMindMapProductActions {
       AiActionProposalSource.modelTool,
       AiActionProposalSource.explicitUi,
     },
+    requiredCapabilities: {'book.read', 'structuredOutput'},
     toolName: 'create_book_mind_map',
     toolDescription: 'Create a native book mind map from frozen book content.',
     argumentSchema: {
@@ -48,15 +49,23 @@ abstract final class AiBookMindMapProductActions {
       AiActionProposalSource.modelTool,
       AiActionProposalSource.explicitUi,
     },
+    requiredCapabilities: {'book.read', 'structuredOutput'},
     toolName: 'revise_book_mind_map',
-    toolDescription: 'Revise one frozen native book mind map artifact.',
+    toolDescription:
+        'Revise an existing native book mind map in this conversation. '
+        'Omit artifactRef to revise the preferred/latest map. Use when the '
+        'reader asks to expand, detail, restructure, or change that map.',
     argumentSchema: {
       'type': 'object',
       'properties': {
-        'artifactRef': {'type': 'string'},
+        'artifactRef': {
+          'type': 'string',
+          'description':
+              'Optional temporary alias (artifact_n). Defaults to preferred/latest.',
+        },
         'instruction': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
       },
-      'required': ['artifactRef', 'instruction'],
+      'required': ['instruction'],
     },
     artifactKind: 'book_mind_map',
     artifactSchemaVersion: 1,

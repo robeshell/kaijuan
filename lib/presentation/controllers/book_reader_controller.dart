@@ -236,10 +236,7 @@ class BookReaderController extends ChangeNotifier {
   /// book). The outline tab follows the reading position: loading/saving
   /// routes to `session.workOutlines[key]`.
   String? _bookOutlineWorkKey;
-  AiOutlineProgress? _bookOutlineProgress;
   String? _bookOutlineError;
-  CancelToken? _bookOutlineCancel;
-  Future<void>? _bookOutlineGeneration;
   AiBookGraph? _bookGraph;
 
   /// Graph of the work currently shown/generated when viewing a collection
@@ -594,9 +591,9 @@ class BookReaderController extends ChangeNotifier {
   }
 
   AiBookOutline? get bookOutline => _bookOutline;
-  AiOutlineProgress? get bookOutlineProgress => _bookOutlineProgress;
+  AiOutlineProgress? get bookOutlineProgress => null;
   String? get bookOutlineError => _bookOutlineError;
-  bool get isGeneratingBookOutline => _bookOutlineGeneration != null;
+  bool get isGeneratingBookOutline => false;
 
   /// Loads the cached outline for this exact content hash. This does not call
   /// the model; a book is only generated when the user explicitly requests it.
@@ -628,168 +625,12 @@ class BookReaderController extends ChangeNotifier {
     return outline;
   }
 
-  /// Generates a chapter outline in batches. The controller owns the job, so
-  /// closing the AI sheet does not cancel it while the reader remains open.
-  Future<void> generateBookOutline({Set<int>? excludedSectionIndices}) {
-    final active = _bookOutlineGeneration;
-    if (active != null) return active;
-    final done = Completer<void>();
-    _bookOutlineGeneration = done.future;
-    unawaited(() async {
-      try {
-        await _generateBookOutline(
-          excludedSectionIndices: excludedSectionIndices,
-        );
-        done.complete();
-      } catch (error, stackTrace) {
-        done.completeError(error, stackTrace);
-      }
-    }());
-    unawaited(
-      done.future.whenComplete(() {
-        _bookOutlineGeneration = null;
-        _bookOutlineCancel = null;
-        if (!_disposed) notifyListeners();
-      }),
-    );
-    return done.future;
-  }
-
-  Future<void> _generateBookOutline({Set<int>? excludedSectionIndices}) async {
-    final service = _aiWorkspace.outline;
-    if (service == null || !canUseAiChat) {
-      _bookOutlineError = 'AI 未启用或未配置';
-      if (!_disposed) notifyListeners();
-      return;
-    }
-    _bookOutlineError = null;
-    final cancel = CancelToken();
-    _bookOutlineCancel = cancel;
+  /// Retired production surface. Structured batch outline is no longer a
+  /// product path — use the book chat shortcut "生成本书大纲" instead.
+  @Deprecated('Use chat outline shortcut via normal conversation send')
+  Future<void> generateBookOutline({Set<int>? excludedSectionIndices}) async {
+    _bookOutlineError = '大纲请使用本书对话中的「生成本书大纲」快捷操作';
     if (!_disposed) notifyListeners();
-    try {
-      // 文件内合订：大纲 = 当前阅读作品；普通/分部单本：整本。
-      // Capture the work key ONCE: generation runs for seconds and the user
-      // may flip pages — the content must be stored under the key it was
-      // generated from, never re-read at save time.
-      var work = currentReadingWork;
-      // 单本书首次生成：currentReadingWork 为 null。做一次结构识别——
-      // 如果它把当前阅读位置定位进合订文件中的某部作品，就按该范围
-      // 生成；普通单本和分部/分卷单本仍使用整本范围。
-      if (work == null) {
-        final resolved = await resolveGraphWorkCandidates(cancel: cancel);
-        if (resolved != null && resolved.length > 1) {
-          work = currentReadingWork;
-        }
-      }
-      final usesManualScope = excludedSectionIndices != null;
-      // If no work can be resolved (uncertain structure or collection front
-      // matter), null deliberately falls back to a whole-publication outline.
-      // The UI may still offer a manual range, but location is never a gate.
-      final startWorkKey = work == null ? null : workKeyFor(work);
-
-      final List<AiBookSectionSlice> sections;
-      if (usesManualScope) {
-        sections = excludeGraphSections(
-          await _graphSectionsForWork(null),
-          excludedSectionIndices,
-        ).where((s) => s.text.trim().isNotEmpty).toList(growable: false);
-      } else if (work != null) {
-        sections = (await _graphSectionsForWork(
-          work,
-        )).where((s) => s.text.trim().isNotEmpty).toList(growable: false);
-      } else {
-        final body = await _aiCorpus.loadNavigation(
-          AiBookOutlineService.maxBookBodyChars,
-        );
-        sections = AiChatRetrieve.splitSections(body);
-      }
-      if (sections.isEmpty) throw AiProviderException('无法读取本书正文');
-      final titled = _withTitles(
-        sections,
-        fallback: (section) =>
-            _titleForOutlineSection(section.originSectionIndex),
-      );
-      // In manual mode the chooser already showed every readable unit and
-      // the user's decision is final. Automatic filtering here would silently
-      // discard a preface/afterword they explicitly re-selected.
-      final outlineSections = usesManualScope
-          ? titled
-          : _filterOutlineSections(titled);
-      if (outlineSections.isEmpty) {
-        throw AiProviderException('没有可用于生成大纲的正文');
-      }
-      AiLog.d(
-        'outline sections=${outlineSections.length} '
-        'range=${work == null ? 'whole-book' : '${work.startSection}..${work.endSectionExclusive}'}',
-      );
-      final generated = await _executeAiWorkflow<AiBookOutline>(
-        descriptor: AiRunDescriptor(
-          runId: AiRunIds.next(),
-          task: AiRunTask.bookOutline,
-          scope: AiRunScope(
-            contentHash: item.contentHash,
-            workKey: startWorkKey,
-            label: work?.title,
-          ),
-        ),
-        budget: AiRunBudget(
-          maxModelCalls: (outlineSections.length * 3 + 8).clamp(16, 256),
-        ),
-        cancelToken: cancel,
-        body: (execution) => service.generate(
-          bookTitle: work?.title ?? item.title,
-          bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-          collectionTitle: work == null ? null : item.title,
-          structureKind: work == null
-              ? (_bookStructureManifest?.kind ?? AiBookStructureKind.singleWork)
-              : AiBookStructureKind.singleWork,
-          sections: outlineSections,
-          cancelToken: execution.cancelToken,
-          onModelStarted: execution.modelStarted,
-          onUsage: ({inputTokens, outputTokens}) => execution.reportTokens(
-            inputTokens: inputTokens,
-            outputTokens: outputTokens,
-          ),
-          onProgress: (progress) {
-            execution.progress(progress.label);
-            _bookOutlineProgress = progress;
-            if (!_disposed) notifyListeners();
-          },
-        ),
-      );
-      // The user explicitly asked for this outline — show it. A page flip
-      // during generation must not hide the result: the saved data is keyed
-      // by startWorkKey and the following 翻页/切 Tab reload switches to the
-      // then-current work. (A plain book has no work key and always matches.)
-      final outline = usesManualScope
-          ? generated.copyWith(
-              excludedSectionIndices: (excludedSectionIndices.toList()..sort())
-                  .toList(growable: false),
-            )
-          : generated;
-      _bookOutline = outline;
-      _bookOutlineWorkKey = startWorkKey;
-      _bookOutlineProgress = null;
-      await _saveBookOutline(outline, workKey: startWorkKey);
-      if (!_disposed) notifyListeners();
-    } on AiProviderException catch (error) {
-      _bookOutlineProgress = null;
-      AiLog.d('outline failed: ${error.message}');
-      if (!cancel.isCancelled) {
-        _bookOutlineError = aiUserErrorMessage(
-          error,
-          operation: AiUserOperation.outline,
-        );
-      }
-      if (!_disposed) notifyListeners();
-    } catch (error, stack) {
-      _bookOutlineProgress = null;
-      AiLog.d('outline failed: $error\n$stack');
-      if (!cancel.isCancelled) {
-        _bookOutlineError = '生成大纲失败，请稍后重试';
-      }
-      if (!_disposed) notifyListeners();
-    }
   }
 
   String _titleForOutlineSection(int sectionIndex1Based) {
@@ -799,17 +640,6 @@ class BookReaderController extends ChangeNotifier {
       return toc[index].trim();
     }
     return '第 $sectionIndex1Based 节';
-  }
-
-  /// EPUB spine often contains a TOC, copyright page and other paratext.
-  /// Sampling and batching belong to [AiBookOutlineService]; this controller
-  /// only removes unambiguous metadata before the model sees the body.
-  List<AiBookSectionSlice> _filterOutlineSections(
-    List<AiBookSectionSlice> sections,
-  ) {
-    return sections
-        .where((section) => !_isOutlineMetadataSection(section))
-        .toList(growable: false);
   }
 
   AiContentRuleWords get _contentRuleWords => _aiWorkspace.contentRuleWords;
@@ -833,57 +663,9 @@ class BookReaderController extends ChangeNotifier {
     return _contentRuleWords.metadataUnits.any((word) => word.trim() == title);
   }
 
-  bool _isOutlineMetadataSection(AiBookSectionSlice section) {
-    if (_isOutlineMetadataTitle(section.label) ||
-        _isGraphAppendixLabel(section.label)) {
-      return true;
-    }
-    // A navigation target is already a named work/volume boundary. MOBI
-    // collections often put that work's own contents page before its body;
-    // treating the prefix as global metadata would discard the whole work.
-    if (section.isNavigationUnit) return false;
-    final text = section.text.trim();
-    if (text.isEmpty) {
-      // An empty body is metadata — unless it is a book/volume container
-      // (JS emits an explicit #level marker with a real title like 呐喊),
-      // which must survive for deterministic structure recognition.
-      return section.label.trim().isEmpty;
-    }
-    final prefix = text.length > 640 ? text.substring(0, 640) : text;
-    final compact = prefix.replaceAll(RegExp(r'\s+'), '');
-    if (RegExp(r'^(目录|目次)(?:[：:]|$)').hasMatch(compact)) return true;
-    final hasCopyrightSignal = RegExp(
-      r'ISBN|图书在版编目|版权所有|版权归属|版权信息',
-    ).hasMatch(prefix);
-    return hasCopyrightSignal && RegExp(r'出版|出版社|版权|编目').hasMatch(prefix);
-  }
 
-  Future<void> _saveBookOutline(
-    AiBookOutline outline, {
-    String? workKey,
-  }) async {
-    await _enqueueChatSessionWrite(() async {
-      final store = _chatHistoryStore;
-      if (store == null) return;
-      final current = await store.read(
-        contentHash: item.contentHash,
-        itemId: item.id,
-      );
-      final base =
-          current ??
-          AiChatSession(contentHash: item.contentHash, itemId: item.id);
-      await store.write(
-        workKey == null
-            ? base.copyWith(outline: outline)
-            : base.copyWith(
-                workOutlines: {...base.workOutlines, workKey: outline},
-              ),
-      );
-    });
-  }
 
   Future<void> deleteBookOutline() async {
-    if (isGeneratingBookOutline) return;
     await _enqueueChatSessionWrite(() async {
       final store = _chatHistoryStore;
       if (store != null) {
@@ -919,9 +701,7 @@ class BookReaderController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  void cancelBookOutlineGeneration() {
-    _bookOutlineCancel?.cancel();
-  }
+  void cancelBookOutlineGeneration() {}
 
   // ------------------------------------------------------------------
   // Book mind map — independent from chat Mermaid and the knowledge graph.
@@ -1032,7 +812,9 @@ class BookReaderController extends ChangeNotifier {
         (frozenCurrentChapter == null
             ? await bookMindMapSections(work: target, useFrozenWork: true)
             : <AiBookSectionSlice>[frozenCurrentChapter]);
-    return _aiWorkspace.generateMindMap(
+    // Content hook only — product intents must go through
+    // generateMindMapsInConversation / runMindMapProductAction.
+    return _aiWorkspace.generateMindMapContent(
       contentHash: item.contentHash,
       workKey: target == null ? null : workKeyFor(target),
       publicationTitle: target?.title ?? item.title,
@@ -1184,8 +966,6 @@ class BookReaderController extends ChangeNotifier {
   List<AiGraphWorkCandidate>? get resolvedGraphWorks => resolvedBookWorks;
 
   AiBookStructureManifest? get bookStructureManifest => _aiStructure.manifest;
-
-  AiBookStructureManifest? get _bookStructureManifest => _aiStructure.manifest;
 
   List<AiBookWork>? get _resolvedBookWorks => _aiStructure.scopedWorks;
 
@@ -2289,7 +2069,7 @@ class BookReaderController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _aiWorkspace.dispose();
-    _bookOutlineCancel?.cancel();
+
     _bookGraphCancel?.cancel();
     _attachGeneration++;
     _preferences.removeListener(_notifyPreferencesChanged);

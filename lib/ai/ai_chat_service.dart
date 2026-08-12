@@ -789,12 +789,16 @@ class AiChatService {
       ..writeln('Native product actions:')
       ..writeln(
         '- For a request to create a native book mind map, call '
-        'create_book_mind_map directly. The App workflow will load the body; '
-        'do not fetch or sample book text first.',
+        'create_book_mind_map directly. The App runs it without a confirmation '
+        'card. The App workflow will load the body; do not fetch or sample book '
+        'text first.',
       )
       ..writeln(
-        '- For a requested content revision to an existing native map, call '
-        'revise_book_mind_map with one listed artifact alias.',
+        '- For a requested content revision (e.g. more detail, expand a branch), '
+        'call revise_book_mind_map. Prefer omitting artifactRef so the App uses '
+        'the preferred map (preferred=true) or the most recent native map. Pass '
+        'artifactRef only when the reader names a specific listed alias. No '
+        'confirmation card; do not ask the reader to press a continue-edit button.',
       )
       ..writeln(
         '- A product action must be the sole tool call in that response and '

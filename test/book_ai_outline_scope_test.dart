@@ -23,6 +23,7 @@ import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_search.dart';
 import 'package:kaijuan/domain/reader_models.dart';
 import 'package:kaijuan/library/persistence/app_database.dart';
+import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 import 'package:kaijuan/presentation/controllers/book_reader_controller.dart';
 import 'package:kaijuan/presentation/widgets/app_components.dart';
 import 'package:kaijuan/presentation/widgets/reader/book_ai_chat_sheet.dart';
@@ -30,8 +31,21 @@ import 'package:kaijuan/presentation/widgets/reader/book_ai_language_sheet.dart'
 import 'package:kaijuan/presentation/widgets/reader/book_ai_mind_map_view.dart';
 import 'package:kaijuan/readers/book/book_language_actions.dart';
 
+/// Widget harness: product actions need durable stores + capabilities that
+/// production attaches via reader open + AI settings.
+void _enableProductActionsForTest(BookReaderController controller) {
+  controller.aiWorkspace.markAiStoresReady(ready: true);
+  controller.aiWorkspace.overrideCapabilitiesForTest(
+    const AiCapabilitySet({'book.read', 'structuredOutput'}),
+  );
+}
+
 class _AmbiguousOutlineController extends BookReaderController {
-  _AmbiguousOutlineController({required super.database, required super.item});
+  _AmbiguousOutlineController({required super.database, required super.item}) {
+    // Production attaches stores on reader open + capabilities via AI settings.
+    // Widget harnesses skip those; enable light-path product actions here.
+    _enableProductActionsForTest(this);
+  }
 
   @override
   bool get canUseAiChat => true;
@@ -594,6 +608,8 @@ void main() {
     await tester.tap(find.text('生成本章思维导图'));
     await tester.pumpAndSettle();
     expect(find.text('重试'), findsOneWidget);
+    expect(find.text('确认生成'), findsNothing);
+    expect(find.text('继续修改'), findsNothing);
 
     await tester.tap(find.text('重试'));
     await tester.pumpAndSettle();
@@ -687,8 +703,9 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '为这本书生成思维导图');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('确认生成'));
-    await tester.pumpAndSettle();
+    // Free-input light path: no confirmation card, no continue-edit pin.
+    expect(find.text('确认生成'), findsNothing);
+    expect(find.text('继续修改'), findsNothing);
     expect(tester.takeException(), isNull);
     expect(controller.structureResolveCalls, structureCallsBeforeWholeBook + 1);
     expect(controller.lastMindMapSourceSectionIndex, isNull);
@@ -697,40 +714,22 @@ void main() {
     // The conversation ListView lazily builds only the visible artifact card.
     expect(find.byType(BookAiMindMapView), findsWidgets);
     expect(find.text('已根据《思维导图测试》的 2 章内容生成思维导图。'), findsOneWidget);
-    final editButton = tester.widget<TextButton>(
-      find
-          .ancestor(
-            of: find.text('继续修改').last,
-            matching: find.byType(TextButton),
-          )
-          .last,
-    );
-    editButton.onPressed!();
-    await tester.pump();
-    expect(find.textContaining('正在修改：'), findsOneWidget);
+    expect(find.textContaining('正在修改：'), findsNothing);
+
     final actionCallsBeforeRevision = controller.productActionRequests;
     final generationsBeforeRevision = controller.generatedMindMapScopes.length;
+    // Session revise without attachment — defaults to latest native map.
     await tester.enterText(find.byType(TextField).last, '再详细一点');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    // Attachment only binds the target. Free input still goes through the
-    // product-action control plane (Proposal → confirmation → Command).
     expect(controller.productActionRequests, actionCallsBeforeRevision + 1);
-    await tester.tap(find.text('确认生成'));
-    await tester.pumpAndSettle();
+    expect(find.text('确认生成'), findsNothing);
     expect(
       controller.generatedMindMapScopes,
       hasLength(generationsBeforeRevision + 1),
     );
     expect(controller.lastExistingMindMap, isNotNull);
     expect(controller.chatStreams, isEmpty);
-    expect(find.textContaining('正在修改：'), findsOneWidget);
-
-    final editAttachment = tester.widget<InputChip>(
-      find.byType(InputChip).first,
-    );
-    editAttachment.onDeleted!();
-    await tester.pump();
     expect(find.textContaining('正在修改：'), findsNothing);
 
     await tester.enterText(find.byType(TextField).last, '为什么这样整理？');
@@ -836,8 +835,6 @@ void main() {
         ..chatChapterSectionIndex = 4;
       controller.productActionGate!.complete();
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('确认生成'));
-      await tester.tap(find.text('确认生成'));
       await tester.pumpAndSettle();
 
       expect(controller.lastMindMapWork, same(firstWork));
@@ -1023,8 +1020,6 @@ void main() {
       await tester.enterText(find.byType(TextField).last, '再丰富点');
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('确认生成'));
-      await tester.pumpAndSettle();
 
       expect(controller.generatedMindMapScopes, ['原始主题']);
       expect(controller.lastExistingMindMap?.artifactId, 'native-map');
@@ -1165,8 +1160,6 @@ void main() {
       await tester.enterText(find.byType(TextField).last, '修改这张思维导图');
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('确认生成'));
-      await tester.pumpAndSettle();
       expect(find.textContaining('作品范围已经变化'), findsOneWidget);
       expect(controller.mindMapSectionCalls, 0);
       expect(controller.generatedMindMapScopes, isEmpty);
@@ -1180,8 +1173,6 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pump();
       await tester.pump();
-      await tester.ensureVisible(find.text('确认生成'));
-      await tester.tap(find.text('确认生成'));
       await tester.pump();
       expect(controller.mindMapSectionCalls, 1);
       expect(
@@ -1207,8 +1198,6 @@ void main() {
       );
       await tester.enterText(find.byType(TextField).last, '增加更多事实细节');
       await tester.testTextInput.receiveAction(TextInputAction.send);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('确认生成'));
       await tester.pumpAndSettle();
       expect(controller.generatedMindMapScopes, hasLength(2));
       expect(tester.takeException(), isNull);
@@ -1283,8 +1272,6 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '生成整本书思维导图');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('确认生成'));
-    await tester.pumpAndSettle();
 
     expect(find.text('本书包含 2 部作品，共 4 章'), findsOneWidget);
     expect(find.text('全部作品'), findsOneWidget);
@@ -1334,8 +1321,6 @@ void main() {
     expect(controller.generatedMindMapScopes, isEmpty);
 
     await tester.tap(find.byTooltip('发送').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('确认生成'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey<String>('ai-mind-map-scope-0')));
     await tester.pumpAndSettle();
@@ -1395,8 +1380,6 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '生成整本书思维导图');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pump();
-    await tester.pump();
-    await tester.tap(find.text('确认生成'));
     await tester.pump();
 
     expect(find.byTooltip('停止'), findsOneWidget);

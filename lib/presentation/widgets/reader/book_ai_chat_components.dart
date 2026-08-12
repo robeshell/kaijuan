@@ -445,7 +445,6 @@ class BookAiChatTimeline extends StatelessWidget {
     required this.onMindMapLayoutChanged,
     required this.onOpenMindMapEvidence,
     required this.onOpenMindMapFullscreen,
-    required this.onContinueEditingMindMap,
     required this.onMindMapRevealed,
     required this.onMindMapPointerChanged,
     required this.onRetry,
@@ -483,7 +482,6 @@ class BookAiChatTimeline extends StatelessWidget {
   final void Function(AiChatMessage, AiMindMapLayout) onMindMapLayoutChanged;
   final ValueChanged<AiMindMapEvidence> onOpenMindMapEvidence;
   final ValueChanged<AiChatMessage> onOpenMindMapFullscreen;
-  final ValueChanged<AiChatMessage> onContinueEditingMindMap;
   final ValueChanged<AiChatMessage> onMindMapRevealed;
   final ValueChanged<bool> onMindMapPointerChanged;
   final VoidCallback onRetry;
@@ -563,9 +561,6 @@ class BookAiChatTimeline extends StatelessWidget {
               onOpenMindMapFullscreen: message.mindMap == null
                   ? null
                   : () => onOpenMindMapFullscreen(message),
-              onContinueEditingMindMap: message.mindMap == null
-                  ? null
-                  : () => onContinueEditingMindMap(message),
               revealMindMapOnMount:
                   message.mindMap != null &&
                   message.turnId == mindMapRevealTurnId,
@@ -656,7 +651,6 @@ class BookAiBubble extends StatelessWidget {
     this.onMindMapLayoutChanged,
     this.onOpenMindMapEvidence,
     this.onOpenMindMapFullscreen,
-    this.onContinueEditingMindMap,
     this.revealMindMapOnMount = false,
     this.onMindMapRevealed,
     this.onMindMapPointerHoverChanged,
@@ -668,7 +662,6 @@ class BookAiBubble extends StatelessWidget {
   final ValueChanged<AiMindMapLayout>? onMindMapLayoutChanged;
   final ValueChanged<AiMindMapEvidence>? onOpenMindMapEvidence;
   final VoidCallback? onOpenMindMapFullscreen;
-  final VoidCallback? onContinueEditingMindMap;
   final bool revealMindMapOnMount;
   final VoidCallback? onMindMapRevealed;
   final ValueChanged<bool>? onMindMapPointerHoverChanged;
@@ -748,20 +741,6 @@ class BookAiBubble extends StatelessWidget {
                   ),
                 ),
               ),
-              if (onContinueEditingMindMap != null) ...[
-                const SizedBox(height: 4),
-                Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: TextButton.icon(
-                    key: ValueKey<String>(
-                      'ai-mind-map-edit-${map.artifactId ?? message.turnId ?? map.scopeFingerprint}',
-                    ),
-                    onPressed: onContinueEditingMindMap,
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    label: const Text('继续修改'),
-                  ),
-                ),
-              ],
             ],
           ],
           if (isUser && webHits != null) ...[

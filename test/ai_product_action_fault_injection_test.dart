@@ -62,6 +62,7 @@ void main() {
         expiresAt: now.add(const Duration(hours: 1)),
       ),
       deferExplicitAuthorization: true,
+      capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
     );
     final authorized = await controller.authorize(
       proposalId: proposalId,
@@ -129,7 +130,7 @@ void main() {
       actions: controller,
       adapters: AiWorkflowAdapterRegistry([adapter]),
       environment: AiWorkflowEnvironment(
-        capabilities: const AiCapabilitySet({}),
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
         checkpoints: MemoryAiWorkflowCheckpointStore(),
         now: () => now,
       ),
@@ -153,6 +154,7 @@ void main() {
     () async {
       final workspace = BookAiWorkspaceController(
         saveChatSession: (_) async {},
+        aiStoresReady: true,
       );
       workspace.conversation.hydrate(
         const AiChatSession(contentHash: 'hash', itemId: 'item'),
@@ -296,7 +298,7 @@ void main() {
       actions: controller,
       adapters: AiWorkflowAdapterRegistry([adapter]),
       environment: AiWorkflowEnvironment(
-        capabilities: const AiCapabilitySet({}),
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
         checkpoints: MemoryAiWorkflowCheckpointStore(),
         now: () => now,
       ),
@@ -343,7 +345,7 @@ void main() {
       actions: controller,
       adapters: AiWorkflowAdapterRegistry([adapter]),
       environment: AiWorkflowEnvironment(
-        capabilities: const AiCapabilitySet({}),
+        capabilities: const AiCapabilitySet({'book.read', 'structuredOutput'}),
         checkpoints: MemoryAiWorkflowCheckpointStore(),
         now: () => now,
       ),

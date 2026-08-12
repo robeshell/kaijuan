@@ -286,17 +286,17 @@
 | 本书对话 | **已有（MVP）** | 顶栏「本书 AI」；**按需 tool 取文**（目录/当前章/按节/书内搜/全书取样），不默认灌全书；可选联网补充；最终回答严格跟随用户问题语言，中文请求不得夹带英文的工具、理解或规划过渡句；会话按 **contentHash** 存盘；见 [ai.md](./specs/ai.md) |
 | 统一 AI 运行时 | **已有** | `AiRunOrchestrator` 统一 run 状态/事件、冻结作用域、预算、取消、usage 与 checkpoint；对话、词典/翻译、结构化大纲与知识图谱全部只依赖 App 自有 `AiModelAdapter`，OpenAI Compatible 和 Anthropic 的 Genkit adapter 精确锁版并隔离。工具使用原生 Function Calling / Tool Use，确定性 Workflow 使用 Schemantic + Genkit 结构化输出；DeepSeek 按其原生 `json_object` 能力输出合法 JSON，再由同一 schema 与业务校验拒绝不合格结果，不退回 fenced JSON。旧 `AiProvider` 双栈及旧 transport 已删除。模型列表是独立只读 catalog，连接测试也走 adapter；见 [完整收口记录](./research/ai-runtime-genkit-completion-plan.md) |
 | Agent 运行时收口 | **进行中** | 新增 App 自有 `AiAgentRuntime` 稳定契约；先把现有 `AiChatService` 包装为兼容实现，再以 Genkit `defineAgent` 承接普通对话的会话、工具循环、Interrupt 与 Trace。产品工具只产生 Proposal，经 Gateway、Policy、确认、Journal 签发 Command 后才能调用确定性 Workflow；Genkit Session/Artifact 不是数据库与 WebDAV 的事实源。仓库提供不读取 App 安全存储的 headless E2E Harness：离线伪端点用于 CI，用户显式提供环境变量时才调用真实 BYOK 端点，并输出脱敏的运行事件、工具调用、产品行动和结构化 Workflow 报告 |
-| AI 产品动作控制协议 | **已有（v1 控制面；语义评测扩充中）** | Proposal → Policy → Command → Journal → Executor → Artifact/checkpoint → Receipt → 对话投影；失败重试复用原 Command；思维导图谱系 head CAS；崩溃窗口可恢复。完整语义评测集仍在扩充。见 [ai-product-actions.md](./specs/ai-product-actions.md) |
+| AI 产品动作控制协议 | **已有（v1 平台能力）** | Proposal → Policy → Command → Journal → Receipt，供**重任务**（整本译、导出、外写等）使用。**图书思维导图默认不再以完整确认/工单流为产品主路径**（轻会话，见 [ai-mind-map.md](./specs/ai-mind-map.md)）。知识图谱为 Domain Job（自有 `ai_graph/`，见 [ai-product-actions.md](./specs/ai-product-actions.md) §3.6）。 |
 | AI Workflow 扩展契约 | **已有（v1 契约；领域按需接入）** | 注册化 Domain/Tool 解析、能力门禁、持久 checkpoint/Artifact/lineage head、第二测试 Workflow 全链路证明。PPT 只是协议参考场景，**不是当前已立项能力**；见 [ai-workflow-extension.md](./specs/ai-workflow-extension.md) |
-| AI 大纲 | **已有（对话快捷操作）** | 本书 AI「对话」中的「生成本书大纲」快捷操作，直接复用对话的书内上下文、检索工具与流式回答，不再提供独立 Tab、范围选择或分批汇总任务；回答作为普通对话消息保存。旧结构化大纲缓存继续兼容读取、备份与恢复，避免历史数据丢失，但不再作为主入口展示 |
-| 图书思维导图 | **已有（MVP）** | 作为本书对话中的原生结构化 Artifact 生成，使用完整有效正文、用户原始要求、书型和单一主导组织原则，由 `AiBookMindMapService` 返回结构化主题树；普通 Mermaid 继续是独立富内容。当前章、作品、出版物、分卷与多作品范围继续由 App 冻结和确认，结果支持修订谱系、三种原生布局、折叠、拖缩、详情、证据跳转和 PNG 导出。自由输入仍只进入一次普通对话回合，不增加关键词路由或第二意图模型；产品工具在目标协议中只产生 Proposal。卡片“继续修改”只绑定目标 Artifact，不授权之后的任意文字；明确修订经 Policy 与对话内确认后才执行，快捷入口和范围卡片可按显式 UI 策略预授权。动作控制迁移见 [ai-product-actions.md](./specs/ai-product-actions.md)，导图内容与交互见 [ai-mind-map.md](./specs/ai-mind-map.md) |
+| AI 大纲 | **已有（对话快捷操作）** | 本书 AI「对话」中的「生成本书大纲」快捷操作，直接复用对话的书内上下文、检索工具与流式回答；回答作为普通对话消息保存。**不再提供**独立结构化大纲生成任务或主入口；会话 JSON 中的历史 `outline` 字段可忽略。 |
+| 图书思维导图 | **已有（MVP）；轻会话路径** | 本书对话内原生主题树 + 画布（非独立 Tab）。快捷或自然语言生成后**直接出图**；**接着聊即可改细**（默认最近/preferred 一张），无「继续修改」按钮门槛，自由输入**不弹确认生成卡**。App 冻结章/作品/全书范围；`AiBookMindMapService` 一次结构化生成；支持布局/折叠/导出等。普通 Mermaid 独立。不引入 LangChain。规格见 [ai-mind-map.md](./specs/ai-mind-map.md)。 |
 | 整本 / 按章翻译任务 | **中** | 后台队列、进度、可取消；**复用翻译偏好**；契约 `fullBookTranslation` 已预留 |
 | 知识图谱 | **已有（v3）** | 保留本书 AI 入口与单本/分段单本/文件内多作品识别；识别后由用户先选作品、再选该作品的具体内容单元。程序可以把前言、目录、附言、索引等标为“建议排除”并默认取消，但必须完整展示并允许重新选择，不能把范围绑定到当前阅读位置。确认范围后逐节抽取、逐节原子快照；实体覆盖人物、地点、事件、组织、物件、概念与非人角色，关系和可定位出处以稳定 ID 相连；家族树只接收证据复核后的代际亲属边并全程按 ID 构建。展示采用固定索引 + 关系图/家族树探索层。见 [ai-graph.md](./specs/ai-graph.md)、[ai-graph-pipeline.md](./specs/ai-graph-pipeline.md)、[ai-graph-narration.md](./specs/ai-graph-narration.md)。 |
 | 导出个人知识库（Obsidian 等） | **中** | 单向 Markdown 导出（划线、笔记、大纲、钉选回答）；先不做双向同步 |
 | 漫画页图 AI | **远** | OCR / 分镜理解另立项 |
 | 全局 AI Tab / 账号托管模型 | **不做** | |
 
-图书思维导图产品工具属于本书对话同一模型回合。模型可读取正常的有限会话历史和 App 提供的可信产物别名目录，但产品工具本身不读取正文；目标链路中 Tool Call 先成为 Proposal，App 在 Policy、确认与预检完成后才签发 Command 并向确定性 Workflow 注入冻结正文。
+图书思维导图属于本书对话同一模型回合的**轻量会话产物**：可经快捷或对话工具发起，App 冻结范围并注入正文后直接生成/修订并写入对话附件。默认体验对齐「会话改图」，不以 Product Action 确认卡为必经步骤（重任务协议见 [ai-product-actions.md](./specs/ai-product-actions.md)）。
 
 ### 6.4 建议落地顺序
 
@@ -310,10 +310,10 @@ M2c 统一 AiRun 状态 / 事件                               ← 已有 MVP
 M2d AiRunOrchestrator + 隔离 Genkit 适配层 + 原生工具调用 ← 已有 MVP
 M2e 词典/翻译/大纲/图谱统一使用 Genkit adapter，删除旧完成链路 ← 进行中
 M2f 独立 AI Workspace + AiAgentRuntime；兼容实现先行，Genkit Agent 灰度切换
-M2g Product Action Protocol v1；Proposal / Policy / 授权 / Journal / Receipt ← 已有（思维导图生产链接入；语义评测扩充中）
-M2h Workflow Extension Contract v1；注册 / 能力 / 版本 / Adapter / Artifact ← 已有（通用契约 + 持久化 + 测试 Workflow）
-M3  AI 大纲（结构化任务 + 本地缓存 + 可跳转）                 ← 已有 MVP
-M3b 图书思维导图（独立确定性 Workflow + 原生布局）           ← 已有
+M2g Product Action Protocol v1（平台；重任务用）← 已有
+M2h Workflow Extension Contract v1 ← 已有
+M3  AI 大纲（对话快捷）← 已有
+M3b 图书思维导图（轻会话 + 原生布局；去确认工单）← 已有，体验收敛中
 M4  按章 / 整本翻译任务（复用翻译偏好）
 M5  知识图谱 v2（稳定 ID/关系/出处/断点） ← 已有（[ai-graph.md](./specs/ai-graph.md)）
 M6  Markdown / Obsidian 导出
@@ -390,7 +390,7 @@ M6  Markdown / Obsidian 导出
 |--------|------|------|
 | **P0** | AI M1b：翻译偏好与选区译深化（ai-translation T0–T2） | **已有** |
 | **P1** | AI M2–M3：本书对话与大纲 | **已有（MVP）** |
-| **P1a** | AI 产品动作控制协议 v1：先接思维导图创建/修订 | **已有（生产链接入；完整语义评测扩充中）** |
+| **P1a** | AI 产品动作控制协议 v1（重任务平台） | **已有**；导图默认轻路径见 M3b |
 | **P1b** | AI Workflow 扩展契约 v1：通用注册、能力门禁、版本与 Artifact | **已有（通用契约 + 持久化 + 测试 Workflow）** |
 | — | AI M5：知识图谱 | **已有（v2）** |
 | **P2** | 听书 T2（语速持久化、选区朗读等） | **中** |

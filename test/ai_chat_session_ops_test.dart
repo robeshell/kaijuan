@@ -7,7 +7,9 @@ import 'package:kaijuan/ai/ai_conversation_intent.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_models.dart';
 import 'package:kaijuan/ai/ai_mind_map.dart';
+import 'package:kaijuan/ai/ai_book_mind_map_product_actions.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
+import 'package:kaijuan/ai/ai_product_action_protocol.dart';
 
 void main() {
   const base = AiChatSession(contentHash: 'hash', itemId: 'book');
@@ -84,16 +86,22 @@ void main() {
   });
 
   test('product context exposes only temporary native artifact aliases', () {
-    const context = AiChatProductContext(
-      artifacts: [
+    final context = AiChatProductContext(
+      artifacts: const [
         AiProductArtifactAlias(
           alias: 'artifact_1',
           artifactId: 'private-map-id',
           title: '全书主题',
           revision: 2,
           isAdjacent: true,
+          isPreferred: true,
         ),
       ],
+      actionRegistry: AiBookMindMapProductActions.registry,
+      capabilities: const AiCapabilitySet({
+        'book.read',
+        'structuredOutput',
+      }),
     );
 
     expect(context.toolDefinitions.map((tool) => tool.name), [
@@ -101,6 +109,8 @@ void main() {
       AiProductToolNames.reviseBookMindMap,
     ]);
     expect(context.trustedPrompt, contains('artifact_1'));
+    expect(context.trustedPrompt, contains('preferred=true'));
+    expect(context.trustedPrompt, contains('omit artifactRef'));
     expect(context.trustedPrompt, isNot(contains('private-map-id')));
 
     final request = context.parse(
@@ -112,6 +122,16 @@ void main() {
     );
     expect(request, isA<AiReviseBookMindMapAction>());
     expect((request as AiReviseBookMindMapAction).artifactId, 'private-map-id');
+
+    // Light path: omit artifactRef → preferred/latest.
+    final omitted = context.parse(
+      const AiModelToolCall(
+        id: 'call-2',
+        name: AiProductToolNames.reviseBookMindMap,
+        arguments: {'instruction': '再详细一点'},
+      ),
+    );
+    expect((omitted as AiReviseBookMindMapAction).artifactId, 'private-map-id');
   });
 
   test('product context rejects invented artifact aliases', () {

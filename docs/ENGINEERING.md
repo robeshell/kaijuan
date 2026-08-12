@@ -119,7 +119,7 @@ BookAiChatView
     → BookContextGateway / App repositories / WebDAV snapshot
 ```
 
-- `BookAiWorkspaceController` 持有独立的 `BookAiConversationController` 与 `BookAiMindMapController`。前者拥有有界会话消息、联网/模型 run、流式投影、重试身份、部分回答 checkpoint、终态提交和会话持久化；后者拥有原生导图附件、批次进度、确定性顺序执行、产物谱系和产品 turn 终态。Widget 只冻结阅读上下文、承载范围选择交互、调用 Controller 并渲染投影，不再自行订阅模型流或执行 Workflow 循环。
+- `BookAiWorkspaceController` 持有 `BookAiConversationController` 与导图相关能力。Widget 不直连模型流。**图书思维导图目标为轻会话路径**（快捷/对话直接生成与修订，无默认确认工单），规格见 [specs/ai-mind-map.md](./specs/ai-mind-map.md)；实现若仍走 Journal/确认，属待收敛债。**Product Action 控制面**保留给重任务；图谱为 Domain Job。架构讨论见 [research/ai-architecture-consolidation.md](./research/ai-architecture-consolidation.md)。**不引入 LangChain**；模型 I/O 用现有 Genkit adapter。
 - `AiAgentRuntime` 是 App 自有的纯 Dart 契约，输入包含冻结作用域、历史、可用产品别名和预算，输出继续使用 `AiRunEvent` 完整快照语义。任何 Genkit 类型不得越过该边界进入表现层或产品持久化。
 - `AiProductActionController` 是所有产品动作的单一控制平面：模型 Tool Call、显式快捷入口和范围卡片统一投影为 `AiActionProposal`，经纯 Dart `AiActionPolicy` 得到允许、对话内确认、补充或拒绝结果；只有有效授权才能签发不可变 `AiAuthorizedCommand`。失败重试与崩溃恢复仍经同一 Controller，但只引用既有 Command/Journal 并创建新的 Workflow attempt，不重新解析意图。Controller 在 Workflow 前原子写入 `AiActionJournal`，完成后提交 `AiActionReceipt`。正式状态、字段和迁移顺序见 [specs/ai-product-actions.md](./specs/ai-product-actions.md)。
 - `ProductActionRegistry` 只接受编译期 `AiProductActionDefinition`：每个动作必须声明唯一 action kind、封闭 schema、风险、作用域、所需能力、Gateway、`AiWorkflowAdapter`、可选 Artifact definition 及独立版本。注册表负责冲突校验、可用性发现和最小 Tool 目录，不决定授权、不读取实时翻页位置、不执行 Workflow。新增动作不得要求修改通用 Controller 的 action switch；完整契约见 [specs/ai-workflow-extension.md](./specs/ai-workflow-extension.md)。
@@ -127,7 +127,7 @@ BookAiChatView
 - `AiCapabilityResolver` 按 Runtime、Provider、模型、平台、设置和依赖生成能力快照。动作按 required/optional/oneOf 声明 structured output、长上下文、真实取消、渲染器、文件写入或外部服务等能力；未满足 required 能力时既不暴露给 Agent，也不能由显式 UI 绕过。
 - `LegacyAiAgentRuntime` 在迁移期包装当前 `AiChatService`，保证提示词、原生 Function Calling、四轮工具上限、八轮续写、取消和错误语义不变；`GenkitAgentRuntime` 通过功能开关和同一契约测试灰度替换。
 - Genkit Agent 在通过运行时契约后可以拥有普通对话的模型工具循环、运行时 Session/Snapshot、Interrupt/Resume、Retry 和 Trace；开卷仍拥有 EPUB 解析、书籍/作品范围授权、预算、产品任务取消、领域 Artifact 版本、checkpoint、数据库、WebDAV 与 UI 状态。
-- `create_book_mind_map`、`revise_book_mind_map`、图谱和翻译等是产品工具。Agent 只提交 App 签发的别名与用户要求，其 Tool Call 只能产生 Proposal；模型、别名解析和范围校验都不构成执行授权。`AiBookMindMapActionGateway` 等 App 网关解析真实身份并复核冻结范围，`AiProductActionController` 按 Policy 获取授权、写入 Journal，再把 Command 交给领域 Controller 和确定性 Workflow。模型不得直接写数据库 ID。网关是纯校验/解析边界，不读取实时翻页位置、不决定授权，也不渲染 UI。
+- 导图生成由对话层触发后，App 冻结范围并调用 `AiBookMindMapService`（`completeJson`）；别名/范围解析可复用 gateway 思路，但**产品验收不以 Journal 确认卡为准**。重任务仍经 `AiProductActionController`。模型不得直接写数据库 ID。
 - Genkit Dart 当前仍是 Preview 依赖，必须精确锁版。升级只能发生在隔离 adapter/runtime 内，并经过伪 Provider、DeepSeek/OpenAI Compatible、Anthropic、流式取消、工具调用、Interrupt 和会话恢复契约测试；生产路径必须可回退到兼容运行时。
 - 当前锁定的 Genkit Dart `0.15.1` 明确没有把本地 attached Agent 的取消信号传入正在进行的 `generate`。在 SDK 修复且开卷的模型矩阵验证通过前，`GenkitAgentRuntime` 不得成为默认运行时；不能用仅更新 UI 状态的“假取消”替代底层 HTTP 中止。
 - 默认切换由 App 自有 `AiAgentRuntimeGate` 执行，而不是靠注释或人工约定。即使请求使用 Genkit Agent，也必须同时存在 runtime factory，并通过 attached 请求真实取消、Provider 矩阵、工具与 Interrupt/Resume、Trace/Snapshot、统一 Runtime 契约测试；任一条件缺失即确定性回退 `LegacyAiAgentRuntime`，并保留可观察 blocker 列表。
@@ -149,7 +149,7 @@ BookAiChatView
 - `BookAiReaderGateway` 承担阅读快照到 Agent turn 的上下文、工具宿主、联网与追问桥接；`book_ai_chat_components.dart` 只放无业务状态的对话展示组件。`BookReaderController` 与 `book_ai_chat_sheet.dart` 不再通过 `part` 共享私有状态来伪装拆分。
 - 大文件继续按可独立验证的组合边界拆分，不以 `part`、跨文件私有状态或只有一层转发的兼容门面充数：
   - `BookAiGraphWorkspace` 独占图谱 Tab 的视图/排序/折叠、生成确认、作品选择、实体详情、证据跳转及全屏路由；生成/取消/checkpoint 继续经 `BookReaderController` 既有 AI 应用门面进入 `AiGraphService`，不在 Workspace 复制图谱缓存或持久化状态。主 AI Sheet 只选择 Tab、组合对话/图谱工作区。
-  - `BookAiMindMapCoordinator` 组合既有 `BookAiMindMapController` 与对话 Controller，独占附件、范围选择等待态、布局持久化、揭示与指针交互状态；`BookAiMindMapRoutes` 独占证据跳转和原生全屏路由。产品动作解析、授权、Journal 和 Workflow 调度迁入 `AiProductActionController` 与领域 Controller；主 Sheet 只提交 UI 事件和渲染结构化等待态，不复制提示词、Policy 或生成状态机。
+  - 导图：Coordinator/Routes 负责画布交互与路由；生成入口应收敛为轻会话 API，主 Sheet 不复制确认工单状态机。重任务才走 Product Action Host。
   - `BookAnnotationsController` 独占批注列表、选择菜单状态机、数据库 watch、Foliate annotation bridge 与笔记操作；`BookSearchController` 独占搜索/图片查看状态和对应 bridge；`BookReaderPreferencesController` 独占排版偏好、字体存储与持久化；`BookReaderBridge` 独占 Foliate 页导航、seek 与正文读取回调。`BookReaderController` 组合这些职责，只保留阅读定位、书签、chrome、生命周期、AI 应用门面与 TTS 公共门面。
   - 系统听书继续由独立 `BookTtsController` 持有引擎、句游标、速率与播放循环；`BookReaderController` 保留既有 TTS 公共门面，避免修改 UI 与 Foliate bridge 契约。
   - 子 Controller 只通过公开构造依赖、不可变输入和显式回调协作；不得各自复制当前 section、locator、作品或会话状态。拆分不得改变 UI、AI 提示词、思维导图/图谱结构与持久化、WebDAV、阅读器行为或系统 TTS 行为。
@@ -174,7 +174,7 @@ BookAiChatView
 | 层 | 当前实现 | 保持不变 / 禁止越界 |
 |----|----------|----------------------|
 | 事件与状态 | `AiRunEvent` 带稳定 `runId`、单调序号、冻结作用域、进度、回答快照、可选思考过程快照、usage 与唯一终态；`AiRunState` 纯 reducer 可幂等重放；controller 保留最近 20 个 run 状态 | 回答与思考过程事件均是可替换快照，不是 token delta；事件不直接成为 Drift / WebDAV schema |
-| 对话产品工具 | 未附加产物的自由输入只进入 `AiChatService` 的同一受控模型回合；除五个只读书内工具外，App 按本轮上下文动态声明 `create_book_mind_map` / `revise_book_mind_map`。模型不调用产品工具时正常回答；调用时必须作为该回合唯一的终止工具请求，`AiRunOrchestrator` 发出 Proposal 事件，由 `AiProductActionController` 写 Journal、执行 Policy、确认并签发 Command，再交给领域 Workflow 或通用 `AiProductWorkflowExecutor`。若模型未调用产品工具却在正文中明确声称已交付原生思维导图，`AiChatService` 撤回该草稿并进行至多一次仅暴露产品工具的协议修复。普通模型回合只暴露 `artifact_1` / `work_1` 等临时别名，不暴露数据库 ID；原生附件以 `artifactId / sourceArtifactId / revision` 追踪谱系，普通 Mermaid 不进入产物目录 | 不增加前置意图模型、自由文本关键词路由、标题包含匹配、`targetMode` 规则矩阵或第二套 transport。模型 Product Tool Call 只能产生 Proposal；必须经 App Policy、对话内确认或显式 UI、Journal 和预检签发 `AiAuthorizedCommand` 后才可启动 Workflow。Controller 使用发送前冻结的章节、作品、manifest、会话 `workKey` 和产物目录重新映射别名，并校验同书范围、预算、取消和运行状态；这些校验不替代授权。附件只绑定冻结的真实产物身份，不把普通评价、提问或否定句授权为修订。读工具与产品终止工具不得在同一模型响应中混用。普通聊天 Mermaid 和图书原生导图保持独立；完整迁移见 [ai-product-actions.md](./specs/ai-product-actions.md) |
+| 对话产品工具 | 只读工具 + 可选导图生成/修订能力；导图默认轻路径直接执行并写入 `ai_chat` 附件。重任务才经 Product Action Journal | 导图不以确认卡/强制「继续修改」为验收；不引入 LangChain；Mermaid ≠ 原生导图 |
 | 开卷编排器 | `AiRunOrchestrator` 统一预算、取消、超时、模型/工具/续写计数、checkpoint hook 与错误分类；对话为最多四轮的受控 Tool Agent | 不把作品定位、权限、持久化或 UI 状态交给模型框架；不做多 Agent |
 | 模型适配层 | `lib/ai/adapters/` 隔离 `GenkitOpenAiModelAdapter` 与 `GenkitAnthropicModelAdapter`；精确固定 `genkit 0.15.1`、`genkit_openai 0.3.7`、`genkit_anthropic 0.2.11`。App 自有 `AiModelAdapter` 只表达单次回合、原生工具请求、可选推理 delta、推理展示类型、工具连续性元数据和结构化 JSON；Anthropic 模型列表仍走只读 `GET /v1/models` transport；可重试 transport/HTTP 错误只允许在首个可见文本或推理输出前自动重试一次。Provider 推理字段由 adapter 内的能力策略映射：DeepSeek `thinking.type`，Anthropic `thinking` adaptive/disabled，OpenAI / xAI / Ollama `reasoning_effort`，自定义兼容端点开启时尽力发送通用字段、关闭时完全省略。锁版 `genkit_openai` 会把 schema 一律映射成 OpenAI `json_schema`；DeepSeek 只接受原生 `json_object`，因此隔离的 HTTP decorator 只对 DeepSeek 把该字段降为 `json_object`，并把同一 JSON Schema 注入模型消息；Genkit 仍负责 JSON 解析，Schemantic/Workflow 继续执行结构与业务校验。OpenAI Compatible 返回的 `reasoning_content` / `reasoning` / `thinking` 与 Anthropic `ReasoningPart` 统一映射为 App 事件；供应商要求跨工具回合保留的推理内容、签名和不可见 `redacted_thinking` 必须按原顺序回传 | Genkit、插件 SDK 与供应商协议类型不得进入 UI、controller、数据库和备份 schema；不得声称展示完整思维链；不得把 DeepSeek 兼容分支扩散到其他 Provider、改成 fence 截取或绕过 schema/业务校验；插件或供应商协议升级必须重新跑对应适配器协议、取消和异常终态测试 |
 | 协议选择 | OpenAI / DeepSeek / Grok / 自定义 / Ollama 使用 Genkit OpenAI Compatible adapter；Anthropic 使用 Genkit Anthropic adapter；适配器缺失或端点不支持时本轮明确失败 | 不做跨协议隐式回退、手写 Messages 对话 adapter、fenced JSON 或旧 Provider 对话回退；不放宽五个只读工具、冻结作品范围和本地参数预算 |
@@ -182,7 +182,7 @@ BookAiChatView
 
 `AiRunEvent` 只表达模型与任务运行事实，不是持久化 schema。Product Action Protocol 迁移后，Proposal、Decision、Command 与 Receipt 可以投影为新的类型化运行事件，但可恢复授权和幂等事实只写 App 自有 `AiActionJournal`，不得靠回放模型文字重建。`AiRunCheckpoint` 自身带版本，但 payload 仍由既有工作流存储负责；当前图谱继续写原有 `AiBookGraph` 快照，不把临时事件写入 `ai_chat` / Drift / WebDAV。对话终态可把供应商公开的推理过程或推理摘要写入 `AiChatMessage.reasoningContent`，并以 `reasoningKind` 区分展示文案，随同一会话 JSON 和 WebDAV 快照保存；它与回答正文分栏、默认折叠，不参与回答复制和后续普通消息历史。签名等协议连续性元数据只存活于当前运行，不写入会话或备份。Genkit 内部 trace 只允许留在 adapter 边界，产品运行事实以 `AiRunEvent` 为准，产品授权事实以 Journal 为准。
 
-思维导图附件只为对话轮次绑定可信目标，不把任意后续文字直接授权为修订。Agent 可以基于附件正常回答，也可以提出修订 Proposal；Policy 确认用户确实要求修改并取得授权后，修订 Command 才占用发送槽位、锁定 `targetArtifactId + expectedRevision`，并冻结附件所在会话的 `workKey`。正文范围恢复下沉到 Controller 预检，Widget 只能提交结构化附件事件、用户指令和确认结果。Controller 不得把一个活动生成 Future 复用给参数不同的后续请求。恢复正文范围时，附件 `workKey == null` 表示整本出版物，非空值必须在当前 manifest 中精确匹配，匹配失败即中止，不得退回当前阅读作品。上一版导图与正文都属于不可信引用数据；并发修订使用 revision compare-and-set，旧 Command 不得覆盖新版本。
+图书思维导图：对话消息附件为持久化事实；会话修订默认最近一张图，评价/解释/否定不生成。范围冻结与 `workKey` 语义仍由 App 负责。详见 [specs/ai-mind-map.md](./specs/ai-mind-map.md)。
 
 对话 composer 只允许一个提交入口：Flutter `EditableText.onSubmitted`、发送按钮、快捷入口和重试最终都经过同一互斥锁。桌面 Enter 不得同时由外层 `Focus.onKeyEvent` 再触发一遍；真实输入在首次提交时冻结，输入连接在任何异步结构/搜索/模型工作前结束并跨过当前 frame，防止 macOS IME 在 semantics/layout 阶段回写 controller。重复平台 action 不得产生第二个 `turnId` 或重复 Workflow。
 

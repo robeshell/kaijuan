@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../ai/ai_agent_runtime.dart';
 import '../../ai/ai_agent_runtime_gate.dart';
 import '../../ai/ai_book_mind_map_service.dart';
@@ -13,8 +15,8 @@ import '../../ai/ai_language_service.dart';
 import '../../ai/ai_log.dart';
 import '../../ai/ai_mind_map.dart';
 import '../../ai/ai_models.dart';
-import '../../ai/ai_outline.dart';
 import '../../ai/ai_product_action_controller.dart';
+import '../../ai/ai_product_action_domain.dart';
 import '../../ai/ai_product_action_protocol.dart';
 import '../../ai/ai_run.dart';
 import '../../ai/ai_run_orchestrator.dart';
@@ -33,6 +35,10 @@ import 'book_ai_mind_map_controller.dart';
 /// This controller deliberately has no reading-engine callbacks, database, or
 /// Widget state. [BookReaderController] remains a compatibility facade while
 /// chat UI and deterministic workflows migrate to this boundary.
+///
+/// Product actions (mind map create/revise) only run after [markAiStoresReady]
+/// when durable Journal/Artifact/Checkpoint stores are attached. Until then
+/// [aiStoresReady] is false and the chat sheet must not propose/recover.
 class BookAiWorkspaceController {
   BookAiWorkspaceController({
     required AiChatSessionWriter saveChatSession,
@@ -44,36 +50,22 @@ class BookAiWorkspaceController {
     this.requestedAgentRuntime = AiAgentRuntimeKind.compatible,
     this.genkitAgentCapabilities = AiAgentRuntimeCapabilities.genkitDart0151,
     this.onChanged,
+    /// Tests may start ready with Memory stores. Production readers must call
+    /// [markAiStoresReady] only after JSON stores attach successfully.
+    bool aiStoresReady = false,
   }) : conversation = BookAiConversationController(saveChatSession),
-       actionController = AiProductActionController(
-         registry: AiBookMindMapProductActions.registry,
-         journal: actionJournal ?? MemoryAiActionJournalStore(),
-       ),
+       actionDomains = kaijuanProductionActionDomains(),
        artifactRepository = artifactRepository ?? MemoryAiArtifactRepository(),
        workflowCheckpoints =
-           workflowCheckpoints ?? MemoryAiWorkflowCheckpointStore() {
+           workflowCheckpoints ?? MemoryAiWorkflowCheckpointStore(),
+       _aiStoresReady = aiStoresReady,
+       _aiStoresError = null {
+    actionController = AiProductActionController(
+      registry: actionDomains.asActionRegistry(productionOnly: true),
+      journal: actionJournal ?? MemoryAiActionJournalStore(),
+    );
     mindMapConversation = BookAiMindMapController(conversation);
-    createMindMapAdapter = AiBookMindMapWorkflowAdapter(
-      actionKind: AiBookMindMapProductActions.create.actionKind,
-      artifacts: this.artifactRepository,
-    );
-    reviseMindMapAdapter = AiBookMindMapWorkflowAdapter(
-      actionKind: AiBookMindMapProductActions.revise.actionKind,
-      artifacts: this.artifactRepository,
-    );
-    workflowAdapters = AiWorkflowAdapterRegistry([
-      createMindMapAdapter,
-      reviseMindMapAdapter,
-    ]);
-    workflowExecutor = AiProductWorkflowExecutor(
-      actions: actionController,
-      adapters: workflowAdapters,
-      environment: AiWorkflowEnvironment(
-        capabilities: const AiCapabilitySet({}),
-        checkpoints: this.workflowCheckpoints,
-        now: DateTime.now,
-      ),
-    );
+    _rebuildAdaptersFromDomains();
     agentRuntimeDecision = AiAgentRuntimeGate.decide(
       requested: requestedAgentRuntime,
       genkitCapabilities: genkitAgentCapabilities,
@@ -87,15 +79,34 @@ class BookAiWorkspaceController {
   final AiAgentRuntimeCapabilities genkitAgentCapabilities;
   final void Function()? onChanged;
   final BookAiConversationController conversation;
+  final AiProductActionDomainRegistry actionDomains;
   late final BookAiMindMapController mindMapConversation;
   late final AiAgentRuntimeDecision agentRuntimeDecision;
-  final AiProductActionController actionController;
+  late final AiProductActionController actionController;
   AiArtifactRepository artifactRepository;
   AiWorkflowCheckpointStore workflowCheckpoints;
   late AiBookMindMapWorkflowAdapter createMindMapAdapter;
   late AiBookMindMapWorkflowAdapter reviseMindMapAdapter;
   late AiWorkflowAdapterRegistry workflowAdapters;
   late AiProductWorkflowExecutor workflowExecutor;
+
+  bool _aiStoresReady;
+  String? _aiStoresError;
+
+  /// Durable Journal/Artifact/Checkpoint stores are attached and usable.
+  bool get aiStoresReady => _aiStoresReady;
+
+  /// User-visible reason when attach failed; null when ready or not yet tried.
+  String? get aiStoresError => _aiStoresError;
+
+  /// Marks durable AI control stores as ready (or failed). Fail-closed: never
+  /// silently treat Memory defaults as durable production state after a failed
+  /// attach attempt.
+  void markAiStoresReady({required bool ready, String? error}) {
+    _aiStoresReady = ready;
+    _aiStoresError = ready ? null : (error ?? _aiStoresError);
+    onChanged?.call();
+  }
 
   void replaceActionJournal(AiActionJournalStore store) {
     actionController.replaceJournal(store);
@@ -107,19 +118,7 @@ class BookAiWorkspaceController {
   }) {
     artifactRepository = artifacts;
     workflowCheckpoints = checkpoints;
-    createMindMapAdapter = AiBookMindMapWorkflowAdapter(
-      actionKind: AiBookMindMapProductActions.create.actionKind,
-      artifacts: artifacts,
-    );
-    reviseMindMapAdapter = AiBookMindMapWorkflowAdapter(
-      actionKind: AiBookMindMapProductActions.revise.actionKind,
-      artifacts: artifacts,
-    );
-    workflowAdapters = AiWorkflowAdapterRegistry([
-      createMindMapAdapter,
-      reviseMindMapAdapter,
-    ]);
-    _rebuildExecutor();
+    _rebuildAdaptersFromDomains();
   }
 
   void registerExtraAdapters(Iterable<AiWorkflowAdapter> extra) {
@@ -127,12 +126,55 @@ class BookAiWorkspaceController {
     _rebuildExecutor();
   }
 
+  void _rebuildAdaptersFromDomains() {
+    final built = actionDomains.buildAdapters(artifactRepository);
+    createMindMapAdapter =
+        built.firstWhere(
+              (adapter) =>
+                  adapter.actionKind ==
+                  AiBookMindMapProductActions.create.actionKind,
+            )
+            as AiBookMindMapWorkflowAdapter;
+    reviseMindMapAdapter =
+        built.firstWhere(
+              (adapter) =>
+                  adapter.actionKind ==
+                  AiBookMindMapProductActions.revise.actionKind,
+            )
+            as AiBookMindMapWorkflowAdapter;
+    workflowAdapters = AiWorkflowAdapterRegistry(built);
+    _rebuildExecutor();
+  }
+
+  /// App-owned capability snapshot for tool listing, Policy, and Workflow env.
+  ///
+  /// Vocabulary (v1):
+  /// - `book.read` — frozen book corpus is available for this open item
+  /// - `structuredOutput` — model adapter can run completeJson workflows
+  AiCapabilitySet? _capabilityOverrideForTest;
+
+  /// Test-only: force capability snapshot (widget harness without AI settings).
+  @visibleForTesting
+  void overrideCapabilitiesForTest(AiCapabilitySet? capabilities) {
+    _capabilityOverrideForTest = capabilities;
+  }
+
+  AiCapabilitySet resolveCapabilities() {
+    final override = _capabilityOverrideForTest;
+    if (override != null) return override;
+    final values = <String>{'book.read'};
+    if (_settings?.isReadyForRequests == true && _mindMap != null) {
+      values.add('structuredOutput');
+    }
+    return AiCapabilitySet(values);
+  }
+
   void _rebuildExecutor() {
     workflowExecutor = AiProductWorkflowExecutor(
       actions: actionController,
       adapters: workflowAdapters,
       environment: AiWorkflowEnvironment(
-        capabilities: const AiCapabilitySet({}),
+        capabilities: resolveCapabilities(),
         checkpoints: workflowCheckpoints,
         now: DateTime.now,
       ),
@@ -420,7 +462,6 @@ class BookAiWorkspaceController {
   AiSettingsController? _settings;
   AiLanguageService? _language;
   AiAgentRuntime? _agentRuntime;
-  AiBookOutlineService? _outline;
   AiBookMindMapService? _mindMap;
   AiBookGraphService? _graph;
   String? _mindMapProgress;
@@ -437,7 +478,6 @@ class BookAiWorkspaceController {
     if (identical(_settings, settings) &&
         (settings == null) == (_language == null) &&
         (settings == null) == (_agentRuntime == null) &&
-        (settings == null) == (_outline == null) &&
         (settings == null) == (_mindMap == null) &&
         (settings == null) == (_graph == null)) {
       return false;
@@ -461,13 +501,8 @@ class BookAiWorkspaceController {
             openModelAdapter: ({reasoningEnabled}) =>
                 settings.openModelAdapter(reasoningEnabled: reasoningEnabled),
           );
-    _outline = settings == null
-        ? null
-        : AiBookOutlineService(
-            isAvailable: () => settings.isReadyForRequests,
-            openModelAdapter: () => settings.openModelAdapter(),
-            settings: () => settings.settings,
-          );
+    // Structured outline service is retired from production assembly.
+    // Product path: chat shortcut → normal conversation message only.
     _mindMap = settings == null
         ? null
         : AiBookMindMapService(
@@ -488,7 +523,6 @@ class BookAiWorkspaceController {
   AiSettingsController? get settingsController => _settings;
   AiLanguageService? get language => _language;
   AiAgentRuntime? get agentRuntime => _agentRuntime;
-  AiBookOutlineService? get outline => _outline;
   AiBookMindMapService? get mindMap => _mindMap;
   AiBookGraphService? get graph => _graph;
   String? get mindMapProgress => _mindMapProgress;
@@ -577,7 +611,11 @@ class BookAiWorkspaceController {
     return result;
   }
 
-  Future<AiBookMindMap?> generateMindMap({
+  /// Content-generation hook for one frozen unit. Used only as the
+  /// `generateMap` callback inside [runMindMapProductAction] — not a product
+  /// entry. Presentation must not call this for user intents; product path is
+  /// always Proposal → Command → [runMindMapProductAction].
+  Future<AiBookMindMap?> generateMindMapContent({
     required String contentHash,
     required String? workKey,
     required String publicationTitle,

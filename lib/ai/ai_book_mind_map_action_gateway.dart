@@ -5,6 +5,7 @@ import 'ai_mind_map.dart';
 import 'ai_models.dart';
 import 'ai_product_action.dart';
 import 'ai_product_action_domain.dart';
+import 'ai_product_action_protocol.dart';
 
 class AiBookMindMapTurnSnapshot {
   const AiBookMindMapTurnSnapshot({
@@ -51,6 +52,7 @@ abstract final class AiBookMindMapActionGateway {
     required AiBookMindMapTurnSnapshot scopeSnapshot,
     String? preferredArtifactId,
     AiProductActionDomainRegistry? domainRegistry,
+    AiCapabilitySet capabilities = const AiCapabilitySet({}),
   }) {
     final domains = domainRegistry ?? kaijuanProductionActionDomains();
     final nativeMessages = history
@@ -59,6 +61,16 @@ abstract final class AiBookMindMapActionGateway {
     final adjacentMessage = history.isEmpty ? null : history.last;
     final aliases = <AiProductArtifactAlias>[];
     final artifactsById = <String, AiBookMindMap>{};
+    // Light path: default preferred = composer attachment OR latest native map.
+    String? resolvedPreferred = preferredArtifactId;
+    if (resolvedPreferred == null && nativeMessages.isNotEmpty) {
+      final last = nativeMessages.last;
+      final lastMap = last.mindMap!;
+      resolvedPreferred =
+          lastMap.artifactId ??
+          last.turnId ??
+          'mind-map:${lastMap.scopeFingerprint}';
+    }
     for (var index = 0; index < nativeMessages.length; index++) {
       final message = nativeMessages[index];
       final map = message.mindMap!;
@@ -74,7 +86,7 @@ abstract final class AiBookMindMapActionGateway {
           title: map.root.title,
           revision: map.revision,
           isAdjacent: identical(message, adjacentMessage),
-          isPreferred: artifactId == preferredArtifactId,
+          isPreferred: artifactId == resolvedPreferred,
         ),
       );
     }
@@ -96,6 +108,7 @@ abstract final class AiBookMindMapActionGateway {
         works: List.unmodifiable(workAliases),
         actionRegistry: domains.asActionRegistry(productionOnly: true),
         toolParser: domains.parseToolCall,
+        capabilities: capabilities,
       ),
       scopeSnapshot: scopeSnapshot,
       artifactsById: Map.unmodifiable(artifactsById),
@@ -177,11 +190,17 @@ abstract final class AiBookMindMapActionGateway {
 
   static AiBookMindMap resolveRevision(
     AiReviseBookMindMapAction action,
-    Map<String, AiBookMindMap> artifactsById,
-  ) {
-    final target = artifactsById[action.artifactId];
+    Map<String, AiBookMindMap> artifactsById, {
+    String? preferredArtifactId,
+  }) {
+    final target =
+        artifactsById[action.artifactId] ??
+        (preferredArtifactId != null
+            ? artifactsById[preferredArtifactId]
+            : null) ??
+        (artifactsById.isEmpty ? null : artifactsById.values.last);
     if (target == null) {
-      throw AiProviderException('这张导图已不在当前对话中，请重新选择后再修改');
+      throw AiProviderException('当前对话还没有可修改的思维导图');
     }
     return target;
   }
