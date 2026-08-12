@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../ai/ai_chat_store.dart';
 import '../../ai/ai_action_journal.dart';
 import '../../ai/ai_graph_store.dart';
+import '../../ai/ai_workflow_contract.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
 import '../../core/text_editing_focus.dart';
@@ -158,6 +159,12 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       _controller.attachAiGraphStore(AiGraphStore(paths.aiGraphDirectory));
       _controller.attachAiActionJournalStore(
         JsonAiActionJournalStore(paths.aiActionJournalDirectory),
+      );
+      _controller.attachAiWorkflowStores(
+        checkpoints: JsonAiWorkflowCheckpointStore(
+          paths.aiWorkflowCheckpointDirectory,
+        ),
+        artifacts: JsonAiArtifactRepository(paths.aiArtifactDirectory),
       );
     } catch (error) {
       debugPrint('[AI] failed to attach reader stores: $error');

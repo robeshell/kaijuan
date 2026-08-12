@@ -345,7 +345,8 @@ class _AmbiguousOutlineController extends BookReaderController {
     }
     if (text.contains('再丰富') ||
         text.contains('增加更多') ||
-        text.contains('修改上一张')) {
+        text.contains('修改上一张') ||
+        text.contains('再详细一点')) {
       final artifacts = context.artifacts;
       if (artifacts.isEmpty) return null;
       final target =
@@ -712,7 +713,11 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '再详细一点');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    expect(controller.productActionRequests, actionCallsBeforeRevision);
+    // Attachment only binds the target. Free input still goes through the
+    // product-action control plane (Proposal → confirmation → Command).
+    expect(controller.productActionRequests, actionCallsBeforeRevision + 1);
+    await tester.tap(find.text('确认生成'));
+    await tester.pumpAndSettle();
     expect(
       controller.generatedMindMapScopes,
       hasLength(generationsBeforeRevision + 1),

@@ -250,14 +250,24 @@ class AiChatProductContext {
   }
 
   AiProductActionRequest parse(AiModelToolCall call) {
-    if (!AiProductToolNames.all.contains(call.name)) {
+    final knownTools = actionRegistry == null
+        ? AiProductToolNames.all
+        : {
+            for (final definition in actionRegistry!.definitions)
+              if (definition.toolName != null) definition.toolName!,
+          };
+    if (!knownTools.contains(call.name)) {
       throw const FormatException('Unknown product tool');
     }
     final instruction = '${call.arguments['instruction'] ?? ''}'.trim();
     if (instruction.isEmpty || instruction.length > 2000) {
       throw const FormatException('Invalid product instruction');
     }
-    if (call.name == AiProductToolNames.createBookMindMap) {
+    // Domain gateways resolve frozen aliases. Generic parsing only recognizes
+    // registered mind-map tools today; new domains register their own gateway
+    // without editing this switch once the shared request envelope lands.
+    if (call.name == AiProductToolNames.createBookMindMap ||
+        call.name == 'create_book_mind_map') {
       final rawScope = '${call.arguments['scope'] ?? 'unspecified'}';
       final scope = AiBookMindMapActionScope.values.where(
         (value) => value.name == rawScope,
@@ -285,17 +295,21 @@ class AiChatProductContext {
         workId: work?.workId,
       );
     }
-    final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
-    final matches = artifacts.where((artifact) => artifact.alias == alias);
-    if (matches.length != 1) {
-      throw const FormatException('Unknown mind-map artifact alias');
+    if (call.name == AiProductToolNames.reviseBookMindMap ||
+        call.name == 'revise_book_mind_map') {
+      final alias = '${call.arguments['artifactRef'] ?? ''}'.trim();
+      final matches = artifacts.where((artifact) => artifact.alias == alias);
+      if (matches.length != 1) {
+        throw const FormatException('Unknown mind-map artifact alias');
+      }
+      final artifact = matches.single;
+      return AiReviseBookMindMapAction(
+        instruction: instruction,
+        artifactAlias: alias,
+        artifactId: artifact.artifactId,
+      );
     }
-    final artifact = matches.single;
-    return AiReviseBookMindMapAction(
-      instruction: instruction,
-      artifactAlias: alias,
-      artifactId: artifact.artifactId,
-    );
+    throw FormatException('No domain parser for product tool: ${call.name}');
   }
 
   bool shouldRepairNativeMindMapImitation({

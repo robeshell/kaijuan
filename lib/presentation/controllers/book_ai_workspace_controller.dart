@@ -2,8 +2,12 @@ import '../../ai/ai_agent_runtime.dart';
 import '../../ai/ai_agent_runtime_gate.dart';
 import '../../ai/ai_book_mind_map_service.dart';
 import '../../ai/ai_book_mind_map_product_actions.dart';
+import '../../ai/ai_book_mind_map_workflow.dart';
+import '../../ai/ai_book_structure.dart';
 import '../../ai/ai_cancel.dart';
+import '../../ai/ai_chat.dart';
 import '../../ai/ai_chat_retrieve.dart';
+import '../../ai/ai_conversation_intent.dart';
 import '../../ai/ai_graph_service.dart';
 import '../../ai/ai_language_service.dart';
 import '../../ai/ai_log.dart';
@@ -17,6 +21,8 @@ import '../../ai/ai_run_orchestrator.dart';
 import '../../ai/ai_settings.dart';
 import '../../ai/ai_translation.dart';
 import '../../ai/ai_user_error.dart';
+import '../../ai/ai_workflow_contract.dart';
+import '../../ai/ai_workflow_executor.dart';
 import '../../ai/legacy_ai_agent_runtime.dart';
 import 'ai_settings_controller.dart';
 import 'book_ai_conversation_controller.dart';
@@ -31,6 +37,8 @@ class BookAiWorkspaceController {
   BookAiWorkspaceController({
     required AiChatSessionWriter saveChatSession,
     AiActionJournalStore? actionJournal,
+    AiWorkflowCheckpointStore? workflowCheckpoints,
+    AiArtifactRepository? artifactRepository,
     this.agentRuntimeFactory = createLegacyAiAgentRuntime,
     this.genkitAgentRuntimeFactory,
     this.requestedAgentRuntime = AiAgentRuntimeKind.compatible,
@@ -40,8 +48,32 @@ class BookAiWorkspaceController {
        actionController = AiProductActionController(
          registry: AiBookMindMapProductActions.registry,
          journal: actionJournal ?? MemoryAiActionJournalStore(),
-       ) {
+       ),
+       artifactRepository = artifactRepository ?? MemoryAiArtifactRepository(),
+       workflowCheckpoints =
+           workflowCheckpoints ?? MemoryAiWorkflowCheckpointStore() {
     mindMapConversation = BookAiMindMapController(conversation);
+    createMindMapAdapter = AiBookMindMapWorkflowAdapter(
+      actionKind: AiBookMindMapProductActions.create.actionKind,
+      artifacts: this.artifactRepository,
+    );
+    reviseMindMapAdapter = AiBookMindMapWorkflowAdapter(
+      actionKind: AiBookMindMapProductActions.revise.actionKind,
+      artifacts: this.artifactRepository,
+    );
+    workflowAdapters = AiWorkflowAdapterRegistry([
+      createMindMapAdapter,
+      reviseMindMapAdapter,
+    ]);
+    workflowExecutor = AiProductWorkflowExecutor(
+      actions: actionController,
+      adapters: workflowAdapters,
+      environment: AiWorkflowEnvironment(
+        capabilities: const AiCapabilitySet({}),
+        checkpoints: this.workflowCheckpoints,
+        now: DateTime.now,
+      ),
+    );
     agentRuntimeDecision = AiAgentRuntimeGate.decide(
       requested: requestedAgentRuntime,
       genkitCapabilities: genkitAgentCapabilities,
@@ -58,9 +90,204 @@ class BookAiWorkspaceController {
   late final BookAiMindMapController mindMapConversation;
   late final AiAgentRuntimeDecision agentRuntimeDecision;
   final AiProductActionController actionController;
+  AiArtifactRepository artifactRepository;
+  AiWorkflowCheckpointStore workflowCheckpoints;
+  late AiBookMindMapWorkflowAdapter createMindMapAdapter;
+  late AiBookMindMapWorkflowAdapter reviseMindMapAdapter;
+  late AiWorkflowAdapterRegistry workflowAdapters;
+  late AiProductWorkflowExecutor workflowExecutor;
 
   void replaceActionJournal(AiActionJournalStore store) {
     actionController.replaceJournal(store);
+  }
+
+  void replaceWorkflowStores({
+    required AiWorkflowCheckpointStore checkpoints,
+    required AiArtifactRepository artifacts,
+  }) {
+    artifactRepository = artifacts;
+    workflowCheckpoints = checkpoints;
+    createMindMapAdapter = AiBookMindMapWorkflowAdapter(
+      actionKind: AiBookMindMapProductActions.create.actionKind,
+      artifacts: artifacts,
+    );
+    reviseMindMapAdapter = AiBookMindMapWorkflowAdapter(
+      actionKind: AiBookMindMapProductActions.revise.actionKind,
+      artifacts: artifacts,
+    );
+    workflowAdapters = AiWorkflowAdapterRegistry([
+      createMindMapAdapter,
+      reviseMindMapAdapter,
+    ]);
+    workflowExecutor = AiProductWorkflowExecutor(
+      actions: actionController,
+      adapters: workflowAdapters,
+      environment: AiWorkflowEnvironment(
+        capabilities: const AiCapabilitySet({}),
+        checkpoints: checkpoints,
+        now: DateTime.now,
+      ),
+    );
+  }
+
+  AiBookMindMapWorkflowAdapter mindMapAdapterFor(String actionKind) {
+    if (actionKind == AiBookMindMapProductActions.revise.actionKind) {
+      return reviseMindMapAdapter;
+    }
+    if (actionKind == AiBookMindMapProductActions.create.actionKind) {
+      return createMindMapAdapter;
+    }
+    throw StateError('Unsupported mind-map action: $actionKind');
+  }
+
+  /// Runs an authorized mind-map command through the generic product executor.
+  Future<BookAiMindMapBatchOutcome> runMindMapProductAction({
+    required String proposalId,
+    required AiAuthorizedCommand actionCommand,
+    required String turnId,
+    required String? workKey,
+    required String text,
+    required String publicationTitle,
+    required List<BookAiMindMapGenerationUnit> units,
+    required BookAiMindMapSectionLoader loadSections,
+    required BookAiMindMapGenerator generateMap,
+    required CancelToken cancelToken,
+    AiBookMindMap? baseMap,
+    String? retryTurnId,
+    AiConversationCommand? command,
+    bool segmentedPublication = false,
+    void Function(AiBookMindMap artifact)? onArtifact,
+  }) async {
+    mindMapConversation.validateActionCommand(
+      actionCommand: actionCommand,
+      units: units,
+      baseMap: baseMap,
+    );
+
+    final preparedUnits =
+        <
+          ({AiBookWork? work, String label, List<AiBookSectionSlice> sections})
+        >[];
+    for (final unit in units) {
+      final sections = unit.frozenSections ?? await loadSections(unit);
+      preparedUnits.add((
+        work: unit.work,
+        label: unit.label,
+        sections: sections,
+      ));
+    }
+
+    final adapter = mindMapAdapterFor(actionCommand.actionKind);
+    final committed = <AiBookMindMap>[];
+    mindMapConversation.beginProductTurn(
+      turnId: turnId,
+      workKey: workKey,
+      text: text,
+      retryTurnId: retryTurnId,
+      command: command,
+    );
+
+    adapter.stage(
+      actionCommand.commandId,
+      AiBookMindMapStagedRun(
+        units: preparedUnits,
+        userInstruction: text,
+        publicationTitle: publicationTitle,
+        baseMap: baseMap,
+        generateUnit:
+            ({
+              required work,
+              required label,
+              required sections,
+              required progressLabel,
+              required cancelToken,
+            }) async {
+              mindMapConversation.setProgress(progressLabel);
+              return generateMap(
+                (
+                  work: work,
+                  label: label,
+                  frozenSections: sections,
+                  estimatedSections: sections.length,
+                ),
+                sections,
+                progressLabel,
+              );
+            },
+        onProgress: mindMapConversation.setProgress,
+        onArtifact: (artifact) async {
+          committed.add(artifact);
+          final matching = preparedUnits
+              .where(
+                (unit) =>
+                    unit.sections.map((s) => s.index).join(',') ==
+                    artifact.scopeSectionIndices.join(','),
+              )
+              .map((unit) => unit.label);
+          final unitLabel = matching.isEmpty
+              ? publicationTitle
+              : matching.first;
+          await mindMapConversation.projectArtifact(
+            turnId: turnId,
+            workKey: workKey,
+            unitLabel: unitLabel,
+            sectionCount: artifact.scopeSectionIndices.length,
+            artifact: artifact,
+          );
+          onArtifact?.call(artifact);
+        },
+      ),
+    );
+
+    try {
+      final entry = await workflowExecutor.execute(
+        proposalId,
+        cancelToken: cancelToken,
+      );
+      final cancelled =
+          entry.status == AiActionJournalStatus.cancelled ||
+          cancelToken.isCancelled;
+      final succeeded = entry.status == AiActionJournalStatus.succeeded;
+      final partially =
+          entry.status == AiActionJournalStatus.partiallySucceeded;
+      mindMapConversation.finishProductTurn(
+        turnId: turnId,
+        workKey: workKey,
+        status: cancelled
+            ? AiChatTurnStatus.cancelled
+            : succeeded || partially
+            ? AiChatTurnStatus.completed
+            : AiChatTurnStatus.failed,
+        allowRetry: !cancelled && committed.isEmpty,
+      );
+      return BookAiMindMapBatchOutcome(
+        completed: committed.length,
+        total: preparedUnits.length,
+        cancelled: cancelled,
+        failedUnit: succeeded || partially || cancelled
+            ? null
+            : (units.isEmpty ? null : units.first),
+        userMessage: succeeded || partially || cancelled
+            ? null
+            : entry.receipt?.publicErrorCode,
+      );
+    } catch (error) {
+      mindMapConversation.finishProductTurn(
+        turnId: turnId,
+        workKey: workKey,
+        status: cancelToken.isCancelled
+            ? AiChatTurnStatus.cancelled
+            : AiChatTurnStatus.failed,
+        error: error,
+        allowRetry: !cancelToken.isCancelled && committed.isEmpty,
+      );
+      return BookAiMindMapBatchOutcome(
+        completed: committed.length,
+        total: preparedUnits.length,
+        cancelled: cancelToken.isCancelled,
+        error: error,
+      );
+    }
   }
 
   AiSettingsController? _settings;

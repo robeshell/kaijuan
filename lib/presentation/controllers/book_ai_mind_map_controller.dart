@@ -50,9 +50,11 @@ class BookAiMindMapBatchOutcome {
 /// Owns the deterministic native mind-map product turn inside chat.
 ///
 /// Scope selection remains a user interaction. Once the view supplies frozen
-/// units, this controller owns the pending user turn, sequential execution,
+/// units and an authorized command, this controller owns the pending user turn,
 /// artifact lineage, progress, terminal status, retry identity and session
-/// persistence. It does not read live reader position or render UI.
+/// persistence. Production execution goes through
+/// [BookAiWorkspaceController.runMindMapProductAction]; this class still
+/// validates commands and projects durable conversation messages.
 class BookAiMindMapController extends ChangeNotifier {
   BookAiMindMapController(this._conversation);
 
@@ -82,59 +84,51 @@ class BookAiMindMapController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<BookAiMindMapBatchOutcome> generate({
-    required String turnId,
-    required String? workKey,
-    required String text,
-    required String publicationTitle,
+  void validateActionCommand({
+    required AiAuthorizedCommand actionCommand,
     required List<BookAiMindMapGenerationUnit> units,
-    required BookAiMindMapSectionLoader loadSections,
-    required BookAiMindMapGenerator generateMap,
-    required bool Function() isCancelled,
-    String? Function()? generationError,
     AiBookMindMap? baseMap,
-    String? retryTurnId,
-    AiConversationCommand? command,
-    bool segmentedPublication = false,
-    AiAuthorizedCommand? actionCommand,
-    void Function(AiBookMindMap artifact)? onArtifact,
-  }) async {
-    if (actionCommand != null &&
-        actionCommand.actionKind == 'revise_book_mind_map' &&
-        baseMap == null) {
+  }) {
+    if (actionCommand.actionKind == 'revise_book_mind_map' && baseMap == null) {
       throw StateError('Revision command requires a target mind map');
     }
-    if (actionCommand != null &&
-        actionCommand.actionKind != 'create_book_mind_map' &&
+    if (actionCommand.actionKind != 'create_book_mind_map' &&
         actionCommand.actionKind != 'revise_book_mind_map') {
       throw StateError('Unsupported mind-map action command');
     }
-    if (actionCommand != null) {
-      if (actionCommand.scopeSectionIndices.isEmpty) {
-        throw StateError('Mind-map action command has no frozen scope');
-      }
-      final frozenScope = actionCommand.scopeSectionIndices.toSet();
-      final requestedSections = <int>{};
-      for (final unit in units) {
-        for (final section in unit.frozenSections ?? const []) {
-          requestedSections.add(section.index);
-        }
-      }
-      if (requestedSections.isEmpty ||
-          requestedSections.length != frozenScope.length ||
-          !requestedSections.every(frozenScope.contains)) {
-        throw StateError('Mind-map action command scope does not match input');
-      }
-      if (actionCommand.actionKind == 'revise_book_mind_map') {
-        final targetId = baseMap?.artifactId;
-        if (targetId == null || actionCommand.targetArtifactId != targetId) {
-          throw StateError('Mind-map revision target does not match command');
-        }
-        if (actionCommand.expectedRevision != baseMap?.revision) {
-          throw StateError('Mind-map revision is stale');
-        }
+    if (actionCommand.scopeSectionIndices.isEmpty) {
+      throw StateError('Mind-map action command has no frozen scope');
+    }
+    final frozenScope = actionCommand.scopeSectionIndices.toSet();
+    final requestedSections = <int>{};
+    for (final unit in units) {
+      for (final section in unit.frozenSections ?? const []) {
+        requestedSections.add(section.index);
       }
     }
+    if (requestedSections.isEmpty ||
+        requestedSections.length != frozenScope.length ||
+        !requestedSections.every(frozenScope.contains)) {
+      throw StateError('Mind-map action command scope does not match input');
+    }
+    if (actionCommand.actionKind == 'revise_book_mind_map') {
+      final targetId = baseMap?.artifactId;
+      if (targetId == null || actionCommand.targetArtifactId != targetId) {
+        throw StateError('Mind-map revision target does not match command');
+      }
+      if (actionCommand.expectedRevision != baseMap?.revision) {
+        throw StateError('Mind-map revision is stale');
+      }
+    }
+  }
+
+  void beginProductTurn({
+    required String turnId,
+    required String? workKey,
+    required String text,
+    String? retryTurnId,
+    AiConversationCommand? command,
+  }) {
     if (_activeTurnId != null) {
       throw StateError('A mind-map product turn is already active');
     }
@@ -153,12 +147,99 @@ class BookAiMindMapController extends ChangeNotifier {
             originalText: text,
           ),
     );
+  }
+
+  void setProgress(String? value) {
+    if (_progress == value) return;
+    _progress = value;
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  Future<void> projectArtifact({
+    required String turnId,
+    required String? workKey,
+    required String unitLabel,
+    required int sectionCount,
+    required AiBookMindMap artifact,
+  }) async {
+    final artifactTurnId =
+        artifact.artifactId ??
+        '$turnId-mind-map-${DateTime.now().microsecondsSinceEpoch}';
+    _conversation.appendMessage(
+      AiChatMessage(
+        role: AiMessageRole.assistant,
+        content: '已根据《$unitLabel》的 $sectionCount 章内容生成思维导图。',
+        createdAt: DateTime.now(),
+        turnId: artifactTurnId,
+        status: AiChatTurnStatus.completed,
+        mindMap: artifact,
+      ),
+      workKey: workKey,
+    );
+    await _conversation.persist();
+  }
+
+  void finishProductTurn({
+    required String turnId,
+    required String? workKey,
+    required AiChatTurnStatus status,
+    Object? error,
+    bool allowRetry = false,
+  }) {
+    if (_owns(turnId, workKey)) {
+      _conversation.finishProductTurn(
+        turnId: turnId,
+        workKey: workKey,
+        status: status,
+        error: error,
+        allowRetry: allowRetry,
+      );
+    }
+    if (_activeTurnId == turnId) {
+      _activeTurnId = null;
+      setProgress(null);
+    }
+  }
+
+  /// Local batch runner used by unit tests and by callers that already hold a
+  /// validated [actionCommand]. Production chat goes through the workspace
+  /// product executor so journal, checkpoints and receipts stay consistent.
+  Future<BookAiMindMapBatchOutcome> generate({
+    required String turnId,
+    required String? workKey,
+    required String text,
+    required String publicationTitle,
+    required List<BookAiMindMapGenerationUnit> units,
+    required BookAiMindMapSectionLoader loadSections,
+    required BookAiMindMapGenerator generateMap,
+    required bool Function() isCancelled,
+    String? Function()? generationError,
+    AiBookMindMap? baseMap,
+    String? retryTurnId,
+    AiConversationCommand? command,
+    bool segmentedPublication = false,
+    required AiAuthorizedCommand actionCommand,
+    void Function(AiBookMindMap artifact)? onArtifact,
+  }) async {
+    validateActionCommand(
+      actionCommand: actionCommand,
+      units: units,
+      baseMap: baseMap,
+    );
+    beginProductTurn(
+      turnId: turnId,
+      workKey: workKey,
+      text: text,
+      retryTurnId: retryTurnId,
+      command: command,
+    );
     final totalSections = units.fold<int>(
       0,
       (total, unit) => total + unit.estimatedSections,
     );
     final unitKind = segmentedPublication ? '卷' : '部作品';
-    _setProgress(
+    setProgress(
       units.length == 1
           ? '正在为你生成${_scopeText(publicationTitle, units.single)}的思维导图，共 $totalSections 章'
           : '本书分为 ${units.length} $unitKind，共 $totalSections 章，准备依次生成',
@@ -172,7 +253,7 @@ class BookAiMindMapController extends ChangeNotifier {
       for (var index = 0; index < units.length; index++) {
         final unit = units[index];
         if (!_owns(turnId, workKey) || isCancelled()) break;
-        _setProgress(
+        setProgress(
           units.length == 1
               ? '正在读取${_scopeText(publicationTitle, unit)}正文，预计 ${unit.estimatedSections} 章'
               : '本书共 ${units.length} $unitKind，正在读取第 ${index + 1}/${units.length} 个范围《${unit.label}》',
@@ -189,7 +270,7 @@ class BookAiMindMapController extends ChangeNotifier {
         final progress = units.length == 1
             ? '正在为你生成${_scopeText(publicationTitle, unit)}的思维导图，共 ${sections.length} 章'
             : '本书共 ${units.length} $unitKind，正在生成第 ${index + 1}/${units.length} 个范围《${unit.label}》，共 ${sections.length} 章';
-        _setProgress(progress);
+        setProgress(progress);
         AiBookMindMap? result;
         try {
           result = await generateMap(unit, sections, progress);
@@ -214,19 +295,14 @@ class BookAiMindMapController extends ChangeNotifier {
               : baseMap.artifactId ?? 'mind-map:${baseMap.scopeFingerprint}',
           revision: baseMap == null ? 1 : baseMap.revision + 1,
         );
-        _conversation.appendMessage(
-          AiChatMessage(
-            role: AiMessageRole.assistant,
-            content: '已根据《${unit.label}》的 ${sections.length} 章内容生成思维导图。',
-            createdAt: DateTime.now(),
-            turnId: artifactTurnId,
-            status: AiChatTurnStatus.completed,
-            mindMap: artifact,
-          ),
-          workKey: workKey,
-        );
         try {
-          await _conversation.persist();
+          await projectArtifact(
+            turnId: turnId,
+            workKey: workKey,
+            unitLabel: unit.label,
+            sectionCount: sections.length,
+            artifact: artifact,
+          );
         } catch (error) {
           failure = error;
           failedUnit = unit;
@@ -235,25 +311,22 @@ class BookAiMindMapController extends ChangeNotifier {
         try {
           onArtifact?.call(artifact);
         } catch (_) {
-          // Artifact presentation is best-effort. The durable product result
-          // must not be rolled back because a transient view was disposed.
+          // Artifact presentation is best-effort.
         }
       }
 
       final cancelled = isCancelled() || !_owns(turnId, workKey);
-      if (_owns(turnId, workKey)) {
-        _conversation.finishProductTurn(
-          turnId: turnId,
-          workKey: workKey,
-          status: cancelled
-              ? AiChatTurnStatus.cancelled
-              : completed == units.length
-              ? AiChatTurnStatus.completed
-              : AiChatTurnStatus.failed,
-          error: failure,
-          allowRetry: !cancelled && completed == 0,
-        );
-      }
+      finishProductTurn(
+        turnId: turnId,
+        workKey: workKey,
+        status: cancelled
+            ? AiChatTurnStatus.cancelled
+            : completed == units.length
+            ? AiChatTurnStatus.completed
+            : AiChatTurnStatus.failed,
+        error: failure,
+        allowRetry: !cancelled && completed == 0,
+      );
       return BookAiMindMapBatchOutcome(
         completed: completed,
         total: units.length,
@@ -265,7 +338,7 @@ class BookAiMindMapController extends ChangeNotifier {
     } finally {
       if (_activeTurnId == turnId) {
         _activeTurnId = null;
-        _setProgress(null);
+        setProgress(null);
       }
     }
   }
@@ -281,13 +354,6 @@ class BookAiMindMapController extends ChangeNotifier {
   ) => unit.label == publicationTitle
       ? '《${unit.label}》'
       : '《$publicationTitle》中的《${unit.label}》';
-
-  void _setProgress(String? value) {
-    if (_progress == value) return;
-    _progress = value;
-    if (_disposed) return;
-    notifyListeners();
-  }
 
   @override
   void dispose() {

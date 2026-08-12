@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | v1 控制面已落地；领域动作按注册表逐项接入 |
+| **状态** | v1 控制面迁移中；协议骨架已建立，生产 Workflow、恢复与 Artifact 提交尚未完成 |
 | **日期** | 2026-08-12 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **工程** | [ENGINEERING.md](../ENGINEERING.md)「AI 边界」 |
@@ -506,21 +506,29 @@ late_event.quarantined
 
 ## 16. 完成标准
 
-- [x] 任何模型 Tool Call 都只能产生 Proposal。
-- [x] 任何 Workflow 都只接受有效 `AiAuthorizedCommand`。
-- [x] 自由输入的产品动作具有对话内确认或补充路径。
-- [x] 附件只绑定目标，不隐式授权修订。
-- [x] 快捷 UI、自由输入、重试和恢复走同一 Policy/Journal。
-- [x] 幂等、revision 冲突、取消和晚到结果通过契约测试。
-- [x] 待确认与执行状态可以在 App 重启后恢复或明确放弃。
-- [x] 产品 Artifact 与 Genkit Session/Artifact、Journal 控制态保持分离。
-- [x] 新增动作经注册定义接入，缺失能力时不可见；增加测试 Workflow 不修改通用 Controller 分发代码。
-- [x] Action、Command、Workflow、Artifact、Prompt 和 Renderer 独立版本化，幂等既防重复 submission 又允许用户再次生成。
-- [x] 语义评测中错误产品执行为 0，未授权 Workflow 启动为 0。
+- [x] 模型思维导图 Tool Call 只产生 Proposal。
+- [x] 任何生产 Workflow 都只接受有效 `AiAuthorizedCommand`。
+- [x] 自由输入的思维导图动作具有对话内确认路径。
+- [x] 思维导图附件只绑定目标，不隐式授权修订。
+- [x] 快捷 UI、自由输入、重试和恢复全部走同一 Policy/Journal/Executor。
+- [x] 幂等、revision 冲突、取消和晚到结果通过生产链与崩溃恢复测试。
+- [x] 待确认与执行状态可以在 App 重启后恢复或明确放弃，且不会从头重复副作用。
+- [x] 产品 Artifact 的概念边界与 Genkit Session/Artifact、Journal 控制态分离。
+- [x] 新增动作经注册定义接入，缺失能力时不可执行；增加第二个测试 Workflow 不修改通用分发代码。
+- [x] Action、Command、Workflow、Artifact、Prompt 和 Renderer 独立版本化并由注册定义实际传播。
+- [ ] 语义评测中错误产品执行为 0，未授权 Workflow 启动为 0。
 - [x] PRODUCT、ENGINEERING、ai.md 与各领域规格不再包含“模型调用或附件直接授权执行”的描述。
 
-实现证据：`AiProductActionController`、`AiWorkflowAdapterRegistry`、
-`AiProductWorkflowExecutor`、`MemoryAiArtifactRepository` 与
-`test/ai_product_action_protocol_test.dart`。当前图书思维导图的领域提交仍由
-`BookAiMindMapController` 负责；通用执行器已提供后续 PPT/翻译等 Workflow 的接入面，
-不要求修改通用 Controller 分发代码。
+当前证据：
+
+- 控制面：`AiProductActionController`、`AiProductWorkflowExecutor`、
+  `JsonAiWorkflowCheckpointStore`、`JsonAiArtifactRepository`
+- 图书思维导图生产链：`AiBookMindMapWorkflowAdapter` +
+  `BookAiWorkspaceController.runMindMapProductAction`；对话入口要求非空
+  `AiAuthorizedCommand`，附件不再直接修订
+- 第二测试 Workflow：`AiTestBookExportProductActions` /
+  `AiTestBookExportWorkflowAdapter`（不改通用 Controller/Executor/主 Widget）
+- 契约与恢复：`test/ai_product_action_protocol_test.dart`、
+  `test/ai_book_mind_map_workflow_test.dart`
+- 语义最小对骨架：`test/ai_product_action_semantics_test.dart`（尚未达到 200–300
+  条完整评测集，故语义零误触发项仍保持未完成）

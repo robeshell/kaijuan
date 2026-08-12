@@ -92,7 +92,27 @@ class AiProductActionController {
             riskClass: AiActionRiskClass.reversible,
             decidedAt: _now(),
           )
-        : !capabilities.containsAll(definition.requiredCapabilities)
+        : snapshotProposal.definitionVersion != definition.definitionVersion ||
+              snapshotProposal.proposalSchemaVersion !=
+                  definition.proposalSchemaVersion
+        ? AiActionDecision(
+            proposalId: proposal.proposalId,
+            outcome: AiActionDecisionOutcome.deny,
+            reasonCode: 'incompatible_proposal_version',
+            riskClass: definition.riskClass,
+            decidedAt: _now(),
+          )
+        : !definition.supportedSources.contains(snapshotProposal.source)
+        ? AiActionDecision(
+            proposalId: proposal.proposalId,
+            outcome: AiActionDecisionOutcome.deny,
+            reasonCode: 'unsupported_action_source',
+            riskClass: definition.riskClass,
+            decidedAt: _now(),
+          )
+        : !capabilities.containsAll(definition.requiredCapabilities) ||
+              (definition.anyOfCapabilities.isNotEmpty &&
+                  !definition.anyOfCapabilities.any(capabilities.containsAll))
         ? AiActionDecision(
             proposalId: proposal.proposalId,
             outcome: AiActionDecisionOutcome.deny,
@@ -470,6 +490,14 @@ class AiProductActionController {
     required String authorizationEvidence,
   }) {
     final actionKind = decision.resolvedActionKind ?? proposal.actionKind;
+    final definition = registry.lookup(actionKind);
+    if (definition == null) {
+      throw StateError('Unknown action definition: $actionKind');
+    }
+    if (proposal.definitionVersion != definition.definitionVersion ||
+        proposal.proposalSchemaVersion != definition.proposalSchemaVersion) {
+      throw StateError('Action proposal version is stale: $actionKind');
+    }
     final targetArtifactId = decision.resolvedTarget ?? proposal.targetRef;
     final expectedRevision = proposal.expectedRevision;
     final scopeFingerprint = _string(
@@ -499,8 +527,8 @@ class AiProductActionController {
       proposalId: proposal.proposalId,
       actionKind: actionKind,
       definitionVersion: proposal.definitionVersion,
-      commandSchemaVersion: 1,
-      workflowVersion: 1,
+      commandSchemaVersion: definition.commandSchemaVersion,
+      workflowVersion: definition.workflowVersion,
       authorizationSource: proposal.source,
       authorizationSubmissionId: authorizationSubmissionId,
       authorizationEvidence: authorizationEvidence,

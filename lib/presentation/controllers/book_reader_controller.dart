@@ -27,6 +27,7 @@ import '../../ai/ai_mind_map.dart';
 import '../../ai/ai_outline.dart';
 import '../../ai/ai_product_action.dart';
 import '../../ai/ai_product_action_protocol.dart';
+import '../../ai/ai_workflow_contract.dart';
 import '../../ai/ai_run.dart';
 import '../../ai/ai_run_orchestrator.dart';
 import '../../ai/ai_search.dart';
@@ -487,6 +488,16 @@ class BookReaderController extends ChangeNotifier {
 
   void attachAiActionJournalStore(AiActionJournalStore store) {
     _aiWorkspace.replaceActionJournal(store);
+  }
+
+  void attachAiWorkflowStores({
+    required AiWorkflowCheckpointStore checkpoints,
+    required AiArtifactRepository artifacts,
+  }) {
+    _aiWorkspace.replaceWorkflowStores(
+      checkpoints: checkpoints,
+      artifacts: artifacts,
+    );
   }
 
   void attachTtsBridge({
@@ -1049,10 +1060,12 @@ class BookReaderController extends ChangeNotifier {
     String? retryTurnId,
     AiConversationCommand? command,
     void Function(AiBookMindMap artifact)? onArtifact,
-    String? actionProposalId,
-    AiAuthorizedCommand? actionCommand,
+    required String actionProposalId,
+    required AiAuthorizedCommand actionCommand,
   }) {
-    return _aiWorkspace.mindMapConversation.generate(
+    return _aiWorkspace.runMindMapProductAction(
+      proposalId: actionProposalId,
+      actionCommand: actionCommand,
       turnId: turnId,
       workKey: workKey,
       text: text,
@@ -1060,14 +1073,11 @@ class BookReaderController extends ChangeNotifier {
       units: units,
       retryTurnId: retryTurnId,
       command: command,
-      actionCommand: actionCommand,
       baseMap: baseMap,
+      cancelToken: cancelToken,
       segmentedPublication:
           bookStructureManifest?.kind ==
           AiBookStructureKind.segmentedSingleWork,
-      isCancelled: () =>
-          cancelToken.isCancelled || _aiWorkspace.mindMapError == '已停止',
-      generationError: () => _aiWorkspace.mindMapError,
       loadSections: (unit) =>
           bookMindMapSections(work: unit.work, useFrozenWork: true),
       generateMap: (unit, sections, progress) => generateBookMindMap(

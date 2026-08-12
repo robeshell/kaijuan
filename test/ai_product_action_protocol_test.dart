@@ -6,6 +6,7 @@ import 'package:kaijuan/ai/ai_workflow_contract.dart';
 import 'package:kaijuan/ai/ai_workflow_executor.dart';
 import 'package:kaijuan/ai/ai_product_action.dart';
 import 'package:kaijuan/ai/ai_action_journal.dart';
+import 'package:kaijuan/ai/ai_test_book_export_workflow.dart';
 import 'dart:io';
 
 void main() {
@@ -412,6 +413,78 @@ void main() {
     expect(adapter.started, 1);
   });
 
+  test(
+    'workflow executor resumes an executing command from checkpoint',
+    () async {
+      final journal = MemoryAiActionJournalStore();
+      final controller = AiProductActionController(
+        registry: AiProductActionRegistry([
+          const AiProductActionDefinition(
+            actionKind: 'recoverable_workflow',
+            definitionVersion: 2,
+            proposalSchemaVersion: 3,
+            commandSchemaVersion: 4,
+            workflowVersion: 5,
+            riskClass: AiActionRiskClass.reversible,
+            supportedSources: {AiActionProposalSource.explicitUi},
+          ),
+        ]),
+        journal: journal,
+        now: () => now,
+        idGenerator: () => 'command-recovery',
+      );
+      await controller.propose(
+        AiActionProposal(
+          protocolVersion: 1,
+          proposalId: 'recovery-proposal',
+          parentRunId: null,
+          conversationId: 'conversation-1',
+          turnId: 'turn-1',
+          actionKind: 'recoverable_workflow',
+          definitionVersion: 2,
+          proposalSchemaVersion: 3,
+          source: AiActionProposalSource.explicitUi,
+          sourceSubmissionId: 'ui-recovery',
+          originalUserText: 'resume',
+          requestedArguments: const {},
+          createdAt: now,
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+      );
+      await controller.markExecuting('recovery-proposal', attempt: 1);
+      final checkpoints = MemoryAiWorkflowCheckpointStore();
+      await checkpoints.write(
+        AiWorkflowCheckpoint(
+          checkpointId: 'checkpoint-1',
+          workflowRunId: 'workflow:command-recovery',
+          attempt: 1,
+          workflowVersion: 5,
+          stageId: 'generated',
+          payload: const {'artifactRef': 'artifact-recovered'},
+          createdAt: now,
+        ),
+      );
+      final adapter = _RecoveringWorkflowAdapter();
+      final executor = AiProductWorkflowExecutor(
+        actions: controller,
+        adapters: AiWorkflowAdapterRegistry([adapter]),
+        environment: AiWorkflowEnvironment(
+          capabilities: const AiCapabilitySet({}),
+          checkpoints: checkpoints,
+          now: () => now,
+        ),
+      );
+
+      final completed = await executor.execute('recovery-proposal', attempt: 2);
+
+      expect(adapter.started, 0);
+      expect(adapter.recovered, 1);
+      expect(adapter.recoveryCheckpoint?.checkpointId, 'checkpoint-1');
+      expect(completed.receipt?.artifactRefs, ['artifact-recovered']);
+      expect(completed.receipt?.workflowVersion, 5);
+    },
+  );
+
   test('artifact repository uses compare-and-set revisions', () async {
     final repository = MemoryAiArtifactRepository();
     final first = AiArtifactEnvelope(
@@ -534,6 +607,112 @@ void main() {
   );
 
   test(
+    'controller cannot bypass action source or any-of capability gates',
+    () async {
+      const definition = AiProductActionDefinition(
+        actionKind: 'gated_action',
+        definitionVersion: 1,
+        proposalSchemaVersion: 1,
+        commandSchemaVersion: 7,
+        workflowVersion: 9,
+        riskClass: AiActionRiskClass.reversible,
+        supportedSources: {AiActionProposalSource.explicitUi},
+        requiredCapabilities: {'book.read'},
+        anyOfCapabilities: [
+          {'export.pdf'},
+          {'export.pptx'},
+        ],
+      );
+      final controller = AiProductActionController(
+        registry: AiProductActionRegistry([definition]),
+        journal: MemoryAiActionJournalStore(),
+        now: () => now,
+        idGenerator: () => 'gated-command',
+      );
+      AiActionProposal proposal(String id, AiActionProposalSource source) =>
+          AiActionProposal(
+            protocolVersion: 1,
+            proposalId: id,
+            parentRunId: null,
+            conversationId: null,
+            turnId: null,
+            actionKind: definition.actionKind,
+            definitionVersion: definition.definitionVersion,
+            proposalSchemaVersion: definition.proposalSchemaVersion,
+            source: source,
+            sourceSubmissionId: id,
+            originalUserText: 'run',
+            requestedArguments: const {},
+            createdAt: now,
+            expiresAt: now.add(const Duration(hours: 1)),
+          );
+
+      final missingAnyOf = await controller.propose(
+        proposal('missing-any', AiActionProposalSource.explicitUi),
+        capabilities: const AiCapabilitySet({'book.read'}),
+      );
+      expect(missingAnyOf.decision.reasonCode, 'missing_capability');
+
+      final wrongSource = await controller.propose(
+        proposal('wrong-source', AiActionProposalSource.modelTool),
+        capabilities: const AiCapabilitySet({'book.read', 'export.pdf'}),
+      );
+      expect(wrongSource.decision.reasonCode, 'unsupported_action_source');
+
+      final allowed = await controller.propose(
+        proposal('allowed', AiActionProposalSource.explicitUi),
+        capabilities: const AiCapabilitySet({'book.read', 'export.pptx'}),
+      );
+      expect(allowed.entry.command?.commandSchemaVersion, 7);
+      expect(allowed.entry.command?.workflowVersion, 9);
+    },
+  );
+
+  test(
+    'file checkpoint and artifact repositories survive reconstruction',
+    () async {
+      final root = await Directory.systemTemp.createTemp('ai-workflow-state-');
+      addTearDown(() => root.delete(recursive: true));
+      final checkpointDirectory = Directory('${root.path}/checkpoints');
+      final artifactDirectory = Directory('${root.path}/artifacts');
+      final checkpoints = JsonAiWorkflowCheckpointStore(checkpointDirectory);
+      final artifacts = JsonAiArtifactRepository(artifactDirectory);
+      final checkpoint = AiWorkflowCheckpoint(
+        checkpointId: 'checkpoint-file',
+        workflowRunId: 'workflow:file-command',
+        attempt: 2,
+        workflowVersion: 3,
+        stageId: 'rendered',
+        payload: const {'artifactRef': 'artifact:file'},
+        createdAt: now,
+      );
+      await checkpoints.write(checkpoint);
+      await artifacts.commit(
+        AiArtifactEnvelope(
+          artifactId: 'artifact:file',
+          kind: 'test',
+          schemaVersion: 1,
+          revision: 1,
+          contentHash: 'hash',
+          payload: const {'value': 1},
+          createdAt: now,
+        ),
+      );
+
+      final restoredCheckpoint = await JsonAiWorkflowCheckpointStore(
+        checkpointDirectory,
+      ).readLatest('workflow:file-command');
+      final restoredArtifact = await JsonAiArtifactRepository(
+        artifactDirectory,
+      ).read('artifact:file');
+
+      expect(restoredCheckpoint?.stageId, 'rendered');
+      expect(restoredArtifact?.revision, 1);
+      expect(restoredArtifact?.payload, {'value': 1});
+    },
+  );
+
+  test(
     'file journal recovers an entry from its backup when primary is missing',
     () async {
       final directory = await Directory.systemTemp.createTemp(
@@ -559,6 +738,297 @@ void main() {
       await primary.delete();
       final recovered = await store.readAll();
       expect(recovered.single.status, AiActionJournalStatus.proposed);
+    },
+  );
+
+  test('incompatible proposal versions are denied without a command', () async {
+    final controller = AiProductActionController(
+      registry: AiProductActionRegistry([
+        const AiProductActionDefinition(
+          actionKind: 'create_book_mind_map',
+          definitionVersion: 2,
+          proposalSchemaVersion: 2,
+          commandSchemaVersion: 2,
+          workflowVersion: 2,
+          riskClass: AiActionRiskClass.reversible,
+          supportedSources: {AiActionProposalSource.modelTool},
+        ),
+      ]),
+      journal: MemoryAiActionJournalStore(),
+      now: () => now,
+      idGenerator: () => 'command-version',
+    );
+    final evaluation = await controller.propose(proposal());
+    expect(evaluation.decision.reasonCode, 'incompatible_proposal_version');
+    expect(evaluation.entry.command, isNull);
+  });
+
+  test(
+    'checkpoint version mismatch abandons recovery instead of restarting',
+    () async {
+      final journal = MemoryAiActionJournalStore();
+      final controller = AiProductActionController(
+        registry: AiProductActionRegistry([
+          const AiProductActionDefinition(
+            actionKind: 'recoverable_workflow',
+            definitionVersion: 1,
+            proposalSchemaVersion: 1,
+            commandSchemaVersion: 1,
+            workflowVersion: 5,
+            riskClass: AiActionRiskClass.reversible,
+            supportedSources: {AiActionProposalSource.explicitUi},
+          ),
+        ]),
+        journal: journal,
+        now: () => now,
+        idGenerator: () => 'command-bad-checkpoint',
+      );
+      await controller.propose(
+        AiActionProposal(
+          protocolVersion: 1,
+          proposalId: 'bad-checkpoint',
+          parentRunId: null,
+          conversationId: 'conversation-1',
+          turnId: 'turn-1',
+          actionKind: 'recoverable_workflow',
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          source: AiActionProposalSource.explicitUi,
+          sourceSubmissionId: 'ui-bad',
+          originalUserText: 'resume',
+          requestedArguments: const {},
+          createdAt: now,
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+      );
+      await controller.markExecuting('bad-checkpoint', attempt: 1);
+      final checkpoints = MemoryAiWorkflowCheckpointStore();
+      await checkpoints.write(
+        AiWorkflowCheckpoint(
+          checkpointId: 'checkpoint-bad',
+          workflowRunId: 'workflow:command-bad-checkpoint',
+          attempt: 1,
+          workflowVersion: 1,
+          stageId: 'generated',
+          payload: const {'artifactRef': 'stale'},
+          createdAt: now,
+        ),
+      );
+      final adapter = _RecoveringWorkflowAdapter();
+      final executor = AiProductWorkflowExecutor(
+        actions: controller,
+        adapters: AiWorkflowAdapterRegistry([adapter]),
+        environment: AiWorkflowEnvironment(
+          capabilities: const AiCapabilitySet({}),
+          checkpoints: checkpoints,
+          now: () => now,
+        ),
+      );
+
+      final completed = await executor.execute('bad-checkpoint', attempt: 2);
+
+      expect(adapter.recovered, 0);
+      expect(completed.status, AiActionJournalStatus.abandoned);
+      expect(
+        completed.receipt?.publicErrorCode,
+        'incompatible_checkpoint_version',
+      );
+    },
+  );
+
+  test(
+    'cancel-requested executor rejects late success and commits cancelled',
+    () async {
+      final journal = MemoryAiActionJournalStore();
+      final controller = AiProductActionController(
+        registry: AiProductActionRegistry([
+          const AiProductActionDefinition(
+            actionKind: 'late_success',
+            definitionVersion: 1,
+            proposalSchemaVersion: 1,
+            commandSchemaVersion: 1,
+            workflowVersion: 1,
+            riskClass: AiActionRiskClass.reversible,
+            supportedSources: {AiActionProposalSource.explicitUi},
+          ),
+        ]),
+        journal: journal,
+        now: () => now,
+        idGenerator: () => 'command-late',
+      );
+      await controller.propose(
+        AiActionProposal(
+          protocolVersion: 1,
+          proposalId: 'late-proposal',
+          parentRunId: null,
+          conversationId: null,
+          turnId: null,
+          actionKind: 'late_success',
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          source: AiActionProposalSource.explicitUi,
+          sourceSubmissionId: 'ui-late',
+          originalUserText: 'run',
+          requestedArguments: const {},
+          createdAt: now,
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+      );
+      final adapter = _LateSuccessAfterCancelAdapter();
+      final executor = AiProductWorkflowExecutor(
+        actions: controller,
+        adapters: AiWorkflowAdapterRegistry([adapter]),
+        environment: AiWorkflowEnvironment(
+          capabilities: const AiCapabilitySet({}),
+          checkpoints: MemoryAiWorkflowCheckpointStore(),
+          now: () => now,
+        ),
+      );
+      final run = executor.execute('late-proposal');
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await executor.requestCancel('late-proposal');
+      final completed = await run;
+      expect(completed.status, AiActionJournalStatus.cancelled);
+      expect(completed.receipt?.artifactRefs, isEmpty);
+    },
+  );
+
+  test(
+    'artifact committed before receipt is recovered without regeneration',
+    () async {
+      final journal = MemoryAiActionJournalStore();
+      final controller = AiProductActionController(
+        registry: AiProductActionRegistry([
+          const AiProductActionDefinition(
+            actionKind: 'recoverable_workflow',
+            definitionVersion: 1,
+            proposalSchemaVersion: 1,
+            commandSchemaVersion: 1,
+            workflowVersion: 5,
+            riskClass: AiActionRiskClass.reversible,
+            supportedSources: {AiActionProposalSource.explicitUi},
+          ),
+        ]),
+        journal: journal,
+        now: () => now,
+        idGenerator: () => 'command-artifact-first',
+      );
+      await controller.propose(
+        AiActionProposal(
+          protocolVersion: 1,
+          proposalId: 'artifact-first',
+          parentRunId: null,
+          conversationId: null,
+          turnId: null,
+          actionKind: 'recoverable_workflow',
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          source: AiActionProposalSource.explicitUi,
+          sourceSubmissionId: 'ui-artifact-first',
+          originalUserText: 'run',
+          requestedArguments: const {},
+          createdAt: now,
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+      );
+      await controller.markExecuting('artifact-first', attempt: 1);
+      final checkpoints = MemoryAiWorkflowCheckpointStore();
+      await checkpoints.write(
+        AiWorkflowCheckpoint(
+          checkpointId: 'checkpoint-artifact-first',
+          workflowRunId: 'workflow:command-artifact-first',
+          attempt: 1,
+          workflowVersion: 5,
+          stageId: 'unit_committed',
+          payload: const {
+            'completedUnits': 1,
+            'unitTotal': 1,
+            'artifactRefs': ['artifact-already-there'],
+            'artifactRef': 'artifact-already-there',
+          },
+          createdAt: now,
+        ),
+      );
+      final adapter = _RecoveringWorkflowAdapter();
+      final executor = AiProductWorkflowExecutor(
+        actions: controller,
+        adapters: AiWorkflowAdapterRegistry([adapter]),
+        environment: AiWorkflowEnvironment(
+          capabilities: const AiCapabilitySet({}),
+          checkpoints: checkpoints,
+          now: () => now,
+        ),
+      );
+
+      final completed = await executor.execute('artifact-first', attempt: 2);
+      expect(adapter.started, 0);
+      expect(adapter.recovered, 1);
+      expect(completed.status, AiActionJournalStatus.succeeded);
+      expect(completed.receipt?.artifactRefs, ['artifact-already-there']);
+    },
+  );
+
+  test(
+    'second test workflow registers and completes without generic edits',
+    () async {
+      final artifacts = MemoryAiArtifactRepository();
+      final journal = MemoryAiActionJournalStore();
+      final controller = AiProductActionController(
+        registry: AiProductActionRegistry([
+          AiTestBookExportProductActions.definition,
+        ]),
+        journal: journal,
+        now: () => now,
+        idGenerator: () => 'command-export',
+      );
+      final tools = controller.registry.toolDescriptors(
+        source: AiActionProposalSource.modelTool,
+        capabilities: const AiCapabilitySet({'book.read'}),
+      );
+      expect(tools.map((tool) => tool.name), [
+        AiTestBookExportProductActions.toolName,
+      ]);
+
+      await controller.propose(
+        AiActionProposal(
+          protocolVersion: 1,
+          proposalId: 'export-proposal',
+          parentRunId: null,
+          conversationId: null,
+          turnId: null,
+          actionKind: AiTestBookExportProductActions.actionKind,
+          definitionVersion: 1,
+          proposalSchemaVersion: 1,
+          source: AiActionProposalSource.explicitUi,
+          sourceSubmissionId: 'ui-export',
+          originalUserText: 'export notes',
+          requestedArguments: const {
+            'format': 'markdown',
+            'instruction': 'export notes',
+          },
+          createdAt: now,
+          expiresAt: now.add(const Duration(hours: 1)),
+        ),
+        capabilities: const AiCapabilitySet({'book.read'}),
+      );
+      final executor = AiProductWorkflowExecutor(
+        actions: controller,
+        adapters: AiWorkflowAdapterRegistry([
+          AiTestBookExportWorkflowAdapter(artifacts: artifacts),
+        ]),
+        environment: AiWorkflowEnvironment(
+          capabilities: const AiCapabilitySet({'book.read'}),
+          checkpoints: MemoryAiWorkflowCheckpointStore(),
+          now: () => now,
+        ),
+      );
+      final completed = await executor.execute('export-proposal');
+      expect(completed.status, AiActionJournalStatus.succeeded);
+      expect(completed.receipt?.artifactRefs, ['export:command-export']);
+      expect(
+        (await artifacts.read('export:command-export'))?.payload['format'],
+        'markdown',
+      );
     },
   );
 }
@@ -630,6 +1100,55 @@ class _SlowWorkflowAdapter extends _FakeWorkflowAdapter {
       sequence: 1,
       attempt: context.attempt,
       artifactRefs: const ['artifact-concurrent'],
+    );
+  }
+}
+
+class _RecoveringWorkflowAdapter extends _FakeWorkflowAdapter {
+  _RecoveringWorkflowAdapter() : super('recoverable_workflow');
+
+  var recovered = 0;
+  AiWorkflowCheckpoint? recoveryCheckpoint;
+
+  @override
+  Stream<AiWorkflowEvent> recover(AiWorkflowRecoveryRequest request) async* {
+    recovered++;
+    recoveryCheckpoint = request.checkpoint;
+    final refs = request.checkpoint?.payload['artifactRefs'];
+    final single = request.checkpoint?.payload['artifactRef'];
+    final artifactRefs = refs is List
+        ? [for (final item in refs) '$item']
+        : ['${single ?? ''}'];
+    yield AiWorkflowSucceeded(
+      workflowRunId: request.workflowRunId,
+      sequence: 1,
+      attempt: request.attempt,
+      artifactRefs: artifactRefs,
+    );
+  }
+}
+
+class _LateSuccessAfterCancelAdapter extends _FakeWorkflowAdapter {
+  _LateSuccessAfterCancelAdapter() : super('late_success');
+
+  @override
+  Stream<AiWorkflowEvent> start(
+    AiAuthorizedCommand command,
+    AiWorkflowRunContext context,
+  ) async* {
+    started++;
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    yield AiWorkflowArtifactReady(
+      workflowRunId: context.workflowRunId,
+      sequence: 1,
+      attempt: context.attempt,
+      artifactRef: 'late-artifact',
+    );
+    yield AiWorkflowSucceeded(
+      workflowRunId: context.workflowRunId,
+      sequence: 2,
+      attempt: context.attempt,
+      artifactRefs: const ['late-artifact'],
     );
   }
 }

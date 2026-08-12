@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'ai_cancel.dart';
 import 'ai_product_action_protocol.dart';
 
@@ -136,6 +139,33 @@ class AiWorkflowCheckpoint {
   final String stageId;
   final Map<String, Object?> payload;
   final DateTime createdAt;
+
+  Map<String, Object?> toJson() => {
+    'checkpointId': checkpointId,
+    'workflowRunId': workflowRunId,
+    'attempt': attempt,
+    'workflowVersion': workflowVersion,
+    'stageId': stageId,
+    'payload': payload,
+    'createdAt': createdAt.toUtc().toIso8601String(),
+  };
+
+  static AiWorkflowCheckpoint? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final json = Map<String, Object?>.from(raw);
+    final payload = json['payload'];
+    final createdAt = DateTime.tryParse('${json['createdAt'] ?? ''}');
+    if (payload is! Map || createdAt == null) return null;
+    return AiWorkflowCheckpoint(
+      checkpointId: '${json['checkpointId'] ?? ''}',
+      workflowRunId: '${json['workflowRunId'] ?? ''}',
+      attempt: (json['attempt'] as num?)?.toInt() ?? 0,
+      workflowVersion: (json['workflowVersion'] as num?)?.toInt() ?? 0,
+      stageId: '${json['stageId'] ?? ''}',
+      payload: Map<String, Object?>.from(payload),
+      createdAt: createdAt,
+    );
+  }
 }
 
 abstract interface class AiWorkflowCheckpointStore {
@@ -156,6 +186,42 @@ class MemoryAiWorkflowCheckpointStore implements AiWorkflowCheckpointStore {
   @override
   Future<AiWorkflowCheckpoint?> readLatest(String workflowRunId) async =>
       _latest[workflowRunId];
+}
+
+class JsonAiWorkflowCheckpointStore implements AiWorkflowCheckpointStore {
+  JsonAiWorkflowCheckpointStore(this.directory);
+
+  final Directory directory;
+  Future<void> _writeQueue = Future<void>.value();
+
+  File _fileFor(String workflowRunId) => File(
+    '${directory.path}${Platform.pathSeparator}${_safeName(workflowRunId)}.json',
+  );
+
+  @override
+  Future<AiWorkflowCheckpoint?> readLatest(String workflowRunId) async {
+    final file = _fileFor(workflowRunId);
+    if (!await file.exists()) return null;
+    return AiWorkflowCheckpoint.fromJson(jsonDecode(await file.readAsString()));
+  }
+
+  @override
+  Future<void> write(AiWorkflowCheckpoint checkpoint) {
+    final operation = _writeQueue.then<void>((_) async {
+      await directory.create(recursive: true);
+      final current = await readLatest(checkpoint.workflowRunId);
+      if (current != null && current.attempt > checkpoint.attempt) return;
+      final file = _fileFor(checkpoint.workflowRunId);
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(
+        jsonEncode(checkpoint.toJson()),
+        flush: true,
+      );
+      await _replaceFile(temporary, file);
+    });
+    _writeQueue = operation.catchError((_) {});
+    return operation;
+  }
 }
 
 class AiWorkflowPreflightResult {
@@ -268,6 +334,33 @@ class AiArtifactEnvelope {
   final String contentHash;
   final Map<String, Object?> payload;
   final DateTime createdAt;
+
+  Map<String, Object?> toJson() => {
+    'artifactId': artifactId,
+    'kind': kind,
+    'schemaVersion': schemaVersion,
+    'revision': revision,
+    'contentHash': contentHash,
+    'payload': payload,
+    'createdAt': createdAt.toUtc().toIso8601String(),
+  };
+
+  static AiArtifactEnvelope? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final json = Map<String, Object?>.from(raw);
+    final payload = json['payload'];
+    final createdAt = DateTime.tryParse('${json['createdAt'] ?? ''}');
+    if (payload is! Map || createdAt == null) return null;
+    return AiArtifactEnvelope(
+      artifactId: '${json['artifactId'] ?? ''}',
+      kind: '${json['kind'] ?? ''}',
+      schemaVersion: (json['schemaVersion'] as num?)?.toInt() ?? 0,
+      revision: (json['revision'] as num?)?.toInt() ?? 0,
+      contentHash: '${json['contentHash'] ?? ''}',
+      payload: Map<String, Object?>.from(payload),
+      createdAt: createdAt,
+    );
+  }
 }
 
 abstract interface class AiArtifactRepository {
@@ -304,6 +397,49 @@ class MemoryAiArtifactRepository implements AiArtifactRepository {
   }
 }
 
+class JsonAiArtifactRepository implements AiArtifactRepository {
+  JsonAiArtifactRepository(this.directory);
+
+  final Directory directory;
+  Future<void> _writeQueue = Future<void>.value();
+
+  File _fileFor(String artifactId) => File(
+    '${directory.path}${Platform.pathSeparator}${_safeName(artifactId)}.json',
+  );
+
+  @override
+  Future<AiArtifactEnvelope?> read(String artifactId) async {
+    final file = _fileFor(artifactId);
+    if (!await file.exists()) return null;
+    return AiArtifactEnvelope.fromJson(jsonDecode(await file.readAsString()));
+  }
+
+  @override
+  Future<AiArtifactEnvelope> commit(
+    AiArtifactEnvelope artifact, {
+    int? expectedRevision,
+  }) {
+    final operation = _writeQueue.then<AiArtifactEnvelope>((_) async {
+      await directory.create(recursive: true);
+      final current = await read(artifact.artifactId);
+      if (expectedRevision != null &&
+          (current == null || current.revision != expectedRevision)) {
+        throw StateError('Artifact revision conflict: ${artifact.artifactId}');
+      }
+      if (current != null && artifact.revision <= current.revision) {
+        throw StateError('Artifact revision must increase');
+      }
+      final file = _fileFor(artifact.artifactId);
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(jsonEncode(artifact.toJson()), flush: true);
+      await _replaceFile(temporary, file);
+      return artifact;
+    });
+    _writeQueue = operation.then<void>((_) {}, onError: (_) {});
+    return operation;
+  }
+}
+
 class AiWorkflowAdapterRegistry {
   AiWorkflowAdapterRegistry(Iterable<AiWorkflowAdapter> adapters)
     : _adapters = _index(adapters);
@@ -325,5 +461,17 @@ class AiWorkflowAdapterRegistry {
       result[adapter.actionKind] = adapter;
     }
     return Map.unmodifiable(result);
+  }
+}
+
+String _safeName(String value) =>
+    base64Url.encode(utf8.encode(value)).replaceAll('=', '');
+
+Future<void> _replaceFile(File temporary, File destination) async {
+  try {
+    await temporary.rename(destination.path);
+  } on FileSystemException {
+    if (await destination.exists()) await destination.delete();
+    await temporary.rename(destination.path);
   }
 }

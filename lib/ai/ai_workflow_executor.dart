@@ -58,12 +58,38 @@ class AiProductWorkflowExecutor {
     if (entry.status == AiActionJournalStatus.cancelRequested) {
       return _cancel(proposalId);
     }
+
+    final runId = 'workflow:${command.commandId}';
+    final inspection = await adapter.inspect(runId);
+    if (inspection.active && entry.status != AiActionJournalStatus.executing) {
+      // Another live run already owns this command; await its journal terminal
+      // state rather than starting a second domain workflow.
+      for (var i = 0; i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final latest = await actions.journal.read(proposalId);
+        if (latest == null || latest.status.isTerminal) {
+          return latest ?? entry;
+        }
+      }
+    }
+
+    final recovering = entry.status == AiActionJournalStatus.executing;
+    final effectiveAttempt = recovering
+        ? (entry.attempt == 0 ? attempt : entry.attempt)
+        : attempt;
     if (entry.status == AiActionJournalStatus.authorized ||
         entry.status == AiActionJournalStatus.queued) {
-      entry = await actions.ensureExecuting(proposalId);
+      entry = await actions.markExecuting(
+        proposalId,
+        attempt: effectiveAttempt,
+      );
     }
     if (entry.status == AiActionJournalStatus.cancelRequested) {
-      return _cancel(proposalId);
+      return _cancel(
+        proposalId,
+        workflowRunId: runId,
+        attempt: effectiveAttempt,
+      );
     }
     final executable = await actions.requireExecutingCommand(
       proposalId: proposalId,
@@ -71,13 +97,17 @@ class AiProductWorkflowExecutor {
     );
     final preflight = await adapter.preflight(executable, environment);
     if (!preflight.accepted) {
-      return _fail(proposalId, preflight.publicErrorCode ?? 'preflight_failed');
+      return _fail(
+        proposalId,
+        preflight.publicErrorCode ?? 'preflight_failed',
+        workflowRunId: runId,
+        attempt: effectiveAttempt,
+      );
     }
 
-    final runId = 'workflow:${executable.commandId}:$attempt';
     final context = AiWorkflowRunContext(
       workflowRunId: runId,
-      attempt: attempt,
+      attempt: effectiveAttempt,
       environment: environment,
       cancelToken: token,
     );
@@ -85,13 +115,50 @@ class AiProductWorkflowExecutor {
     AiActionJournalStatus? terminalStatus;
     String? publicErrorCode;
     try {
-      await for (final event in adapter.start(executable, context)) {
+      final AiWorkflowCheckpoint? checkpoint;
+      try {
+        checkpoint = await _recoveryCheckpoint(
+          command: executable,
+          workflowRunId: runId,
+        );
+      } on StateError catch (error) {
+        if ('$error'.contains('incompatible')) {
+          return actions.completeForProposal(
+            proposalId: proposalId,
+            status: AiActionJournalStatus.abandoned,
+            artifactRefs: const [],
+            workflowRunId: runId,
+            attempt: effectiveAttempt,
+            publicErrorCode: 'incompatible_checkpoint_version',
+          );
+        }
+        rethrow;
+      }
+      final events = recovering
+          ? adapter.recover(
+              AiWorkflowRecoveryRequest(
+                command: executable,
+                workflowRunId: runId,
+                attempt: effectiveAttempt,
+                environment: environment,
+                checkpoint: checkpoint,
+              ),
+            )
+          : adapter.start(executable, context);
+      await for (final event in events) {
         final current = await actions.journal.read(proposalId);
         final cancellationRequested =
             token.isCancelled ||
             current?.status == AiActionJournalStatus.cancelRequested;
         if (event is AiWorkflowArtifactReady && !cancellationRequested) {
           artifactRefs.add(event.artifactRef);
+        }
+        if (event is AiWorkflowCheckpointCommitted) {
+          if (event.checkpoint.workflowRunId != runId ||
+              event.checkpoint.workflowVersion != executable.workflowVersion) {
+            throw StateError('Workflow checkpoint identity mismatch');
+          }
+          await environment.checkpoints.write(event.checkpoint);
         }
         if (event is AiWorkflowSucceeded) {
           if (!cancellationRequested) artifactRefs.addAll(event.artifactRefs);
@@ -127,20 +194,34 @@ class AiProductWorkflowExecutor {
         status: terminalStatus,
         artifactRefs: artifactRefs.toList(growable: false),
         workflowRunId: runId,
-        attempt: attempt,
+        attempt: effectiveAttempt,
         publicErrorCode: publicErrorCode,
       );
     } catch (error) {
       final current = await actions.journal.read(proposalId);
       if (token.isCancelled ||
           current?.status == AiActionJournalStatus.cancelRequested) {
-        return _cancel(proposalId, workflowRunId: runId, attempt: attempt);
+        return _cancel(
+          proposalId,
+          workflowRunId: runId,
+          attempt: effectiveAttempt,
+        );
+      }
+      if ('$error'.contains('incompatible')) {
+        return actions.completeForProposal(
+          proposalId: proposalId,
+          status: AiActionJournalStatus.abandoned,
+          artifactRefs: const [],
+          workflowRunId: runId,
+          attempt: effectiveAttempt,
+          publicErrorCode: 'incompatible_checkpoint_version',
+        );
       }
       return _fail(
         proposalId,
         'workflow_execution_failed',
         workflowRunId: runId,
-        attempt: attempt,
+        attempt: effectiveAttempt,
       );
     }
   }
@@ -167,6 +248,18 @@ class AiProductWorkflowExecutor {
     }
     final after = await actions.journal.read(proposalId);
     return after ?? current!;
+  }
+
+  Future<AiWorkflowCheckpoint?> _recoveryCheckpoint({
+    required AiAuthorizedCommand command,
+    required String workflowRunId,
+  }) async {
+    final checkpoint = await environment.checkpoints.readLatest(workflowRunId);
+    if (checkpoint == null) return null;
+    if (checkpoint.workflowVersion != command.workflowVersion) {
+      throw StateError('Workflow checkpoint version is incompatible');
+    }
+    return checkpoint;
   }
 
   Future<AiActionJournalEntry> _cancel(

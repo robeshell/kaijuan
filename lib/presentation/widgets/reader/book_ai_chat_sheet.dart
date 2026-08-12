@@ -529,12 +529,29 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         );
         return;
       }
+      final command = candidate.entry.command;
+      if (command == null) {
+        await _c.aiWorkspace.actionController.abandon(
+          proposal.proposalId,
+          reasonCode: 'authorized_command_missing',
+        );
+        return;
+      }
+      // Keep the journal at authorized/queued for a clean executor start, or
+      // leave executing so the executor recovers from the durable checkpoint.
+      if (candidate.entry.status == AiActionJournalStatus.authorized) {
+        await _c.aiWorkspace.actionController.queue(proposal.proposalId);
+      }
+      final latest = await _c.aiWorkspace.actionController.journal.read(
+        proposal.proposalId,
+      );
+      final executable = latest?.command ?? command;
       await _generateMindMapsInChat(
         proposal.originalUserText,
         units,
         conversationWorkKey: requestedWorkKey.isEmpty ? null : requestedWorkKey,
         actionProposalId: proposal.proposalId,
-        actionCommand: candidate.entry.command,
+        actionCommand: executable,
       );
     } catch (error) {
       await _completeProductActionFailure(proposal.proposalId);
@@ -734,39 +751,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         ? null
         : _mindMapForArtifact(frozenTargetId);
     if (retrying && retryCommand?.object == AiIntentObject.mindMap) {
-      final retryScope = _mindMapScopeForText(retryCommand!.originalText);
-      await _routeMindMapRequest(
-        text,
-        retryScope,
+      await _retryMindMapProductAction(
+        text: text,
         retryTurnId: retryTurnId,
-        clearComposer: false,
-      );
-      return;
-    }
-    if (retryTarget != null && retryCommand?.action == AiIntentAction.edit) {
-      await _runMindMapRevision(
-        text,
-        retryTarget,
-        retryTurnId: retryTurnId,
-        clearComposer: preset == null && _input.text.trim() == text,
+        retryCommand: retryCommand!,
+        retryTarget: retryTarget,
       );
       return;
     }
 
-    // "继续修改" is an explicit product attachment, not a hint for the
-    // language model. While the chip is visible, submit the reader's text
-    // directly as a revision instruction for that exact native artifact. A
-    // preset is excluded so retrying an unrelated chat turn cannot be
-    // captured by a currently attached map.
-    final attachedMindMap = preset == null ? _activeMindMap : null;
-    if (attachedMindMap != null) {
-      await _runMindMapRevision(
-        text,
-        attachedMindMap,
-        clearComposer: _input.text.trim() == text,
-      );
-      return;
-    }
+    // Attachment only binds preferred target context for this free-input turn.
+    // The model may propose a revision; it cannot authorize one. Direct
+    // revision shortcuts would bypass Proposal/Policy/Command.
 
     // Ordinary chat also preserves the resolved work of an omnibus. Mind-map
     // product actions are requested by this same model run and dispatched
@@ -1010,10 +1006,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     String? conversationWorkKey,
     String? retryTurnId,
     required bool clearComposer,
-    String? actionProposalId,
-    Future<AiActionJournalEntry> Function(
+    required String actionProposalId,
+    required Future<AiActionJournalEntry> Function(
       List<BookAiMindMapGenerationUnit> units,
-    )?
+    )
     authorizeAction,
   }) async {
     final frozenConversationWorkKey = conversationWorkKey ?? _chatWorkKey;
@@ -1038,9 +1034,14 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       return false;
     }
     if (clearComposer) _clearComposerAfterFrame(text);
-    AiActionJournalEntry? authorized;
-    if (actionProposalId != null) {
-      authorized = await authorizeAction?.call([unit]);
+    final authorized = await authorizeAction([unit]);
+    final actionCommand = authorized.command;
+    if (actionCommand == null) {
+      throw StateError('产品操作未签发授权命令');
+    }
+    if (authorized.status.isTerminal ||
+        authorized.status == AiActionJournalStatus.cancelRequested) {
+      return false;
     }
     await _generateMindMapsInChat(
       text,
@@ -1056,7 +1057,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       ),
       keepEditing: keepEditing,
       actionProposalId: actionProposalId,
-      actionCommand: authorized?.command,
+      actionCommand: actionCommand,
     );
     return true;
   }
@@ -1668,9 +1669,102 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       return latest;
     }
     if (latest.status == AiActionJournalStatus.authorized) {
-      await _c.aiWorkspace.actionController.queue(proposal.proposalId);
+      return _c.aiWorkspace.actionController.queue(proposal.proposalId);
     }
-    return _c.aiWorkspace.actionController.ensureExecuting(proposal.proposalId);
+    if (latest.status == AiActionJournalStatus.queued ||
+        latest.status == AiActionJournalStatus.executing) {
+      return latest;
+    }
+    throw StateError('产品操作尚未授权，不能执行');
+  }
+
+  Future<void> _retryMindMapProductAction({
+    required String text,
+    required String? retryTurnId,
+    required AiConversationCommand retryCommand,
+    AiBookMindMap? retryTarget,
+  }) async {
+    // User retry after a terminal failure is a new trusted submission. Crash
+    // recovery mid-execution reuses the journal; this path issues a fresh
+    // explicit-UI proposal so Policy/Journal still gate the side effects.
+    final isEdit = retryCommand.action == AiIntentAction.edit;
+    final proposal = AiActionProposal(
+      protocolVersion: AiActionProposal.currentProtocolVersion,
+      proposalId: 'proposal-${_newTurnId()}',
+      parentRunId: null,
+      conversationId: _c.item.contentHash,
+      turnId: retryTurnId,
+      actionKind: isEdit ? 'revise_book_mind_map' : 'create_book_mind_map',
+      definitionVersion: 1,
+      proposalSchemaVersion: 1,
+      source: AiActionProposalSource.explicitUi,
+      sourceSubmissionId: 'retry-${_newTurnId()}',
+      originalUserText: text,
+      requestedArguments: {
+        'instruction': text,
+        'contentHash': _c.item.contentHash,
+        if (_chatWorkKey case final value? when value.isNotEmpty)
+          'workKey': value,
+        if (!isEdit) 'scope': _mindMapScopeForText(text).name,
+        if (isEdit && retryTarget?.artifactId != null)
+          'targetArtifactId': retryTarget!.artifactId,
+      },
+      scopeRef: isEdit ? null : _mindMapScopeForText(text).name,
+      targetRef: isEdit ? retryTarget?.artifactId : null,
+      expectedRevision: isEdit ? retryTarget?.revision : null,
+      createdAt: DateTime.now(),
+      expiresAt: DateTime.now().add(const Duration(hours: 24)),
+    );
+    try {
+      final evaluation = await _c.aiWorkspace.actionController.propose(
+        proposal,
+        deferExplicitAuthorization: true,
+      );
+      if (!evaluation.authorized &&
+          evaluation.entry.status != AiActionJournalStatus.proposed) {
+        return;
+      }
+      if (isEdit) {
+        final target = retryTarget;
+        if (target == null) {
+          await _completeProductActionCancelled(proposal.proposalId);
+          return;
+        }
+        final started = await _runMindMapRevision(
+          text,
+          target,
+          retryTurnId: retryTurnId,
+          clearComposer: false,
+          actionProposalId: proposal.proposalId,
+          authorizeAction: (units) =>
+              _authorizeActionForExecution(proposal, units: units),
+        );
+        if (!started) {
+          await _completeProductActionCancelled(proposal.proposalId);
+        }
+        return;
+      }
+      final started = await _routeMindMapRequest(
+        text,
+        _mindMapScopeForText(text),
+        retryTurnId: retryTurnId,
+        clearComposer: false,
+        actionProposalId: proposal.proposalId,
+        authorizeAction: (units) =>
+            _authorizeActionForExecution(proposal, units: units),
+      );
+      if (!started) {
+        await _completeProductActionCancelled(proposal.proposalId);
+      }
+    } catch (error) {
+      await _completeProductActionFailure(proposal.proposalId);
+      if (mounted) {
+        _appendMindMapClarification(
+          text,
+          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
+        );
+      }
+    }
   }
 
   Future<void> _completeProductActionFailure(String proposalId) async {
@@ -1815,10 +1909,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     AiBookSectionSlice? frozenCurrentChapter,
     String? retryTurnId,
     bool clearComposer = false,
-    String? actionProposalId,
-    Future<AiActionJournalEntry> Function(
+    required String actionProposalId,
+    required Future<AiActionJournalEntry> Function(
       List<BookAiMindMapGenerationUnit> units,
-    )?
+    )
     authorizeAction,
   }) async {
     final conversationWorkKey = frozenTurn?.conversationWorkKey ?? _chatWorkKey;
@@ -1874,12 +1968,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (clearComposer && !composerClearedForChoice) {
       _clearComposerAfterFrame(text);
     }
-    if (actionProposalId != null) {
-      units = await _freezeMindMapUnits(units);
+    units = await _freezeMindMapUnits(units);
+    final authorized = await authorizeAction(units);
+    final actionCommand = authorized.command;
+    if (actionCommand == null) {
+      throw StateError('产品操作未签发授权命令');
     }
-    AiActionJournalEntry? authorized;
-    if (actionProposalId != null) {
-      authorized = await authorizeAction?.call(units);
+    if (authorized.status.isTerminal ||
+        authorized.status == AiActionJournalStatus.cancelRequested) {
+      return false;
     }
     await _generateMindMapsInChat(
       text,
@@ -1887,7 +1984,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       retryTurnId: retryTurnId,
       conversationWorkKey: conversationWorkKey,
       actionProposalId: actionProposalId,
-      actionCommand: authorized?.command,
+      actionCommand: actionCommand,
     );
     return true;
   }
@@ -2027,8 +2124,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required String? conversationWorkKey,
     AiConversationCommand? command,
     bool keepEditing = false,
-    String? actionProposalId,
-    AiAuthorizedCommand? actionCommand,
+    required String actionProposalId,
+    required AiAuthorizedCommand actionCommand,
   }) async {
     final workKey = conversationWorkKey;
     final turnId = _newTurnId();
@@ -2036,7 +2133,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     _activeActionProposalId = actionProposalId;
     _activeTurnWorkKey = workKey;
     _cancel = CancelToken();
-    final committedArtifactIds = <String>[];
     setState(() {
       _sending = true;
       _error = null;
@@ -2057,7 +2153,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       actionCommand: actionCommand,
       onArtifact: (artifact) {
         final artifactId = artifact.artifactId;
-        if (artifactId != null) committedArtifactIds.add(artifactId);
         if (!mounted) return;
         if (keepEditing && artifactId != null) {
           _mindMapConversation.attachArtifact(artifactId);
@@ -2065,27 +2160,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         if (artifactId != null) _mindMapCoordinator.reveal(artifactId);
       },
     );
-    if (actionProposalId != null) {
-      final actionEntry = await _c.aiWorkspace.actionController.journal.read(
-        actionProposalId,
-      );
-      final cancelRequested =
-          actionEntry?.status == AiActionJournalStatus.cancelRequested;
-      await _c.aiWorkspace.actionController.completeForProposal(
-        proposalId: actionProposalId,
-        status: cancelRequested
-            ? AiActionJournalStatus.cancelled
-            : outcome.succeeded
-            ? AiActionJournalStatus.succeeded
-            : outcome.cancelled
-            ? AiActionJournalStatus.cancelled
-            : AiActionJournalStatus.failed,
-        artifactRefs: cancelRequested ? const [] : committedArtifactIds,
-        publicErrorCode: cancelRequested || outcome.succeeded
-            ? null
-            : 'mind_map_workflow_failed',
-      );
-    }
+    // Receipt is committed by AiProductWorkflowExecutor. The chat layer only
+    // projects UI state from the journal outcome.
     if (!mounted) return;
     final failed = !outcome.succeeded && !outcome.cancelled;
     _mindMapCoordinator.cancelScope();

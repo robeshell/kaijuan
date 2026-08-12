@@ -396,7 +396,15 @@ class AiChatService {
       }
       final calls = result.toolCalls;
       final productCalls = calls
-          .where((call) => AiProductToolNames.all.contains(call.name))
+          .where((call) {
+            final registry = productContext.actionRegistry;
+            if (registry == null) {
+              return AiProductToolNames.all.contains(call.name);
+            }
+            return registry.definitions.any(
+              (definition) => definition.toolName == call.name,
+            );
+          })
           .toList(growable: false);
       if (repairingProductAction &&
           (productCalls.length != 1 || calls.length != 1)) {

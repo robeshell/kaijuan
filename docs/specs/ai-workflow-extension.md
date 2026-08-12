@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | v1 通用契约与测试骨架已落地；PPT 等领域动作按需接入 |
+| **状态** | v1 通用契约骨架已建立；生产恢复、Artifact repository 与无中心改动扩展仍在迁移 |
 | **日期** | 2026-08-12 |
 | **产品动作控制** | [ai-product-actions.md](./ai-product-actions.md) |
 | **AI 总规范** | [ai.md](./ai.md) |
@@ -514,17 +514,19 @@ scope preflight
 
 ## 14. 完成标准
 
-- [x] `AiProductActionDefinition`、注册表校验和动态工具目录落地。
-- [x] 能力快照与 required/optional/oneOf 门禁落地。
-- [x] 通用 `AiWorkflowAdapter`、事件、检查点、取消和恢复契约落地。
-- [x] Action/Command/Workflow/Artifact/Prompt/Renderer 版本彼此独立。
-- [x] Artifact 强类型 payload、原子提交、派生文件和 WebDAV 边界落地。
+- [x] `AiProductActionDefinition`、注册表冲突校验和动态工具目录骨架落地。
+- [x] 能力快照与 required/optional/oneOf 门禁在目录和 Controller 两侧一致生效。
+- [x] 通用 `AiWorkflowAdapter` 的事件、检查点、取消和恢复语义在生产 Workflow 落地。
+- [x] Action/Command/Workflow/Artifact/Prompt/Renderer 版本彼此独立并实际传播。
+- [x] Artifact 强类型 payload、持久化原子提交、派生文件和 WebDAV 边界落地。
 - [x] 幂等键绑定可信 submission，既防重复回调又允许用户再次生成。
-- [x] 所有成功/失败文案由 Receipt 和 App 投影产生，模型不能伪造成功。
-- [x] 增加一个测试 Workflow 不修改通用 Controller 分发代码。
-- [x] PPT 参考场景的语义最小对、能力降级和多阶段恢复可由协议完整表达。
+- [x] 所有生产成功/失败文案由 Receipt 和 App 投影产生，模型不能伪造成功。
+- [x] 增加第二个测试 Workflow 不修改通用 Controller、工具解析和 Widget 分发代码。
+- [ ] PPT 参考场景的语义最小对、能力降级和多阶段恢复由可执行契约测试证明。
 - [x] Genkit/Legacy/未来远端 Runtime 切换不改变产品动作与 Artifact 契约。
 
-实现证据：`lib/ai/ai_workflow_contract.dart`、`lib/ai/ai_workflow_executor.dart`、
-`AiProductActionRegistry.toolDescriptors` 与通用控制面测试。PPT 仍是协议参考场景，
+当前证据：`lib/ai/ai_workflow_contract.dart`、`lib/ai/ai_workflow_executor.dart`、
+`AiBookMindMapWorkflowAdapter`、`JsonAi*Store`、
+`AiTestBookExportWorkflowAdapter` 与对应测试。派生文件 PNG 导出仍由既有思维导图
+renderer 负责，不经通用 Artifact envelope 写二进制。PPT 仍是协议参考场景，
 没有虚构为已交付的产品能力。

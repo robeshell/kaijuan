@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| **状态** | 对话内直接生成已实现；Product Action Protocol v1 待迁移 |
+| **状态** | 对话内生成已实现；Product Action Protocol v1 生产链已接入 |
 | **日期** | 2026-08-12 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **相关** | [ai.md](./ai.md)、[ai-product-actions.md](./ai-product-actions.md)、[ai-workflow-extension.md](./ai-workflow-extension.md)、[ai-graph.md](./ai-graph.md)、[webdav-backup.md](./webdav-backup.md) |
@@ -14,7 +14,7 @@
 
 思维导图表达主题、论点和层级摘要；知识图谱表达实体、关系、证据和身份消歧。两者不得共用业务模型、缓存或视图状态。普通聊天中的 Mermaid 继续作为通用富内容能力，也不得成为图书思维导图的缓存格式。
 
-思维导图的内容 Workflow 与动作控制分离：`AiBookMindMapService` 只负责获得一个已授权范围后的结构化生成；创建/修订是否应该执行，由 [AI 产品动作协议](./ai-product-actions.md) 的 Proposal、Policy、授权、Journal 和 Command 决定。当前直接校验后执行的兼容路径继续可用到迁移完成，但不得再扩展隐式触发规则。
+思维导图的内容 Workflow 与动作控制分离：`AiBookMindMapService` 只负责获得一个已授权范围后的结构化生成；创建/修订是否应该执行，由 [AI 产品动作协议](./ai-product-actions.md) 的 Proposal、Policy、授权、Journal 和 Command 决定。生产入口经 `AiBookMindMapWorkflowAdapter` 与通用 Executor 提交 Artifact 与 Receipt，不得再扩展隐式触发规则。
 
 思维导图作为首个产品动作还遵守 [Workflow Extension Contract](./ai-workflow-extension.md)：其 Action Definition、能力门禁、多层版本、强类型 Artifact 和 Receipt 使用通用契约，本规格继续拥有导图的内容模型、证据、布局与交互语义。
 
