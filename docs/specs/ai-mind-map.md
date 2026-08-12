@@ -2,10 +2,10 @@
 
 | | |
 |--|--|
-| **状态** | 对话内直接生成已实现 |
-| **日期** | 2026-08-10 |
+| **状态** | 对话内直接生成已实现；Product Action Protocol v1 待迁移 |
+| **日期** | 2026-08-12 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
-| **相关** | [ai.md](./ai.md)、[ai-graph.md](./ai-graph.md)、[webdav-backup.md](./webdav-backup.md) |
+| **相关** | [ai.md](./ai.md)、[ai-product-actions.md](./ai-product-actions.md)、[ai-workflow-extension.md](./ai-workflow-extension.md)、[ai-graph.md](./ai-graph.md)、[webdav-backup.md](./webdav-backup.md) |
 | **引擎** | 图书 reflow only；漫画页图另案 |
 
 ## 1. 定位
@@ -14,16 +14,20 @@
 
 思维导图表达主题、论点和层级摘要；知识图谱表达实体、关系、证据和身份消歧。两者不得共用业务模型、缓存或视图状态。普通聊天中的 Mermaid 继续作为通用富内容能力，也不得成为图书思维导图的缓存格式。
 
+思维导图的内容 Workflow 与动作控制分离：`AiBookMindMapService` 只负责获得一个已授权范围后的结构化生成；创建/修订是否应该执行，由 [AI 产品动作协议](./ai-product-actions.md) 的 Proposal、Policy、授权、Journal 和 Command 决定。当前直接校验后执行的兼容路径继续可用到迁移完成，但不得再扩展隐式触发规则。
+
+思维导图作为首个产品动作还遵守 [Workflow Extension Contract](./ai-workflow-extension.md)：其 Action Definition、能力门禁、多层版本、强类型 Artifact 和 Receipt 使用通用契约，本规格继续拥有导图的内容模型、证据、布局与交互语义。
+
 ## 2. 对话入口
 
 - 自由输入不由关键词或独立意图模型预判，而由本书对话同一模型回合决定直接回答还是调用原生思维导图产品工具。明确 Mermaid、评价、教程或讨论可以直接回答，不应触发原生 Workflow。
-- `create_book_mind_map` 和 `revise_book_mind_map` 是动态、终止型产品工具。模型只引用 App 为本轮签发的 `work_n` 范围别名和 `artifact_n` 产物别名；App 映射真实身份并再次校验，不通过用户原文包含关系猜作品。发送时冻结章节正文、作品、manifest、会话 `workKey` 和别名目录，模型运行期间翻页不得改变目标。人类可读标题必须作为转义后的不可信数据传递。缺少具体目标时必须在对话内追问，不能静默重新生成。
-- 模型若没有调用产品工具、却用可见 Markdown 声称已经交付思维导图，App 必须撤回草稿并进行一次仅允许产品工具的协议修复；仍未得到合法工具调用则失败，不保存文字提纲。协议修复只纠正模型伪交付，不从用户关键词推断作品或章节范围。
+- `create_book_mind_map` 和 `revise_book_mind_map` 是动态、终止型产品工具。模型只引用 App 为本轮签发的 `work_n` 范围别名和 `artifact_n` 产物别名；Tool Call 只产生 `AiActionProposal`，App 映射真实身份、校验冻结范围并交给 Policy，不能直接启动 Workflow。发送时冻结章节正文、作品、manifest、会话 `workKey` 和别名目录，模型运行期间翻页不得改变目标。人类可读标题必须作为转义后的不可信数据传递。缺少具体目标时在对话内补充，不能静默重新生成。
+- 模型若没有调用产品工具、却用可见 Markdown 声称已经交付思维导图，App 必须撤回草稿并进行一次仅允许产品工具的协议修复；仍未得到合法工具调用则失败，不保存文字提纲。修复成功只得到 Proposal，仍须经过 Policy 与授权。协议修复只纠正模型伪交付，不从用户关键词推断作品或章节范围。
 - 对话中的每张导图附件拥有 App 生成的 `artifactId`，并保留可选的 `sourceArtifactId` 与单调 `revision`。旧消息没有这些字段时以消息 turn 或范围指纹兼容寻址；布局切换只更新同一 artifact，不产生新的内容版本。
-- 卡片上的“继续修改”把该 `artifactId` 作为可见、可移除的输入附件绑定到 composer。附件存在时，用户输入确定性进入同一产物的修订 Workflow，并在新版本生成后把附件推进到新 `artifactId`；关闭附件后恢复普通对话。显式附件不再依赖模型是否选择修订工具，但仍必须经过 Controller 的范围恢复与身份校验。
-- 编辑 Workflow 仍使用原 artifact 的冻结正文范围，但把上一版完整结构和用户要求作为结构化模型输入，返回完整的新树并追加一条对话附件；它不在客户端做节点补丁，也不覆盖旧版本。目标缺失、正文范围失效或执行取消时只保留对话状态，不伪造新 artifact。
+- 卡片上的“继续修改”把该 `artifactId` 作为可见、可移除的目标附件绑定到 composer。附件只提供可信目标上下文，不把 composer 切换为修订模式，也不授权后续任意文字。评价、解释和否定可以正常回答；明确修改时由同一 Agent 提出指向附件的修订 Proposal。自由输入产生的修订首阶段显示对话内确认卡，关闭附件后只移除目标上下文。
+- Policy 授权后，编辑 Command 使用原 Artifact 的冻结正文范围、`targetArtifactId + expectedRevision`、上一版完整结构和用户要求作为输入，返回完整的新树并追加一条对话附件；它不在客户端做节点补丁，也不覆盖旧版本。并发修订的 revision 已变化时拒绝提交并要求基于最新版重试。目标缺失、正文范围失效或执行取消时只保留控制状态，不伪造新 Artifact。
 - “当前章/本章/这一章/这章”冻结当前 Foliate 章节；“当前作品/这部作品”冻结结构识别中的当前作品；“这本书/本书/整本书/全书”表示当前出版物。没有范围词且没有命中作品标题时默认当前章。
-- 快捷入口携带 App 已知的结构化命令；自由输入调用产品工具后，App 仍保留用户完整原始提示词，并将其作为本次结构化生成要求发送给 Workflow，不能只保留范围。
+- 快捷入口先形成 App 已知的 Proposal，并可按显式 UI 策略自动授权；自由输入调用产品工具后，App 仍保留用户完整原始提示词，并在确认后将其写入 Command，作为结构化生成要求发送给 Workflow，不能只保留范围或模型摘要。
 - 快捷入口继续使用标准指令“请为当前章生成思维导图”。思维导图仍在对话内完成，不新增 Tab。
 
 ## 3. 结构预检与用户告知
@@ -39,19 +43,20 @@
 - 当前章正文直接来自 Foliate 当前文档，并在异步调用前冻结标题、正文和物理 section。作品/分卷范围来自共享结构事实，不另建思维导图识别器。
 - Foliate 将同一 XHTML 内的连续同级标题作为逻辑结构证据时，正文范围必须先覆盖整个 `body`，再用标题收窄起止点；最后一个标题后的正文不得因 Range 终点未初始化而丢失。标题与副标题分成多个逻辑单元时，空标题单元可以保留给结构识别，但后续正文单元必须完整进入生成范围。
 
-范围选择只解决“生成哪一部”，不提供知识图谱式章节逐项勾选。选项按“全部作品、各部作品”纵向排列；等待选择时锁定输入框以避免并发发送。取消选择不会产生模型请求，并恢复尚未发送的原始输入。
+范围选择只解决“生成哪一部”，不提供知识图谱式章节逐项勾选。选项按“全部作品、各部作品”纵向排列；卡片必须同时展示将执行的创建动作，用户点击“生成”既完成范围选择，也构成该确定范围的明确授权。等待选择时锁定重复产品提交，但允许产品控制层保持可恢复状态；取消选择不会产生模型请求，并拒绝该 Proposal。
 
 ## 4. 输入与生成
 
 ```text
-用户明确请求
-  → App 识别当前章 / 作品 / 出版物
-  → 复用图书结构并告知识别结果
-  → 合集时在对话内展示纵向选择卡片并等待用户选择
+用户输入 / 快捷入口
+  → 模型 Tool Call 或结构化 UI 形成 Proposal
+  → App Policy 识别当前章 / 作品 / 出版物
+  → 对话内确认、补充或范围选择（显式 UI 可预授权）
+  → 签发 Command 并写入 Journal
   → 读取所选范围完整正文并过滤明确外围材料
   → AiWorkflowModelSession.completeJson 单次生成
   → App 做基础树校验、稳定 ID 与证据定位
-  → 立即写入当前对话附件
+  → 写入当前对话 Artifact 与 Receipt
 ```
 
 - 一个选定范围对应一次模型请求。删除固定字符 batch、逐批主题提炼、批次并发、最终 reduce 和 checkpoint。
@@ -64,7 +69,7 @@
 - 根节点概括核心命题、中心问题或叙事主线；一级通常保持 4–7 个处于同一抽象层级、使用同一划分维度的主要分支；二级展开观点、阶段、机制或矛盾；更深节点承载原因、事实、案例、转折、影响、条件与结论。同级标题保持语法形式平行，摘要写出正文事实而不复述标题。模型必须合并语义重复内容，避免目录复刻、同级维度混用和为了平衡而制造空节点。
 - 正文规模只用于 App 计算输出 token 容量，不向模型暴露目标节点数、最低节点数或按字符换算的密度指标，也不因节点数量重试。提示词包含论说、叙事、知识类的短结构示例及“目录标题逐章平铺”的反例；示例只规范编辑方法，不向最终结果注入示例事实。
 
-思维导图 Workflow 不迁入 Genkit `defineFlow`，仍由开卷确定性执行。普通对话可以经 App 自有 `AiAgentRuntime` 使用 Genkit Agent 来选择 `create_book_mind_map` / `revise_book_mind_map` 产品工具；工具请求必须经过 App 的别名、范围、预算和运行状态校验后才能启动 Workflow。Genkit 继续承担 Provider 归一化、Schemantic structured output、原生工具协议、运行时会话与 trace；范围、用户确认、取消、领域产物、错误与对话持久化属于开卷。
+思维导图 Workflow 不迁入 Genkit `defineFlow`，仍由开卷确定性执行，并只接受 `AiAuthorizedCommand`。普通对话可以经 App 自有 `AiAgentRuntime` 使用 Genkit Agent 选择 `create_book_mind_map` / `revise_book_mind_map`，但 Tool Call 只产生 Proposal；App 负责 Policy、确认、别名与范围解析、预算、Journal、幂等、revision 和运行状态。Genkit 继续承担 Provider 归一化、Schemantic structured output、原生工具协议、可选 Interrupt/Resume、运行时会话与 trace；授权、取消、领域产物、错误与对话持久化属于开卷。
 
 ## 5. 校验与数据
 
@@ -86,12 +91,14 @@ AiBookMindMapNode
 - 不再要求模型回传并精确比对章节覆盖集合，也不因摘要措辞、节点密度或缺少 evidence 重试模型。结构化 JSON 无法解析、父引用缺失、无根或存在环/孤立节点时本轮明确失败，不在本地猜测或补写内容 JSON。
 - evidence 是可选增强。只有引文能在对应冻结正文中逐字定位时才保存跳转；范围外、改写或无法定位的引文直接丢弃，不影响节点。
 - `scopeSectionIndices` 和 `scopeFingerprint` 由 App 根据真实输入生成，不依赖模型声明。
+- 修订提交必须校验 Command 的 `targetArtifactId + expectedRevision`；revision 不匹配时不得覆盖或自动改写目标。创建与修订都按 Product Action Protocol 的 `idempotencyKey` 去重，安全重试不得产生重复附件。
 
 ## 6. 对话持久化与 WebDAV
 
 - 对话消息中的 `AiBookMindMap` 附件是唯一持久化事实。同一会话可保留多个章节、作品和分卷导图；布局切换直接更新该消息附件。
 - 删除 `ai_mind_map/` 最近产物目录、运行 checkpoint、`AiBookMindMapStore` 以及 WebDAV 中重复的 `aiMindMaps` 顶层记录。思维导图随 `ai_chat/` 会话自然进入用户主动 WebDAV 快照。
 - 不迁移旧独立最近产物；旧备份中的额外 `aiMindMaps` 字段可被格式解析器忽略。API Key、布局临时坐标和模型协议连续性元数据不进入备份。
+- Proposal、待确认卡片、Command、取消令牌和 Receipt 属于本地 `AiActionJournal` 控制事实，不作为思维导图附件、也不随 WebDAV 同步。崩溃恢复时若 Artifact 已提交但 Receipt 未完成，必须按稳定 Artifact/Command 身份补回执，不能再次生成。
 
 ## 7. 布局与交互
 
@@ -104,10 +111,14 @@ AiBookMindMapNode
 ## 8. 验收
 
 - “生成本章思维导图”完整发送冻结章节与用户原始要求，只调用一次结构化模型；普通单书全书同样一次调用。
+- 自由对话产生的创建/修订 Tool Call 只形成 Proposal；对话内确认后才调用结构化模型。快捷入口和范围卡片可按显式 UI Policy 预授权，但仍写 Command/Journal。
+- “继续修改”附件只绑定目标：“这张图不错”“解释第三个分支”“不用改了”不得生成新版本；“再详细一点”形成指向该附件的修订 Proposal，并在确认后使用 expected revision 执行。
+- 否定、讨论、评价、教程、概念比较、明确 Mermaid 请求和标点歧义语句的语义评测中，未授权 Workflow 启动数为 0。
 - 论说、叙事和知识类测试材料分别命中对应编辑模板；结果记录非空主导组织原则，一级分支保持同一划分维度，提示词不再包含目标节点数。
 - 分卷单书按卷依次生成；多作品合集在任何模型调用前于对话内纵向展示作品数、章节数与范围选择，选择全部后按作品依次生成，全程不弹窗。
 - 不再存在 mind-map batch/reduce Schema、批次摘要、字符采样、checkpoint、最近产物 store 或独立 WebDAV记录。
 - 取消、结构化输出失败、上下文过长和树拓扑非法有清晰终态；已经完成的作品/分卷卡片保留。
+- 取消先进入 `cancelRequested`，底层工作静止后才完成取消；取消后晚到的模型结果不得写入附件。重复提交和崩溃重试不得产生重复 Artifact，并发修订同一 revision 只能有一个成功。
 - 同一 XHTML 使用“章标题 + 同级副标题”的书籍，最后一个标题后的正文仍完整进入输入；Provider 返回多个有效根时在本地合成单根并成功显示。
 - 生成状态中的书名、作品名和范围说明必须在对话可用宽度内换行，最多显示三行后省略；长出版物标题不得撑破消息列表或遮挡停止操作。
 - 对话内和全屏均可导出 PNG；导出图片包含当前可见层级的完整画布，平移和缩放不裁切内容，成功、取消和失败均有明确反馈。

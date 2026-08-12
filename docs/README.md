@@ -19,6 +19,8 @@
 | 某屏交互 | [specs/](./specs/) |
 | 图书听书（TTS） | [specs/book-tts.md](./specs/book-tts.md)（T1 MVP 已有；不接云端 AI 音色） |
 | 本书 AI 智能体 | [specs/ai.md](./specs/ai.md)（BYOK / 词典译 / 对话…） |
+| AI 产品动作协议 | [specs/ai-product-actions.md](./specs/ai-product-actions.md)（Proposal / Policy / 授权 / Journal / Workflow / Receipt） |
+| AI Workflow 扩展契约 | [specs/ai-workflow-extension.md](./specs/ai-workflow-extension.md)（注册 / 能力 / 版本 / Adapter / Artifact；含 PPT 参考场景） |
 | AI 翻译偏好与选区译 | [specs/ai-translation.md](./specs/ai-translation.md)（设计定稿） |
 | 本书知识图谱 | [specs/ai-graph.md](./specs/ai-graph.md)（M5 已实现；实体/关系/出处，章级增量） · 展示方案驱动 + 家族树见 [specs/ai-graph-narration.md](./specs/ai-graph-narration.md)（N1–N4 已实现） |
 | 图书思维导图 | [specs/ai-mind-map.md](./specs/ai-mind-map.md)（独立确定性 Workflow、结构化节点与原生布局） |
@@ -50,6 +52,8 @@ docs/
     reading-stats.md
     book-tts.md
     ai.md                            ← 本书 AI 智能体
+    ai-product-actions.md            ← AI 产品动作控制协议（v1）
+    ai-workflow-extension.md         ← 新增 AI Workflow 的通用扩展契约（v1）
     ai-translation.md                ← AI 翻译偏好与选区译（设计定稿）
     ai-graph.md                      ← 本书知识图谱（M5 已实现）
     ai-graph-narration.md            ← 图谱展示方案驱动 + 家族树（N1–N4 已实现）
@@ -90,7 +94,7 @@ docs/
 ### 加 AI 能力
 
 1. 改 PRODUCT §6 能力表与落地顺序。  
-2. 开或改 `docs/specs/ai.md`；翻译专项见 `docs/specs/ai-translation.md`。  
+2. 开或改 `docs/specs/ai.md`；会启动任务、修改产物或写入外部系统的动作还须更新 `docs/specs/ai-product-actions.md` 的授权矩阵，并按 `docs/specs/ai-workflow-extension.md` 注册 Workflow、能力、版本和 Artifact；翻译专项见 `docs/specs/ai-translation.md`。
 3. ENGINEERING 增加 `lib/ai`（或等价）边界与 Provider 约定。  
 
 ### 加工程包
@@ -115,6 +119,8 @@ docs/
 | reading-stats | 阅读统计 |
 | book-tts | 听书（系统 TTS；T1 MVP 已有） |
 | ai | 本书 AI 智能体（BYOK / 词典译 / 对话 / 大纲 / 思维导图；M0–M3b 已有） |
+| ai-product-actions | AI 产品动作控制协议（Proposal / Policy / 对话内确认 / Command / Journal / Receipt；设计定稿，待迁移） |
+| ai-workflow-extension | 新 Workflow 注册、能力门禁、执行/恢复、版本和 Artifact 契约；PPT 仅作扩展校验示例 |
 | ai-translation | AI 翻译偏好与选区译（设计定稿；T0–T3 已有，T4 整本译待办） |
 | ai-graph | 本书知识图谱（M5 已有；实体/关系/出处，章级增量） |
 | ai-graph-narration | 图谱展示方案驱动 + 家族树（N1–N4 已实现；方案契约/方向约定/连线架构图/地点链） |
