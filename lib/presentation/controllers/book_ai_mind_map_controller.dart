@@ -8,6 +8,7 @@ import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_conversation_intent.dart';
 import '../../ai/ai_mind_map.dart';
 import '../../ai/ai_models.dart';
+import '../../ai/ai_product_action_protocol.dart';
 import 'book_ai_conversation_controller.dart';
 
 typedef BookAiMindMapGenerationUnit = ({
@@ -95,8 +96,44 @@ class BookAiMindMapController extends ChangeNotifier {
     String? retryTurnId,
     AiConversationCommand? command,
     bool segmentedPublication = false,
+    AiAuthorizedCommand? actionCommand,
     void Function(AiBookMindMap artifact)? onArtifact,
   }) async {
+    if (actionCommand != null &&
+        actionCommand.actionKind == 'revise_book_mind_map' &&
+        baseMap == null) {
+      throw StateError('Revision command requires a target mind map');
+    }
+    if (actionCommand != null &&
+        actionCommand.actionKind != 'create_book_mind_map' &&
+        actionCommand.actionKind != 'revise_book_mind_map') {
+      throw StateError('Unsupported mind-map action command');
+    }
+    if (actionCommand != null) {
+      if (actionCommand.scopeSectionIndices.isEmpty) {
+        throw StateError('Mind-map action command has no frozen scope');
+      }
+      final frozenScope = actionCommand.scopeSectionIndices.toSet();
+      final requestedSections = <int>{};
+      for (final unit in units) {
+        for (final section in unit.frozenSections ?? const []) {
+          requestedSections.add(section.index);
+        }
+      }
+      if (requestedSections.isEmpty ||
+          !requestedSections.every(frozenScope.contains)) {
+        throw StateError('Mind-map action command scope does not match input');
+      }
+      if (actionCommand.actionKind == 'revise_book_mind_map') {
+        final targetId = baseMap?.artifactId;
+        if (targetId == null || actionCommand.targetArtifactId != targetId) {
+          throw StateError('Mind-map revision target does not match command');
+        }
+        if (actionCommand.expectedRevision != baseMap?.revision) {
+          throw StateError('Mind-map revision is stale');
+        }
+      }
+    }
     if (_activeTurnId != null) {
       throw StateError('A mind-map product turn is already active');
     }

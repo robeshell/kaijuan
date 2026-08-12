@@ -448,7 +448,10 @@ class AiActionJournalEntry {
           AiActionJournalStatus.rejected,
           AiActionJournalStatus.expired,
         },
-        AiActionJournalStatus.authorized: {AiActionJournalStatus.queued},
+        AiActionJournalStatus.authorized: {
+          AiActionJournalStatus.queued,
+          AiActionJournalStatus.cancelled,
+        },
         AiActionJournalStatus.queued: {
           AiActionJournalStatus.executing,
           AiActionJournalStatus.cancelRequested,

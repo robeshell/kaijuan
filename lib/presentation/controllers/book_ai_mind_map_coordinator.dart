@@ -18,6 +18,20 @@ class BookAiMindMapScopePrompt {
   int? selectedValue;
 }
 
+class BookAiProductActionPrompt {
+  BookAiProductActionPrompt({
+    required this.proposalId,
+    required this.title,
+    required this.summary,
+  });
+
+  final String proposalId;
+  final String title;
+  final String summary;
+  final Completer<bool?> completer = Completer<bool?>();
+  bool? selected;
+}
+
 /// Owns native mind-map attachment, reveal, pointer, layout, and scope-choice
 /// interaction state for the book AI workspace.
 class BookAiMindMapCoordinator extends ChangeNotifier {
@@ -36,10 +50,12 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
   String? _revealArtifactId;
   bool _pointerActive = false;
   BookAiMindMapScopePrompt? _scopePrompt;
+  BookAiProductActionPrompt? _actionPrompt;
 
   String? get revealArtifactId => _revealArtifactId;
   bool get pointerActive => _pointerActive;
   BookAiMindMapScopePrompt? get scopePrompt => _scopePrompt;
+  BookAiProductActionPrompt? get actionPrompt => _actionPrompt;
   String? get activeArtifactId => mindMapConversation.attachedArtifactId;
 
   AiBookMindMap? get activeMindMap {
@@ -123,6 +139,45 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool?> requestActionConfirmation({
+    required String proposalId,
+    required String title,
+    required String summary,
+    VoidCallback? onOpened,
+  }) async {
+    cancelActionPrompt();
+    final prompt = BookAiProductActionPrompt(
+      proposalId: proposalId,
+      title: title,
+      summary: summary,
+    );
+    _actionPrompt = prompt;
+    notifyListeners();
+    onOpened?.call();
+    final result = await prompt.completer.future;
+    if (identical(_actionPrompt, prompt)) {
+      _actionPrompt = null;
+      notifyListeners();
+    }
+    return result;
+  }
+
+  void selectActionConfirmation(bool approved) {
+    final prompt = _actionPrompt;
+    if (prompt == null || prompt.completer.isCompleted) return;
+    prompt.selected = approved;
+    notifyListeners();
+    prompt.completer.complete(approved);
+  }
+
+  void cancelActionPrompt() {
+    final prompt = _actionPrompt;
+    if (prompt == null) return;
+    if (!prompt.completer.isCompleted) prompt.completer.complete(null);
+    _actionPrompt = null;
+    notifyListeners();
+  }
+
   void updateLayout(AiChatMessage message, AiMindMapLayout layout) {
     final sourceMap = message.mindMap;
     if (sourceMap == null) return;
@@ -154,6 +209,7 @@ class BookAiMindMapCoordinator extends ChangeNotifier {
   @override
   void dispose() {
     cancelScope();
+    cancelActionPrompt();
     super.dispose();
   }
 }

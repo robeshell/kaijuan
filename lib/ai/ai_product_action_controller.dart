@@ -1,0 +1,407 @@
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
+
+import 'ai_product_action_protocol.dart';
+
+class AiActionEvaluation {
+  const AiActionEvaluation({required this.entry, required this.decision});
+
+  final AiActionJournalEntry entry;
+  final AiActionDecision decision;
+
+  bool get needsConfirmation =>
+      decision.outcome == AiActionDecisionOutcome.requireConfirmation;
+  bool get needsClarification =>
+      decision.outcome == AiActionDecisionOutcome.requireClarification;
+  bool get authorized => entry.status == AiActionJournalStatus.authorized;
+}
+
+/// App-owned control plane for product actions. It never calls a model or a
+/// domain Workflow; it only validates, journals and authorizes immutable
+/// commands for a separate executor.
+class AiProductActionController {
+  AiProductActionController({
+    required this.registry,
+    required this.journal,
+    this.policy = const AiActionPolicy(),
+    DateTime Function()? now,
+    String Function()? idGenerator,
+  }) : _now = now ?? DateTime.now,
+       _idGenerator = idGenerator ?? _defaultId;
+
+  final AiProductActionRegistry registry;
+  AiActionJournalStore journal;
+  final AiActionPolicy policy;
+  final DateTime Function() _now;
+  final String Function() _idGenerator;
+
+  void replaceJournal(AiActionJournalStore next) {
+    journal = next;
+  }
+
+  Future<AiActionEvaluation> propose(
+    AiActionProposal proposal, {
+    AiCapabilitySet capabilities = const AiCapabilitySet({}),
+    bool deferExplicitAuthorization = false,
+  }) async {
+    final existing = await journal.read(proposal.proposalId);
+    if (existing != null) {
+      final decision =
+          existing.decision ??
+          AiActionDecision(
+            proposalId: proposal.proposalId,
+            outcome: AiActionDecisionOutcome.deny,
+            reasonCode: 'journal_entry_missing_decision',
+            riskClass: AiActionRiskClass.reversible,
+            decidedAt: _now(),
+          );
+      return AiActionEvaluation(entry: existing, decision: decision);
+    }
+
+    var entry = AiActionJournalEntry.proposed(proposal);
+    await journal.write(entry);
+    final definition = registry.lookup(proposal.actionKind);
+    final decision = definition == null
+        ? AiActionDecision(
+            proposalId: proposal.proposalId,
+            outcome: AiActionDecisionOutcome.deny,
+            reasonCode: 'unknown_action_kind',
+            riskClass: AiActionRiskClass.reversible,
+            decidedAt: _now(),
+          )
+        : !capabilities.containsAll(definition.requiredCapabilities)
+        ? AiActionDecision(
+            proposalId: proposal.proposalId,
+            outcome: AiActionDecisionOutcome.deny,
+            reasonCode: 'missing_capability',
+            riskClass: definition.riskClass,
+            decidedAt: _now(),
+          )
+        : policy.decide(
+            proposal: proposal,
+            definition: definition,
+            now: _now(),
+          );
+    final status = switch (decision.outcome) {
+      AiActionDecisionOutcome.allow =>
+        deferExplicitAuthorization &&
+                proposal.source == AiActionProposalSource.explicitUi
+            ? AiActionJournalStatus.proposed
+            : AiActionJournalStatus.authorized,
+      AiActionDecisionOutcome.requireConfirmation =>
+        AiActionJournalStatus.awaitingConfirmation,
+      AiActionDecisionOutcome.requireClarification =>
+        AiActionJournalStatus.awaitingClarification,
+      AiActionDecisionOutcome.deny =>
+        proposal.expiresAt.isBefore(_now())
+            ? AiActionJournalStatus.expired
+            : AiActionJournalStatus.rejected,
+    };
+    AiAuthorizedCommand? command;
+    if (status == AiActionJournalStatus.authorized) {
+      command = _commandFor(
+        proposal: proposal,
+        decision: decision,
+        authorizationSubmissionId: proposal.sourceSubmissionId,
+        authorizationEvidence: 'proposal:${proposal.proposalId}',
+      );
+    }
+    entry = entry.transition(
+      status,
+      decision: decision,
+      command: command,
+      now: _now(),
+    );
+    await journal.write(entry);
+    return AiActionEvaluation(entry: entry, decision: decision);
+  }
+
+  Future<AiActionJournalEntry> approve({
+    required String proposalId,
+    required String authorizationSubmissionId,
+    required String authorizationEvidence,
+    Map<String, Object?> normalizedArguments = const {},
+  }) async {
+    var entry = await _requiredEntry(proposalId);
+    if (entry.status != AiActionJournalStatus.awaitingConfirmation) {
+      throw StateError('Action is not awaiting confirmation');
+    }
+    final decision = entry.decision;
+    if (decision == null ||
+        decision.outcome != AiActionDecisionOutcome.requireConfirmation) {
+      throw StateError('Action has no confirmable decision');
+    }
+    final effectiveDecision = normalizedArguments.isEmpty
+        ? decision
+        : AiActionDecision(
+            proposalId: decision.proposalId,
+            outcome: decision.outcome,
+            reasonCode: decision.reasonCode,
+            riskClass: decision.riskClass,
+            decidedAt: decision.decidedAt,
+            resolvedActionKind: decision.resolvedActionKind,
+            resolvedScope: decision.resolvedScope,
+            resolvedTarget: decision.resolvedTarget,
+            normalizedArguments: {
+              ...decision.normalizedArguments,
+              ...normalizedArguments,
+            },
+            confirmationSummary: decision.confirmationSummary,
+            allowedHumanDecisions: decision.allowedHumanDecisions,
+          );
+    return _authorizeEntry(
+      entry: entry,
+      decision: effectiveDecision,
+      authorizationSubmissionId: authorizationSubmissionId,
+      authorizationEvidence: authorizationEvidence,
+    );
+  }
+
+  Future<AiActionJournalEntry> authorize({
+    required String proposalId,
+    required String authorizationSubmissionId,
+    required String authorizationEvidence,
+    Map<String, Object?> normalizedArguments = const {},
+  }) async {
+    var entry = await _requiredEntry(proposalId);
+    if (entry.status != AiActionJournalStatus.proposed) {
+      throw StateError('Action is not awaiting explicit authorization');
+    }
+    final decision = entry.decision;
+    if (decision == null || decision.outcome != AiActionDecisionOutcome.allow) {
+      throw StateError('Action has no allow decision');
+    }
+    final effectiveDecision = normalizedArguments.isEmpty
+        ? decision
+        : AiActionDecision(
+            proposalId: decision.proposalId,
+            outcome: decision.outcome,
+            reasonCode: decision.reasonCode,
+            riskClass: decision.riskClass,
+            decidedAt: decision.decidedAt,
+            resolvedActionKind: decision.resolvedActionKind,
+            resolvedScope: decision.resolvedScope,
+            resolvedTarget: decision.resolvedTarget,
+            normalizedArguments: {
+              ...decision.normalizedArguments,
+              ...normalizedArguments,
+            },
+            confirmationSummary: decision.confirmationSummary,
+            allowedHumanDecisions: decision.allowedHumanDecisions,
+          );
+    return _authorizeEntry(
+      entry: entry,
+      decision: effectiveDecision,
+      authorizationSubmissionId: authorizationSubmissionId,
+      authorizationEvidence: authorizationEvidence,
+    );
+  }
+
+  Future<AiActionJournalEntry> _authorizeEntry({
+    required AiActionJournalEntry entry,
+    required AiActionDecision decision,
+    required String authorizationSubmissionId,
+    required String authorizationEvidence,
+  }) async {
+    final command = _commandFor(
+      proposal: entry.proposal,
+      decision: decision,
+      authorizationSubmissionId: authorizationSubmissionId,
+      authorizationEvidence: authorizationEvidence,
+    );
+    entry = entry.transition(
+      AiActionJournalStatus.authorized,
+      decision: decision,
+      command: command,
+      now: _now(),
+    );
+    await journal.write(entry);
+    return entry;
+  }
+
+  Future<AiActionJournalEntry> queue(String proposalId) =>
+      _transition(proposalId, AiActionJournalStatus.queued);
+
+  Future<AiActionJournalEntry> markExecuting(
+    String proposalId, {
+    int? attempt,
+  }) => _transition(
+    proposalId,
+    AiActionJournalStatus.executing,
+    attempt: attempt ?? 1,
+  );
+
+  Future<AiActionJournalEntry> requestCancel(String proposalId) =>
+      _transition(proposalId, AiActionJournalStatus.cancelRequested);
+
+  Future<AiAuthorizedCommand> requireExecutingCommand({
+    required String proposalId,
+    required String commandId,
+  }) async {
+    final entry = await _requiredEntry(proposalId);
+    final command = entry.command;
+    if (command == null || command.commandId != commandId) {
+      throw StateError('Action command does not match its proposal');
+    }
+    if (entry.status != AiActionJournalStatus.queued &&
+        entry.status != AiActionJournalStatus.executing) {
+      throw StateError('Action command is not executable');
+    }
+    return command;
+  }
+
+  Future<AiActionJournalEntry> reject(String proposalId) async {
+    final entry = await _requiredEntry(proposalId);
+    if (entry.status != AiActionJournalStatus.proposed &&
+        entry.status != AiActionJournalStatus.awaitingConfirmation &&
+        entry.status != AiActionJournalStatus.awaitingClarification) {
+      throw StateError('Action is not awaiting a human decision');
+    }
+    final next = entry.transition(AiActionJournalStatus.rejected, now: _now());
+    await journal.write(next);
+    return next;
+  }
+
+  Future<AiActionJournalEntry> complete(AiActionReceipt receipt) async {
+    final entries = await journal.readAll();
+    AiActionJournalEntry? entry = entries
+        .cast<AiActionJournalEntry?>()
+        .firstWhere(
+          (candidate) => candidate?.command?.commandId == receipt.commandId,
+          orElse: () => null,
+        );
+    if (entry == null) {
+      throw StateError('Unknown action command: ${receipt.commandId}');
+    }
+    if (entry.command?.commandId != receipt.commandId) {
+      throw StateError('Receipt command does not match journal command');
+    }
+    if (entry.status.isTerminal) return entry;
+    entry = entry.transition(receipt.status, receipt: receipt, now: _now());
+    await journal.write(entry);
+    return entry;
+  }
+
+  Future<AiActionJournalEntry> completeForProposal({
+    required String proposalId,
+    required AiActionJournalStatus status,
+    required List<String> artifactRefs,
+    String workflowRunId = '',
+    int attempt = 1,
+    String? publicErrorCode,
+  }) async {
+    final entry = await _requiredEntry(proposalId);
+    final command = entry.command;
+    if (command == null) throw StateError('Action has no authorized command');
+    return complete(
+      AiActionReceipt(
+        commandId: command.commandId,
+        workflowRunId: workflowRunId.isEmpty
+            ? 'workflow:${command.commandId}'
+            : workflowRunId,
+        attempt: attempt,
+        definitionVersion: command.definitionVersion,
+        workflowVersion: command.workflowVersion,
+        status: status,
+        artifactRefs: artifactRefs,
+        publicErrorCode: publicErrorCode,
+        finishedAt: _now(),
+      ),
+    );
+  }
+
+  Future<AiActionJournalEntry> _transition(
+    String proposalId,
+    AiActionJournalStatus status, {
+    int? attempt,
+  }) async {
+    var entry = await _requiredEntry(proposalId);
+    entry = entry.transition(status, attempt: attempt, now: _now());
+    await journal.write(entry);
+    return entry;
+  }
+
+  Future<AiActionJournalEntry> _requiredEntry(String id) async {
+    final entry = await journal.read(id);
+    if (entry == null) throw StateError('Unknown action journal entry: $id');
+    return entry;
+  }
+
+  AiAuthorizedCommand _commandFor({
+    required AiActionProposal proposal,
+    required AiActionDecision decision,
+    required String authorizationSubmissionId,
+    required String authorizationEvidence,
+  }) {
+    final actionKind = decision.resolvedActionKind ?? proposal.actionKind;
+    final targetArtifactId = decision.resolvedTarget ?? proposal.targetRef;
+    final expectedRevision = proposal.expectedRevision;
+    final scopeFingerprint = _string(
+      decision.normalizedArguments['scopeFingerprint'],
+    );
+    final idempotencyKey = sha256
+        .convert(
+          utf8.encode(
+            [
+              authorizationSubmissionId,
+              actionKind,
+              scopeFingerprint ?? proposal.scopeRef ?? '',
+              targetArtifactId ?? '',
+              '${expectedRevision ?? ''}',
+            ].join('|'),
+          ),
+        )
+        .toString();
+    final arguments = Map<String, Object?>.unmodifiable(
+      decision.normalizedArguments.isEmpty
+          ? proposal.requestedArguments
+          : decision.normalizedArguments,
+    );
+    return AiAuthorizedCommand(
+      protocolVersion: AiActionProposal.currentProtocolVersion,
+      commandId: _idGenerator(),
+      proposalId: proposal.proposalId,
+      actionKind: actionKind,
+      definitionVersion: proposal.definitionVersion,
+      commandSchemaVersion: 1,
+      workflowVersion: 1,
+      authorizationSource: proposal.source,
+      authorizationSubmissionId: authorizationSubmissionId,
+      authorizationEvidence: authorizationEvidence,
+      authorizedAt: _now(),
+      idempotencyKey: idempotencyKey,
+      arguments: arguments,
+      originalUserText: proposal.originalUserText,
+      contentHash: _string(arguments['contentHash']),
+      workKey: _string(arguments['workKey']),
+      scopeFingerprint: scopeFingerprint,
+      scopeSectionIndices:
+          (arguments['scopeSectionIndices'] as List?)
+              ?.whereType<num>()
+              .map((value) => value.toInt())
+              .toList(growable: false) ??
+          const [],
+      targetArtifactId: targetArtifactId,
+      expectedRevision: expectedRevision,
+    );
+  }
+
+  static String _defaultId() =>
+      'command-${DateTime.now().microsecondsSinceEpoch}';
+
+  static String? _string(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : null;
+}
+
+extension on AiActionJournalStatus {
+  bool get isTerminal => switch (this) {
+    AiActionJournalStatus.succeeded ||
+    AiActionJournalStatus.partiallySucceeded ||
+    AiActionJournalStatus.failed ||
+    AiActionJournalStatus.cancelled ||
+    AiActionJournalStatus.rejected ||
+    AiActionJournalStatus.expired ||
+    AiActionJournalStatus.abandoned => true,
+    _ => false,
+  };
+}

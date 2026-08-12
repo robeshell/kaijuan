@@ -12,6 +12,7 @@ import '../../controllers/book_ai_mind_map_coordinator.dart';
 import '../ai_typography.dart';
 import 'ai_result_body.dart';
 import 'book_ai_mind_map_scope_card.dart';
+import 'book_ai_action_confirmation_card.dart';
 import 'book_ai_mind_map_view.dart';
 
 class BookAiThinkingIndicator extends StatelessWidget {
@@ -451,6 +452,9 @@ class BookAiChatTimeline extends StatelessWidget {
     this.scopePrompt,
     this.onScopeSelected,
     this.onScopeCancelled,
+    this.actionPrompt,
+    this.onActionApproved,
+    this.onActionRejected,
     super.key,
   });
 
@@ -486,6 +490,9 @@ class BookAiChatTimeline extends StatelessWidget {
   final BookAiMindMapScopePrompt? scopePrompt;
   final ValueChanged<int>? onScopeSelected;
   final VoidCallback? onScopeCancelled;
+  final BookAiProductActionPrompt? actionPrompt;
+  final VoidCallback? onActionApproved;
+  final VoidCallback? onActionRejected;
 
   @override
   Widget build(BuildContext context) {
@@ -574,6 +581,15 @@ class BookAiChatTimeline extends StatelessWidget {
                 prompt: prompt,
                 onSelected: onScopeSelected!,
                 onCancel: onScopeCancelled!,
+              ),
+            ),
+          if (actionPrompt case final prompt?)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
+              child: BookAiActionConfirmationCard(
+                prompt: prompt,
+                onApprove: onActionApproved!,
+                onReject: onActionRejected!,
               ),
             ),
           if (showFollowUpShortcuts)

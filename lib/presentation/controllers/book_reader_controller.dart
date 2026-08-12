@@ -26,6 +26,7 @@ import '../../ai/ai_models.dart';
 import '../../ai/ai_mind_map.dart';
 import '../../ai/ai_outline.dart';
 import '../../ai/ai_product_action.dart';
+import '../../ai/ai_product_action_protocol.dart';
 import '../../ai/ai_run.dart';
 import '../../ai/ai_run_orchestrator.dart';
 import '../../ai/ai_search.dart';
@@ -65,6 +66,7 @@ class BookReaderController extends ChangeNotifier {
   BookReaderController({
     required this.database,
     required this.item,
+    AiActionJournalStore? actionJournal,
     BookReadingPreferences? readingPreferences,
     BookLanguageProvider? languageProvider,
     AiSettingsController? aiSettings,
@@ -102,6 +104,7 @@ class BookReaderController extends ChangeNotifier {
     )..addListener(_notifySearchChanged);
     _aiWorkspace = BookAiWorkspaceController(
       saveChatSession: saveChatSession,
+      actionJournal: actionJournal,
       agentRuntimeFactory: agentRuntimeFactory,
       genkitAgentRuntimeFactory: genkitAgentRuntimeFactory,
       requestedAgentRuntime: requestedAgentRuntime,
@@ -480,6 +483,10 @@ class BookReaderController extends ChangeNotifier {
   /// Optional graph cache store (per contentHash under `ai_graph/`).
   void attachAiGraphStore(AiGraphStore? store) {
     _aiGraphStore = store;
+  }
+
+  void attachAiActionJournalStore(AiActionJournalStore store) {
+    _aiWorkspace.replaceActionJournal(store);
   }
 
   void attachTtsBridge({
@@ -1042,6 +1049,8 @@ class BookReaderController extends ChangeNotifier {
     String? retryTurnId,
     AiConversationCommand? command,
     void Function(AiBookMindMap artifact)? onArtifact,
+    String? actionProposalId,
+    AiAuthorizedCommand? actionCommand,
   }) {
     return _aiWorkspace.mindMapConversation.generate(
       turnId: turnId,
@@ -1051,6 +1060,7 @@ class BookReaderController extends ChangeNotifier {
       units: units,
       retryTurnId: retryTurnId,
       command: command,
+      actionCommand: actionCommand,
       baseMap: baseMap,
       segmentedPublication:
           bookStructureManifest?.kind ==

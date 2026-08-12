@@ -686,6 +686,8 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '为这本书生成思维导图');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('确认生成'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(controller.structureResolveCalls, structureCallsBeforeWholeBook + 1);
     expect(controller.lastMindMapSourceSectionIndex, isNull);
@@ -828,6 +830,9 @@ void main() {
         ..chatChapterText = '翻页后的第二部正文'
         ..chatChapterSectionIndex = 4;
       controller.productActionGate!.complete();
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('确认生成'));
+      await tester.tap(find.text('确认生成'));
       await tester.pumpAndSettle();
 
       expect(controller.lastMindMapWork, same(firstWork));
@@ -1013,6 +1018,8 @@ void main() {
       await tester.enterText(find.byType(TextField).last, '再丰富点');
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pumpAndSettle();
+      await tester.tap(find.text('确认生成'));
+      await tester.pumpAndSettle();
 
       expect(controller.generatedMindMapScopes, ['原始主题']);
       expect(controller.lastExistingMindMap?.artifactId, 'native-map');
@@ -1153,6 +1160,8 @@ void main() {
       await tester.enterText(find.byType(TextField).last, '修改这张思维导图');
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pumpAndSettle();
+      await tester.tap(find.text('确认生成'));
+      await tester.pumpAndSettle();
       expect(find.textContaining('作品范围已经变化'), findsOneWidget);
       expect(controller.mindMapSectionCalls, 0);
       expect(controller.generatedMindMapScopes, isEmpty);
@@ -1165,6 +1174,9 @@ void main() {
       await tester.enterText(find.byType(TextField).last, '修改上一张思维导图');
       await tester.testTextInput.receiveAction(TextInputAction.send);
       await tester.pump();
+      await tester.pump();
+      await tester.ensureVisible(find.text('确认生成'));
+      await tester.tap(find.text('确认生成'));
       await tester.pump();
       expect(controller.mindMapSectionCalls, 1);
       expect(
@@ -1190,6 +1202,8 @@ void main() {
       );
       await tester.enterText(find.byType(TextField).last, '增加更多事实细节');
       await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确认生成'));
       await tester.pumpAndSettle();
       expect(controller.generatedMindMapScopes, hasLength(2));
       expect(tester.takeException(), isNull);
@@ -1264,6 +1278,8 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '生成整本书思维导图');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('确认生成'));
+    await tester.pumpAndSettle();
 
     expect(find.text('本书包含 2 部作品，共 4 章'), findsOneWidget);
     expect(find.text('全部作品'), findsOneWidget);
@@ -1313,6 +1329,8 @@ void main() {
     expect(controller.generatedMindMapScopes, isEmpty);
 
     await tester.tap(find.byTooltip('发送').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确认生成'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey<String>('ai-mind-map-scope-0')));
     await tester.pumpAndSettle();
@@ -1372,6 +1390,8 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '生成整本书思维导图');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('确认生成'));
     await tester.pump();
 
     expect(find.byTooltip('停止'), findsOneWidget);

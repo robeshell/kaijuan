@@ -1,6 +1,7 @@
 import '../../ai/ai_agent_runtime.dart';
 import '../../ai/ai_agent_runtime_gate.dart';
 import '../../ai/ai_book_mind_map_service.dart';
+import '../../ai/ai_book_mind_map_product_actions.dart';
 import '../../ai/ai_cancel.dart';
 import '../../ai/ai_chat_retrieve.dart';
 import '../../ai/ai_graph_service.dart';
@@ -9,6 +10,8 @@ import '../../ai/ai_log.dart';
 import '../../ai/ai_mind_map.dart';
 import '../../ai/ai_models.dart';
 import '../../ai/ai_outline.dart';
+import '../../ai/ai_product_action_controller.dart';
+import '../../ai/ai_product_action_protocol.dart';
 import '../../ai/ai_run.dart';
 import '../../ai/ai_run_orchestrator.dart';
 import '../../ai/ai_settings.dart';
@@ -27,12 +30,17 @@ import 'book_ai_mind_map_controller.dart';
 class BookAiWorkspaceController {
   BookAiWorkspaceController({
     required AiChatSessionWriter saveChatSession,
+    AiActionJournalStore? actionJournal,
     this.agentRuntimeFactory = createLegacyAiAgentRuntime,
     this.genkitAgentRuntimeFactory,
     this.requestedAgentRuntime = AiAgentRuntimeKind.compatible,
     this.genkitAgentCapabilities = AiAgentRuntimeCapabilities.genkitDart0151,
     this.onChanged,
-  }) : conversation = BookAiConversationController(saveChatSession) {
+  }) : conversation = BookAiConversationController(saveChatSession),
+       actionController = AiProductActionController(
+         registry: AiBookMindMapProductActions.registry,
+         journal: actionJournal ?? MemoryAiActionJournalStore(),
+       ) {
     mindMapConversation = BookAiMindMapController(conversation);
     agentRuntimeDecision = AiAgentRuntimeGate.decide(
       requested: requestedAgentRuntime,
@@ -49,6 +57,11 @@ class BookAiWorkspaceController {
   final BookAiConversationController conversation;
   late final BookAiMindMapController mindMapConversation;
   late final AiAgentRuntimeDecision agentRuntimeDecision;
+  final AiProductActionController actionController;
+
+  void replaceActionJournal(AiActionJournalStore store) {
+    actionController.replaceJournal(store);
+  }
 
   AiSettingsController? _settings;
   AiLanguageService? _language;

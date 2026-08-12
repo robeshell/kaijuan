@@ -16,6 +16,7 @@ import '../../../ai/ai_models.dart';
 import '../../../ai/ai_mind_map.dart';
 import '../../../ai/ai_provider_kind.dart';
 import '../../../ai/ai_product_action.dart';
+import '../../../ai/ai_product_action_protocol.dart';
 import '../../../ai/ai_rich_content_inspector.dart';
 import '../../../ai/ai_user_error.dart';
 import '../../../core/kaijuan_icons.dart';
@@ -428,7 +429,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     if (text.isEmpty ||
         _sending ||
         _resolvingChatScope ||
-        _mindMapCoordinator.scopePrompt != null) {
+        _mindMapCoordinator.scopePrompt != null ||
+        _mindMapCoordinator.actionPrompt != null) {
       return;
     }
     if (!_ready) return;
@@ -448,6 +450,16 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final retryTarget = frozenTargetId == null
         ? null
         : _mindMapForArtifact(frozenTargetId);
+    if (retrying && retryCommand?.object == AiIntentObject.mindMap) {
+      final retryScope = _mindMapScopeForText(retryCommand!.originalText);
+      await _routeMindMapRequest(
+        text,
+        retryScope,
+        retryTurnId: retryTurnId,
+        clearComposer: false,
+      );
+      return;
+    }
     if (retryTarget != null && retryCommand?.action == AiIntentAction.edit) {
       await _runMindMapRevision(
         text,
@@ -709,12 +721,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
   }
 
-  Future<void> _runMindMapRevision(
+  Future<bool> _runMindMapRevision(
     String text,
     AiBookMindMap target, {
     String? conversationWorkKey,
     String? retryTurnId,
     required bool clearComposer,
+    String? actionProposalId,
+    Future<AiActionJournalEntry> Function(
+      List<BookAiMindMapGenerationUnit> units,
+    )?
+    authorizeAction,
   }) async {
     final frozenConversationWorkKey = conversationWorkKey ?? _chatWorkKey;
     final targetId = target.artifactId ?? 'mind-map:${target.scopeFingerprint}';
@@ -730,14 +747,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     } finally {
       if (mounted) setState(() => _resolvingChatScope = false);
     }
-    if (!mounted) return;
+    if (!mounted) return false;
     if (unit == null) {
       if (_activeMindMapArtifactId == targetId) {
         _mindMapConversation.detachArtifact();
       }
-      return;
+      return false;
     }
     if (clearComposer) _clearComposerAfterFrame(text);
+    AiActionJournalEntry? authorized;
+    if (actionProposalId != null) {
+      authorized = await authorizeAction?.call([unit]);
+    }
     await _generateMindMapsInChat(
       text,
       [unit],
@@ -751,7 +772,10 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         targetArtifactId: targetId,
       ),
       keepEditing: keepEditing,
+      actionProposalId: actionProposalId,
+      actionCommand: authorized?.command,
     );
+    return true;
   }
 
   void _clearComposerAfterFrame(String submittedText) {
@@ -853,6 +877,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   Future<void> _stop({bool commitPartial = true, bool persist = true}) async {
     _mindMapCoordinator.cancelScope();
+    _mindMapCoordinator.cancelActionPrompt();
     final turnId = _activeTurnId;
     final turnWorkKey = _activeTurnWorkKey;
     if (_mindMapTurnId == turnId) {
@@ -1088,10 +1113,69 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
   Future<void> _handleOpeningShortcut(AiChatShortcut shortcut) async {
     final scope = shortcut.mindMapScope;
     if (scope != null) {
-      await _routeMindMapRequest(shortcut.prompt, scope);
+      final proposal = AiActionProposal(
+        protocolVersion: AiActionProposal.currentProtocolVersion,
+        proposalId: 'proposal-${_newTurnId()}',
+        parentRunId: _activeTurnId,
+        conversationId: _c.item.contentHash,
+        turnId: _activeTurnId,
+        actionKind: 'create_book_mind_map',
+        definitionVersion: 1,
+        proposalSchemaVersion: 1,
+        source: AiActionProposalSource.explicitUi,
+        sourceSubmissionId: _newTurnId(),
+        originalUserText: shortcut.prompt,
+        requestedArguments: {
+          'scope': scope.name,
+          'contentHash': _c.item.contentHash,
+          if (_chatWorkKey case final value? when value.isNotEmpty)
+            'workKey': value,
+        },
+        scopeRef: scope.name,
+        createdAt: DateTime.now(),
+        expiresAt: DateTime.now().add(const Duration(hours: 24)),
+      );
+      try {
+        final evaluation = await _c.aiWorkspace.actionController.propose(
+          proposal,
+          deferExplicitAuthorization: true,
+        );
+        if (!evaluation.authorized &&
+            evaluation.entry.status != AiActionJournalStatus.proposed) {
+          return;
+        }
+        final started = await _routeMindMapRequest(
+          shortcut.prompt,
+          scope,
+          actionProposalId: proposal.proposalId,
+          authorizeAction: (units) =>
+              _authorizeActionForExecution(proposal, units: units),
+        );
+        if (!started) {
+          await _completeProductActionCancelled(proposal.proposalId);
+        }
+      } catch (error) {
+        await _completeProductActionFailure(proposal.proposalId);
+        if (mounted) {
+          _appendMindMapClarification(
+            shortcut.prompt,
+            aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
+          );
+        }
+      }
       return;
     }
     await _send(shortcut.prompt);
+  }
+
+  AiMindMapRequestScope _mindMapScopeForText(String text) {
+    if (text.contains('本章') || text.contains('当前章')) {
+      return AiMindMapRequestScope.currentChapter;
+    }
+    if (text.contains('整本') || text.contains('全书') || text.contains('本书')) {
+      return AiMindMapRequestScope.wholeBook;
+    }
+    return AiMindMapRequestScope.unspecified;
   }
 
   Future<void> _dispatchProductAction(
@@ -1100,6 +1184,63 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required AiBookMindMapProductTurn productTurn,
     String? retryTurnId,
   }) async {
+    final proposal = _proposalForProductAction(
+      originalText,
+      action,
+      productTurn: productTurn,
+    );
+    try {
+      await _dispatchProductActionUnsafe(
+        originalText,
+        action,
+        productTurn: productTurn,
+        retryTurnId: retryTurnId,
+        proposal: proposal,
+      );
+    } catch (error) {
+      await _completeProductActionFailure(proposal.proposalId);
+      if (mounted) {
+        _appendMindMapClarification(
+          originalText,
+          aiUserErrorMessage(error, operation: AiUserOperation.mindMap),
+          workKey: productTurn.scopeSnapshot.conversationWorkKey,
+        );
+      }
+    }
+  }
+
+  Future<void> _dispatchProductActionUnsafe(
+    String originalText,
+    AiProductActionRequest action, {
+    required AiBookMindMapProductTurn productTurn,
+    String? retryTurnId,
+    required AiActionProposal proposal,
+  }) async {
+    final evaluation = await _c.aiWorkspace.actionController.propose(proposal);
+    if (!evaluation.authorized && !evaluation.needsConfirmation) {
+      _appendMindMapClarification(
+        originalText,
+        evaluation.needsClarification
+            ? '还需要明确思维导图的范围或要修改的导图。'
+            : '这项思维导图操作目前未获授权，请重新发起。',
+        workKey: productTurn.scopeSnapshot.conversationWorkKey,
+      );
+      return;
+    }
+    if (evaluation.needsConfirmation) {
+      final approved = await _mindMapCoordinator.requestActionConfirmation(
+        proposalId: proposal.proposalId,
+        title: action is AiCreateBookMindMapAction ? '确认生成思维导图' : '确认修改思维导图',
+        summary: action is AiCreateBookMindMapAction
+            ? '将根据已冻结的阅读范围生成原生思维导图。'
+            : '将基于当前导图的第 ${action is AiReviseBookMindMapAction ? productTurn.artifactsById[action.artifactId]?.revision ?? 1 : 1} 版生成新版本。',
+        onOpened: _scrollToEnd,
+      );
+      if (approved != true) {
+        await _c.aiWorkspace.actionController.reject(proposal.proposalId);
+        return;
+      }
+    }
     switch (action) {
       case final AiCreateBookMindMapAction create:
         AiBookMindMapCreateInput input;
@@ -1116,7 +1257,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           );
           return;
         }
-        await _routeMindMapRequest(
+        final started = await _routeMindMapRequest(
           originalText,
           input.scope,
           frozenTurn: productTurn.scopeSnapshot,
@@ -1124,7 +1265,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           frozenCurrentChapter: input.frozenCurrentChapter,
           retryTurnId: retryTurnId,
           clearComposer: true,
+          actionProposalId: proposal.proposalId,
+          authorizeAction: (units) =>
+              _authorizeActionForExecution(proposal, units: units),
         );
+        if (!started) {
+          await _completeProductActionCancelled(proposal.proposalId);
+        }
       case final AiReviseBookMindMapAction revise:
         AiBookMindMap target;
         try {
@@ -1140,17 +1287,171 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           );
           return;
         }
-        await _runMindMapRevision(
+        final started = await _runMindMapRevision(
           originalText,
           target,
           conversationWorkKey: productTurn.scopeSnapshot.conversationWorkKey,
           retryTurnId: retryTurnId,
           clearComposer: false,
+          actionProposalId: proposal.proposalId,
+          authorizeAction: (units) =>
+              _authorizeActionForExecution(proposal, units: units),
         );
+        if (!started) {
+          await _completeProductActionCancelled(proposal.proposalId);
+        }
     }
   }
 
-  Future<void> _routeMindMapRequest(
+  Future<AiActionJournalEntry> _authorizeActionForExecution(
+    AiActionProposal proposal, {
+    required List<BookAiMindMapGenerationUnit> units,
+  }) async {
+    final entry = await _c.aiWorkspace.actionController.journal.read(
+      proposal.proposalId,
+    );
+    if (entry?.status == AiActionJournalStatus.awaitingConfirmation) {
+      final sectionIndices = [
+        for (final unit in units)
+          for (final section in (unit.frozenSections ?? const []))
+            section.index,
+      ];
+      await _c.aiWorkspace.actionController.approve(
+        proposalId: proposal.proposalId,
+        authorizationSubmissionId: '${proposal.proposalId}:approve',
+        authorizationEvidence: 'conversation:confirm',
+        normalizedArguments: {
+          'scopeFingerprint': 'sections:${sectionIndices.join(',')}',
+          'scopeSectionIndices': sectionIndices,
+        },
+      );
+    } else if (entry?.status == AiActionJournalStatus.proposed) {
+      final sectionIndices = [
+        for (final unit in units)
+          for (final section in (unit.frozenSections ?? const []))
+            section.index,
+      ];
+      await _c.aiWorkspace.actionController.authorize(
+        proposalId: proposal.proposalId,
+        authorizationSubmissionId: proposal.sourceSubmissionId,
+        authorizationEvidence: 'ui:mind-map-scope-confirmed',
+        normalizedArguments: {
+          'scopeFingerprint': 'sections:${sectionIndices.join(',')}',
+          'scopeSectionIndices': sectionIndices,
+        },
+      );
+    }
+    final authorized = await _c.aiWorkspace.actionController.queue(
+      proposal.proposalId,
+    );
+    await _c.aiWorkspace.actionController.markExecuting(proposal.proposalId);
+    return authorized;
+  }
+
+  Future<void> _completeProductActionFailure(String proposalId) async {
+    try {
+      final entry = await _c.aiWorkspace.actionController.journal.read(
+        proposalId,
+      );
+      if (entry == null) return;
+      if (entry.status == AiActionJournalStatus.proposed ||
+          entry.status == AiActionJournalStatus.awaitingConfirmation ||
+          entry.status == AiActionJournalStatus.awaitingClarification) {
+        await _c.aiWorkspace.actionController.reject(proposalId);
+        return;
+      }
+      await _c.aiWorkspace.actionController.completeForProposal(
+        proposalId: proposalId,
+        status: AiActionJournalStatus.failed,
+        artifactRefs: const [],
+        publicErrorCode: 'mind_map_action_failed',
+      );
+    } catch (_) {
+      // Keep the user-facing error. The journal remains inspectable for a
+      // future recovery pass when the command was not yet executable.
+    }
+  }
+
+  Future<void> _completeProductActionCancelled(String proposalId) async {
+    try {
+      final entry = await _c.aiWorkspace.actionController.journal.read(
+        proposalId,
+      );
+      if (entry == null) return;
+      if (entry.status == AiActionJournalStatus.proposed ||
+          entry.status == AiActionJournalStatus.awaitingConfirmation ||
+          entry.status == AiActionJournalStatus.awaitingClarification) {
+        await _c.aiWorkspace.actionController.reject(proposalId);
+        return;
+      }
+      if (entry.status == AiActionJournalStatus.authorized) {
+        await _c.aiWorkspace.actionController.requestCancel(proposalId);
+        await _c.aiWorkspace.actionController.completeForProposal(
+          proposalId: proposalId,
+          status: AiActionJournalStatus.cancelled,
+          artifactRefs: const [],
+        );
+        return;
+      }
+      await _c.aiWorkspace.actionController.completeForProposal(
+        proposalId: proposalId,
+        status: AiActionJournalStatus.cancelled,
+        artifactRefs: const [],
+      );
+    } catch (_) {
+      await _completeProductActionFailure(proposalId);
+    }
+  }
+
+  AiActionProposal _proposalForProductAction(
+    String originalText,
+    AiProductActionRequest action, {
+    required AiBookMindMapProductTurn productTurn,
+  }) {
+    final isCreate = action is AiCreateBookMindMapAction;
+    final actionKind = isCreate
+        ? 'create_book_mind_map'
+        : 'revise_book_mind_map';
+    final scope = switch (action) {
+      AiCreateBookMindMapAction() => action.scope.name,
+      AiReviseBookMindMapAction() => null,
+    };
+    final target = switch (action) {
+      AiCreateBookMindMapAction() => null,
+      AiReviseBookMindMapAction() => action.artifactId,
+    };
+    final args = <String, Object?>{
+      'instruction': action.instruction,
+      'contentHash': _c.item.contentHash,
+    };
+    if (scope != null) args['scope'] = scope;
+    if (target != null) args['targetArtifactId'] = target;
+    final workKey = productTurn.scopeSnapshot.conversationWorkKey;
+    if (workKey != null) args['workKey'] = workKey;
+    return AiActionProposal(
+      protocolVersion: AiActionProposal.currentProtocolVersion,
+      proposalId: 'proposal-${_newTurnId()}',
+      parentRunId: _activeTurnId,
+      conversationId: _c.item.contentHash,
+      turnId: _activeTurnId,
+      actionKind: actionKind,
+      definitionVersion: 1,
+      proposalSchemaVersion: 1,
+      source: AiActionProposalSource.modelTool,
+      sourceSubmissionId: _activeTurnId ?? _newTurnId(),
+      originalUserText: originalText,
+      requestedArguments: args,
+      scopeRef: scope,
+      targetRef: target,
+      expectedRevision: target == null
+          ? null
+          : productTurn.artifactsById[target]?.revision,
+      createdAt: DateTime.now(),
+      expiresAt: DateTime.now().add(const Duration(hours: 24)),
+    );
+  }
+
+  Future<bool> _routeMindMapRequest(
     String text,
     AiMindMapRequestScope scope, {
     AiBookMindMapTurnSnapshot? frozenTurn,
@@ -1158,6 +1459,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     AiBookSectionSlice? frozenCurrentChapter,
     String? retryTurnId,
     bool clearComposer = false,
+    String? actionProposalId,
+    Future<AiActionJournalEntry> Function(
+      List<BookAiMindMapGenerationUnit> units,
+    )?
+    authorizeAction,
   }) async {
     final conversationWorkKey = frozenTurn?.conversationWorkKey ?? _chatWorkKey;
     List<BookAiMindMapGenerationUnit>? units;
@@ -1181,7 +1487,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         if (frozenTurn == null && _c.bookStructureManifest == null) {
           await _c.resolveBookStructure();
         }
-        if (!mounted) return;
+        if (!mounted) return false;
         final manifest = frozenTurn?.manifest ?? _c.bookStructureManifest;
         if (scope == AiMindMapRequestScope.unspecified &&
             resolvedWork == null) {
@@ -1207,17 +1513,45 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       if (composerClearedForChoice && mounted && _input.text.isEmpty) {
         _restoreComposerText(text);
       }
-      return;
+      return false;
     }
     if (clearComposer && !composerClearedForChoice) {
       _clearComposerAfterFrame(text);
+    }
+    if (actionProposalId != null) {
+      units = await _freezeMindMapUnits(units);
+    }
+    AiActionJournalEntry? authorized;
+    if (actionProposalId != null) {
+      authorized = await authorizeAction?.call(units);
     }
     await _generateMindMapsInChat(
       text,
       units,
       retryTurnId: retryTurnId,
       conversationWorkKey: conversationWorkKey,
+      actionProposalId: actionProposalId,
+      actionCommand: authorized?.command,
     );
+    return true;
+  }
+
+  Future<List<BookAiMindMapGenerationUnit>> _freezeMindMapUnits(
+    List<BookAiMindMapGenerationUnit> units,
+  ) async {
+    final frozen = <BookAiMindMapGenerationUnit>[];
+    for (final unit in units) {
+      final sections =
+          unit.frozenSections ??
+          await _c.bookMindMapSections(work: unit.work, useFrozenWork: true);
+      frozen.add((
+        work: unit.work,
+        label: unit.label,
+        frozenSections: List.unmodifiable(sections),
+        estimatedSections: sections.length,
+      ));
+    }
+    return List.unmodifiable(frozen);
   }
 
   void _restoreComposerText(String text) {
@@ -1337,12 +1671,15 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     required String? conversationWorkKey,
     AiConversationCommand? command,
     bool keepEditing = false,
+    String? actionProposalId,
+    AiAuthorizedCommand? actionCommand,
   }) async {
     final workKey = conversationWorkKey;
     final turnId = _newTurnId();
     _activeTurnId = turnId;
     _activeTurnWorkKey = workKey;
     _cancel = CancelToken();
+    final committedArtifactIds = <String>[];
     setState(() {
       _sending = true;
       _error = null;
@@ -1359,15 +1696,30 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       retryTurnId: retryTurnId,
       command: command,
       baseMap: baseMap,
+      actionProposalId: actionProposalId,
+      actionCommand: actionCommand,
       onArtifact: (artifact) {
-        if (!mounted) return;
         final artifactId = artifact.artifactId;
+        if (artifactId != null) committedArtifactIds.add(artifactId);
+        if (!mounted) return;
         if (keepEditing && artifactId != null) {
           _mindMapConversation.attachArtifact(artifactId);
         }
         if (artifactId != null) _mindMapCoordinator.reveal(artifactId);
       },
     );
+    if (actionProposalId != null) {
+      await _c.aiWorkspace.actionController.completeForProposal(
+        proposalId: actionProposalId,
+        status: outcome.succeeded
+            ? AiActionJournalStatus.succeeded
+            : outcome.cancelled
+            ? AiActionJournalStatus.cancelled
+            : AiActionJournalStatus.failed,
+        artifactRefs: committedArtifactIds,
+        publicErrorCode: outcome.succeeded ? null : 'mind_map_workflow_failed',
+      );
+    }
     if (!mounted) return;
     final failed = !outcome.succeeded && !outcome.cancelled;
     _mindMapCoordinator.cancelScope();
@@ -1434,6 +1786,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final showFollowUpShortcuts =
         !_sending &&
         _mindMapCoordinator.scopePrompt == null &&
+        _mindMapCoordinator.actionPrompt == null &&
         !_generatingFollowUp &&
         !_searchingWeb &&
         _streaming.isEmpty &&
@@ -1452,7 +1805,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     final conversationInputLocked =
         _sending ||
         _resolvingChatScope ||
-        _mindMapCoordinator.scopePrompt != null;
+        _mindMapCoordinator.scopePrompt != null ||
+        _mindMapCoordinator.actionPrompt != null;
 
     // Side panel already has a fixed height; bottom sheet needs an explicit
     // height so Expanded children layout correctly.
@@ -1484,7 +1838,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                       _sending ||
                           _resolvingChatScope ||
                           _clearingHistory ||
-                          _mindMapCoordinator.scopePrompt != null
+                          _mindMapCoordinator.scopePrompt != null ||
+                          _mindMapCoordinator.actionPrompt != null
                       ? null
                       : () => unawaited(_clearHistory()),
                   icon: const Icon(KaijuanIcons.delete, size: 20),
@@ -1625,6 +1980,11 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     scopePrompt: _mindMapCoordinator.scopePrompt,
                     onScopeSelected: _mindMapCoordinator.selectScope,
                     onScopeCancelled: _mindMapCoordinator.cancelScope,
+                    actionPrompt: _mindMapCoordinator.actionPrompt,
+                    onActionApproved: () =>
+                        _mindMapCoordinator.selectActionConfirmation(true),
+                    onActionRejected: () =>
+                        _mindMapCoordinator.selectActionConfirmation(false),
                     onUserDrag: () {
                       _scrollRequestEpoch++;
                       _streamTailFollowEpoch++;
