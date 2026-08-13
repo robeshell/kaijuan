@@ -113,7 +113,8 @@ class BookAiWorkspaceController {
     if (!_storesSettled.isCompleted) {
       _storesSettled.complete();
     }
-    onChanged?.call();
+    // Do not notify the reader: chat waits on [whenStoresSettled], and a
+    // notify here rebuilds the Foliate WebView during open.
   }
 
   void replaceActionJournal(AiActionJournalStore store) {

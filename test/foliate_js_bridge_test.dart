@@ -51,6 +51,46 @@ void main() {
     expect(snapshot.toc.first.children.single.href, 'Text/a.xhtml#part');
   });
 
+  test('publication snapshot parses compact flat toc', () {
+    final snapshot = FoliatePublicationSnapshot.fromJsonString('''
+      {
+        "flat": true,
+        "sections": ["Text/a.xhtml", "Text/b.xhtml"],
+        "toc": [
+          {"label": "第一章", "href": "Text/a.xhtml#start", "depth": 0},
+          {"label": "小节", "href": "Text/a.xhtml#part", "depth": 1}
+        ]
+      }
+    ''');
+
+    expect(snapshot.sectionHrefs, ['Text/a.xhtml', 'Text/b.xhtml']);
+    expect(snapshot.toc, isEmpty);
+    expect(snapshot.flatToc, hasLength(2));
+    expect(snapshot.flatToc.first.title, '第一章');
+    expect(snapshot.flatToc.last.depth, 1);
+  });
+
+  test('href index matches exact, suffix and fragment paths', () {
+    final index = FoliateHrefIndex([
+      'OEBPS/Text/ch1.xhtml',
+      'OEBPS/Text/ch2.xhtml',
+      'OEBPS/Text/notes.xhtml',
+    ]);
+    expect(index.indexOf('OEBPS/Text/ch1.xhtml'), 0);
+    expect(index.indexOf('Text/ch2.xhtml#frag'), 1);
+    expect(index.indexOf('notes.xhtml'), 2);
+    expect(index.indexOf('OEBPS/Text/missing.xhtml'), isNull);
+    expect(index.indexOf(''), isNull);
+  });
+
+  test('href index keeps the first spine hit', () {
+    final index = FoliateHrefIndex([
+      'vol1/ch1.xhtml',
+      'vol2/ch1.xhtml',
+    ]);
+    expect(index.indexOf('ch1.xhtml'), 0);
+  });
+
   test('publication snapshot rejects malformed section payload', () {
     expect(
       () => FoliatePublicationSnapshot.fromJsonString('{"sections": {}}'),

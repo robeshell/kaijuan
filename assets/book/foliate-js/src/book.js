@@ -1,5 +1,6 @@
 console.log('book.js')
 console.log('AnxUA', navigator.userAgent)
+try { window.__kaijuanOpen && window.__kaijuanOpen.mark('book-js-eval') } catch (e) {}
 
 import './view.js?v=20260727c'
 import { FootnoteHandler } from './footnotes.js'
@@ -8,6 +9,11 @@ import { collapse, compare, fromRange, toRange } from './epubcfi.js?v=20260723k'
 const { configure, ZipReader, BlobReader, TextWriter, BlobWriter } =
   await import('./vendor/zip.js')
 const { EPUB } = await import('./epub.js')
+
+const markOpen = (step, extra) => {
+  try { window.__kaijuanOpen && window.__kaijuanOpen.mark(step, extra) } catch (e) {}
+}
+markOpen('book-js-deps')
 
 var isPdf = false;
 
@@ -740,11 +746,15 @@ const getView = async file => {
   if (file.isDirectory) {
     const loader = await makeDirectoryLoader(file)
     const { EPUB } = await import('./epub.js')
+    markOpen('epub-init-start', 'directory')
     book = await new EPUB(loader).init()
+    markOpen('epub-init-ready', 'sections=' + (book.sections?.length || 0))
   }
   else if (!file.size) throw new Error('File not found')
   else if (await isZip(file)) {
+    markOpen('zip-start', 'bytes=' + (file.size || 0))
     const loader = await makeZipLoader(file)
+    markOpen('zip-ready', 'entries=' + (loader.entries?.length || 0))
     if (isCBZ(file)) {
       const { makeComicBook } = await import('./comic-book.js')
       book = makeComicBook(loader, file)
@@ -755,19 +765,25 @@ const getView = async file => {
       const blob = await loader.loadBlob((entry ?? entries[0]).filename)
       book = await makeFB2(blob)
     } else {
+      markOpen('epub-init-start')
       book = await new EPUB(loader).init()
+      markOpen('epub-init-ready', 'sections=' + (book.sections?.length || 0))
     }
   }
   else if (await isPDF(file)) {
     isPdf = true;
+    markOpen('pdf-open-start')
     const { makePDF } = await import('./pdf.js')
     book = await makePDF(file)
+    markOpen('pdf-open-ready')
   }
   else {
     const { isMOBI, MOBI } = await import('./mobi.js')
     if (await isMOBI(file)) {
       const fflate = await import('./vendor/fflate.js')
+      markOpen('mobi-open-start')
       book = await new MOBI({ unzlib: fflate.unzlibSync }).open(file)
+      markOpen('mobi-open-ready')
     } else if (isFB2(file)) {
       const { makeFB2 } = await import('./fb2.js')
       book = await makeFB2(file)
@@ -776,7 +792,9 @@ const getView = async file => {
   if (!book) throw new Error('File type not supported')
   const view = document.createElement('foliate-view')
   document.body.append(view)
+  markOpen('view-open-start')
   await view.open(book)
+  markOpen('view-open-ready')
   return view
 }
 
@@ -1285,9 +1303,9 @@ class Reader {
     // renderer.next() here as well races the init() fallback for a new book,
     // creating two chapter iframes at once. Android WebView then repeatedly
     // resizes the competing paginator views and may never resolve open().
-    console.log('FoliateReader init-start', cfi ? 'locator' : 'first-section')
+    markOpen('view-init-start', cfi ? 'locator' : 'first-section')
     await this.view.init({ lastLocation: cfi })
-    console.log('FoliateReader init-ready')
+    markOpen('view-init-ready')
 
     const canvasBg = style?.backgroundColor || '#FFFFFF'
     document.documentElement.style.backgroundColor = canvasBg
@@ -1915,7 +1933,9 @@ class Reader {
 const open = async (file, cfi) => {
   const reader = new Reader()
   globalThis.reader = reader
+  markOpen('reader-open-start', cfi ? 'locator' : 'first-section')
   await reader.open(file, cfi)
+  markOpen('reader-open-ready')
   
   // Initialize code highlighting if theme is set
   if (style.codeHighlightTheme && style.codeHighlightTheme !== 'off') {
@@ -1923,6 +1943,7 @@ const open = async (file, cfi) => {
   }
   
   if (!importing) {
+    markOpen('flutter-onLoadEnd')
     callFlutter('onLoadEnd')
     onSetToc()
     callFlutter('renderAnnotations')
@@ -1971,6 +1992,34 @@ window.addEventListener('keydown', handleReaderKeydown, true)
 const callFlutter = (name, data) => {
   // console.log('callFlutter', name, data)
   window.flutter_inappwebview.callHandler(name, data)
+}
+
+// Compact spine + flat TOC for Flutter. Nested Foliate toc objects are huge
+// on collected editions and stall the WKWebView bridge after first paint.
+window.__kaijuanPublicationSnapshot = () => {
+  const book = reader && reader.view && reader.view.book
+  if (!book) return JSON.stringify({ sections: [], toc: [], author: [], flat: true })
+  const sections = (book.sections || []).map((section, index) =>
+    String(section.href || section.id || index))
+  const toc = []
+  const walk = (items, depth) => {
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (!item) continue
+      const label = String(item.label || item.title || '')
+      const href = String(item.href || '')
+      if (label || href) toc.push({ label, href, depth })
+      if (item.subitems && item.subitems.length) walk(item.subitems, depth + 1)
+    }
+  }
+  walk(book.toc || [], 0)
+  return JSON.stringify({
+    sections,
+    toc,
+    author: (book.metadata && book.metadata.author) || [],
+    flat: true,
+  })
 }
 
 const setStyle = (oldStyle) => {
@@ -3811,7 +3860,14 @@ var initialCfi = JSON.parse(urlParams.get('initialCfi'))
 var style = JSON.parse(urlParams.get('style'))
 var readingRules = JSON.parse(urlParams.get('readingRules'))
 
+markOpen('fetch-start')
 fetch(url)
-  .then(res => res.blob())
-  .then(blob => open(new File([blob], new URL(url, window.location.origin).pathname), initialCfi))
+  .then(res => {
+    markOpen('fetch-headers', 'status=' + res.status)
+    return res.blob()
+  })
+  .then(blob => {
+    markOpen('fetch-ready', 'bytes=' + blob.size)
+    return open(new File([blob], new URL(url, window.location.origin).pathname), initialCfi)
+  })
   .catch(e => console.error(e))

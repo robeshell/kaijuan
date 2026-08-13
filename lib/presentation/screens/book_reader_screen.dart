@@ -15,6 +15,7 @@ import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../library/stats/reading_time_tracker.dart';
 import '../../library/storage/library_paths.dart';
+import '../../readers/book/book_open_trace.dart';
 import '../../readers/book/book_reader_capabilities.dart';
 import '../../readers/book/book_theme.dart';
 import '../../readers/book/foliate_js_engine_adapter.dart';
@@ -110,9 +111,8 @@ class _BookReaderScreenState extends State<BookReaderScreen>
       aiSettings: widget.aiSettings ?? AiSettingsScope.maybeOf(context),
       scrollModeEnabled: scrollModeEnabled,
     );
-    // Attach durable AI stores before opening the book so product actions do
-    // not race against Memory defaults. Failures mark workspace not-ready.
-    unawaited(_attachAiStores());
+    // AI JSON stores wait until Foliate has painted. Attaching in initState
+    // raced the EPUB open on disk and rebuilt the WebView tree mid-load.
     if (!scrollModeEnabled &&
         widget.readingPreferences?.readingMode == BookReadingMode.scroll) {
       unawaited(
@@ -152,9 +152,15 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     unawaited(_openBookFile());
   }
 
+  bool _aiStoresAttachStarted = false;
+  LibraryPaths? _libraryPaths;
+  BookOpenTrace? _openTrace;
+
   Future<void> _attachAiStores() async {
+    if (_aiStoresAttachStarted) return;
+    _aiStoresAttachStarted = true;
     try {
-      final paths = await LibraryPaths.forApp();
+      final paths = _libraryPaths ?? await LibraryPaths.forApp();
       if (!mounted) return;
       _controller.attachChatHistoryStore(
         JsonAiChatHistoryStore(paths.aiChatDirectory),
@@ -170,8 +176,10 @@ class _BookReaderScreenState extends State<BookReaderScreen>
         artifacts: JsonAiArtifactRepository(paths.aiArtifactDirectory),
       );
       _controller.aiWorkspace.markAiStoresReady(ready: true);
+      _openTrace?.mark('ai-stores-ready');
     } catch (error) {
       debugPrint('[AI] failed to attach reader stores: $error');
+      _openTrace?.mark('ai-stores-failed', detail: '$error');
       if (!mounted) return;
       _controller.aiWorkspace.markAiStoresReady(
         ready: false,
@@ -245,6 +253,9 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     _timeTracker.setContentReady(
       _engine.rendererReady && _controller.openError == null,
     );
+    if (_engine.rendererReady || _controller.openError != null) {
+      unawaited(_attachAiStores());
+    }
   }
 
   @override
@@ -269,18 +280,28 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   Future<void> _openBookFile() async {
     final item = widget.item;
+    final trace = BookOpenTrace(title: item.title, format: item.format);
+    _openTrace = trace;
+    trace.mark('open-start');
     final paths = await LibraryPaths.forApp();
+    _libraryPaths = paths;
+    trace.mark('paths-ready');
     final resolved = await paths.resolveExistingPath(
       item.filePath,
       contentHash: item.contentHash,
     );
     if (!mounted) return;
-    await _engine.open(resolved ?? item.filePath);
+    trace.mark(
+      'file-resolved',
+      detail: resolved == null ? 'missing-fallback' : 'ok',
+    );
+    await _engine.open(resolved ?? item.filePath, trace: trace);
   }
 
   void _maybeStartReveal(bool contentReady) {
     if (!contentReady || _revealStarted || !_showReveal) return;
     _revealStarted = true;
+    _openTrace?.mark('cover-reveal-started');
     unawaited(_reveal.forward());
   }
 

@@ -5,12 +5,15 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/book_reading_preferences.dart';
 import '../../domain/book_structure.dart';
+import '../../domain/reader_models.dart';
 import '../../presentation/controllers/book_reader_controller.dart';
+import 'book_open_trace.dart';
 import 'book_rendition_session.dart';
 import 'book_models.dart';
 import 'book_reader_capabilities.dart';
@@ -31,6 +34,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   BookRenditionWebLease? _webLease;
   InAppWebViewController? _webController;
   List<String> _sectionHrefs = const [];
+  FoliateHrefIndex? _hrefIndex;
   String _initialCfi = '';
   bool _disposed = false;
   int _openGeneration = 0;
@@ -40,6 +44,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   bool _firstRelocationReported = false;
   bool _awaitingRendererRecovery = false;
   bool _relocationSuspended = false;
+  FoliateRelocation? _queuedRelocation;
   String? _viewportTransitionCfi;
   double _safeTop = 0;
   double _safeBottom = 0;
@@ -60,6 +65,7 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
   double? _lastBrightness;
   bool? _lastChromeVisible;
   Timer? _prefsApplyTimer;
+  BookOpenTrace? _openTrace;
 
   /// Desktop PlatformView (WKWebView / WebView2) often keeps a stale surface
   /// until the next input; flip a sub-pixel translate to force a composite.
@@ -108,48 +114,85 @@ class FoliateJsBookEngineAdapter extends ChangeNotifier {
 })()
 ''';
 
-  Future<void> open(String filePath) async {
+  Future<void> open(String filePath, {BookOpenTrace? trace}) async {
     final generation = ++_openGeneration;
+    _openTrace = trace;
     try {
       _webReady = false;
       _metadataAttached = false;
       _engineAttached = false;
       _firstRelocationReported = false;
       _awaitingRendererRecovery = false;
+      _queuedRelocation = null;
       _sectionHrefs = const [];
+      _hrefIndex = null;
       _session?.invalidateWebView(_webLease);
       _webLease = null;
       _webController = null;
       final previous = _session;
       _session = null;
+      markOpen('adapter-open', detail: _openFileDetail(filePath));
       // Locator DB read and loopback mount run together so the first reader
       // frame is not gated on a serial await chain.
       final locatorFuture = readerController.loadInitialLocator();
       final sessionFuture = () async {
-        if (previous != null) await previous.close();
+        if (previous != null) {
+          await previous.close();
+          markOpen('previous-session-closed');
+        }
         return BookRenditionSession.open(
           File(filePath),
-          onTiming: (timing) => debugPrint('[BookRendition] $timing'),
+          onTiming: (timing) {
+            // Re-stamp on the open-chain clock so JS + Dart share one table.
+            markOpen(timing.step);
+          },
         );
       }();
       final locator = await locatorFuture;
       if (_disposed || generation != _openGeneration) {
         await sessionFuture.then((session) => session.close());
+        _openTrace?.dumpSummary(reason: 'cancelled');
         return;
       }
       _initialCfi = locator?.cfi ?? '';
+      markOpen(
+        'locator-ready',
+        detail: _initialCfi.isEmpty ? 'first-section' : 'cfi',
+      );
       final session = await sessionFuture;
       if (_disposed || generation != _openGeneration) {
         await session.close();
+        _openTrace?.dumpSummary(reason: 'cancelled');
         return;
       }
       _session = session;
+      markOpen('session-assigned');
       notifyListeners();
     } catch (error) {
+      markOpen('adapter-open-failed', detail: '$error');
+      _openTrace?.dumpSummary(reason: 'error');
       if (_disposed || generation != _openGeneration) return;
       await _session?.close();
       _session = null;
       readerController.engineFailed(error);
+    }
+  }
+
+  void markOpen(String step, {String? detail}) {
+    _openTrace?.mark(step, detail: detail);
+  }
+
+  bool absorbOpenTraceConsole(String message) {
+    return _openTrace?.absorbConsole(message) ?? false;
+  }
+
+  static String _openFileDetail(String filePath) {
+    final name = filePath.split(RegExp(r'[/\\]')).last;
+    try {
+      final bytes = File(filePath).lengthSync();
+      return '$name size=${(bytes / 1024).round()}KB';
+    } catch (_) {
+      return name;
     }
   }
 
@@ -532,6 +575,8 @@ try {
         'convertChineseMode': 'none',
         'bionicReadingMode': false,
       }),
+      if (readerController.item.format == ReaderFormat.pdf.storageValue)
+        'pdf': '1',
     });
   }
 
@@ -585,6 +630,7 @@ try {
     _metadataAttached = true;
     _session?.mark('renderer-load-end');
     debugPrint('[FoliateJs] onLoadEnd');
+    _openTrace?.noteMilestone('first-paint');
     // Foliate view.init has painted — unlock cover reveal before TOC attach.
     if (!_webReady) {
       _webReady = true;
@@ -597,31 +643,58 @@ try {
       notifyListeners();
     }
     try {
+      // Let the cover start dissolving before the metadata bridge call.
+      await SchedulerBinding.instance.endOfFrame;
+      if (!lease.isCurrent || _disposed) return;
+      markOpen('publication-eval-start');
       final raw = await _evaluateFor(lease, '''
-        JSON.stringify({
-          sections: (reader.view.book.sections || []).map((section, index) =>
-            String(section.href || section.id || index)),
-          toc: reader.view.book.toc || [],
-          author: (reader.view.book.metadata && reader.view.book.metadata.author) || []
-        })
+        (function () {
+          if (typeof window.__kaijuanPublicationSnapshot === 'function') {
+            return window.__kaijuanPublicationSnapshot();
+          }
+          return JSON.stringify({
+            sections: (reader.view.book.sections || []).map((section, index) =>
+              String(section.href || section.id || index)),
+            toc: reader.view.book.toc || [],
+            author: (reader.view.book.metadata && reader.view.book.metadata.author) || []
+          });
+        })()
       ''');
       if (!lease.isCurrent || _disposed) return;
       if (raw is! String) throw Exception('Anx Reader 返回了无效的 EPUB 元数据');
-      final publication = FoliatePublicationSnapshot.fromJsonString(raw);
+      markOpen(
+        'publication-eval',
+        detail: '${(raw.length / 1024).round()}KB',
+      );
+      final publication = raw.length > 80000
+          ? await compute(parseFoliatePublicationSnapshot, raw)
+          : FoliatePublicationSnapshot.fromJsonString(raw);
+      if (!lease.isCurrent || _disposed) return;
+      markOpen(
+        'publication-decoded',
+        detail:
+            '${publication.sectionHrefs.length} sections '
+            'flat=${publication.flatToc.length} nested=${publication.toc.length}',
+      );
       if (publication.sectionHrefs.isEmpty) {
         throw Exception('EPUB 没有可阅读的正文');
       }
 
       readerController.setPublicationAuthors(publication.authors);
       _sectionHrefs = publication.sectionHrefs;
+      _hrefIndex = FoliateHrefIndex(_sectionHrefs);
       final titles = List<String>.generate(
         _sectionHrefs.length,
         (index) => '第 ${index + 1} 节',
       );
-      final tocEntries = <BookTocEntry>[];
-      _flattenToc(publication.toc, 0, tocEntries, titles);
+      final tocEntries = _tocEntriesFromSnapshot(publication, titles);
 
       if (!_engineAttached) {
+        markOpen(
+          'publication-parsed',
+          detail: '${publication.sectionHrefs.length} sections '
+              '${tocEntries.length} toc',
+        );
         await readerController.attachEngine(
           BookSectionMap(
             startIndices: List.generate(_sectionHrefs.length, (index) => index),
@@ -637,6 +710,10 @@ try {
 
       _session?.mark('publication-attached');
       debugPrint('[FoliateJs] reader ready');
+      _flushQueuedRelocation();
+      if (!_firstRelocationReported) {
+        _openTrace?.dumpSummary(reason: 'publication-attached');
+      }
       final pending = readerController.pendingJump;
       if (pending?.cfi == _initialCfi && _initialCfi.isNotEmpty) {
         readerController.clearPendingJump();
@@ -645,12 +722,36 @@ try {
       }
       notifyListeners();
     } catch (error) {
+      markOpen('onLoadEnd-failed', detail: '$error');
+      _openTrace?.dumpSummary(reason: 'error');
       if (!lease.isCurrent || _disposed) return;
       _metadataAttached = false;
       _webReady = false;
       readerController.engineFailed(error);
       notifyListeners();
     }
+  }
+
+  List<BookTocEntry> _tocEntriesFromSnapshot(
+    FoliatePublicationSnapshot publication,
+    List<String> titles,
+  ) {
+    if (publication.flatToc.isNotEmpty) {
+      final output = <BookTocEntry>[];
+      for (final item in publication.flatToc) {
+        _appendTocEntry(
+          output,
+          titles,
+          title: item.title,
+          href: item.href,
+          depth: item.depth,
+        );
+      }
+      return output;
+    }
+    final tocEntries = <BookTocEntry>[];
+    _flattenToc(publication.toc, 0, tocEntries, titles);
+    return tocEntries;
   }
 
   void _flattenToc(
@@ -660,31 +761,55 @@ try {
     List<String> titles,
   ) {
     for (final node in nodes) {
-      final title = node.title;
-      final href = node.href;
-      final sectionIndex = _sectionIndexFromHref(href);
-      if (title.isNotEmpty) {
-        if (sectionIndex != null && titles[sectionIndex].startsWith('第 ')) {
-          titles[sectionIndex] = title;
-        }
-        output.add(
-          BookTocEntry(
-            title: title,
-            href: href.split('#').first,
-            fragment: href.contains('#')
-                ? href.split('#').skip(1).join('#')
-                : null,
-            sectionIndex: sectionIndex,
-            depth: depth.clamp(0, 12),
-          ),
-        );
-      }
+      _appendTocEntry(
+        output,
+        titles,
+        title: node.title,
+        href: node.href,
+        depth: depth,
+      );
       _flattenToc(node.children, depth + 1, output, titles);
     }
   }
 
+  void _appendTocEntry(
+    List<BookTocEntry> output,
+    List<String> titles, {
+    required String title,
+    required String href,
+    required int depth,
+  }) {
+    final sectionIndex = _sectionIndexFromHref(href);
+    if (title.isEmpty) return;
+    if (sectionIndex != null && titles[sectionIndex].startsWith('第 ')) {
+      titles[sectionIndex] = title;
+    }
+    output.add(
+      BookTocEntry(
+        title: title,
+        href: href.split('#').first,
+        fragment: href.contains('#')
+            ? href.split('#').skip(1).join('#')
+            : null,
+        sectionIndex: sectionIndex,
+        depth: depth.clamp(0, 12),
+      ),
+    );
+  }
+
+  void _flushQueuedRelocation() {
+    final queued = _queuedRelocation;
+    _queuedRelocation = null;
+    if (queued != null) _onRelocated(queued);
+  }
+
   void _onRelocated(FoliateRelocation relocation) {
-    if (_sectionHrefs.isEmpty || !_webReady || _relocationSuspended) return;
+    if (_disposed || _relocationSuspended) return;
+    if (!_webReady || _sectionHrefs.isEmpty) {
+      _queuedRelocation = relocation;
+      markOpen('relocation-queued');
+      return;
+    }
     final sectionIndex =
         relocation.sectionIndex ??
         BookLocator.sectionIndexFromCfi(relocation.cfi) ??
@@ -696,6 +821,7 @@ try {
     } else if (!_firstRelocationReported) {
       _firstRelocationReported = true;
       _session?.mark('first-relocation');
+      _openTrace?.dumpSummary(reason: 'first-relocation');
     }
     readerController.reportRenditionLocation(
       sectionIndex: sectionIndex.clamp(0, _sectionHrefs.length - 1),
@@ -975,26 +1101,7 @@ try {
     return '#${argb.substring(2)}';
   }
 
-  int? _sectionIndexFromHref(String? href) {
-    if (href == null || href.isEmpty) return null;
-    final target = _cleanHref(href);
-    final index = _sectionHrefs.indexWhere((value) {
-      final section = _cleanHref(value);
-      return section == target ||
-          target.endsWith('/$section') ||
-          section.endsWith('/$target');
-    });
-    return index < 0 ? null : index;
-  }
-
-  String _cleanHref(String value) {
-    final path = value.split('#').first;
-    try {
-      return Uri.decodeFull(path);
-    } catch (_) {
-      return path;
-    }
-  }
+  int? _sectionIndexFromHref(String? href) => _hrefIndex?.indexOf(href);
 
   Future<dynamic> _evaluate(String source) async {
     final lease = _webLease;
@@ -1012,6 +1119,7 @@ try {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _openTrace?.dumpSummary(reason: 'disposed');
     _prefsApplyTimer?.cancel();
     _prefsApplyTimer = null;
     _openGeneration++;
@@ -1278,9 +1386,17 @@ class _FoliateJsEngineViewState extends State<_FoliateJsEngineView>
           );
         }
       },
+      onLoadStart: (_, _) {
+        widget.adapter.markOpen('webview-load-start');
+      },
+      onLoadStop: (_, _) {
+        widget.adapter.markOpen('webview-load-stop');
+      },
       onConsoleMessage: (_, message) {
+        final text = message.message;
+        if (widget.adapter.absorbOpenTraceConsole(text)) return;
         if (_lease?.isCurrent != true) return;
-        if (kDebugMode) debugPrint('[FoliateJs] ${message.message}');
+        if (kDebugMode) debugPrint('[FoliateJs] $text');
       },
       onReceivedError: (_, request, error) {
         if (_lease?.isCurrent != true ||

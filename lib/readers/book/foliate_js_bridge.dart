@@ -75,16 +75,24 @@ class FoliateImportSnapshot {
   }
 }
 
+/// Isolate entry for large publication JSON (WKWebView string → Dart).
+FoliatePublicationSnapshot parseFoliatePublicationSnapshot(String source) =>
+    FoliatePublicationSnapshot.fromJsonString(source);
+
 /// Typed publication snapshot returned after Foliate finishes opening a book.
 class FoliatePublicationSnapshot {
   const FoliatePublicationSnapshot({
     required this.sectionHrefs,
     required this.toc,
+    this.flatToc = const [],
     this.authors = const [],
   });
 
   final List<String> sectionHrefs;
   final List<FoliateTocNode> toc;
+
+  /// Compact `[label, href, depth]` rows from JS. Preferred over [toc].
+  final List<FoliateFlatTocItem> flatToc;
 
   /// From EPUB/OPF metadata when available.
   final List<String> authors;
@@ -103,15 +111,51 @@ class FoliatePublicationSnapshot {
         .where((value) => value.isNotEmpty)
         .toList(growable: false);
     final rawToc = decoded['toc'];
+    final flat = decoded['flat'] == true;
     return FoliatePublicationSnapshot(
       sectionHrefs: sections,
-      toc: rawToc is List
+      toc: !flat && rawToc is List
           ? rawToc
                 .map(FoliateTocNode.tryParse)
                 .whereType<FoliateTocNode>()
                 .toList(growable: false)
           : const [],
+      flatToc: flat && rawToc is List
+          ? rawToc
+                .map(FoliateFlatTocItem.tryParse)
+                .whereType<FoliateFlatTocItem>()
+                .toList(growable: false)
+          : const [],
       authors: FoliateImportSnapshot.contributorsFrom(decoded['author']),
+    );
+  }
+}
+
+class FoliateFlatTocItem {
+  const FoliateFlatTocItem({
+    required this.title,
+    required this.href,
+    this.depth = 0,
+  });
+
+  final String title;
+  final String href;
+  final int depth;
+
+  static FoliateFlatTocItem? tryParse(Object? value) {
+    if (value is! Map) return null;
+    final title = (value['label'] ?? value['title'])?.toString().trim() ?? '';
+    final href = value['href']?.toString() ?? '';
+    final depth = switch (value['depth']) {
+      final num n => n.toInt(),
+      final String s => int.tryParse(s) ?? 0,
+      _ => 0,
+    };
+    if (title.isEmpty && href.isEmpty) return null;
+    return FoliateFlatTocItem(
+      title: title,
+      href: href,
+      depth: depth.clamp(0, 12),
     );
   }
 }
@@ -140,6 +184,62 @@ class FoliateTocNode {
         : const <FoliateTocNode>[];
     if (title.isEmpty && href.isEmpty && children.isEmpty) return null;
     return FoliateTocNode(title: title, href: href, children: children);
+  }
+}
+
+/// Maps TOC / relocate hrefs onto spine indices.
+///
+/// Same match rules as the old linear scan: exact path, or either side is a
+/// suffix after `/`. First spine hit wins. Built once per open so a 3000-entry
+/// TOC does not rescan 3000 sections per row.
+class FoliateHrefIndex {
+  FoliateHrefIndex(Iterable<String> hrefs) {
+    var index = 0;
+    for (final href in hrefs) {
+      _indexPath(clean(href), index);
+      index += 1;
+    }
+  }
+
+  final Map<String, int> _keys = {};
+
+  static String clean(String value) {
+    final path = value.split('#').first;
+    try {
+      return Uri.decodeFull(path);
+    } catch (_) {
+      return path;
+    }
+  }
+
+  void _indexPath(String cleaned, int index) {
+    _keys.putIfAbsent(cleaned, () => index);
+    var start = 0;
+    while (true) {
+      final slash = cleaned.indexOf('/', start);
+      if (slash < 0) return;
+      if (slash + 1 < cleaned.length) {
+        _keys.putIfAbsent(cleaned.substring(slash + 1), () => index);
+      }
+      start = slash + 1;
+    }
+  }
+
+  int? indexOf(String? href) {
+    if (href == null || href.isEmpty) return null;
+    final target = clean(href);
+    final exact = _keys[target];
+    if (exact != null) return exact;
+    var start = 0;
+    while (true) {
+      final slash = target.indexOf('/', start);
+      if (slash < 0) return null;
+      if (slash + 1 < target.length) {
+        final found = _keys[target.substring(slash + 1)];
+        if (found != null) return found;
+      }
+      start = slash + 1;
+    }
   }
 }
 

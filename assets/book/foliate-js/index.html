@@ -88,6 +88,23 @@
   document.addEventListener('contextmenu', e => { e.preventDefault(); });
 </script>
 <script>
+  window.__kaijuanOpen = (function () {
+    var t0 = performance.now();
+    var prev = t0;
+    function mark(step, extra) {
+      var now = performance.now();
+      var elapsed = Math.round(now - t0);
+      var delta = Math.round(now - prev);
+      prev = now;
+      var line = 'KaikaOpen step=' + step + ' t=' + elapsed + ' d=' + delta;
+      if (extra) line += ' ' + extra;
+      console.log(line);
+    }
+    mark('html-boot');
+    return { mark: mark };
+  })();
+</script>
+<script>
   (function () {
     const ua = navigator.userAgent || '';
     const platform = navigator.platform || '';
@@ -116,14 +133,35 @@
     });
 
     (async () => {
+      // PDF.js is only needed for PDF files. book.js lazy-imports src/pdf.js
+      // when it sees a PDF; that wrapper expects the global vendor build.
+      // Loading 555KB+ of pdf.js on every EPUB open (especially mobile
+      // WebView) delays first paint for no reason.
+      const params = new URLSearchParams(window.location.search);
+      const needsPdf = params.get('pdf') === '1';
+      const mark = (step, extra) => {
+        try { window.__kaijuanOpen && window.__kaijuanOpen.mark(step, extra); }
+        catch (_) {}
+      };
+
       if (shouldUseModernBundle) {
-        await loadScript('./src/vendor/pdfjs/pdf.js', { async: false, defer: false });
-        await loadScript('./src/book.js?v=20260807b', { type: 'module' });
+        if (needsPdf) {
+          await loadScript('./src/vendor/pdfjs/pdf.js', { async: false, defer: false });
+          mark('pdfjs-loaded');
+        }
+        mark('book-js-request');
+        await loadScript('./src/book.js?v=20260813b', { type: 'module' });
+        mark('book-js-script');
         return;
       }
 
+      mark('bundle-request');
       await loadScript('./dist/bundle.js', { type: 'module' });
-      await loadScript('./dist/pdf-legacy.js', { async: false, defer: false });
+      mark('bundle-script');
+      if (needsPdf) {
+        await loadScript('./dist/pdf-legacy.js', { async: false, defer: false });
+        mark('pdfjs-loaded');
+      }
     })();
   })();
 </script>
