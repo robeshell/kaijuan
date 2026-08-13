@@ -1,21 +1,23 @@
-# AI Workflow 扩展契约（Workflow Extension Contract v1）
+# AI 长任务扩展规则
 
 | | |
 |--|--|
-| **状态** | v1 通用契约骨架已建立；生产恢复、Artifact repository 与无中心改动扩展仍在迁移 |
+| **状态** | 通用基础代码已建立并由非生产测试任务验证；尚无生产长任务接入 |
 | **日期** | 2026-08-12 |
 | **产品动作控制** | [ai-product-actions.md](./ai-product-actions.md) |
 | **AI 总规范** | [ai.md](./ai.md) |
 | **工程** | [ENGINEERING.md](../ENGINEERING.md)「AI 边界」 |
 | **参考领域** | [ai-mind-map.md](./ai-mind-map.md)、[ai-translation.md](./ai-translation.md)、[ai-graph.md](./ai-graph.md) |
 
-> 本规范定义“一个新的 AI 产品 Workflow 如何接入开卷”。它不决定用户是否已经授权执行；授权以 Product Action Protocol 为准。它也不规定某个领域如何写提示词或生成内容；领域规格仍是内容语义权威。
+> 本页说明如何把新的 AI 长任务接入开卷。它不决定用户是否已经授权，也不规定领域提示词如何编写。代码类型仍保留 `Workflow`、`Adapter`、`Artifact` 等名称，正文用“任务执行器”“适配器”“生成结果”解释。
 
 ---
 
 ## 1. 结论
 
-新增思维导图、整本翻译、知识库导出或未来演示文稿能力时，不得复制一套聊天路由，也不得把模型 Tool Call 直接接到业务 Service。所有可执行能力统一注册为 `AiProductActionDefinition`，经同一个控制平面签发 Command，再由对应 `AiWorkflowAdapter` 执行并提交类型化 Artifact 与 Receipt。
+新增整本翻译、知识库导出或未来演示文稿能力时，不得复制一套聊天路由，也不得把模型工具调用直接接到业务服务。需要长时间运行、修改结果或写入外部系统的能力，应登记为 `AiProductActionDefinition`，由 App 校验并签发命令，再交给对应 `AiWorkflowAdapter` 执行和保存结果。
+
+图书思维导图是已经明确的例外：它是对话中的轻量结果，直接由导图会话路径生成，不使用本规则的任务记录。知识图谱也继续使用自己的分章检查点和缓存。
 
 ```text
 AiAgentRuntime / 明确 UI 入口
@@ -36,7 +38,7 @@ AiAgentRuntime / 明确 UI 入口
   → App-owned result projection
 ```
 
-框架替换不改变这条链：Genkit、兼容 Runtime 或未来远端 Agent 只负责把模型输出投影为 Proposal；Workflow 注册、授权、执行事实和产品产物始终属于开卷。
+更换模型框架不改变这条链。Genkit、当前兼容对话运行时或未来远端服务只能提供模型输出；任务登记、用户授权、执行事实和产品结果始终属于开卷。
 
 ---
 
@@ -44,9 +46,9 @@ AiAgentRuntime / 明确 UI 入口
 
 ### 2.1 适用范围
 
-以下能力必须使用本契约：
+以下**未来生产能力**应使用本规则：
 
-- 创建或修订领域 Artifact；
+- 创建或修订需要独立保存、恢复或外写的领域结果；
 - 启动可取消、可恢复或有预算的后台任务；
 - 写入 App 数据库、文件、WebDAV 或外部系统；
 - 执行导出、分享、覆盖、删除等产品动作；
@@ -60,7 +62,7 @@ AiAgentRuntime / 明确 UI 入口
 - 不要求每个 Workflow 使用 Genkit `defineFlow` 或 Agent；
 - 不把所有 Workflow 改造成动态流程图或通用脚本语言；
 - 不让一个通用 `Map<String, dynamic>` 取代领域模型；
-- 不承诺模型永不误解用户，只保证误解不会绕过 Policy 产生未授权副作用；
+- 不承诺模型永不误解用户，只保证误解不会绕过权限判断产生未授权的写入或外部操作；
 - 不把未来参考场景自动加入产品路线图。
 
 ---
@@ -111,7 +113,7 @@ validateDefinitionSet()
 buildToolDescriptors(availableDefinitions, temporaryAliases)
 ```
 
-Agent 每轮只看到 `listAvailable` 返回的最小工具集合。未满足能力、作用域或产品开关的动作不得暴露给模型；明确 UI 入口遇到不可用动作时也必须给出确定性原因，不能退回自由聊天假装完成。
+模型每轮只看到 `listAvailable` 返回的最小工具集合。未满足能力、作用域或产品开关的动作不得暴露给模型；明确 UI 入口遇到不可用动作时也必须给出确定原因，不能退回自由聊天假装完成。
 
 工具描述由注册定义生成，不能在 Agent prompt、Runtime adapter 和 Controller 中分别维护三份 schema。Provider 特有格式转换只能发生在 `AiAgentRuntime` 内部。
 
@@ -170,7 +172,7 @@ AiCapabilitySet
 
 ### 5.1 `AiWorkflowAdapter`
 
-所有领域 Workflow 对控制平面暴露同一组语义操作；实现可以是本地 Dart Service、Genkit structured output、远端服务或组合，但不得泄漏具体框架类型：
+所有领域任务执行器向通用任务控制器提供同一组操作；实现可以是本地 Dart 服务、Genkit 结构化输出、远端服务或组合，但不得把具体框架类型传到产品数据层：
 
 ```text
 preflight(AiAuthorizedCommand, AiWorkflowEnvironment)
@@ -246,7 +248,7 @@ cancelled
 
 | 版本 | 负责内容 | 兼容要求 |
 |------|----------|----------|
-| `protocolVersion` | Proposal/Decision/Command/Receipt 外层协议 | 控制平面读取 |
+| `protocolVersion` | 任务建议、判断、命令和执行结果的外层格式 | 通用任务控制器读取 |
 | `definitionVersion` | 注册元数据和能力要求 | 注册表校验 |
 | `proposalSchemaVersion` | Tool/UI 原始参数 | Gateway 解析或拒绝 |
 | `commandSchemaVersion` | Workflow 输入参数 | Workflow 必须明确支持 |
@@ -516,16 +518,13 @@ scope preflight
 
 - [x] `AiProductActionDefinition`、注册表冲突校验和动态工具目录骨架落地。
 - [x] 能力快照与 required/optional/oneOf 门禁在目录和 Controller 两侧一致生效。
-- [x] 通用 `AiWorkflowAdapter` 的事件、检查点、取消和恢复语义在生产 Workflow 落地。
+- [x] 通用 `AiWorkflowAdapter` 的事件、检查点、取消和恢复语义已由非生产测试任务验证。
 - [x] Action/Command/Workflow/Artifact/Prompt/Renderer 版本彼此独立并实际传播。
-- [x] Artifact 强类型 payload、持久化原子提交、派生文件和 WebDAV 边界落地。
+- [x] 类型化结果与 JSON 原子写入已有基础实现和测试；派生文件和 WebDAV 如何处理已写入规则，但要由首个生产重任务验证。
 - [x] 幂等键绑定可信 submission，既防重复回调又允许用户再次生成。
-- [x] 所有生产成功/失败文案由 Receipt 和 App 投影产生，模型不能伪造成功。
+- [x] 通用代码要求成功/失败文案来自执行结果和 App 投影；尚待首个生产长任务验证。
 - [x] 增加第二个测试 Workflow 不修改通用 Controller、工具解析和 Widget 分发代码。
 - [ ] PPT 参考场景的语义最小对、能力降级和多阶段恢复由可执行契约测试证明。
-- [x] Genkit/Legacy/未来远端 Runtime 切换不改变产品动作与 Artifact 契约。
+- [x] 对话运行时边界与长任务契约彼此独立；未来更换运行时不应改变任务和结果格式。
 
-证据：`AiBookMindMapWorkflowAdapter`（无对话副作用）、`JsonAiArtifactRepository`
-谱系 head + 文件锁、`AiProductActionDomainRegistry` + `toolParser`、
-`test_book_export` 从 Tool Call 到 Receipt。派生 PNG 仍由既有 renderer 负责。
-PPT 仍是协议参考场景。
+当前证据：`JsonAiArtifactRepository`、`AiProductActionDomainRegistry`、通用任务执行器，以及非生产 `test_book_export` 从模型工具调用到执行结果的测试。生产目录只有思维导图的生成/修订工具，而这两个工具最终转入轻量会话路径，不使用通用任务执行器。PPT 仍只是说明未来扩展方式的例子。

@@ -70,6 +70,24 @@ void main() {
     controller.dispose();
   });
 
+  test('beginTurn stores a short display label without changing model text', () {
+    final controller = BookAiConversationController((_) async {}, now: () => now)
+      ..hydrate(
+        const AiChatSession(contentHash: 'book-hash', itemId: 'book-id'),
+      );
+    controller.beginTurn(
+      turnId: 'turn-label',
+      workKey: 'work-1',
+      text: kAiChatBookDigestPrompt,
+      displayText: '本书书摘',
+      wantsWebSearch: false,
+    );
+    final user = controller.messagesFor('work-1').single;
+    expect(user.content, kAiChatBookDigestPrompt);
+    expect(user.visibleContent, '本书书摘');
+    controller.dispose();
+  });
+
   test('failure keeps partial answer and retry identity in one work', () {
     final controller = BookAiConversationController(
       (_) async {},

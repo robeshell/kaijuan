@@ -89,6 +89,9 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   int _scrollRequestEpoch = 0;
   int _streamTailFollowEpoch = 0;
+  /// When false, the reader scrolled away from the latest bubble. Streaming
+  /// and follow-up insertion must not yank the list back to the end.
+  bool _followTail = true;
   bool _committingComposer = false;
 
   /// Attached highlight; null when cleared by user.
@@ -648,17 +651,17 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     }
   }
 
-  Future<void> _send([String? preset]) async {
+  Future<void> _send([String? preset, String? displayText]) async {
     if (_committingComposer) return;
     _committingComposer = true;
     try {
-      await _sendLocked(preset);
+      await _sendLocked(preset, displayText);
     } finally {
       _committingComposer = false;
     }
   }
 
-  Future<void> _sendLocked(String? preset) async {
+  Future<void> _sendLocked(String? preset, String? displayText) async {
     // Freeze the submitted value before yielding. macOS can deliver a late
     // IME editing update after the keyboard action, and rereading the
     // controller after an await could otherwise submit that transient value.
@@ -782,6 +785,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
         turnId: turnId,
         workKey: turnWorkKey,
         text: text,
+        displayText: displayText,
         wantsWebSearch: wantWeb,
         retrying: retrying,
         retryTurnId: retryTurnId,
@@ -1057,15 +1061,13 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       });
       published = true;
       unawaited(_persist());
-      _scrollToEnd();
+      _scrollToEndIfFollowing();
     } finally {
       if (identical(_suggestionCancel, token)) {
         _suggestionCancel = null;
         if (!published && mounted) {
           setState(() => _generatingFollowUp = false);
-          // Empty/failed model suggestions reveal the stable fallback list.
-          // Keep that newly inserted UI in view just like generated follow-ups.
-          _scrollToEnd();
+          _scrollToEndIfFollowing();
         }
       }
     }
@@ -1224,17 +1226,19 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
 
   /// Scroll message list to the bottom.
   ///
-  /// [animated] is for an explicit send or newly inserted follow-ups. Opening
-  /// the sheet uses a jump so the user does not briefly see the first message
-  /// then animate down. Streaming snapshots use [_followStreamingTail].
+  /// [force] is for an explicit send or opening the sheet. Follow-ups and
+  /// completion must use [_scrollToEndIfFollowing] so an upward read is
+  /// not yanked back. Streaming snapshots use [_followStreamingTail].
   /// Retries a few frames: ListView may not have clients yet right after
   /// bootstrap, and markdown bubbles can grow after the first layout.
-  void _scrollToEnd({bool animated = true}) {
+  void _scrollToEnd({bool animated = true, bool force = true}) {
+    if (force) _followTail = true;
+    if (!_followTail) return;
     _streamTailFollowEpoch++;
     final epoch = ++_scrollRequestEpoch;
     void attempt(int remaining) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || epoch != _scrollRequestEpoch) return;
+        if (!mounted || epoch != _scrollRequestEpoch || !_followTail) return;
         if (!_scroll.hasClients) {
           if (remaining > 0) attempt(remaining - 1);
           return;
@@ -1254,6 +1258,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted ||
                 epoch != _scrollRequestEpoch ||
+                !_followTail ||
                 !_scroll.hasClients) {
               return;
             }
@@ -1270,18 +1275,33 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
     attempt(8);
   }
 
+  void _scrollToEndIfFollowing({bool animated = true}) {
+    if (!_followTail) return;
+    _scrollToEnd(animated: animated, force: false);
+  }
+
+  void _noteUserScroll(ScrollMetrics metrics) {
+    _followTail = metrics.extentAfter <= 48;
+    _scrollRequestEpoch++;
+    _streamTailFollowEpoch++;
+  }
+
   bool get _isNearMessageTail {
-    if (!_scroll.hasClients) return true;
-    return _scroll.position.extentAfter <= 48;
+    if (!_scroll.hasClients) return _followTail;
+    return _followTail && _scroll.position.extentAfter <= 48;
   }
 
   /// Keeps a growing streaming bubble pinned without starting a new scroll
   /// animation for every model snapshot. The captured offset protects a user
   /// gesture that begins between the event and the next layout frame.
   void _followStreamingTail({required double? previousOffset}) {
+    if (!_followTail) return;
     final epoch = ++_streamTailFollowEpoch;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || epoch != _streamTailFollowEpoch || !_scroll.hasClients) {
+      if (!mounted ||
+          epoch != _streamTailFollowEpoch ||
+          !_followTail ||
+          !_scroll.hasClients) {
         return;
       }
       if (_scroll.position.isScrollingNotifier.value) return;
@@ -1327,7 +1347,7 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
       if (mounted) setState(() {});
       return;
     }
-    await _send(shortcut.prompt);
+    await _send(shortcut.prompt, shortcut.transcriptLabel);
   }
 
   Future<void> _dispatchProductAction(
@@ -1930,7 +1950,6 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     streamingReasoning: _streamingReasoning,
                     streamingReasoningKind: _streamingReasoningKind,
                     searchingWeb: _searchingWeb,
-                    toolSteps: _conversation.toolSteps,
                     // Chips only on the composer (avoid double strip under the
                     // last bubble — same list lives next to send).
                     actionChips: const [],
@@ -1946,12 +1965,18 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
                     onActionRejected: () =>
                         _mindMapCoordinator.selectActionConfirmation(false),
                     onUserDrag: () {
-                      _scrollRequestEpoch++;
-                      _streamTailFollowEpoch++;
+                      if (_scroll.hasClients) {
+                        _noteUserScroll(_scroll.position);
+                      } else {
+                        _followTail = false;
+                        _scrollRequestEpoch++;
+                        _streamTailFollowEpoch++;
+                      }
                     },
                     onShortcutSelected: (shortcut) =>
                         unawaited(_handleOpeningShortcut(shortcut)),
-                    onActionChip: (chip) => unawaited(_send(chip.prompt)),
+                    onActionChip: (chip) =>
+                        unawaited(_send(chip.prompt, chip.transcriptLabel)),
                     onCopy: (message) => unawaited(_copy(message.content)),
                     onMindMapLayoutChanged: _mindMapCoordinator.updateLayout,
                     onOpenMindMapEvidence: (evidence) =>
@@ -2004,7 +2029,8 @@ class _BookAiChatSheetState extends State<_BookAiChatSheet>
             actionChips: showFollowUpShortcuts
                 ? kAiChatActionChips
                 : const [],
-            onActionChip: (chip) => unawaited(_send(chip.prompt)),
+            onActionChip: (chip) =>
+                unawaited(_send(chip.prompt, chip.transcriptLabel)),
           ),
         ],
       ],

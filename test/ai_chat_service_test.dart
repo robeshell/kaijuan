@@ -46,6 +46,10 @@ void main() {
       expect(messages.last.content, contains('<response_contract>'));
       expect(messages.last.content, contains('Do not narrate tool use'));
       expect(
+        messages.first.content,
+        contains('Do not volunteer reasons'),
+      );
+      expect(
         messages.last.content,
         contains('Never announce that you now understand the book'),
       );
@@ -384,21 +388,32 @@ void main() {
   });
 
   group('shortcuts', () {
-    test('outline shortcut uses the normal whole-book chat prompt', () {
+    test('outline shortcut is a short reader intent', () {
       final outline = kAiChatShortcuts.firstWhere(
         (shortcut) => shortcut.label == '生成本书大纲',
       );
 
-      expect(outline.prompt, contains('全书'));
-      expect(outline.prompt, contains('主要结构阶段'));
+      expect(outline.prompt, '请为这本书写一份大纲。');
+      expect(outline.prompt, isNot(contains('get_toc')));
       expect(outline.needsSelection, isFalse);
     });
 
-    test('book digest shortcut is structured and scope-aware', () {
+    test('task shortcuts send intent only; recipes live in system', () {
       final digest = kAiChatShortcuts.firstWhere((s) => s.label == '本书书摘');
-      expect(digest.prompt, contains('核心冲突'));
-      expect(digest.prompt, contains('合集'));
-      expect(digest.prompt, contains('get_reading_metadata'));
+      expect(digest.prompt, kAiChatBookDigestPrompt);
+      expect(digest.prompt, isNot(contains('get_reading_metadata')));
+      expect(kAiChatChapterSummaryPrompt, '请总结这一章。');
+      expect(kAiChatChapterCloseReadPrompt, '请精读这一章。');
+      final system = AiChatService.buildMessages(
+        userText: kAiChatBookDigestPrompt,
+        history: const [],
+        context: const AiChatContextBundle(),
+        bookTitle: '书',
+      ).first.content;
+      expect(system, contains('Task recipes'));
+      expect(system, contains('书摘'));
+      expect(system, contains('回忆前文'));
+      expect(system, contains('制作说明'));
     });
 
     test('opening shortcuts use quote-specific questions when selected', () {
@@ -417,6 +432,16 @@ void main() {
       expect(kAiChatActionChips, hasLength(5));
       expect(kAiChatActionChips.map((c) => c.label), containsAll(['解释', '总结']));
       expect(kAiChatActionChips.every((c) => c.prompt.trim().isNotEmpty), isTrue);
+      expect(
+        kAiChatActionChips.every((c) => c.transcriptLabel == c.label),
+        isTrue,
+      );
+    });
+
+    test('task shortcuts keep long prompts off the transcript label', () {
+      final digest = kAiChatShortcuts.firstWhere((s) => s.label == '本书书摘');
+      expect(digest.transcriptLabel, '本书书摘');
+      expect(digest.prompt, isNot(digest.label));
     });
 
     test(
@@ -426,7 +451,8 @@ void main() {
         final selected = aiChatFollowUpShortcuts(hasSelection: true);
 
         expect(general, hasLength(3));
-        expect(general.every((s) => s.prompt.contains('刚才的回答')), isTrue);
+        expect(general.every((s) => s.prompt.length <= s.label.length + 2), isTrue);
+        expect(general.every((s) => !s.prompt.contains('请基于刚才的回答')), isTrue);
         expect(selected, hasLength(3));
         expect(selected.every((s) => s.needsSelection), isTrue);
       },
@@ -575,6 +601,17 @@ void main() {
       },
     );
 
+    test('tool-preface detector keeps long drafts', () {
+      expect(AiChatService.isRetractableToolPreface('让我先查目录'), isTrue);
+      expect(AiChatService.isRetractableToolPreface('Let me check the TOC'), isTrue);
+      expect(
+        AiChatService.isRetractableToolPreface(
+          '这一章写分院仪式：帽子评语、关键抉择，以及开学宴上的警告。主题是选择塑造身份。',
+        ),
+        isFalse,
+      );
+    });
+
     test('publishes live snapshots for a direct prose response', () async {
       final adapter = _ScriptedModelAdapter([
         [
@@ -611,7 +648,7 @@ void main() {
       expect((events.last as AiRunCompleted).text, '第一段继续');
     });
 
-    test('retracts live preface when the turn ends as tools', () async {
+    test('retracts a short tool preface but keeps a real draft', () async {
       final adapter = _ScriptedModelAdapter([
         [
           const AiModelTextDelta('让我先查目录'),
@@ -657,9 +694,77 @@ void main() {
           .map((event) => event.text)
           .toList();
       expect(texts, contains('让我先查目录'));
-      expect(texts, contains('')); // retracted before tools run
+      expect(texts, contains('')); // short preface retracted
       expect(texts.last, '目录里有这些内容。');
       expect((events.last as AiRunCompleted).text, '目录里有这些内容。');
+    });
+
+    test('keeps a drafted answer while later tool rounds run', () async {
+      const draft =
+          '这一章写分院仪式：帽子评语、关键抉择，以及开学宴上的警告。主题是选择塑造身份。';
+      final adapter = _ScriptedModelAdapter([
+        [
+          const AiModelTextDelta(draft),
+          const AiModelTurnCompleted(
+            text: draft,
+            toolCalls: [
+              AiModelToolCall(
+                id: 'toc-1',
+                name: AiChatToolNames.getToc,
+                arguments: {},
+              ),
+            ],
+            truncated: false,
+          ),
+        ],
+        [
+          const AiModelTextDelta('让我再读一章'),
+          const AiModelTurnCompleted(
+            text: '让我再读一章',
+            toolCalls: [
+              AiModelToolCall(
+                id: 'ch-1',
+                name: AiChatToolNames.getChapter,
+                arguments: {'sectionIndex': 1},
+              ),
+            ],
+            truncated: false,
+          ),
+        ],
+        [
+          const AiModelTextDelta(draft),
+          const AiModelTurnCompleted(
+            text: draft,
+            toolCalls: [],
+            truncated: false,
+          ),
+        ],
+      ]);
+      final service = AiChatService(
+        isAvailable: () => true,
+        openModelAdapter: ({reasoningEnabled}) => adapter,
+      );
+
+      final events = await service
+          .streamRun(
+            run: descriptor,
+            userText: '总结这一章',
+            history: const [],
+            context: const AiChatContextBundle(),
+            bookTitle: '书',
+            tools: _FakeHost(),
+          )
+          .toList();
+
+      final texts = events
+          .whereType<AiRunTextSnapshot>()
+          .map((event) => event.text)
+          .toList();
+      expect(texts, isNot(contains('')));
+      expect(texts, isNot(contains('让我再读一章')));
+      expect(texts.first, draft);
+      expect(texts.last, draft);
+      expect((events.last as AiRunCompleted).text, draft);
     });
 
     test('emits a terminal product action from the same model turn', () async {
@@ -1232,6 +1337,33 @@ void main() {
       expect(restored.toolSteps, hasLength(2));
       expect(restored.toolSteps.first.label, '当前阅读元数据');
       expect(restored.toolSteps.every((s) => s.done), isTrue);
+    });
+
+    test('user messages persist a short display label separately', () {
+      const message = AiChatMessage(
+        role: AiMessageRole.user,
+        content: kAiChatBookDigestPrompt,
+        displayContent: '本书书摘',
+      );
+      final restored = AiChatMessage.fromJson(
+        Map<String, dynamic>.from(message.toJson()),
+      );
+      expect(restored.content, kAiChatBookDigestPrompt);
+      expect(restored.displayContent, '本书书摘');
+      expect(restored.visibleContent, '本书书摘');
+      expect(const AiChatMessage(role: AiMessageRole.user, content: '手打问题').visibleContent, '手打问题');
+    });
+
+    test('tool step summary collapses duplicates into one line', () {
+      expect(
+        AiChatToolStep.summarize(const [
+          AiChatToolStep(label: '目录', done: true),
+          AiChatToolStep(label: '检索', done: true),
+          AiChatToolStep(label: '检索', done: true),
+        ]),
+        '查阅了目录、检索',
+      );
+      expect(AiChatToolStep.summarize(const []), isEmpty);
     });
 
     test('session JSON preserves turn identity and status', () {

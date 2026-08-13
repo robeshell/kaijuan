@@ -153,7 +153,7 @@ class AiGraphEvidence {
 
 ## 4. 抽取管线（`AiBookGraphService`）
 
-复用 `AiBookStructureResolver` 的文件结构结果与 `AiBookOutlineService` 的章节切分；模型 I/O 统一经 `AiWorkflowModelSession` / `AiStructuredOutputAdapter`，**不引 LangChain 或多 Agent**。
+复用 `AiBookStructureResolver` 的文件结构结果与用户确认后的 `AiBookSectionSlice` 正文单元；模型请求统一经 `AiWorkflowModelSession` / `AiStructuredOutputAdapter`，**不引 LangChain，也不让多个模型互相分工**。
 
 ### 4.1 流程
 
@@ -178,7 +178,7 @@ class AiGraphEvidence {
 
 每批抽取结果**先落盘再合并**（中间产物可审计、可重放、天然断点）：
 
-1. **对齐**：用维护中的 `alias → canonical` 缓存（**按 person / location / event 分桶**）把本批实体名映射到已有节点；无歧义别名并入已有 canonical，未匹配才建新节点。
+1. **对齐**：用维护中的别名索引（按实体类型分桶）把本批实体名映射到已有节点；无歧义别名并入已有实体，未匹配才建新节点。
 2. **证据追加**：实体/关系命中已有唯一键 → `evidence` 追加、`chapterFreq` 累加、`first/lastSection` 更新、描述**不覆盖**（记入待合成列表）。
 3. **描述合成**：同一实体证据超过阈值后，由一次 LLM 调用按证据合成单一描述（GraphRAG 式 `SUMMARIZE`），冲突时以证据为准；失败则保留旧描述并标 `needs_review`。
 4. **关系合并**：同 `(source, target, type)` → `weight` 平均、证据追加。
@@ -192,7 +192,7 @@ class AiGraphEvidence {
   "entities": [
     {
       "name": "伊丽莎白·班纳特",
-      "type": "person",                    // person|location|event
+      "type": "person",                    // person|location|event|organization|item|concept|creature
       "aliases": ["伊丽莎白", "丽萃"],
       "description": "班纳特家二小姐，聪慧、有主见……",
       "evidence": [{"section": 3, "quote": "……原文连续片段……"}]
@@ -211,12 +211,12 @@ class AiGraphEvidence {
 ```
 
 - 所有字段必填；`evidence` 至少 1 条（防空证据污染）。
-- **质量门槛**：落地前用 5 个代表性章节做 golden set，跑通 `schema 校验率 × 语义准确率` 再定稿 prompt（研究建议）。
+- **质量门槛**：用 5 个代表性章节制作人工标注样本，检查格式、引文定位、准确率和召回率，再调整提示词与模型组合。
 
-### 4.4 成本
+### 4.4 调用规模与费用
 
-- 几十万字 ≈ 200–400 次调用（便宜模型 1–3 美元量级）；章级增量让「读多少抽多少」成本随阅读进度摊开。
-- 默认不开 gleaning；合并/消歧用贵模型一次过，抽取用便宜模型。
+- 调用次数由用户选择的内容单元、每节分片数、可选缺漏补查和关系复核共同决定，不能用固定次数或固定金额承诺。
+- App 记录实际模型调用与可获得的用量信息；按节保存进度，使失败后只补未完成内容。缺漏补查只有在已抽取结果确实缺少某类重要实体时才执行一次有界调用。
 
 ---
 
@@ -232,7 +232,7 @@ class AiGraphEvidence {
 
 ### 5.2 程序校验（模型输出是候选，程序是裁判）
 
-1. **schema 校验**：类型枚举（person/location/event）、关系类型词表、字段必填、`evidence` 非空。
+1. **结构校验**：七类实体枚举、关系类型词表、字段必填、`evidence` 非空。
 2. **引文存在性**：quote 在原文归一化搜索；搜不到 → 重试（≤2 次）或降级为章节级证据，绝不静默收下。
 3. **唯一键幂等**：`entityId`、`sourceId+targetId+type` upsert，重复批次不产生脏数据；证据按 `(sectionIndex, normalizedQuote)` 去重。
 4. **歧义拒绝**：同名异人（两个「王五」）→ 映射待审名单，**绝不合并**——误并是关系图最脏的错误。
@@ -260,9 +260,9 @@ class AiGraphEvidence {
 - 生成后**抽样 1% 语义复核**（人工或 LLM judge），发现系统性偏差即调 prompt。
 - 章级增量让问题**只影响新章**：改 prompt 后重抽新章即可，不用全书重来。
 
-### 5.7 golden set 验收指标（上线门槛）
+### 5.7 人工标注样本验收指标
 
-落地前用 **5 个代表性章节人工标注** golden set，跑通以下指标再定稿 prompt / 模型组合：
+用 **5 个代表性章节制作人工标注样本**，跑通以下指标再调整提示词与模型组合：
 
 | 指标 | 含义 | 门槛建议 |
 |------|------|----------|
@@ -384,7 +384,7 @@ lib/presentation/widgets/reader/book_ai_graph_view.dart / book_ai_graph_fullscre
 ### G1 — 数据模型 + 抽取管线 ✅
 
 - 模型、Schemantic 结构化契约、单章抽取 + quote 回填 + 业务校验与截断分片。
-- 验收：5 章 golden set，`schema 校验率` 与 `语义准确率` 达标（指标见 §5.7）；quote 定位成功率高；失败可重试不重复计费。
+- 验收：5 章人工标注样本的格式合法率与语义准确率达标（指标见 §5.7）；引文定位成功率高；失败可重试，不重复计费。
 
 ### G2 — 增量合并 + 缓存 + 备份 ✅
 

@@ -177,6 +177,7 @@ class BookAiConversationController extends ChangeNotifier {
     bool retrying = false,
     String? retryTurnId,
     AiConversationCommand? command,
+    String? displayText,
   }) {
     final history = List<AiChatMessage>.from(_session.messagesFor(workKey));
     if (retryTurnId != null) {
@@ -205,6 +206,7 @@ class BookAiConversationController extends ChangeNotifier {
       AiChatMessage(
         role: AiMessageRole.user,
         content: text,
+        displayContent: _displayContentFor(text, displayText),
         createdAt: _now(),
         webHitCount: wantsWebSearch ? 0 : null,
         turnId: turnId,
@@ -362,6 +364,7 @@ class BookAiConversationController extends ChangeNotifier {
     required String turnId,
     required String? workKey,
     required String text,
+    String? displayText,
     required bool wantsWebSearch,
     required BookAiRuntimeStarter startRuntime,
     BookAiWebSearch? searchWeb,
@@ -369,10 +372,16 @@ class BookAiConversationController extends ChangeNotifier {
     bool retrying = false,
     String? retryTurnId,
   }) async {
+    final resolvedDisplay =
+        displayText ??
+        (retryTurnId == null
+            ? null
+            : _userDisplayForTurn(retryTurnId, workKey: workKey));
     final turn = beginTurn(
       turnId: turnId,
       workKey: workKey,
       text: text,
+      displayText: resolvedDisplay,
       wantsWebSearch: wantsWebSearch,
       retrying: retrying,
       retryTurnId: retryTurnId,
@@ -745,6 +754,22 @@ class BookAiConversationController extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  String? _userDisplayForTurn(String turnId, {String? workKey}) {
+    for (final message in _session.messagesFor(workKey).reversed) {
+      if (message.turnId == turnId && message.role == AiMessageRole.user) {
+        final shown = message.displayContent.trim();
+        return shown.isEmpty ? null : shown;
+      }
+    }
+    return null;
+  }
+
+  static String _displayContentFor(String text, String? displayText) {
+    final shown = (displayText ?? '').trim();
+    if (shown.isEmpty || shown == text.trim()) return '';
+    return shown;
   }
 
   void _resetActiveTurn() {

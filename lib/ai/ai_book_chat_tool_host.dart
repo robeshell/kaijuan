@@ -71,7 +71,12 @@ class AiBookChatToolHost implements AiChatToolHost {
   @override
   Future<String> toolGetCurrentChapter({int maxChars = 10000}) async {
     final text = turnContext.chapterText.trim();
-    if (text.isEmpty) return '(当前章正文不可用)';
+    if (text.isEmpty) {
+      if (turnContext.chapterTitle.trim().isEmpty) {
+        return '(no body at this locator)';
+      }
+      return '[${turnContext.chapterTitle.trim()}]\n(no body at this locator)';
+    }
     final title = turnContext.chapterTitle.trim();
     // Prefer head+tail over pure head so late-chapter material is visible.
     final body = text.length > maxChars

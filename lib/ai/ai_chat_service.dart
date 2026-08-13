@@ -58,6 +58,23 @@ class AiChatService {
       AiChatRetrieve.isWholeBookQuery(userText)
       ? maxToolRoundsDeep
       : maxToolRounds;
+
+  static final _toolPrefaceRe = RegExp(
+    r'^(让我|我先|我来|先[去查读写搜]|正在[查读写搜]|稍等|等我|'
+    r'hold on|let me|i.?ll (check|look|search|read))',
+    caseSensitive: false,
+  );
+
+  /// Short "I'll look that up" lines may disappear when tools start.
+  /// A real draft that arrived in the same turn must stay on screen.
+  static bool isRetractableToolPreface(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return true;
+    if (AiChatToolMarkup.looksLikeLeakedToolCall(t)) return true;
+    if (t.length > 80) return false;
+    return _toolPrefaceRe.hasMatch(t);
+  }
+
   static const maxToolRoundChars = 24000;
 
   /// Per-call answer budget. A prose answer that reaches this limit is
@@ -300,15 +317,17 @@ class AiChatService {
     var repairingProductAction = false;
     var productRepairAttempted = false;
     final toolRoundLimit = toolRoundsFor(userText);
+    // Prose already shown that is not a tool-round preface. Later tool
+    // rounds must not overwrite or retract it.
+    var heldVisible = '';
 
     for (var round = 0; round < toolRoundLimit; round++) {
       execution.ensureActive();
       if (remainingToolChars <= 0) break;
       execution.modelStarted(AiRunModelPurpose.toolDecision);
       reasoning.startTurn();
-      // Live-stream clean prose so the bubble still scrolls as tokens arrive.
-      // If the turn ends as tools / DSML, retract with yield '' so tool-round
-      // prefaces ("让我再读一章…") never stick as the final answer.
+      // Stream only while the bubble is still empty. A later tool round
+      // that writes "让我再查…" must not replace an answer already on screen.
       final streamed = StringBuffer();
       var publishedLive = false;
       AiModelTurnCompleted? completed;
@@ -336,7 +355,8 @@ class AiChatService {
                 streamed.write(event.text);
                 final raw = streamed.toString();
                 // Hold DSML / pseudo tool markup off the bubble while streaming.
-                if (!AiChatToolMarkup.looksLikeLeakedToolCall(raw)) {
+                if (heldVisible.isEmpty &&
+                    !AiChatToolMarkup.looksLikeLeakedToolCall(raw)) {
                   publishedLive = true;
                   yield raw;
                 }
@@ -380,7 +400,11 @@ class AiChatService {
           );
           effectiveCalls = recovered;
         } else if (!repairingProductAction && round + 1 < toolRoundLimit) {
-          if (publishedLive || streamed.isNotEmpty) yield '';
+          if (heldVisible.isEmpty &&
+              (publishedLive || streamed.isNotEmpty) &&
+              isRetractableToolPreface(streamed.toString())) {
+            yield '';
+          }
           working
             ..add(
               AiModelMessage(
@@ -401,7 +425,10 @@ class AiChatService {
           // No more tool rounds — strip markup and try to keep any prose.
           final cleaned = AiChatToolMarkup.stripLeakedToolCall(resultText);
           if (cleaned.isEmpty) {
-            if (publishedLive || streamed.isNotEmpty) yield '';
+            if (heldVisible.isEmpty &&
+                (publishedLive || streamed.isNotEmpty)) {
+              yield '';
+            }
             // Fall through to forced final answer after the loop.
             break;
           }
@@ -417,6 +444,7 @@ class AiChatService {
         if (answer.trim().isEmpty) throw AiProviderException('没有生成内容');
         if (repairingProductAction) {
           if (publishedLive || streamed.isNotEmpty) yield '';
+          heldVisible = '';
           throw AiProviderException('模型未按要求返回原生思维导图操作，请重试');
         }
         if (productContext.shouldRepairNativeMindMapImitation(
@@ -425,9 +453,11 @@ class AiChatService {
         )) {
           if (productRepairAttempted) {
             if (publishedLive || streamed.isNotEmpty) yield '';
+            heldVisible = '';
             throw AiProviderException('模型未按要求返回原生思维导图操作，请重试');
           }
           if (publishedLive || streamed.isNotEmpty) yield '';
+          heldVisible = '';
           productRepairAttempted = true;
           repairingProductAction = true;
           working
@@ -459,7 +489,10 @@ class AiChatService {
             ? AiChatToolMarkup.stripLeakedToolCall(answer)
             : answer;
         if (visible.trim().isEmpty) {
-          if (publishedLive || streamed.isNotEmpty) yield '';
+          if (heldVisible.isEmpty &&
+              (publishedLive || streamed.isNotEmpty)) {
+            yield '';
+          }
           throw AiProviderException('模型返回了无效的工具调用文本，请重试');
         }
         // Live stream already published the same prose — do not re-yield the
@@ -479,8 +512,17 @@ class AiChatService {
         return;
       }
 
-      // Tool path: retract any live preface so only the tool timeline remains.
-      if (publishedLive || streamed.isNotEmpty) yield '';
+      // Keep a real draft on screen while tools run. Only retract a short
+      // "let me look that up" preface or leaked protocol text.
+      final draft = streamed.toString().trim();
+      if (heldVisible.isEmpty) {
+        if (isRetractableToolPreface(draft) ||
+            AiChatToolMarkup.looksLikeLeakedToolCall(resultText)) {
+          if (publishedLive || streamed.isNotEmpty) yield '';
+        } else if (draft.isNotEmpty) {
+          heldVisible = draft;
+        }
+      }
       if (result.truncated && result.toolCalls.isNotEmpty) {
         throw AiProviderException('工具调用响应被截断，未执行任何工具');
       }
@@ -869,23 +911,71 @@ class AiChatService {
       ..writeln()
       ..writeln('Answer formatting (product quality):')
       ..writeln(
-        '- Open with a short framing line when useful: book/work name, '
-        'progress, and whether tools only cover the current scoped work.',
+        '- Deliver the asked content first. Do not volunteer reasons, '
+        'process notes, or tool diagnostics (e.g. why the current locator '
+        'is front matter, why a tool returned empty, why this is not a '
+        'novel chapter). If the reader asks 为什么 / 怎么知道 / 理由, then explain.',
+      )
+      ..writeln(
+        '- Never quote tool-error parentheses such as 「当前章正文不可用」 '
+        'to the reader. If the current section has no story, summarize '
+        'what that section actually is in a few sentences.',
       )
       ..writeln(
         '- Prefer scannable structure: markdown headings, numbered lists, '
-        'short paragraphs, and small tables for comparisons or "要点".',
+        'short paragraphs, and small tables for comparisons or "要点". '
+        'Skip a heading if it would be empty or only a justification.',
       )
       ..writeln(
-        '- For digests / summaries: core conflict, 3 key people (motive + '
-        'critical choice), theme keywords; mark uncertain parts as 基于取样.',
+        '- Task recipes (match the reader intent; they will not paste a spec):',
       )
       ..writeln(
-        '- For close reading: quote short passages, then craft/analysis.',
+        '  · 书摘: scoped work only; mark core conflict with »; 3 people '
+        '(motive + one choice); 3–5 theme words; no ending spoiler; '
+        'mark thin evidence as 基于取样.',
       )
       ..writeln(
-        '- End with 1–2 concrete next steps the reader can accept in one '
-        'tap (e.g. 精读某节、生成本章思维导图、对照另一人物). '
+        '  · 总结这一章: 6–10 sentences on the current locator. Story → plot '
+        'beats. Front matter (制作说明 / 版权 / 作者简介 / 目录) → what that page '
+        'actually says; no fake 情节/人物 headings.',
+      )
+      ..writeln(
+        '  · 精读: short quotes then craft. Front matter: no invented plot. '
+        'Do not spoil unread story.',
+      )
+      ..writeln(
+        '  · 回忆前文: only plot before current progress; 3–6 sentences; '
+        'never unread events. Stay inside the current tool corpus.',
+      )
+      ..writeln(
+        '  · 大纲: one-paragraph through-line, then titled stages; mark '
+        '基于取样; scoped work only — not a chapter-by-chapter dump.',
+      )
+      ..writeln(
+        '  · 人物关系: the whole scoped work, not only the current chapter '
+        'or lecture.',
+      )
+      ..writeln(
+        '  · 时代背景: ground in the book; label extras as 补充说明.',
+      )
+      ..writeln(
+        '  · 解释 / 看法 / 总结 / 分析 / 建议 (post-answer chips): continue the '
+        'last assistant turn. 解释 = key points; 看法 = a view still grounded '
+        'in the book; 总结 = shorter bullets; 分析 = deeper with citations; '
+        '建议 = next reading or asking moves. Do not restart the book.',
+      )
+      ..writeln(
+        '  · Follow-up questions (再展开 / 主线 / 细节, or a generated one): '
+        'continue the last answer using chat history and the current '
+        'chapter or selection. Do not restate the whole previous reply.',
+      )
+      ..writeln(
+        '- For close reading of story chapters: quote short passages, then '
+        'craft/analysis. For front matter, do not invent plot structure.',
+      )
+      ..writeln(
+        '- End with 1–2 concrete next steps only when the answer is about '
+        'story content the reader can continue (e.g. 精读某节、生成本章思维导图). '
         'Do not invent UI buttons; plain Chinese is enough.',
       );
 
@@ -923,8 +1013,9 @@ class AiChatService {
           'unless the reader switches tool scope to the whole publication.',
         )
         ..writeln(
-          '- Say this scope limit in plain language when the reader expects '
-          'the whole collection or later volumes.',
+          '- Mention the scoped-work limit only when the reader clearly asks '
+          'about the whole collection or other volumes — not as a preface '
+          'to an ordinary chapter summary.',
         );
     }
 

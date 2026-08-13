@@ -1,24 +1,24 @@
-# 本书 AI 智能体
+# 本书 AI
 
 | | |
 |--|--|
 | **状态** | M0–M3b 已完成；**M5 知识图谱已实现**（见 [ai-graph.md](./ai-graph.md)）；M4 整本译 / M6 导出未做 |
-| **日期** | 2026-08-12 |
+| **日期** | 2026-08-13 |
 | **PRODUCT** | [§6](../PRODUCT.md) · [§10.2](../PRODUCT.md) |
 | **视觉** | [../DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md) |
 | **相关** | [ai-product-actions.md](./ai-product-actions.md)、[ai-workflow-extension.md](./ai-workflow-extension.md)、[book-reader.md](./book-reader.md)、[reader-chrome.md](./reader-chrome.md)、[subpages.md](./subpages.md)、[webdav-backup.md](./webdav-backup.md)、[book-tts.md](./book-tts.md) |
 | **引擎** | 图书 reflow only（v1）；漫画页图 AI 另案 |
 
 > 产品状态只改 [PRODUCT.md](../PRODUCT.md) §6。本页写交互、边界、任务切分与验收。  
-> 落地后回写 PRODUCT 能力表；ENGINEERING 补 `lib/ai` 边界。
+> 状态变化先回写 PRODUCT 能力表；工程边界以 ENGINEERING 为准。
 >
-> 对话中会启动任务、修改产物或写入外部系统的动作统一遵守 [AI 产品动作协议](./ai-product-actions.md)；新增动作还须遵守 [AI Workflow 扩展契约](./ai-workflow-extension.md)，通过注册定义声明 schema、风险、能力、版本、Workflow Adapter 与领域 Artifact，不复制聊天路由或用关键词分发。
+> 会启动后台任务、修改结果或写入外部系统的能力，统一遵守 [AI 产品任务规则](./ai-product-actions.md)；新增此类能力还须遵守 [AI 长任务扩展规则](./ai-workflow-extension.md)，明确输入、风险、能力、版本、执行方式和结果格式。
 
 ---
 
 ## 1. 结论（先读）
 
-**开卷 AI = 围着一本书的可选智能体**，不是全局聊天 Tab，也不是账号云。
+**开卷 AI 是围绕当前图书工作的可选阅读助手**，不是全局聊天页，也不是账号云服务。
 
 | 层 | 职责 | 网络 |
 |----|------|------|
@@ -38,10 +38,10 @@
 - BYOK 设置、总开关、OpenAI Compatible 与 Anthropic Messages API 端点、模型列表和连接测试。
 - 选区 AI 词典与翻译，支持系统能力 fallback、流式输出、停止、复制和上下文前后文。
 - 本书对话，按 `contentHash` 持久化，支持当前章节、选区、目录、全文取样和书内检索工具；另有 **阅读位置元数据**（进度/当前章/作品范围）供模型防剧透与说明合集边界。
-- 工具环：普通轮约 8 次、整本类问题约 12 次（非无界 Agent）。合集默认 **当前作品**；对话顶可切 **整本文件**，工具 corpus 放开到同一 EPUB 内全部作品（与 Anx「整文件可搜」对齐，剧透需用户自选）。
-- 对话快捷含任务模板（书摘/章总结/精读/回忆前文/导图）与回答后固定动作芯片（解释/看法/总结/分析/建议）。
-- 工具步骤时间线：生成中展示步骤条，完成后 **写入 assistant 消息** 并可随会话 JSON/WebDAV 恢复。
-- 回答版式契约：system 要求分块结构、合集/进度说明、文末可执行下一步；书摘类任务有成品模板。
+- 对话工具：`get_reading_metadata`、`get_toc`、`get_current_chapter`、`get_chapter`、`search_book`、`sample_book`，共六个只读工具。普通问题最多 14 轮工具交互，整书类问题最多 24 轮；每轮最多 10 个工具调用，总结果最多 64,000 字符。合集默认 **当前作品**，用户可切换为 **整本文件**。
+- 对话快捷、回答后芯片和追问都只发一句读者意图；成品结构、工具用法与「不主动讲理由」写在 system。用户气泡显示短标签。
+- 工具过程：生成中用一行状态（思考球）；完成后收成「查阅了…」摘要并写入 assistant 消息，可随会话 JSON/WebDAV 恢复。不做逐步磁贴。
+- 回答版式契约：先给所问内容；不主动写理由、工具失败说明或「这里为什么不是正文章节」。读者追问「为什么」再解释。书摘类任务有成品模板。
 - 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。停止与关闭必须在第一次点击时立即更新界面并撤销请求，不等待 transport / stream 的异步清理完成。
 
 #### 伴读体验验收（S1–S7 摘要）
@@ -56,7 +56,7 @@
 | S6 | 回忆前文快捷 | 取进度前情节，不剧透未读 |
 | S7 | 失败/停止 | 步骤/状态可见，历史不脏 |
 - AI 对话纳入用户主动执行的 WebDAV 备份；恢复时按书籍 `contentHash` 合并并去重。
-- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。自由输入不使用关键词或第二意图模型。**图书思维导图是轻会话产物**：快捷或明确生成/修订后直接出原生图，接着聊即可改细（默认最近一张），不要求「继续修改」门槛，自由输入默认不弹确认生成卡；由 `AiBookMindMapService` 一次结构化生成，范围由 App 冻结。不引入 LangChain。详见 [ai-mind-map.md](./ai-mind-map.md)。**Product Action 控制面**留给整本译、导出等重任务，不是导图日常必经体验。当前章/单书/合集范围与生成规则见导图规格。
+- 本书 AI 工作区提供对话 / 知识图谱两个 Tab；大纲与思维导图都从对话自然语言或快捷入口发起。快捷入口直接发出明确命令；自由输入由同一个对话模型决定回答、读取书内内容，还是调用原生思维导图工具。代码仍保留一段有界修复规则，用于拦截模型“口头声称已生成导图、实际只输出 Markdown”的错误，不把它当作主路由。**图书思维导图是轻量会话结果**：生成或修订后直接显示原生图，继续对话即可修改最近一张，不要求额外确认。详见 [ai-mind-map.md](./ai-mind-map.md)。长任务控制基础留给整本翻译、正式导出等未来任务。
 - 大纲回答作为普通对话消息按 `contentHash` 缓存。历史结构化大纲数据继续随手动 WebDAV 快照备份和恢复，以兼容旧版本；Key 仍不备份。
 - 可选联网搜索（Tavily / Brave，独立搜索 Key）注入本书对话；Ollama 本地后端免 Key（`AiProviderKind.ollama`，模型经 `GET /v1/models` 列出）。
 - 知识图谱 M5：实体（人物/地点/事件）+ 关系 + 出处，章级增量；文件内多作品先由用户选作品，再确认具体内容单元，`allowUnreadContext` 只负责限制未读内容；随手动 WebDAV 快照备份（Key 永不备份）。规格与验收见 [ai-graph.md](./ai-graph.md)。
@@ -72,32 +72,56 @@
 
 明确取舍：
 
-- 不引入多 Agent。运行时采用开卷自有的确定性 `AiRunOrchestrator`；任务路由、书籍/作品范围、权限、预算、取消、续写、checkpoint、存储与 UI 状态均由 App 持有。
+- 不做多个模型互相分工。运行时采用开卷自有的 `AiRunOrchestrator`；书籍/作品范围、权限、预算、取消、续写、检查点、存储与 UI 状态均由 App 持有。
 - Genkit Dart 及官方 OpenAI / Anthropic 插件精确固定版本并分别隔离在 adapter；两类 adapter 都只执行单次模型回合，映射原生工具请求、流式输出、usage 与结构化结果。本书对话不保留手写 Messages 对话 adapter、旧 Provider、fenced JSON 或跨协议回退。
-- 模型工具调用、输入附件和范围校验都不构成产品动作授权。目标链路统一使用 App 自有 Proposal、Policy、对话内确认/补充、Command、Journal 与 Receipt；Genkit Interrupt/Resume 只可作为运行时实现。
+- 模型工具调用、输入附件和范围校验都不等于用户授权。对于未来会写文件、覆盖结果或访问外部系统的长任务，App 仍须形成任务建议、做权限判断、记录不可变命令和执行结果。当前生产功能尚未接入这条长任务链。
 
-### 对话产品动作与 Workflow 路由（目标协议）
+### 当前对话与导图路由
 
-权威控制协议见 [ai-product-actions.md](./ai-product-actions.md)。本书 AI 不在普通回答前运行第二次意图模型，也不维护自由文本关键词路由。用户输入只进入普通对话的一次受控模型回合；App 除五个只读书内工具外，按本轮可信上下文动态声明产品工具。模型可以直接回答，也可以提出产品动作，但不能授权执行。
+本书 AI 不在普通回答前运行第二个意图模型，也不靠一套完整关键词表分流。用户输入进入一次对话模型回合；App 提供六个只读书内工具，并根据当前会话是否已有原生导图，动态提供“生成导图”和“修改导图”工具。模型可以回答、读取内容或选择导图工具。
 
 ```text
-用户输入 / 明确 UI 操作
-  → 同一 AiAgentRuntime 回合或结构化 UI Proposal
-    → 普通文字 / 只读书内工具循环
-    → 产品工具终止请求 → AiActionProposal
-  → AiActionPolicy
-    → allow / 对话内确认 / 对话内补充 / deny
-  → AiAuthorizedCommand → AiActionJournal
-  → 确定性 Workflow → AiActionReceipt + Artifact
+快捷入口
+  → App 直接冻结导图范围并生成
+
+自由输入
+  → AiAgentRuntime
+    → 普通回答
+    → 六个只读书内工具后回答
+    → create_book_mind_map / revise_book_mind_map
+      → 结束本次普通回答
+      → App 冻结范围
+      → AiBookMindMapService 结构化生成
+      → 保存为对话附件
 ```
 
-重任务仍可经 `AiRunProductActionRequested → AiProductActionController`（Journal / Command / Receipt）。**图书思维导图默认不强制该确认工单流**（见 [ai-mind-map.md](./ai-mind-map.md)）。
+未来长任务可以接入 `AiProductActionController` 的建议、确认、任务记录、执行和结果链。**当前生产目录没有这样的重任务**；图书思维导图也不走该链。
 
 模型未真正交付原生导图却声称已生成时，可做有界协议修复后走轻路径生成。评价、解释、否定、Mermaid、教程不得启动原生导图生成。修订默认绑会话内最近一张原生图；不设「继续修改」为必经步骤。
 
-普通输入发起模型回合前冻结章节、当前作品、manifest、会话 `workKey` 与别名目录。导图轻路径在冻结范围后直接生成/修订并写入对话附件；重任务仍可走 Journal/Command。`workKey == null` 表示整本出版物。正文与上一版导图均为不可信引用材料。
+普通输入发起模型回合前冻结章节、当前作品、结构清单、会话 `workKey` 与别名目录。导图在冻结范围后直接生成或修改并写入对话附件；未来重任务可以另走任务记录和固定执行命令。`workKey == null` 表示整本出版物。正文与上一版导图均为不可信引用材料。
 
 普通聊天 Mermaid 仍是通用富内容，不进入原生导图。不引入 LangChain。Genkit 只做模型 I/O；产品边界由开卷拥有。
+
+### 提示词、上下文与回复
+
+当前对话只有一套正式提示词，由 `AiChatService` 统一组装。各部分职责如下：
+
+| 内容 | 由谁提供 | 规则 |
+|------|----------|------|
+| 固定规则 | App | 说明阅读助手角色、回答语言、可用工具、联网回答格式、导图工具和安全边界 |
+| 用户问题 | 读者 | 保留原意，不用本地关键词改写成另一种任务 |
+| 阅读上下文 | App | 书名、目录、当前章、选区、作品范围、网页摘要和工具结果都标为引用材料，不能改写固定规则 |
+| 对话历史 | App | 最多带 24 条，每条最多 4,000 字符，总计最多 24,000 字符；未完成消息不进入正常历史 |
+| 工具结果 | App | 只接受六个只读书内工具的结构化结果；每轮重新附加回答语言和安全规则 |
+
+最终回复遵守以下规则：
+
+- 回答语言跟随本轮真实问题。中文问题的正文、标题、工具后的过渡内容和自动续写都使用中文。
+- 单次回答最多请求 4,096 个输出 token；遇到供应商长度上限时，在同一冻结上下文中最多续写 8 次，并去掉首尾重复内容。
+- 工具使用过程在生成时显示简短状态，完成后收成一条“查阅了什么”的摘要。工具参数、内部规划和“我已理解全书”之类过程话术不混入最终答案。
+- 回答后的三个继续提问入口由一次独立的短结构化请求产生；失败只回退到固定入口，不影响正文。该请求不改变刚完成的答案，也不再读取新正文。
+- 本地仅保留两个窄判断：一是整书类问题可使用 24 轮而非 14 轮工具预算；二是模型声称已生成原生导图却只给出文字时，允许修复这次协议错误。它们不决定一般对话意图，也不逐句适配用户说法。
 
 ---
 
@@ -252,7 +276,7 @@
 - 模型以 `finish_reason=length` / `stop_reason=max_tokens` 结束时，不把已显示正文直接标记为失败，也不要求读者更换模型。客户端自动把当前正文作为 assistant 历史，请模型只从中断处续写，并对首尾重叠文本去重后拼接到同一条流式回答。续写必须有次数上限；达到保护上限仍未结束时保留全部已生成内容，并提示缩小问题范围后重试。
 - 自动续写复用原问题、冻结的作品范围与同一轮工具结果，不重新执行书内工具，也不把续写拆成多条对话消息。续写期间继续显示生成状态，停止按钮取消整轮请求。
 - 流式请求在首个可见文字到达前遇到 408 / 409 / 425 / 429、服务端 5xx、超时或网络中断时，可自动重试一次；一旦已有可见正文，禁止从头静默重试，以免重复内容、重复工具调用和不可控计费。中途失败保留部分正文并进入可重试状态。
-- 流式正文与思考快照不得为每次更新重复启动滚动动画或多帧抢占式重试。用户原本位于消息尾部时，内容增长后只在下一布局帧静默贴住新的尾部；用户向上滚动查看历史后立即暂停自动跟随，后续快照不得把列表拉回底部。发送新消息和回答完成后一次性出现追问时仍可执行一次明确的到底部滚动。
+- 流式正文与思考快照不得为每次更新重复启动滚动动画或多帧抢占式重试。用户原本位于消息尾部时，内容增长后只在下一布局帧静默贴住新的尾部；用户向上滚动查看历史后立即暂停自动跟随，后续快照、回答完成和追问出现都不得把列表拉回底部。读者自己滚回底部后才恢复跟随。发送新消息仍可明确滚到底。工具轮若已流出像回答的正文，不得清空再重画；仅短前言（「让我先查…」）或协议泄漏可收回。后续工具轮不得覆盖已显示的正文。
 - 长回答生成期间按节流频率保存 pending 助手快照；正常完成、停止或失败时由终态原子覆盖。App 被系统终止后，恢复逻辑保留最后一份正文并将 pending 标记为已停止，且不把未完成内容加入后续模型历史。
 - 服务商公开返回的推理内容只进入独立展示，不拼进 Markdown 回答。DeepSeek、部分 Ollama/兼容模型返回的过程标为「思考过程」；Anthropic 与 Grok 等只公开摘要的服务商标为「思考摘要」；OpenAI Chat Completions 或不公开推理内容的模型仍可按开关调整推理强度，但不显示空面板。App 不把等待状态、自己生成的说明或模型普通正文冒充思维链。
 - 推理内容生成中可增量展开查看，完成后默认折叠；终态随 `AiChatMessage` 和 WebDAV 会话快照保存，但不进入“复制回答”、追问 prompt 或后续普通聊天历史。同一次原生工具循环仍须按供应商协议把 DeepSeek `reasoning_content` 或 Anthropic thinking block 与签名原样回传给模型；签名只属于当前运行，不落盘。
@@ -284,8 +308,8 @@
 | **Tools**（模型按需调用） | `get_current_chapter` / `get_chapter` / `search_book` / `sample_book` | 取其它章、关键词、全书均匀取样 |
 | 网页摘要 | 面板「联网」开时 | 书外通识；回答【书中】+【补充说明】 |
 
-协议：模型通过适配层的原生 Function Calling 请求工具。App 校验并执行 tool，把带稳定 call ID 的结构化结果送回下一模型回合，最多 4 轮，再流式生成正文。Genkit 只执行单次模型回合，不拥有工具循环。端点不支持原生工具调用时本轮明确失败，不改写为文本协议，也不静默重跑。
-- 五个书内工具共享本轮冻结的作品作用域与同一份章级语料：`get_toc` 返回的 `§n` 是 `get_chapter(sectionIndex:n)` 唯一合法的章节 ID，`search_book` / `sample_book` 也只能检索、取样该语料；不得混用全文件 spine 序号、作品级 TOC 切片序号和章级逻辑序号。合集正文必须先按作品的物理 section 范围提取、再应用字符预算，不能先截断整个文件后再裁作品，否则位于文件后部的作品会永久不可检索。`get_current_chapter` 使用提问发出时冻结的章节标题与正文，读者在生成期间翻页不得改变该轮工具结果。
+协议：模型通过适配层的原生 Function Calling 请求工具。App 校验并执行工具，把带稳定调用 ID 的结构化结果送回下一模型回合。普通问题最多 14 轮工具交互，整书类问题最多 24 轮，然后生成正文；Genkit 只执行单次模型回合，不拥有这段循环。端点不支持原生工具调用时本轮明确失败，不改写为文本协议，也不静默重跑。
+- 六个书内工具共享本轮冻结的作品作用域与同一份章级语料：`get_reading_metadata` 只返回阅读位置与作品范围元数据；`get_toc` 返回的 `§n` 是 `get_chapter(sectionIndex:n)` 唯一合法的章节 ID；`get_current_chapter`、`search_book` 和 `sample_book` 也只能读取同一语料。不得混用全文件 spine 序号、作品级 TOC 切片序号和章级逻辑序号。合集正文必须先按作品的物理 section 范围提取、再应用字符预算，不能先截断整个文件后再裁作品，否则位于文件后部的作品会永久不可检索。`get_current_chapter` 使用提问发出时冻结的章节标题与正文，读者在生成期间翻页不得改变该轮工具结果。
 - 工具参数由 App 钳制，模型不能扩大单工具正文预算；每轮去重重复调用，并受单轮聚合正文预算约束，避免多工具、多轮累计撑爆上下文。
 - `sample_book` 的正文样本必须覆盖全书跨度；章节多于单轮可承载数量时按均匀位置抽样，不得从书首顺序读取到预算耗尽。
 - 文件内多作品合订的对话在发送时优先固定当前作品作用域，目录、书内工具和联网搜索在本轮内使用同一作用域。若结构不确定、当前位置属于封面/总目录/前言或 renderer 暂时无法定位当前作品，不封锁对话：统一回退到整个文件，消息存入整本会话，并在模型上下文中使用书名而不是猜测作品名。不得因定位失败禁用输入框、快捷问题或工具。
@@ -342,25 +366,7 @@
 - 快捷操作必须走与手工输入相同的 `_send` 路径，不能调用历史 `generateBookOutline` 管线。这样单本、文件内多作品以及结构无法可靠定位的出版物都遵循对话既有的“优先当前作品、无法定位则开放整个文件”规则。
 - 历史版本生成的结构化大纲及其缓存格式暂时保留，仅用于数据兼容和 WebDAV 恢复；新界面不展示独立大纲 Tab，也不新增结构化大纲缓存。
 
-以下为旧结构化管线的兼容约束，不再是当前界面入口：
-
-- 生成曾是一次显式任务，结果不会因关闭面板而取消；读者主动停止或退出阅读器才取消。
-- 先由本地规则过滤目录、版权等元数据，并确定普通单本或文件内合订中的正文范围；AI 不负责猜测作品边界。正文读取上限为 150 万字符，各 section 按全书预算均匀保留头、中、尾样本，随后以约 1.2–1.6 万字符为目标组成多个批次。每个批次是独立请求，不携带其他批次的正文或回答；批次输出必须回传 App 指定的 section ID，且与该批次输入完全一致。
-- 文件内部结构由共享的 `BookStructureManifest` 表达，至少区分：普通单本、单本分部/分卷、多作品合订和证据不足。书库「合集」只是多个独立 `ReadingItem` 的外层整理关系，成员进入阅读器后仍按自己的文件结构处理；不得把书库合集和文件内部合订混为一种类型。同一 spine 内的章标题、篇标题以及“——/—”开头的副标题只是单本书的逻辑章节，即使它们被 EPUB 制作为多个空标题容器或共享导航锚点，也不得升级为独立作品。
-- 结构事实来自 [book-structure.md](./book-structure.md) 的完整 `BookStructureIndex`；`[§]` 纯文本只用于正文传输和旧引擎 fallback，不能再成为新路径的章节/作品权威来源。
-- 结构识别只消费阅读器提供的确定性事实（TOC 层级、导航目标、spine、heading 与逻辑单元），不让 AI 判断书型。混合格式合集先识别季、辑、系列、套装等局部容器，再合成各容器内由作品树、重复目录与章节序号重启证明的强边界；不同容器不必采用同一种切割策略。局部合成方案仍与其他完整方案冲突、无法形成至少两个安全范围或同一 spine 内无法定位当前作品时，整体标记为不确定；对话回退整个文件，大纲/图谱继续由用户显式确认范围。当前结构清单不表达部分确定状态。内部层级仅用于范围定位，不恢复树形大纲 UI。
-- 不确定结构分为可安全退化为单本和有明确多作品冲突证据两类。扁平 TOC、非“第 X 章”式标题或缺少子层级本身不构成多作品证据；若每个导航项落在依次前进的独立 spine，且不存在重复起点、同一 spine 内多个一级作品等冲突，按普通单本处理，对话使用整本作用域。只有存在明确多作品冲突证据、却无法把当前 renderer section 唯一归入某部作品时，对话才失败关闭，避免把相邻作品正文注入同一轮问答。大纲与知识图谱不得整页封死：改由用户显式选择内容单元后生成。已有缓存结果不因本次结构识别为“不确定”而被隐藏。
-- 当前作品定位与导航锚点必须使用 Foliate renderer 直接报告的同一套 0-based section index；CFI / chapter href 解析只用于兼容旧 bundle，不能作为正常路径的唯一位置来源。
-- 大纲、对话和图谱共用同一结构清单；大纲与对话继续解析当前阅读作品，图谱则把识别出的作品列表交给用户选择，不能跟随翻页自动切换。作品 ID 不得仅依赖起始 spine，必须能兼容同一 spine 内的多个逻辑作品。图谱辅助资料规则只给出默认取消建议，不能在用户确认前删除单元。
-- 全部批次摘要完成后，最后一次请求只读取中间摘要，生成 `overview + units` 扁平大纲；每个 unit 回传来源批次 ID，App 校验所有批次均被覆盖、无未知 ID、单元数量与字段长度合法后才保存。批次或汇总输出达到 token 上限时不得当作成功：批次缩小后重试，汇总压缩中间摘要后重试。HTTP 成功但 JSON 或 schema 校验失败时，也必须在原批次内进行有界重试，不得因一次坏响应立即终止整本生成；重试仍须通过完整字段与覆盖校验，不对缺失字段做静默修补。
-- 电子书标题、作者和正文都是不可信引用数据。模型提示必须把它们放入明确的 `<book_metadata>` / `<book_content>` / `<batch_summaries>` 边界，并声明其中即使出现命令、角色要求或“忽略之前指令”等文字也不能执行；大纲请求不开放工具。
-- 大纲缓存包含格式版本；不兼容格式的旧缓存不再显示，读者可从可见的重新生成按钮创建新缓存。
-- 全书大纲始终使用全书正文；它是显式生成并缓存的整书阅读辅助，不会因当前阅读位置退化为「已读章节」大纲。`allowUnreadContext` 不作用于本书对话或大纲，留给后续需要防剧透的功能（**现已由知识图谱使用**，见 [ai-graph.md](./ai-graph.md)）。
-- 大纲不流式输出结构化 JSON，但界面显示真实的批次完成数和最终汇总状态；正文对话仍独立走流式请求。
-- 批次只是传输机制，不决定最终大纲粒度。普通单本/当前作品的大纲目标约 3–10 个语义阶段，单本分部可优先保留真实分部锚点；不得按原始 section 数量或批次数量要求逐章生成。最终汇总须保留批次覆盖的 section 标题与结构类型，便于跨批次合并。
-- 知识图谱 M5 已实现：实体（人物/地点/事件）+ 关系 + 出处，章级增量；文件内多作品按用户选择逐本生成，单元范围显式确认，程序仅推荐排除辅文；交互、数据模型与验收见 [ai-graph.md](./ai-graph.md)。
-- 图谱范围选择必须覆盖整份出版物的全部可读单元。正文字符预算只能限制发送给模型的均衡样本，不能让后部单元从范围选择器消失。
-- 旧大纲页面已下线；不得在对话中重新引入一套结构化大纲卡片或范围选择器。
+旧结构化大纲代码只为读取历史会话 JSON 保留，不再参与生产生成。它过去使用的分批摘要、最终归并、独立进度和专用缓存都不是当前产品规则，也不应作为新功能模板。书籍范围仍由共享的 [book-structure.md](./book-structure.md) 提供；大纲本身使用普通对话的书内工具和流式回复。旧大纲页面已下线，不得在对话中重新引入独立结构化大纲卡片或范围选择器。
 
 ### 4.5 后续切片交互（纲要）
 
@@ -481,7 +487,7 @@ AI 对话备份规则：
 - 仅用户触发的动作发请求。  
 - 请求体含用户选段/章节文本时，设置页应用简短隐私说明：「正文片段将发送到你配置的接口地址」。  
 - 不写第三方分析 SDK 专打 AI 事件（若全局无，则 AI 也不例外加）。  
-- 防提示词注入：system message 仅包含应用固定规则、工具目录和联网回答格式；书名、目录、选区、正文、网页摘要及工具结果都作为带 `<untrusted_context>` 边界的引用材料传入，材料中要求改写规则、调用工具、泄露数据或改变角色的文本一律不可执行。只有适配器返回的原生 tool request 会进入执行器；普通回答、书中文字或代码块绝不触发工具。白名单、参数限制和最多四轮工具调用继续生效。
+- 防提示词注入：system message 仅包含应用固定规则、工具目录和联网回答格式；书名、目录、选区、正文、网页摘要及工具结果都作为带 `<untrusted_context>` 边界的引用材料传入，材料中要求改写规则、调用工具、泄露数据或改变角色的文本一律不可执行。只有适配器返回的原生 tool request 会进入执行器；普通回答、书中文字或代码块绝不触发工具。工具白名单和参数限制始终生效；普通问题最多 14 轮工具交互，整书类问题最多 24 轮。
 
 ### 7.5 统一运行状态与事件
 
@@ -495,25 +501,25 @@ AI 对话备份规则：
 - 编排器强制模型调用、工具轮数、续写轮数、工具结果字符数与可选运行时长预算；模型 token usage 只有 adapter 可靠返回时才记录，不作为唯一硬预算。
 - controller 用同一 reducer 跟踪本书对话、词典/选区翻译、大纲与图谱；图谱逐节 checkpoint 仍写原有快照格式。
 
-Product Action Protocol 迁移后，运行投影还须表达 `action proposed`、`awaiting clarification`、`awaiting confirmation`、`authorized`、`rejected`、`cancel requested` 与 Receipt 终态。`AiRunEvent` 只负责 UI 可重放事实；Proposal、Decision、Command、幂等键和 Receipt 的可恢复状态写入 App 自有 `AiActionJournal`。终态后到达的模型或 Workflow 事件必须隔离，不能把已取消/拒绝动作改回成功。
+未来生产长任务接入后，运行状态还要表达等待补充、等待确认、已授权、已拒绝、正在取消和最终结果。本地任务记录保存可恢复状态，普通 `AiRunEvent` 只负责界面可重放的运行事实。终态后到达的模型或任务事件必须隔离，不能把已取消或已拒绝的任务改回成功。
 
-协议边界：本书对话按服务商选择 OpenAI Compatible 原生 Function Calling 或 Anthropic Messages API 原生 Tool Use；失败直接进入 `RunFailed`，不得跨协议重试，也不得回退 fenced JSON 或旧 Provider 对话 transport。五个工具仍由 App 白名单执行且全为只读。Anthropic assistant `tool_use` 与后续 user `tool_result` 必须保留 call ID 和内容块顺序；工具参数只在完整 `content_block_stop` 且 JSON 对象解析成功后交给 App。DeepSeek 思考模式与工具调用并用时，adapter 必须流式映射并在终态提取 `reasoning_content`，在对应 assistant tool-call message 中原样回传给下一轮。Anthropic thinking block 必须携带原签名并保持在对应 assistant tool-use 之前；不可见 `redacted_thinking` 也必须作为不透明块按原顺序回传，但不进入 UI 或存储。当前锁版插件的出站转换缺口只能在隔离的本地插件补丁中修复，禁止由业务层伪造。业务层只投影供应商可见的过程/摘要，终态可写入会话独立字段，但不得进入回答快照、回答复制或后续普通聊天历史。
+协议边界：本书对话按服务商选择 OpenAI Compatible 原生 Function Calling 或 Anthropic Messages API 原生 Tool Use；失败直接进入 `RunFailed`，不得跨协议重试，也不得回退 fenced JSON 或旧 Provider 对话 transport。六个工具仍由 App 白名单执行且全为只读。Anthropic assistant `tool_use` 与后续 user `tool_result` 必须保留 call ID 和内容块顺序；工具参数只在完整 `content_block_stop` 且 JSON 对象解析成功后交给 App。DeepSeek 思考模式与工具调用并用时，adapter 必须流式映射并在终态提取 `reasoning_content`，在对应 assistant tool-call message 中原样回传给下一轮。Anthropic thinking block 必须携带原签名并保持在对应 assistant tool-use 之前；不可见 `redacted_thinking` 也必须作为不透明块按原顺序回传，但不进入 UI 或存储。当前锁版插件的出站转换缺口只能在隔离的本地插件补丁中修复，禁止由业务层伪造。业务层只投影供应商可见的过程/摘要，终态可写入会话独立字段，但不得进入回答快照、回答复制或后续普通聊天历史。
 
 ### 7.6 Agent 运行时迁移契约
 
-- 普通本书对话统一依赖 App 自有 `AiAgentRuntime`，不得由 Widget 或 `BookReaderController` 直接依赖 `AiChatService` / Genkit `Agent`。运行时输入必须在发送时冻结书籍、作品、当前章、产物别名、联网结果、推理偏好和历史消息。
+- 普通本书对话统一依赖 App 自有 `AiAgentRuntime`，不得由 Widget 或 `BookReaderController` 直接依赖 `AiChatService` 或 Genkit Agent。运行时输入必须在发送时冻结书籍、作品、当前章、结果别名、联网结果、推理偏好和历史消息。
 - `BookAiConversationController` 是会话事实的内存投影，拥有有界消息、当前 run、完整正文/推理快照、retry turn、部分回答 checkpoint 和终态持久化。聊天 Widget 不得另建第二份会话或 checkpoint 状态机。
 - `BookAiMindMapController` 拥有原生导图附件、批次进度、按冻结范围顺序执行、产物 revision/source 谱系及产品 turn 终态。范围选择卡片属于 UI，但选择后的 Workflow 循环、消息附件提交和部分失败处理不得回到 Widget。
-- 运行时输出复用 `AiRunEvent`：正文与可见推理仍是完整快照；兼容运行时的终止型 `AiRunProductActionRequested` 在目标链中只能投影为 `AiActionProposal`，不得直接成为 Workflow 命令。迁移不得把 Genkit token delta、Session 类型或 Tool 对象暴露给 UI。
-- 第一阶段由 `LegacyAiAgentRuntime` 包装现有行为；第二阶段新增 `GenkitAgentRuntime`。两者必须通过同一套正常回答、书内工具、产品工具、截断续写、取消、失败、并发发送和快照回放契约测试。
-- Genkit Agent 负责普通对话的一次 action-observation 循环、运行时会话、Interrupt/Resume、Retry 与 Trace。所有会改变产品状态的 Tool 必须先成为 Proposal，再经过 App 的 `AiProductActionController`、Policy、授权和 Journal；作用域、权限、预算与别名校验不能代替用户授权。
+- 运行时输出复用 `AiRunEvent`：正文与可见推理都是当前完整快照。模型请求生成或修改原生导图时，兼容运行时发出终止型 `AiRunProductActionRequested`，由对话宿主转入导图会话路径，不把 Genkit 的消息、会话或工具对象暴露给 UI。
+- 当前生产运行时是 `LegacyAiAgentRuntime`。未来若增加 `GenkitAgentRuntime`，必须通过同一套正常回答、书内工具、导图工具、截断续写、取消、失败、并发发送和快照回放测试。
+- Genkit Agent 目前不是生产运行时。以后若启用，可以负责普通对话的工具循环、会话暂停恢复、重试和跟踪；会改变产品状态的长任务仍须由 App 做权限判断、记录命令并执行。
 - 思维导图产品动作由 `AiBookMindMapActionGateway` 对发送前冻结的章节、作品列表和产物表做纯解析；它不决定授权，也不执行 Workflow。实时阅读位置变化不得重定向已发出的创建或修订请求。
-- `AiAuthorizedCommand` 是领域 Workflow 唯一可接受的产品动作输入，包含冻结范围指纹、真实目标、`expectedRevision`、原始用户要求与幂等键。Workflow 完成后写 `AiActionReceipt`；等待态和执行态由本地 Journal 恢复，不使用 Genkit Session/Artifact 代替。
-- `BookMindMapWorkflow`、`BookGraphWorkflow`、翻译任务和大纲任务保持确定性；它们可以被 Agent Tool 触发并在内部继续使用 `AiWorkflowModelSession.completeJson`，但不得改成由 Agent 自由拆解、重复执行或直接持久化。
+- 未来接入长任务时，领域执行器只接受 App 签发的不可变命令，其中包含冻结范围、真实目标、目标版本、原始用户要求和去重键。任务结束后写本地执行结果；不能使用 Genkit 会话代替。
+- 思维导图、知识图谱和未来整本翻译继续由各自的确定性服务执行。它们可以内部使用 `AiWorkflowModelSession.completeJson`，但不能交给对话模型自由拆解、重复执行或直接写入产品存储。
 - Genkit Dart 仍按 Preview 风险管理：依赖精确锁版；默认保留兼容运行时开关；升级前跑 Provider 模型矩阵与 Agent 契约测试。Genkit Session/Artifact 不是 `AiChatSession`、导图、图谱或 WebDAV 的存储 schema。
 - Genkit Dart `0.15.1` 的本地 attached Agent 尚未把取消信号传入进行中的模型生成。该缺口未修复前，Genkit 实现只能处于隔离验证状态，不得切为默认；验收必须证明取消会中止实际模型请求，而不只是把 App 投影改成 `cancelled`。
 - `AiAgentRuntimeGate` 是默认切换的可执行门禁：需要 Genkit runtime factory，并逐项验证 attached 请求真实取消、Provider 矩阵、工具与 Interrupt/Resume、Trace/Snapshot 和统一契约测试；请求 Genkit 但条件不足时必须回退兼容 Runtime，并公开阻塞原因供测试与诊断。
-- 迁移完成标准：普通对话不再存在 App 手写模型工具循环和语言正则修复；任何模型 Tool Call 都只能产生 Proposal，任何 Workflow 都只接受 Command；附件不隐式授权修订；Widget 不再执行 Workflow 或提交会话文件；`BookReaderController` 只保留阅读引擎桥接与兼容门面。
+- Genkit Agent 的切换条件：真实取消、支持的服务商矩阵、工具调用、会话暂停恢复、跟踪记录和统一运行时测试全部通过。切换不应改变对话文件、思维导图、知识图谱或 WebDAV 格式。
 
 ---
 
@@ -603,15 +609,15 @@ AiBookLanguageProvider（或 Composite）
 - [x] 流式回答节流保存 pending 检查点；异常退出后保留正文但不进入正常模型历史。
 - [x] AI 对话随用户主动执行的 WebDAV 备份恢复，并按消息去重合并。
 - [x] 统一 `AiRunState` / `AiRunEvent` / `AiRunOrchestrator`，聊天 UI 直接消费结构化事件。
-- [x] Genkit OpenAI Compatible adapter 精确锁版并隔离；原生五工具 schema、结构化输出、流式与取消通过伪服务协议测试。
+- [x] Genkit OpenAI Compatible adapter 精确锁版并隔离；原生六工具 schema、结构化输出、流式与取消通过伪服务协议测试。
 - [x] Genkit Anthropic adapter 精确锁版并隔离；原生 Tool Use、结构化输出、流式终态、usage、重试与取消通过伪服务协议测试。
 - [x] 对话只走所选服务商的原生工具协议；已删除 fenced 与旧 Provider 对话回退。
-- [x] 词典/选区翻译、大纲、图谱接入统一 run；图谱 checkpoint 保持既有存储格式。
+- [x] 词典、选区翻译、普通对话和图谱接入统一运行事件；大纲是普通对话消息，图谱逐节进度保持既有存储格式。
 - [x] 词典/选区翻译改走无工具 `AiModelAdapter` 单回合，无第二套生成 transport。
-- [x] 结构化大纲与知识图谱全部模型步骤使用独立 Schemantic schema + Genkit structured output；已删除 fence 截取、正则恢复和格式修补请求。
+- [x] 知识图谱和原生思维导图的结构化模型步骤使用独立 Schemantic 定义与 Genkit 结构化输出；不使用代码块截取、正则恢复或格式修补请求。
 - [x] 模型列表拆为只读 catalog，连接测试改走 adapter；`AiProvider`、`AiProviderFactory`、两套旧 completion transport 与 tracking provider 已删除。
 - [x] 两类 Genkit adapter 通过本地伪服务协议测试；`tool/ai_genkit_smoke.dart` 提供不含 Key 的本地 OpenAI Compatible CLI trace，也可用用户环境变量选测 Anthropic；完整验收见 [执行记录](../research/ai-runtime-genkit-completion-plan.md)。
-- [x] `BookAiWorkspaceController` 通过 conversation/mind-map 子 Controller 独占会话发送、联网/流式、重试、原生导图附件、批次 Workflow 和终态状态；聊天 Widget 只冻结阅读上下文、展示范围选择并渲染投影。
+- [x] `BookAiWorkspaceController` 通过对话和导图子 Controller 管理会话发送、联网、流式输出、重试、导图附件和完成状态；聊天 Widget 只冻结阅读上下文、展示范围选择并渲染结果。
 - [x] `BookAiConversationController` 接管有界会话、run 投影、重试、部分回答 checkpoint、完成/失败/取消提交与持久化；聊天 Widget 不再维护第二套 checkpoint。
 - [x] `AiBookMindMapActionGateway` 在 Widget/阅读器之外校验冻结作品、章节和产物身份；模型动作不能读取实时翻页状态。
 - [x] `AiAgentRuntime` 契约落地，现有行为经 `LegacyAiAgentRuntime` 兼容，阅读 controller 不再直接依赖 `AiChatService`。
@@ -622,7 +628,8 @@ AiBookLanguageProvider（或 Composite）
 - [x] headless Runtime Harness 同时提供离线确定性验收与显式 BYOK live 模式，覆盖回答、读工具、现有产品行动事件、结构化思维导图、续写、transport 取消和脱敏报告。
 - [x] Product Action Protocol v1 平台能力已具备（重任务用）；图书思维导图改为轻会话主路径，见 [ai-mind-map.md](./ai-mind-map.md)。
 - [x] 导图实现收敛：去掉自由输入确认卡与强制「继续修改」，对齐轻路径验收。
-- [ ] Workflow Extension Contract v1 落地：Action Definition、能力门禁、多层版本、通用 Adapter、强类型 Artifact 与 Receipt 投影通过契约测试；新增测试动作不修改通用 Controller 分发代码。
+- [x] 长任务扩展基础落地：动作登记、能力检查、独立版本、通用执行接口、类型化结果和执行记录通过契约测试；新增测试动作不修改通用 Controller 分发代码。
+- [ ] 将首个真正的生产长任务（整本翻译或正式导出）接入上述基础，并完成恢复、WebDAV 与界面验收。
 - [ ] Genkit Agent 经功能开关、真实 HTTP 取消、模型矩阵和 Trace 验证后替换普通聊天循环。
 
 

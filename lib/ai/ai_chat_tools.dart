@@ -296,16 +296,16 @@ abstract final class AiChatTools {
     };
   }
 
-  /// Short Chinese tile label for one native tool name (timeline UI).
+  /// Short Chinese label for one native tool name (status / summary).
   static String displayNameFor(String name) => switch (name) {
-    AiChatToolNames.getReadingMetadata => '当前阅读元数据',
-    AiChatToolNames.getToc => '当前书籍目录',
-    AiChatToolNames.getCurrentChapter => '当前章节内容',
-    AiChatToolNames.getChapter => '按节读取章节',
-    AiChatToolNames.searchBook => '书内搜索',
-    AiChatToolNames.sampleBook => '全书取样',
-    'create_book_mind_map' => '生成思维导图',
-    'revise_book_mind_map' => '修订思维导图',
+    AiChatToolNames.getReadingMetadata => '阅读位置',
+    AiChatToolNames.getToc => '目录',
+    AiChatToolNames.getCurrentChapter => '当前章',
+    AiChatToolNames.getChapter => '章节',
+    AiChatToolNames.searchBook => '检索',
+    AiChatToolNames.sampleBook => '取样',
+    'create_book_mind_map' => '导图',
+    'revise_book_mind_map' => '改图',
     _ => name,
   };
 

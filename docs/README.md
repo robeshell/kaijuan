@@ -1,7 +1,7 @@
 # kaijuan 文档索引
 
 仓库实现 **一个本地阅读 App**（开卷），内建漫画页图引擎 + 图书 reflow 引擎。  
-权威与扩展方法以本页为准。
+权威与扩展方法以本页为准。文档状态以当前代码为依据：代码中已经接入生产入口并有测试保护的能力写“已有”，只有接口、测试样例或未来方案的能力写“待做”或“规划”，不能把设计目标写成已经交付。
 
 ## 读哪份
 
@@ -12,15 +12,15 @@
 | 工程结构 / 单入口 / 数据沿用 | [ENGINEERING.md](./ENGINEERING.md) |
 | Foliate 全链路研究与取舍 | [research/foliate-architecture.md](./research/foliate-architecture.md) |
 | LLM 三元组抽取研究与学习路径 | [research/kg-llm-extraction.md](./research/kg-llm-extraction.md)（服务 ai-graph） |
-| 本书 AI 从普通对话到受控 Agent / 导图会话化的实现演进 | [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)（全流程复盘 + 系列文章主线 §9） |
+| 本书 AI 的历史演进 | [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)（历史复盘，不代表当前实现） |
 | 图书 AI 助手演进系列文章 | [articles/book-ai-assistant-evolution/](./articles/book-ai-assistant-evolution/)（第 1 篇已写；第 2–6 篇提纲见 evolution §9） |
-| AI 运行时 Genkit 完整收口计划 | [research/ai-runtime-genkit-completion-plan.md](./research/ai-runtime-genkit-completion-plan.md)（词典/翻译/大纲/图谱迁移与旧 Provider 删除边界） |
-| Genkit Agent 生产切换门禁 | [research/ai-agent-runtime-readiness.md](./research/ai-agent-runtime-readiness.md)（当前版本证据、Harness 与解除门禁顺序） |
+| AI 模型接入收口记录 | [research/ai-runtime-genkit-completion-plan.md](./research/ai-runtime-genkit-completion-plan.md)（历史实施记录；当前事实以 ENGINEERING 为准） |
+| Genkit Agent 生产切换条件 | [research/ai-agent-runtime-readiness.md](./research/ai-agent-runtime-readiness.md)（为什么当前仍使用兼容对话运行时） |
 | 某屏交互 | [specs/](./specs/) |
 | 图书听书（TTS） | [specs/book-tts.md](./specs/book-tts.md)（T1 MVP 已有；不接云端 AI 音色） |
-| 本书 AI 智能体 | [specs/ai.md](./specs/ai.md)（BYOK / 词典译 / 对话…） |
-| AI 产品动作协议 | [specs/ai-product-actions.md](./specs/ai-product-actions.md)（Proposal / Policy / 授权 / Journal / Workflow / Receipt） |
-| AI Workflow 扩展契约 | [specs/ai-workflow-extension.md](./specs/ai-workflow-extension.md)（注册 / 能力 / 版本 / Adapter / Artifact；含 PPT 参考场景） |
+| 本书 AI | [specs/ai.md](./specs/ai.md)（BYOK / 词典译 / 对话…） |
+| AI 产品任务规则 | [specs/ai-product-actions.md](./specs/ai-product-actions.md)（建议、确认、执行、恢复和结果记录） |
+| AI 长任务扩展规则 | [specs/ai-workflow-extension.md](./specs/ai-workflow-extension.md)（新增整本翻译、导出等能力时如何接入） |
 | AI 翻译偏好与选区译 | [specs/ai-translation.md](./specs/ai-translation.md)（设计定稿） |
 | 本书知识图谱 | [specs/ai-graph.md](./specs/ai-graph.md)（M5 已实现；实体/关系/出处，章级增量） · 展示方案驱动 + 家族树见 [specs/ai-graph-narration.md](./specs/ai-graph-narration.md)（N1–N4 已实现） |
 | 图书思维导图 | [specs/ai-mind-map.md](./specs/ai-mind-map.md)（**轻会话产物**：直接出图/接着聊改细；原生布局） |
@@ -51,9 +51,9 @@ docs/
     reader-chrome.md / comic-reader.md / book-reader.md
     reading-stats.md
     book-tts.md
-    ai.md                            ← 本书 AI 智能体
-    ai-product-actions.md            ← AI 产品动作控制协议（v1）
-    ai-workflow-extension.md         ← 新增 AI Workflow 的通用扩展契约（v1）
+    ai.md                            ← 本书 AI
+    ai-product-actions.md            ← AI 产品任务的确认、执行与恢复规则
+    ai-workflow-extension.md         ← 新增 AI 长任务的工程接入规则
     ai-translation.md                ← AI 翻译偏好与选区译（设计定稿）
     ai-graph.md                      ← 本书知识图谱（M5 已实现）
     ai-graph-narration.md            ← 图谱展示方案驱动 + 家族树（N1–N4 已实现）
@@ -68,13 +68,15 @@ docs/
 4. **specs/** — 单屏交互  
 5. **AGENTS.md** — 实现约束  
 
+权威文档优先使用直接中文说明。工程类型名、协议字段和第三方框架名只有在需要与代码一一对应时才保留，并放在反引号中；“产品任务”“任务执行器”“生成结果”等词首次出现时必须同时说明它具体指什么。`research/` 记录历史讨论，不用来证明当前已经实现。
+
 ## 已定原则（摘要）
 
 - **一个 App、一套数据**（沿用已有 `app_library`）。  
 - **一个仓库**，共享 core；两个引擎按 `item.kind` 路由。  
 - 书库内「全部 / 漫画 / 图书」类型筛选。  
 - 导入 **CBZ / ZIP / EPUB / FB2 / MOBI / AZW3 / PDF / TXT / MD**；方式/格式两层，见 [import.md](./specs/import.md)。  
-- **AI** 为可选本书智能体（BYOK），见 [PRODUCT.md §6](./PRODUCT.md)。
+- **AI** 是可选的本书阅读助手（BYOK），见 [PRODUCT.md §6](./PRODUCT.md)。
 
 ## 如何扩展
 
@@ -94,7 +96,7 @@ docs/
 ### 加 AI 能力
 
 1. 改 PRODUCT §6 能力表与落地顺序。  
-2. 开或改 `docs/specs/ai.md`；会启动任务、修改产物或写入外部系统的动作还须更新 `docs/specs/ai-product-actions.md` 的授权矩阵，并按 `docs/specs/ai-workflow-extension.md` 注册 Workflow、能力、版本和 Artifact；翻译专项见 `docs/specs/ai-translation.md`。
+2. 开或改 `docs/specs/ai.md`。会启动后台任务、修改结果或写文件的能力，还须更新 `docs/specs/ai-product-actions.md`，并按 `docs/specs/ai-workflow-extension.md` 登记输入、权限、版本、恢复方式和结果格式。翻译专项见 `docs/specs/ai-translation.md`。
 3. ENGINEERING 增加 `lib/ai`（或等价）边界与 Provider 约定。  
 
 ### 加工程包
@@ -118,13 +120,13 @@ docs/
 | webdav-backup | 用户自有 WebDAV 备份与恢复 |
 | reading-stats | 阅读统计 |
 | book-tts | 听书（系统 TTS；T1 MVP 已有） |
-| ai | 本书 AI 智能体（BYOK / 词典译 / 对话 / 大纲 / 思维导图；M0–M3b 已有） |
-| ai-product-actions | AI 产品动作控制协议（Proposal / Policy / 对话内确认 / Command / Journal / Receipt；设计定稿，待迁移） |
-| ai-workflow-extension | 新 Workflow 注册、能力门禁、执行/恢复、版本和 Artifact 契约；PPT 仅作扩展校验示例 |
+| ai | 本书 AI（BYOK / 词典译 / 对话 / 大纲 / 思维导图；M0–M3b 已有） |
+| ai-product-actions | AI 产品任务的建议、确认、执行、取消、恢复和结果记录；基础代码已有，生产重任务尚未接入 |
+| ai-workflow-extension | 新增长任务时的登记、能力检查、执行、恢复、版本和结果格式；PPT 仅为说明例子 |
 | ai-translation | AI 翻译偏好与选区译（设计定稿；T0–T3 已有，T4 整本译待办） |
 | ai-graph | 本书知识图谱（M5 已有；实体/关系/出处，章级增量） |
 | ai-graph-narration | 图谱展示方案驱动 + 家族树（N1–N4 已实现；方案契约/方向约定/连线架构图/地点链） |
-| ai-mind-map | 图书思维导图（轻会话；结构化节点/原生布局；实现收敛中） |
+| ai-mind-map | 图书思维导图（轻量会话结果；结构化节点、原生布局；已接入） |
 | settings / mobile / overlay | **待写** |
 
 整理三概念权威表见 [PRODUCT.md §4.3](./PRODUCT.md)。

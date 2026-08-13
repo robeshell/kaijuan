@@ -68,6 +68,19 @@ class AiChatToolStep {
     if (label.isEmpty) return null;
     return AiChatToolStep(label: label, done: map['done'] == true);
   }
+
+  /// One-line completed-turn summary. Empty when there is nothing to show.
+  static String summarize(List<AiChatToolStep> steps) {
+    final seen = <String>{};
+    final parts = <String>[];
+    for (final step in steps) {
+      final label = step.label.trim();
+      if (label.isEmpty || !seen.add(label)) continue;
+      parts.add(label);
+    }
+    if (parts.isEmpty) return '';
+    return '查阅了${parts.join('、')}';
+  }
 }
 
 class AiChatMessage {
@@ -86,10 +99,24 @@ class AiChatMessage {
     this.command,
     this.richArtifactKind,
     this.toolSteps = const [],
+    this.displayContent = '',
   });
 
   final AiMessageRole role;
   final String content;
+
+  /// Reader-facing user bubble. Empty means show [content].
+  ///
+  /// Shortcuts keep the long task prompt in [content] (model + retry) and
+  /// put the short chip label here so the transcript does not dump
+  /// implementation instructions.
+  final String displayContent;
+
+  /// Text shown in the user bubble.
+  String get visibleContent {
+    final shown = displayContent.trim();
+    return shown.isEmpty ? content : shown;
+  }
 
   /// Optional provider-supplied reasoning shown in a separate disclosure.
   /// It is excluded from answer copy and future model history.
@@ -146,6 +173,7 @@ class AiChatMessage {
     AiConversationCommand? command,
     AiRichArtifactKind? richArtifactKind,
     List<AiChatToolStep>? toolSteps,
+    String? displayContent,
     bool clearWebHitCount = false,
     bool clearMindMap = false,
     bool clearCommand = false,
@@ -168,6 +196,7 @@ class AiChatMessage {
           ? null
           : (richArtifactKind ?? this.richArtifactKind),
       toolSteps: toolSteps ?? this.toolSteps,
+      displayContent: displayContent ?? this.displayContent,
     );
   }
 
@@ -190,6 +219,7 @@ class AiChatMessage {
       'toolSteps': [
         for (final step in toolSteps) step.toJson(),
       ],
+    if (displayContent.trim().isNotEmpty) 'displayContent': displayContent,
   };
 
   static AiChatMessage fromJson(Map<String, dynamic> json) {
@@ -230,6 +260,7 @@ class AiChatMessage {
                 if (AiChatToolStep.fromJson(item) case final step?) step,
             ]
           : const [],
+      displayContent: '${json['displayContent'] ?? ''}',
     );
   }
 }
@@ -304,33 +335,21 @@ class AiChatShortcut {
   final String prompt;
   final bool needsSelection;
   final AiMindMapRequestScope? mindMapScope;
+
+  /// Short chip text to persist on the user bubble when it differs from [prompt].
+  String? get transcriptLabel {
+    final shown = label.trim();
+    if (shown.isEmpty || shown == prompt.trim()) return null;
+    return shown;
+  }
 }
 
-/// Task-style prompts (structured deliverables). Prefer these over bare
-/// natural-language chips when the product wants Anx-like "finished" answers.
-const kAiChatBookDigestPrompt =
-    '请为当前阅读范围内的这本书生成一份书摘（不是逐章流水账）。\n'
-    '【要求】\n'
-    '1. 开头用一两句说明：书名/当前作品名、阅读进度（若已知）、若是合集则只写当前这一部，'
-    '不要假装覆盖合集中其它作品。\n'
-    '2. 用「»」标出核心冲突（一两句）。\n'
-    '3. 列出 3 个核心人物：每人一行——姓名、动机、一个关键抉择（须有书中依据；'
-    '依据不足时标明「基于取样」）。\n'
-    '4. 3–5 个主题关键词，用间隔号或顿号连接。\n'
-    '5. 避免剧透最终结局；进度较低时先简短提醒可能涉及后文。\n'
-    '6. 优先 get_reading_metadata、get_toc、sample_book / search_book 取证后再写；'
-    '不要编造未读到的情节。\n'
-    '7. 文末可问读者是否需要本章精读或思维导图。';
+/// Reader-facing shortcut intents. Formatting and tool policy live in system.
+const kAiChatBookDigestPrompt = '请为这本书写一份书摘。';
 
-const kAiChatChapterSummaryPrompt =
-    '请总结我正在读的这一章。\n'
-    '【要求】语言与正文一致；约 6–10 句；三段：主要情节 / 人物与关系 / 主题或写法；'
-    '避免「本章讲述了」套话；先 get_current_chapter（必要时 get_toc）再写。';
+const kAiChatChapterSummaryPrompt = '请总结这一章。';
 
-const kAiChatChapterCloseReadPrompt =
-    '请精读我正在读的这一章：先 get_current_chapter 取原文；'
-    '用小标题组织——情节要点、关键原文摘句（短引）、叙事/手法、与前后文关系（不确定则说明）；'
-    '不要剧透未读部分。';
+const kAiChatChapterCloseReadPrompt = '请精读这一章。';
 
 /// Shortcuts for a whole-book companion (not progress-gated).
 const kAiChatShortcuts = <AiChatShortcut>[
@@ -344,86 +363,74 @@ const kAiChatShortcuts = <AiChatShortcut>[
   AiChatShortcut(label: '精读这一章', prompt: kAiChatChapterCloseReadPrompt),
   AiChatShortcut(
     label: '回忆前文',
-    prompt:
-        '请根据 get_reading_metadata 与 get_toc，总结我当前位置之前的主要情节（3–6 句）。'
-        '优先 get_chapter 取更早章节的关键段落；合集请遵守当前检索范围。'
-        '不要剧透我尚未读到的部分。',
+    prompt: '请回忆到我目前读到的位置为止的前文。',
   ),
   AiChatShortcut(
     label: '生成本书大纲',
-    prompt:
-        '请为当前这本书生成一份全书脉络概览（不是逐章流水账）。'
-        '先用一段话概括主线与核心主题，再按内容推进列出主要结构阶段；'
-        '每一项包含简短标题和说明。优先使用 sample_book / get_toc 把握全书结构；'
-        '若取样有限，请标明是基于取样的概览，不要假装读完每一章。'
-        '合集请只覆盖当前作品范围。请直接基于书中内容回答。',
+    prompt: '请为这本书写一份大纲。',
   ),
   AiChatShortcut(
     label: '解释这段',
-    prompt: '请解释我划出的这段话：在说什么，有什么用意。',
+    prompt: '请解释我划出的这段话。',
     needsSelection: true,
   ),
   AiChatShortcut(
     label: '人物关系',
-    prompt:
-        '请根据提供的各部分正文，梳理整本书的主要人物及其关系。'
-        '按书中结构组织，不要只列当前这一讲的人物。合集请只写当前作品。',
+    prompt: '请梳理这本书的主要人物及其关系。',
   ),
   AiChatShortcut(
     label: '时代背景',
-    prompt:
-        '结合书里写到的内容，谈谈相关的时代、制度或社会背景。'
-        '书里没写的部分用「补充说明」；若本轮已联网，请用检索结果充实补充说明并简述来源。',
+    prompt: '请结合书里写到的内容谈谈时代背景。',
   ),
 ];
 
-/// Fixed post-answer action chips (label short; prompt is what gets sent).
+/// Fixed post-answer action chips. Recipes for these intents live in system.
 const kAiChatActionChips = <AiChatShortcut>[
-  AiChatShortcut(label: '解释', prompt: '请解释刚才回答里最关键的几点。'),
-  AiChatShortcut(label: '你的看法', prompt: '你对刚才讨论的内容有什么看法？'),
-  AiChatShortcut(label: '总结', prompt: '请用更短的条目总结刚才的回答。'),
-  AiChatShortcut(label: '分析', prompt: '请再深入分析刚才的问题，补充书中依据。'),
-  AiChatShortcut(label: '建议', prompt: '基于刚才的内容，接下来我可以怎么读或问什么？'),
+  AiChatShortcut(label: '解释', prompt: '请解释刚才最关键的几点。'),
+  AiChatShortcut(label: '你的看法', prompt: '你怎么看？'),
+  AiChatShortcut(label: '总结', prompt: '请更短地总结刚才的回答。'),
+  AiChatShortcut(label: '分析', prompt: '请再分析一下，补书中依据。'),
+  AiChatShortcut(label: '建议', prompt: '接下来我可以怎么读？'),
 ];
 
 const _kAiChatSelectionShortcuts = <AiChatShortcut>[
   AiChatShortcut(
     label: '解释这段',
-    prompt: '请解释我划出的这段话：在说什么，有什么用意。',
+    prompt: '请解释这段。',
     needsSelection: true,
   ),
   AiChatShortcut(
     label: '这段和本章的关系',
-    prompt: '请结合我划出的这段话和当前章节，说明它在本章中起什么作用。',
+    prompt: '这段和本章有什么关系？',
     needsSelection: true,
   ),
   AiChatShortcut(
     label: '作者为什么这样写',
-    prompt: '请结合我划出的这段话的上下文，分析作者为什么这样写。',
+    prompt: '作者为什么这样写？',
     needsSelection: true,
   ),
 ];
 
 const _kAiChatFollowUpShortcuts = <AiChatShortcut>[
-  AiChatShortcut(label: '结合书中内容再展开', prompt: '请基于刚才的回答，结合书中的具体内容再展开讲讲。'),
-  AiChatShortcut(label: '和本章主线有什么关系', prompt: '请基于刚才的回答，说明这和当前章节的主线有什么关系。'),
-  AiChatShortcut(label: '有哪些容易忽略的细节', prompt: '请基于刚才的回答，补充书中容易忽略但值得注意的细节。'),
+  AiChatShortcut(label: '结合书中内容再展开', prompt: '结合书中内容再展开。'),
+  AiChatShortcut(label: '和本章主线有什么关系', prompt: '和本章主线有什么关系？'),
+  AiChatShortcut(label: '有哪些容易忽略的细节', prompt: '有哪些容易忽略的细节？'),
 ];
 
 const _kAiChatSelectionFollowUpShortcuts = <AiChatShortcut>[
   AiChatShortcut(
     label: '结合上下文再解释',
-    prompt: '请结合我划出的这段话前后的上下文，再解释得具体一些。',
+    prompt: '结合上下文再解释一下。',
     needsSelection: true,
   ),
   AiChatShortcut(
     label: '这段在本章中的作用',
-    prompt: '请结合刚才的回答，说明我划出的这段话在本章中起什么作用。',
+    prompt: '这段在本章中起什么作用？',
     needsSelection: true,
   ),
   AiChatShortcut(
     label: '和全书主题有什么关联',
-    prompt: '请结合刚才的回答，说明我划出的这段话和全书主题有什么关联。',
+    prompt: '这段和全书主题有什么关联？',
     needsSelection: true,
   ),
 ];

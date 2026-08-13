@@ -1,8 +1,8 @@
-# AI 产品动作协议（Product Action Protocol v1）
+# AI 产品任务规则
 
 | | |
 |--|--|
-| **状态** | v1 控制面为**重任务平台**；**图书思维导图主路径为会话生成、不经 Journal**（见 [ai-mind-map.md](./ai-mind-map.md)）；**知识图谱为 Domain Job**（§3.6） |
+| **状态** | 基础代码已完成；仅有非生产测试任务验证全链路，尚无生产重任务接入。图书思维导图和知识图谱都不走本规则的任务记录 |
 | **日期** | 2026-08-12 |
 | **收口设计** | [ai-architecture-consolidation.md](../research/ai-architecture-consolidation.md) |
 | **PRODUCT** | [§6](../PRODUCT.md) |
@@ -10,18 +10,18 @@
 | **相关** | [ai.md](./ai.md)、[ai-workflow-extension.md](./ai-workflow-extension.md)、[ai-mind-map.md](./ai-mind-map.md)、[ai-graph.md](./ai-graph.md)、[ai-translation.md](./ai-translation.md) |
 | **适用范围** | 本书对话中由模型建议，或由 App 明确入口触发的产品动作 |
 
-> 本规范是开卷 AI 产品动作的权威控制协议。它定义建议、策略、确认、授权、执行、恢复与回执，不定义各领域 Workflow 内部如何生成内容。若其他 AI 规格把模型工具调用、输入附件或自然语言命中直接等同于执行授权，以本规范为准。
+> 本页规定未来 AI 长任务如何提出、确认、执行、取消、恢复和记录结果，不规定某个领域如何生成内容。代码类型仍沿用 `Proposal / Policy / Command / Journal / Receipt` 等名称，正文优先使用中文说明。
 
 ---
 
 ## 1. 结论
 
-开卷采用以下固定边界：
+对于会写文件、覆盖结果或访问外部系统的长任务，开卷采用以下固定边界：
 
 ```text
-模型可以建议动作，不能授权动作；
-App 可以解析和校验动作，只有可信用户操作或产品策略可以授权动作；
-Workflow 只执行 App 签发的不可变命令，不执行原始模型 Tool Call。
+模型可以建议任务，不能自行批准；
+App 解析和校验任务，只有可信用户操作或产品规则可以批准；
+领域执行器只执行 App 签发的不可变命令，不直接执行模型工具调用。
 ```
 
 正式链路：
@@ -40,7 +40,7 @@ Workflow 只执行 App 签发的不可变命令，不执行原始模型 Tool Cal
   → AiActionReceipt + 领域 Artifact
 ```
 
-产品工具调用只是 `AiActionProposal` 的一种来源。它不是命令、不是审批结果。**适用本协议的重任务**不得由模型 Tool Call 直接落库或外写；**图书思维导图日常生成/修订默认走轻会话路径**（见 [ai-mind-map.md](./ai-mind-map.md)），不要求用户经过本协议的确认卡。
+模型工具调用只是任务建议的一种来源，不是命令，也不是批准结果。适用本规则的长任务不能由模型直接写数据库、写文件或访问外部系统。图书思维导图走轻量会话路径，不需要这里的确认卡。
 
 ---
 
@@ -50,18 +50,18 @@ Workflow 只执行 App 签发的不可变命令，不执行原始模型 Tool Cal
 
 | 术语 | 定义 |
 |------|------|
-| **Product Action** | 会启动领域任务、改变持久化产品状态、产生或修订 Artifact、写文件或访问外部系统的动作 |
-| **Read Tool** | 只读取冻结书籍上下文、不会改变产品状态的工具，如目录、章节、搜索和取样 |
-| **Proposal** | 对“准备做什么”的结构化建议；无执行权 |
-| **Policy** | App 自有的纯决策层；判断权限、风险、范围、目标、歧义与是否需要确认 |
-| **Decision** | Policy 对 Proposal 的结果：允许、要求确认、要求补充或拒绝 |
-| **Authorization** | 可信用户操作或 App 明确策略对一个确定动作的授权证据 |
-| **Command** | App 根据有效授权签发的不可变执行命令 |
-| **Workflow** | 开卷拥有的确定性领域编排；只接受 Command |
-| **Artifact** | 思维导图、图谱、译稿、导出文件等领域产物 |
-| **Receipt** | 一次 Command 的可审计执行结果，不等同于 Artifact |
-| **Journal** | 本地持久化的动作控制记录，用于幂等、恢复、取消和晚到结果隔离 |
-| **Action Definition** | 一个动作的编译期注册定义，包含 schema、风险、能力、Gateway、Workflow Adapter、Artifact 与版本 |
+| **产品任务（Product Action）** | 会启动领域任务、改变已保存状态、写文件或访问外部系统的动作 |
+| **只读工具（Read Tool）** | 只读取冻结的图书内容，不改变产品状态，如目录、章节、搜索和取样 |
+| **任务建议（Proposal）** | 对“准备做什么”的结构化描述，没有执行权 |
+| **权限规则（Policy）** | App 判断权限、风险、范围、目标、歧义和是否需要确认的规则 |
+| **判断结果（Decision）** | 允许、要求确认、要求补充或拒绝 |
+| **授权（Authorization）** | 可信用户操作或 App 明确规则对一个确定任务的批准证据 |
+| **执行命令（Command）** | App 根据有效授权签发的不可变命令 |
+| **任务执行器（Workflow）** | 开卷拥有的确定性执行流程，只接受执行命令 |
+| **生成结果（Artifact）** | 译稿、导出文件等领域结果 |
+| **执行结果（Receipt）** | 一次命令的成功、部分成功、失败或取消记录，不等同于生成结果 |
+| **任务记录（Journal）** | 本地持久化的控制记录，用于去重、恢复、取消和隔离晚到结果 |
+| **动作定义（Action Definition）** | 编译期登记的任务说明，包含输入格式、风险、能力、执行器、结果类型和版本 |
 
 Read Tool 不进入产品动作审批，但仍受冻结作用域、参数预算、调用次数、取消和提示词注入防护约束。
 
@@ -76,13 +76,13 @@ Read Tool 不进入产品动作审批，但仍受冻结作用域、参数预算�
 - App 只向模型暴露本轮签发的临时别名；真实身份由 Gateway 在冻结快照内解析。
 - Controller 的范围和预算校验不是用户授权，二者必须分别成立。
 
-### 3.2 单一控制平面
+### 3.2 重任务共用一套控制流程
 
-- 自由输入、快捷入口、范围卡片、失败重试、崩溃恢复和未来产品动作都汇入同一 `AiProductActionController`。创建/修订请求走 Proposal/Policy；失败重试和恢复只引用既有 Command/Journal，不重新解释原始自然语言。
+- 本节只适用于接入本规则的重任务。它们的自由输入、明确入口、范围卡片、失败重试和崩溃恢复都汇入同一 `AiProductActionController`。创建或修订先形成任务建议并经过权限判断；失败重试和恢复只引用既有执行命令与本地记录，不重新解释原始自然语言。
 - 动作发现与分发来自 `ProductActionRegistry` 的注册定义；完整扩展接口见 [ai-workflow-extension.md](./ai-workflow-extension.md)。
 - 不为每个中文说法增加关键词路由、正则矩阵或专用隐式分支。
 - 不增加第二个意图模型。普通对话的同一模型可以回答、调用 Read Tool 或提出 Product Action Proposal。
-- 显式 UI 命令可以跳过模型判断，但不能绕过 Policy、Journal 和 Workflow 预检。
+- 明确 UI 命令可以跳过模型判断，但不能绕过权限判断、本地任务记录和开始前检查。
 
 ### 3.6 不经本协议 Journal 的 AI 能力（成文边界）
 
@@ -90,9 +90,9 @@ Read Tool 不进入产品动作审批，但仍受冻结作用域、参数预算�
 
 | 能力 | 入口 | 持久化 | Journal？ |
 |------|------|--------|-----------|
-| **图书思维导图（日常）** | 快捷 / 会话生成与修订 | `ai_chat/` 消息附件 | **否**（轻路径，见 [ai-mind-map.md](./ai-mind-map.md)） |
+| **图书思维导图（日常）** | 快捷 / 会话生成与修订 | `ai_chat/` 消息附件 | **否**（轻量会话路径，见 [ai-mind-map.md](./ai-mind-map.md)） |
 | **知识图谱** | 图谱 Tab | `ai_graph/` + 服务 checkpoint | **否**（Domain Job C1） |
-| **整本译 / 导出 / 外写**（规划） | 待定 | 领域产物 | **是**（应走本协议） |
+| **整本译 / 导出 / 外写**（规划） | 待定 | 领域结果 | **是**（应走本规则） |
 
 约束：
 
@@ -127,26 +127,21 @@ Read Tool 不进入产品动作审批，但仍受冻结作用域、参数预算�
 
 ```text
 proposed
-  → policyChecked
-    → awaitingClarification
-      → proposed | rejected | expired
-    → awaitingConfirmation
-      → authorized | rejected | expired
-    → authorized
-    → rejected
+  → awaitingClarification
+    → rejected | expired | abandoned
+  → awaitingConfirmation
+    → authorized | rejected | expired | abandoned
+  → authorized | rejected | expired | abandoned
 
 authorized
-  → preflight
-    → queued
-      → executing
-        → succeeded
-        → partiallySucceeded
-        → failed
-        → cancelRequested
-          → cancelled
-          → failed
-    → failed
-    → abandoned
+  → queued | cancelRequested | failed | cancelled | abandoned
+queued
+  → executing | cancelRequested | failed | abandoned
+executing
+  → succeeded | partiallySucceeded | failed | cancelled | abandoned
+  → cancelRequested
+cancelRequested
+  → cancelled | failed | abandoned
 ```
 
 ### 4.1 状态约束
@@ -424,7 +419,7 @@ late_event.quarantined
 
 事件必须携带稳定 ID、状态版本、单调序号、动作类型、授权来源、范围指纹、延迟和公开错误码；不得记录 Key 或完整正文。
 
-首阶段上线门槛：
+首个生产重任务接入前的门槛：
 
 - 否定、评价、教程、概念讨论、Mermaid 请求和附件普通问答评测中，错误产品执行数必须为 0。
 - 任何未授权 Workflow 启动数必须为 0。
@@ -446,7 +441,7 @@ late_event.quarantined
 
 ### 14.2 语义评测
 
-建立 200–300 条中文为主的最小对照集，至少覆盖：
+计划建立 200–300 条中文为主的最小对照集，至少覆盖：
 
 - 创建 / 修订 / 评价 / 讨论 / 教程 / 否定 / 反问 / 假设 / 纠正。
 - 有附件与无附件；单张与多张 Artifact。
@@ -475,42 +470,42 @@ late_event.quarantined
 
 ---
 
-## 15. 分阶段迁移
+## 15. 实施情况与后续顺序
 
-不得大爆炸替换当前对话和 Workflow。
+不得一次性替换当前对话和所有任务执行器。
 
-### P0 — 规范与测试骨架
+### P0 — 规范与测试骨架（已完成）
 
 - 本规范成为权威控制协议。
 - 为现有错误语义先补失败测试：否定、附件评价、歧义、重复提交、取消晚到、revision 冲突。
-- 旧行为尚未迁移时，测试应明确标记为预期失败或单独目标套件，不得把文档目标误报为已实现。
+- 测试区分当前行为与未来目标，不把文档目标误报为已实现。
 
-### P1 — App 契约与 Policy
+### P1 — App 契约与权限判断（已完成基础）
 
 - 新增纯 Dart Proposal/Decision/Command/Receipt/Journal 状态契约。
-- `AiRunProductActionRequested` 仅转换成 Proposal，不再直接代表可执行命令。
-- 建立动作注册表和 Policy 矩阵；先接思维导图创建/修订。
+- `AiRunProductActionRequested` 可转换成任务建议，不直接代表可执行命令。
+- 已建立动作注册表和权限规则；思维导图的生成/修订只复用注册与工具解析，实际执行走轻量会话路径。
 
-### P2 — 对话内确认与附件语义
+### P2 — 对话内确认与附件语义（规则完成，待生产重任务验证）
 
 - 结构化确认/补充卡片用于**重任务**。
 - **图书思维导图**不按「自由输入默认确认」验收；见 [ai-mind-map.md](./ai-mind-map.md)。
 - 导图会话修订见 [ai-mind-map.md](./ai-mind-map.md)；重任务附件语义另定。
-- 快捷入口、范围卡片和失败重试走同一 Controller，但可按矩阵自动授权。
+- 接入本规则的重任务快捷入口、范围卡片和失败重试走同一 Controller，但可按矩阵自动授权。
 
-### P3 — Journal、幂等、版本与取消
+### P3 — 本地任务记录、去重、版本与取消（基础代码完成）
 
-- Workflow 前持久化 Command；加入安全恢复和 Receipt。
-- 修订使用 expected revision；WebDAV 和会话附件按稳定身份合并。
+- 任务执行前持久化命令；加入安全恢复和执行结果。
+- 修订使用预期版本；WebDAV 和会话附件按稳定身份合并的规则待具体生产任务落实。
 - 取消进入 `cancelRequested`，等待真实静止并隔离晚到结果。
 
-### P4 — 扩展产品动作
+### P4 — 接入首个生产重任务（未开始）
 
-- 将整本翻译、写入笔记、导出和未来图谱对话入口逐项接入注册表。
+- 将整本翻译、写入笔记和导出等未来重任务逐项接入注册表；知识图谱是否迁入另行决定。
 - 按 [Workflow Extension Contract](./ai-workflow-extension.md) 落地 Action Definition、能力门禁、多层版本、Workflow Adapter、领域 Artifact 与 App-owned Receipt 投影。
 - 每新增动作只增加注册定义、schema、Policy、Gateway、Workflow adapter 和领域产物实现，不增加自然语言关键词路由或通用 Controller switch。
 
-### P5 — Genkit Agent 灰度
+### P5 — 验证并尝试切换 Genkit Agent（未开始）
 
 - 在相同协议和测试下验证 Genkit Interrupt/Resume、Session/Snapshot、Trace 和真实取消。
 - 运行时门禁全部通过后，才允许 Genkit 替换普通对话工具循环；Product Action Protocol 不随 SDK 切换。
@@ -519,15 +514,14 @@ late_event.quarantined
 
 ## 16. 完成标准
 
-- [x] 控制面平台：Proposal/Policy/Command/Journal/Receipt 可用；Domain 注册与能力门禁有实现基础。
+- [x] 通用任务控制基础：任务建议、权限判断、执行命令、本地记录和执行结果可用；领域注册与能力检查已有实现。
 - [x] 第二测试 Workflow（`test_book_export`）证明扩展路径。
 - [x] **图书思维导图产品规格**改为轻会话（本文矩阵与 [ai-mind-map.md](./ai-mind-map.md) 已对齐）。
 - [x] **导图实现**去掉自由输入确认卡与强制「继续修改」，对齐轻路径验收。
-- [ ] 重任务语义评测（译/导出等）与图谱 Domain Job 文档一致性。
-- [ ] 图谱 C2 或永久例外产品决定。
+- [ ] 为整本翻译或正式导出建立生产领域实现、恢复测试与用户界面。
+- [ ] 决定知识图谱继续保持独立任务，还是迁入通用重任务流程。
 
 仍未完成 / 后续：
 
-- 导图代码收敛到轻路径
-- 图谱 C2 或永久 Domain Job 例外产品决定
-- 重任务语义评测与恢复矩阵（非导图日常体验门槛）
+- 图谱继续保留独立任务，还是接入通用重任务流程，尚未作产品决定
+- 重任务语义评测与恢复矩阵（不是导图日常体验的上线门槛）

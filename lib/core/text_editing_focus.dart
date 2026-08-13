@@ -28,6 +28,9 @@ bool get _isDesktop {
   };
 }
 
+/// Desktop keyboard (macOS / Windows / Linux), not compact layout.
+bool get isDesktopTextEditingPlatform => _isDesktop;
+
 /// True while the platform IME / dictation still owns a composing region.
 ///
 /// Programmatic [TextEditingController] writes or WebView `clearFocus` during
@@ -147,6 +150,42 @@ Widget withDesktopTextEditingShortcuts(
       const SingleActivator(LogicalKeyboardKey.keyA, control: true): () {
         selectAllInController(controller);
       },
+    },
+    child: child,
+  );
+}
+
+/// Desktop chat submit: Enter sends when IME is idle; Shift+Enter newlines.
+///
+/// Must not bind Enter as a [CallbackShortcuts] key — that would swallow
+/// IME confirm. Ignored events fall through to [EditableText].
+Widget withDesktopChatSubmit(
+  Widget child, {
+  required TextEditingController controller,
+  required VoidCallback onSubmit,
+  bool enabled = true,
+}) {
+  if (!_isDesktop) return child;
+  return Focus(
+    canRequestFocus: false,
+    skipTraversal: true,
+    onKeyEvent: (node, event) {
+      if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+        return KeyEventResult.ignored;
+      }
+      final key = event.logicalKey;
+      if (key != LogicalKeyboardKey.enter &&
+          key != LogicalKeyboardKey.numpadEnter) {
+        return KeyEventResult.ignored;
+      }
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        return KeyEventResult.ignored;
+      }
+      if (!enabled || textEditingIsComposing(controller)) {
+        return KeyEventResult.ignored;
+      }
+      onSubmit();
+      return KeyEventResult.handled;
     },
     child: child,
   );

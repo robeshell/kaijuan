@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:thinking_orbs/thinking_orbs.dart';
 
 import '../../../ai/ai_chat.dart';
@@ -15,59 +16,27 @@ import 'book_ai_mind_map_scope_card.dart';
 import 'book_ai_action_confirmation_card.dart';
 import 'book_ai_mind_map_view.dart';
 
-/// Anx-style tool step tiles (compact): one row per tool with done indicator.
-class BookAiToolStepTimeline extends StatelessWidget {
-  const BookAiToolStepTimeline({required this.steps, super.key});
+/// Completed-turn tool summary. Live progress stays on the thinking line.
+class BookAiToolStepSummary extends StatelessWidget {
+  const BookAiToolStepSummary({required this.steps, super.key});
 
   final List<AiChatToolStep> steps;
 
   @override
   Widget build(BuildContext context) {
-    if (steps.isEmpty) return const SizedBox.shrink();
-    final colors = context.appColors;
+    final summary = AiChatToolStep.summarize(steps);
+    if (summary.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < steps.length; i++) ...[
-            if (i > 0) const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: colors.surfaceContainerHighest.withValues(alpha: 0.42),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: context.appDivider),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.build_circle_outlined,
-                    size: 16,
-                    color: context.appSecondaryText,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      steps[i].label,
-                      style: TextStyle(
-                        fontSize: context.aiDetailSize,
-                        height: 1.25,
-                      ),
-                    ),
-                  ),
-                  Icon(
-                    steps[i].done ? Icons.check_circle : Icons.circle_outlined,
-                    size: 14,
-                    color: steps[i].done
-                        ? colors.primary
-                        : context.appSecondaryText,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
+      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 6),
+      child: Text(
+        summary,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: context.appCaptionSize,
+          height: 1.3,
+          color: context.appSecondaryText,
+        ),
       ),
     );
   }
@@ -462,39 +431,46 @@ class _BookAiComposerState extends State<BookAiComposer> {
                 Expanded(
                   child: withDesktopTextEditingShortcuts(
                     controller: controller,
-                    TextField(
+                    withDesktopChatSubmit(
                       controller: controller,
-                      focusNode: focusNode,
-                      enabled: !locked,
-                      autofocus: false,
-                      minLines: 1,
-                      maxLines: 6,
-                      keyboardType: TextInputType.multiline,
-                      // newline: send is the button. Avoid send/done actions
-                      // that fight Chinese IME and system dictation.
-                      textInputAction: TextInputAction.newline,
-                      // none: sentences capitalization rewrites the first
-                      // grapheme under some IMEs / voice-to-text sessions.
-                      textCapitalization: TextCapitalization.none,
-                      enableInteractiveSelection: true,
-                      // Fewer automatic rewrites while dictating or composing.
-                      smartDashesType: SmartDashesType.disabled,
-                      smartQuotesType: SmartQuotesType.disabled,
-                      spellCheckConfiguration:
-                          const SpellCheckConfiguration.disabled(),
-                      // No onTap focus/clearPlatformFocus — the field focuses
-                      // itself; WebView clear is deferred and IME-safe.
-                      style: context.appInputTextStyle.copyWith(
-                        color: context.appPrimaryText,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: '问这本书…',
-                        hintStyle: context.appInputTextStyle.copyWith(
-                          color: context.appSecondaryText,
+                      enabled: !locked && !sending,
+                      onSubmit: onSend,
+                      TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        enabled: !locked,
+                        autofocus: false,
+                        minLines: 1,
+                        maxLines: 6,
+                        keyboardType: TextInputType.multiline,
+                        // newline keeps IME/dictation from treating confirm
+                        // as send. Desktop Enter is handled above when idle.
+                        textInputAction: TextInputAction.newline,
+                        // none: sentences capitalization rewrites the first
+                        // grapheme under some IMEs / voice-to-text sessions.
+                        textCapitalization: TextCapitalization.none,
+                        enableInteractiveSelection: true,
+                        // Fewer automatic rewrites while dictating or composing.
+                        smartDashesType: SmartDashesType.disabled,
+                        smartQuotesType: SmartQuotesType.disabled,
+                        spellCheckConfiguration:
+                            const SpellCheckConfiguration.disabled(),
+                        // No onTap focus/clearPlatformFocus — the field focuses
+                        // itself; WebView clear is deferred and IME-safe.
+                        style: context.appInputTextStyle.copyWith(
+                          color: context.appPrimaryText,
                         ),
-                        isDense: true,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                        decoration: InputDecoration(
+                          hintText: '问这本书…',
+                          hintStyle: context.appInputTextStyle.copyWith(
+                            color: context.appSecondaryText,
+                          ),
+                          isDense: true,
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 6,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -553,7 +529,6 @@ class BookAiChatTimeline extends StatelessWidget {
     required this.streamingReasoning,
     required this.streamingReasoningKind,
     required this.searchingWeb,
-    required this.toolSteps,
     required this.actionChips,
     required this.error,
     required this.canRetry,
@@ -593,7 +568,6 @@ class BookAiChatTimeline extends StatelessWidget {
   final String streamingReasoning;
   final AiReasoningContentKind streamingReasoningKind;
   final bool searchingWeb;
-  final List<AiChatToolStep> toolSteps;
   final List<AiChatShortcut> actionChips;
   final String? error;
   final bool canRetry;
@@ -617,17 +591,21 @@ class BookAiChatTimeline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
     // One SelectionArea for the whole transcript. Nested SelectionArea +
     // MarkdownBody(selectable: true) fight the ListView drag gesture and make
     // desktop/macOS text selection feel broken.
     return SelectionArea(
-      child: NotificationListener<ScrollStartNotification>(
+      child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
-          if (notification.dragDetails != null) onUserDrag();
+          // Wheel / trackpad / drag all count. Programmatic jumpTo does not
+          // emit UserScrollNotification, so auto-follow is not cancelled.
+          if (notification is UserScrollNotification &&
+              notification.direction != ScrollDirection.idle) {
+            onUserDrag();
+          }
           return false;
         },
-        child: ListView(
+        child: CustomScrollView(
           key: const ValueKey<String>('ai-chat-message-list'),
           controller: scrollController,
           // NeverScrollable only while the pointer is on a mind-map canvas so
@@ -637,182 +615,221 @@ class BookAiChatTimeline extends StatelessWidget {
           physics: pointerActive
               ? const NeverScrollableScrollPhysics()
               : const ClampingScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(16, compact ? 0 : 4, 16, compact ? 8 : 12),
-          children: [
-          // liveRegion only when there is status text — a permanent live region
-          // forces semantics flushes on every rebuild and can re-enter text
-          // input updates mid-frame while the user is typing.
-          if (liveStatus.isNotEmpty)
-            Semantics(
-              container: true,
-              liveRegion: true,
-              label: liveStatus,
-              child: const SizedBox.shrink(),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(16, compact ? 0 : 4, 16, 0),
+              sliver: SliverToBoxAdapter(child: _buildHeader(context)),
             ),
-          if (messages.isEmpty &&
-              streamingText.isEmpty &&
-              streamingReasoning.isEmpty &&
-              !searchingWeb)
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                4,
-                compact ? 12 : 20,
-                4,
-                compact ? 16 : 24,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '围绕这本书聊聊：总结、人物，或你想到的问题。',
-                    style: TextStyle(
-                      fontSize: context.aiBodySize,
-                      height: 1.6,
-                      color: context.appSecondaryText,
-                    ),
-                  ),
-                  if (scopePrompt == null && openingShortcuts.isNotEmpty) ...[
-                    SizedBox(height: compact ? 12 : 16),
-                    SelectionContainer.disabled(
-                      child: BookAiSuggestedQuestionList(
-                        shortcuts: openingShortcuts,
-                        onSelected: onShortcutSelected,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          for (final message in messages)
-            BookAiBubble(
-              key: ValueKey<String>(
-                '${message.turnId ?? message.createdAt?.microsecondsSinceEpoch ?? message.hashCode}:'
-                '${message.mindMap?.scopeFingerprint ?? ''}',
-              ),
-              message: message,
-              onCopy: () => onCopy(message),
-              onMindMapLayoutChanged: message.mindMap == null
-                  ? null
-                  : (layout) => onMindMapLayoutChanged(message, layout),
-              onOpenMindMapEvidence: message.mindMap == null
-                  ? null
-                  : onOpenMindMapEvidence,
-              onOpenMindMapFullscreen: message.mindMap == null
-                  ? null
-                  : () => onOpenMindMapFullscreen(message),
-              revealMindMapOnMount:
-                  message.mindMap != null &&
-                  message.turnId == mindMapRevealTurnId,
-              onMindMapRevealed: message.turnId == null
-                  ? null
-                  : () => onMindMapRevealed(message),
-              onMindMapPointerHoverChanged: onMindMapPointerChanged,
-            ),
-          if (scopePrompt case final prompt?)
-            Padding(
-              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
-              child: BookAiMindMapScopeChoiceCard(
-                prompt: prompt,
-                onSelected: onScopeSelected!,
-                onCancel: onScopeCancelled!,
-              ),
-            ),
-          if (actionPrompt case final prompt?)
-            Padding(
-              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
-              child: BookAiActionConfirmationCard(
-                prompt: prompt,
-                onApprove: onActionApproved!,
-                onReject: onActionRejected!,
-              ),
-            ),
-          if (showFollowUpShortcuts) ...[
-            if (actionChips.isNotEmpty)
-              SelectionContainer.disabled(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 8),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    reverse: true,
-                    child: Row(
-                      children: [
-                        for (var i = 0; i < actionChips.length; i++) ...[
-                          if (i > 0) const SizedBox(width: 8),
-                          ActionChip(
-                            label: Text(
-                              actionChips[i].label,
-                              style: TextStyle(fontSize: context.aiDetailSize),
-                            ),
-                            onPressed: () => onActionChip(actionChips[i]),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final message = messages[index];
+                    return BookAiBubble(
+                      key: ValueKey<String>(_messageKey(message)),
+                      message: message,
+                      onCopy: () => onCopy(message),
+                      onMindMapLayoutChanged: message.mindMap == null
+                          ? null
+                          : (layout) => onMindMapLayoutChanged(message, layout),
+                      onOpenMindMapEvidence: message.mindMap == null
+                          ? null
+                          : onOpenMindMapEvidence,
+                      onOpenMindMapFullscreen: message.mindMap == null
+                          ? null
+                          : () => onOpenMindMapFullscreen(message),
+                      revealMindMapOnMount:
+                          message.mindMap != null &&
+                          message.turnId == mindMapRevealTurnId,
+                      onMindMapRevealed: message.turnId == null
+                          ? null
+                          : () => onMindMapRevealed(message),
+                      onMindMapPointerHoverChanged: onMindMapPointerChanged,
+                    );
+                  },
+                  childCount: messages.length,
+                  findChildIndexCallback: (key) {
+                    if (key is! ValueKey<String>) return null;
+                    final index = messages.indexWhere(
+                      (message) => _messageKey(message) == key.value,
+                    );
+                    return index >= 0 ? index : null;
+                  },
                 ),
               ),
-            SelectionContainer.disabled(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 2, bottom: 12),
-                child: BookAiSuggestedQuestionList(
-                  shortcuts: followUpShortcuts,
-                  onSelected: onShortcutSelected,
-                ),
-              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, compact ? 8 : 12),
+              sliver: SliverToBoxAdapter(child: _buildFooter(context)),
             ),
           ],
-          if (showStatusIndicator)
-            ExcludeSemantics(
-              child: BookAiThinkingIndicator(
-                label: statusIndicatorLabel,
-                state: statusOrbState,
-              ),
-            ),
-          if (activeTurnVisible &&
-              (streamingText.isNotEmpty ||
-                  streamingReasoning.isNotEmpty ||
-                  toolSteps.isNotEmpty))
-            BookAiBubble(
-              message: AiChatMessage(
-                role: AiMessageRole.assistant,
-                content: streamingText,
-                reasoningContent: streamingReasoning,
-                reasoningKind: streamingReasoningKind,
-              ),
-              streaming: true,
-              liveToolSteps: toolSteps,
-            ),
-          if (error case final message?)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      message,
-                      style: TextStyle(
-                        color: colors.error,
-                        fontSize: context.aiBodySize,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  if (canRetry) ...[
-                    const SizedBox(width: 8),
-                    SelectionContainer.disabled(
-                      child: OutlinedButton(
-                        onPressed: onRetry,
-                        child: const Text('重试'),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-        ],
         ),
       ),
+    );
+  }
+
+  static String _messageKey(AiChatMessage message) =>
+      '${message.turnId ?? message.createdAt?.microsecondsSinceEpoch ?? message.hashCode}:'
+      '${message.mindMap?.scopeFingerprint ?? ''}';
+
+  Widget _buildHeader(BuildContext context) {
+    final showEmpty =
+        messages.isEmpty &&
+        streamingText.isEmpty &&
+        streamingReasoning.isEmpty &&
+        !searchingWeb;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (liveStatus.isNotEmpty)
+          Semantics(
+            container: true,
+            liveRegion: true,
+            label: liveStatus,
+            child: const SizedBox.shrink(),
+          ),
+        if (showEmpty)
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              4,
+              compact ? 12 : 20,
+              4,
+              compact ? 16 : 24,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '围绕这本书聊聊：总结、人物，或你想到的问题。',
+                  style: TextStyle(
+                    fontSize: context.aiBodySize,
+                    height: 1.6,
+                    color: context.appSecondaryText,
+                  ),
+                ),
+                if (scopePrompt == null && openingShortcuts.isNotEmpty) ...[
+                  SizedBox(height: compact ? 12 : 16),
+                  SelectionContainer.disabled(
+                    child: BookAiSuggestedQuestionList(
+                      shortcuts: openingShortcuts,
+                      onSelected: onShortcutSelected,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildFooter(BuildContext context) {
+    final colors = context.appColors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (scopePrompt case final prompt?)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
+            child: BookAiMindMapScopeChoiceCard(
+              prompt: prompt,
+              onSelected: onScopeSelected!,
+              onCancel: onScopeCancelled!,
+            ),
+          ),
+        if (actionPrompt case final prompt?)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
+            child: BookAiActionConfirmationCard(
+              prompt: prompt,
+              onApprove: onActionApproved!,
+              onReject: onActionRejected!,
+            ),
+          ),
+        if (showFollowUpShortcuts) ...[
+          if (actionChips.isNotEmpty)
+            SelectionContainer.disabled(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  reverse: true,
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < actionChips.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 8),
+                        ActionChip(
+                          label: Text(
+                            actionChips[i].label,
+                            style: TextStyle(fontSize: context.aiDetailSize),
+                          ),
+                          onPressed: () => onActionChip(actionChips[i]),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          SelectionContainer.disabled(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 12),
+              child: BookAiSuggestedQuestionList(
+                shortcuts: followUpShortcuts,
+                onSelected: onShortcutSelected,
+              ),
+            ),
+          ),
+        ],
+        if (showStatusIndicator)
+          ExcludeSemantics(
+            child: BookAiThinkingIndicator(
+              label: statusIndicatorLabel,
+              state: statusOrbState,
+            ),
+          ),
+        if (activeTurnVisible &&
+            (streamingText.isNotEmpty || streamingReasoning.isNotEmpty))
+          BookAiBubble(
+            key: const ValueKey<String>('live-assistant'),
+            message: AiChatMessage(
+              role: AiMessageRole.assistant,
+              content: streamingText,
+              reasoningContent: streamingReasoning,
+              reasoningKind: streamingReasoningKind,
+            ),
+            streaming: true,
+          ),
+        if (error case final message?)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(
+                      color: colors.error,
+                      fontSize: context.aiBodySize,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                if (canRetry) ...[
+                  const SizedBox(width: 8),
+                  SelectionContainer.disabled(
+                    child: OutlinedButton(
+                      onPressed: onRetry,
+                      child: const Text('重试'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
@@ -823,7 +840,6 @@ class BookAiBubble extends StatelessWidget {
     required this.message,
     this.onCopy,
     this.streaming = false,
-    this.liveToolSteps = const [],
     this.onMindMapLayoutChanged,
     this.onOpenMindMapEvidence,
     this.onOpenMindMapFullscreen,
@@ -835,8 +851,6 @@ class BookAiBubble extends StatelessWidget {
   final AiChatMessage message;
   final VoidCallback? onCopy;
   final bool streaming;
-  /// In-flight tool steps while [streaming] is true.
-  final List<AiChatToolStep> liveToolSteps;
   final ValueChanged<AiMindMapLayout>? onMindMapLayoutChanged;
   final ValueChanged<AiMindMapEvidence>? onOpenMindMapEvidence;
   final VoidCallback? onOpenMindMapFullscreen;
@@ -853,11 +867,8 @@ class BookAiBubble extends StatelessWidget {
     final webHits = message.webHitCount;
     final compact = context.appIsCompact;
     final maxWidth = MediaQuery.sizeOf(context).width * (isUser ? 0.76 : 0.92);
-    final steps = streaming
-        ? liveToolSteps
-        : message.toolSteps;
-    final stepTimeline = !isUser && steps.isNotEmpty
-        ? BookAiToolStepTimeline(steps: steps)
+    final stepSummary = !isUser && !streaming && message.toolSteps.isNotEmpty
+        ? BookAiToolStepSummary(steps: message.toolSteps)
         : null;
 
     final bubble = Container(
@@ -877,7 +888,7 @@ class BookAiBubble extends StatelessWidget {
         children: [
           if (isUser)
             Text(
-              message.content,
+              message.visibleContent,
               style: TextStyle(
                 fontSize: context.aiBodySize,
                 height: compact ? 1.5 : 1.55,
@@ -995,8 +1006,8 @@ class BookAiBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (stepTimeline != null)
-                  SelectionContainer.disabled(child: stepTimeline),
+                if (stepSummary != null)
+                  SelectionContainer.disabled(child: stepSummary),
                 bubble,
               ],
             ),

@@ -157,6 +157,7 @@ class _AmbiguousOutlineController extends BookReaderController {
   Future<AiChatContextBundle> loadAiChatContext({
     String? selectionOverride,
     required AiBookWork? workScope,
+    AiChatCorpusScope corpusScope = AiChatCorpusScope.currentWork,
   }) async => AiChatContextBundle(
     chapterTitle: chatChapterTitle,
     chapterText: chatChapterText,
@@ -616,7 +617,7 @@ void main() {
     expect(controller.lastMindMapSourceSectionIndex, 1);
     expect(find.byType(BookAiMindMapView), findsOneWidget);
     expect(find.text('已根据《当前章》的 1 章内容生成思维导图。'), findsOneWidget);
-    final retryMessageList = tester.widget<ListView>(
+    final retryMessageList = tester.widget<CustomScrollView>(
       find.byKey(const ValueKey<String>('ai-chat-message-list')),
     );
     retryMessageList.controller!.jumpTo(0);
@@ -625,7 +626,7 @@ void main() {
     expect(find.widgetWithText(Tab, '思维导图'), findsNothing);
 
     final chapterMap = find.byType(BookAiMindMapView).first;
-    final messageList = tester.widget<ListView>(
+    final messageList = tester.widget<CustomScrollView>(
       find.byKey(const ValueKey<String>('ai-chat-message-list')),
     );
     final listController = messageList.controller!;
@@ -640,7 +641,7 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<ListView>(
+          .widget<CustomScrollView>(
             find.byKey(const ValueKey<String>('ai-chat-message-list')),
           )
           .physics,
@@ -666,7 +667,7 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<ListView>(
+          .widget<CustomScrollView>(
             find.byKey(const ValueKey<String>('ai-chat-message-list')),
           )
           .physics,
@@ -1551,7 +1552,7 @@ void main() {
     final listFinder = find.byKey(
       const ValueKey<String>('ai-chat-message-list'),
     );
-    final scroll = tester.widget<ListView>(listFinder).controller!;
+    final scroll = tester.widget<CustomScrollView>(listFinder).controller!;
     expect(scroll.position.extentAfter, lessThan(1));
 
     await tester.drag(listFinder, const Offset(0, 260));
@@ -1626,7 +1627,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('结合书中内容再展开'), findsOneWidget);
-      final list = tester.widget<ListView>(
+      final list = tester.widget<CustomScrollView>(
         find.byKey(const ValueKey<String>('ai-chat-message-list')),
       );
       expect(list.controller!.position.extentAfter, lessThan(1));
