@@ -1012,9 +1012,9 @@ initState:
 - `docs/ENGINEERING.md` AI 边界  
 - `docs/specs/ai.md`  
 - `docs/specs/ai-product-actions.md`  
-- `docs/specs/ai-workflow-extension.md`  
+- `docs/specs/ai-product-actions.md`（已吸收原长任务扩展规则）
 - `docs/specs/ai-mind-map.md`  
-- `docs/specs/ai-graph.md` / `ai-graph-pipeline.md`  
+- `docs/specs/ai-graph.md`（已吸收原构建流程与展示规则）
 - `docs/specs/ai-translation.md`  
 - `lib/ai/ai_product_action_controller.dart`  
 - `lib/ai/ai_product_action_domain.dart`  
@@ -1037,7 +1037,7 @@ initState:
 ### PR-0 — 规格诚实化 + 图谱规范例外 + checklist 逐行重验
 
 - **标题：** `docs(ai): honest control-plane coverage, domain-job carve-out, checklist audit`
-- **影响：** `PRODUCT.md`、`ENGINEERING.md`、`ai.md`、`ai-product-actions.md`（**§3.2 例外条款**）、`ai-workflow-extension.md`、`ai-graph.md`（§7 对照表）、README 可选
+- **影响：** `PRODUCT.md`、`ENGINEERING.md`、`ai.md`、`ai-product-actions.md`（**§3.2 例外条款**）、`ai-graph.md`（§7 对照表）、README 可选
 - **依赖：** 无
 - **说明：**  
   - 文首状态：控制面生产完整仅 mind-map；能力门禁未生效；扩展 UI switch 未清。  

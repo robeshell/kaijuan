@@ -6,7 +6,7 @@ import '../../../ai/ai_graph_family_tree.dart';
 import '../ai_typography.dart';
 
 /// Line-connected organization-chart family tree (spec:
-/// docs/specs/ai-graph-narration.md §5.3): top-down, siblings spread evenly,
+/// docs/specs/ai-graph.md §7.4): top-down, siblings spread evenly,
 /// parents connected to children with elbow lines.
 ///
 /// Interaction — picked by the user after hand-rolled scroll layouts and the

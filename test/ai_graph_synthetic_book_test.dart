@@ -8,7 +8,7 @@ import 'package:kaijuan/ai/ai_graph_service.dart';
 import 'package:kaijuan/ai/ai_model_adapter.dart';
 import 'package:kaijuan/ai/ai_settings.dart';
 
-/// Synthetic-book regression baseline (docs/specs/ai-graph-pipeline.md §5).
+/// Synthetic-book regression baseline (docs/specs/ai-graph.md §5).
 ///
 /// Deliberately NOT bound to any real book: 南国纪事 is a fictional text
 /// whose model output plants every known failure mode of the extraction +

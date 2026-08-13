@@ -2,17 +2,17 @@
 
 | | |
 |--|--|
-| **状态** | M0–M3b 已完成；**M5 知识图谱已实现**（见 [ai-graph.md](./ai-graph.md)）；M4 整本译 / M6 导出未做 |
+| **状态** | 设置、词典、选区翻译、对话、大纲、思维导图和知识图谱已实现；整本翻译与导出未做 |
 | **日期** | 2026-08-13 |
 | **PRODUCT** | [§6](../PRODUCT.md) · [§10.2](../PRODUCT.md) |
 | **视觉** | [../DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md) |
-| **相关** | [ai-product-actions.md](./ai-product-actions.md)、[ai-workflow-extension.md](./ai-workflow-extension.md)、[book-reader.md](./book-reader.md)、[reader-chrome.md](./reader-chrome.md)、[subpages.md](./subpages.md)、[webdav-backup.md](./webdav-backup.md)、[book-tts.md](./book-tts.md) |
-| **引擎** | 图书 reflow only（v1）；漫画页图 AI 另案 |
+| **相关** | [ai-product-actions.md](./ai-product-actions.md)、[book-reader.md](./book-reader.md)、[reader-chrome.md](./reader-chrome.md)、[subpages.md](./subpages.md)、[webdav-backup.md](./webdav-backup.md)、[book-tts.md](./book-tts.md) |
+| **引擎** | 仅图书阅读器；漫画页图 AI 另行设计 |
 
 > 产品状态只改 [PRODUCT.md](../PRODUCT.md) §6。本页写交互、边界、任务切分与验收。  
 > 状态变化先回写 PRODUCT 能力表；工程边界以 ENGINEERING 为准。
 >
-> 会启动后台任务、修改结果或写入外部系统的能力，统一遵守 [AI 产品任务规则](./ai-product-actions.md)；新增此类能力还须遵守 [AI 长任务扩展规则](./ai-workflow-extension.md)，明确输入、风险、能力、版本、执行方式和结果格式。
+> 会启动后台任务、修改结果或写入外部系统的能力，统一遵守 [AI 产品任务与长任务扩展规则](./ai-product-actions.md)，明确输入、风险、能力、版本、执行方式和结果格式。
 
 ---
 
@@ -22,7 +22,7 @@
 
 | 层 | 职责 | 网络 |
 |----|------|------|
-| 设置 / BYOK | Key、端点、模型、总开关 | 仅用户主动「测试连接」或功能调用时 |
+| 设置 / 用户自备模型 | 密钥、接口地址、模型、总开关 | 仅用户主动「测试连接」或使用功能时 |
 | 语言工具 | 词典、选区翻译（实现 `BookLanguageProvider`） | 有 Key 且 AI 开时出网；否则系统能力 |
 | 本书工作区 | 对话、大纲、任务（整本译等） | 同上 |
 | 沉淀导出 | Markdown / Obsidian 单向导出 | 本地文件 I/O；不经过模型托管 |
@@ -35,11 +35,11 @@
 
 已完成：
 
-- BYOK 设置、总开关、OpenAI Compatible 与 Anthropic Messages API 端点、模型列表和连接测试。
-- 选区 AI 词典与翻译，支持系统能力 fallback、流式输出、停止、复制和上下文前后文。
+- 用户自备模型设置、总开关、云端或本地模型、模型列表和连接测试。
+- 选区 AI 词典与翻译，支持回退到系统能力、流式输出、停止、复制和上下文前后文。
 - 本书对话，按 `contentHash` 持久化，支持当前章节、选区、目录、全文取样和书内检索工具；另有 **阅读位置元数据**（进度/当前章/作品范围）供模型防剧透与说明合集边界。
 - 对话工具：`get_reading_metadata`、`get_toc`、`get_current_chapter`、`get_chapter`、`search_book`、`sample_book`，共六个只读工具。普通问题最多 14 轮工具交互，整书类问题最多 24 轮；每轮最多 10 个工具调用，总结果最多 64,000 字符。合集默认 **当前作品**，用户可切换为 **整本文件**。
-- 对话快捷、回答后芯片和追问都只发一句读者意图；成品结构、工具用法与「不主动讲理由」写在 system。用户气泡显示短标签。
+- 对话快捷入口和回答后的追问只发送一句读者意图；回答格式、工具用法与「不主动讲理由」写在系统提示词中。用户气泡显示简短文字。
 - 工具过程：生成中用一行状态（思考球）；完成后收成「查阅了…」摘要并写入 assistant 消息，可随会话 JSON/WebDAV 恢复。不做逐步磁贴。
 - 回答版式契约：先给所问内容；不主动写理由、工具失败说明或「这里为什么不是正文章节」。读者追问「为什么」再解释。书摘类任务有成品模板。
 - 对话正文流式输出、工具执行状态、停止、复制、清空，以及有限历史和请求重试。停止与关闭必须在第一次点击时立即更新界面并撤销请求，不等待 transport / stream 的异步清理完成。
@@ -134,7 +134,7 @@
 
 - 选区 **AI 词典**、**AI 翻译**（应用内结果，可流式）。  
 - **本书对话**（绑定当前书；静默带当前位置 + 可选选区；快捷问法）。回答结束后，无论模型生成了专属追问还是回退到内置快捷问法，消息列表都应自动滚动到新出现的快捷问法，用户无需再手动滚动。
-- 后续：大纲、按章/整本翻译任务、知识图谱、知识库导出（见 §9 切片）。  
+- 后续：按章或整本翻译任务、知识库导出（见 §9 切片）。
 
 ### 不做（本能力内）
 
@@ -201,7 +201,7 @@
    - 开关由 adapter 按当前服务商与模型能力映射，不假设所有协议都能彻底关闭推理：DeepSeek 为 enabled/disabled；Anthropic 为 adaptive/disabled；OpenAI 为 high 与 none/low；Grok 为 high/low；Ollama 为 high/none；自定义兼容端点只在开启时尽力发送 `reasoning_effort=high`，关闭时省略扩展字段。Anthropic 的 Genkit constrained output 依赖强制 `return_output` 工具，而官方协议不保证强制工具与 thinking 可组合，因此大纲、图谱等结构化调用固定关闭该次 thinking，优先保证 schema；普通对话、词典和翻译仍服从开关。DeepSeek 官方结构化能力是 `response_format: {"type":"json_object"}`，不是锁版 Genkit 插件默认发送的 `json_schema`；adapter 仅对 DeepSeek 在最终 HTTP JSON 内转换格式并注入同一 schema，返回值继续通过 Genkit JSON parser、Schemantic 类型边界与 Workflow 业务校验。模型不支持或端点拒绝扩展字段时，本轮明确失败并给出可读错误，不跨协议回退。
    - 「测试连接」：发最小 completion；成功 SnackBar「连接正常」；失败展示可读错误。  
 
-4. **联网搜索（可选，BYOK）**  
+4. **联网搜索（可选，用户自备搜索服务）**
    - 服务商：Tavily / Brave Search。  
    - 搜索 API Key：与模型 Key 分开，进安全存储，**不进** WebDAV。  
    - 仅当用户在本书 AI 面板打开「联网」时才会请求搜索 API。  
@@ -614,7 +614,7 @@ AiBookLanguageProvider（或 Composite）
 - [x] 对话只走所选服务商的原生工具协议；已删除 fenced 与旧 Provider 对话回退。
 - [x] 词典、选区翻译、普通对话和图谱接入统一运行事件；大纲是普通对话消息，图谱逐节进度保持既有存储格式。
 - [x] 词典/选区翻译改走无工具 `AiModelAdapter` 单回合，无第二套生成 transport。
-- [x] 知识图谱和原生思维导图的结构化模型步骤使用独立 Schemantic 定义与 Genkit 结构化输出；不使用代码块截取、正则恢复或格式修补请求。
+- [x] 知识图谱和原生思维导图分别定义结果结构，并使用 Genkit 结构化输出；不使用代码块截取、正则恢复或格式修补请求。
 - [x] 模型列表拆为只读 catalog，连接测试改走 adapter；`AiProvider`、`AiProviderFactory`、两套旧 completion transport 与 tracking provider 已删除。
 - [x] 两类 Genkit adapter 通过本地伪服务协议测试；`tool/ai_genkit_smoke.dart` 提供不含 Key 的本地 OpenAI Compatible CLI trace，也可用用户环境变量选测 Anthropic；完整验收见 [执行记录](../research/ai-runtime-genkit-completion-plan.md)。
 - [x] `BookAiWorkspaceController` 通过对话和导图子 Controller 管理会话发送、联网、流式输出、重试、导图附件和完成状态；聊天 Widget 只冻结阅读上下文、展示范围选择并渲染结果。
@@ -625,7 +625,7 @@ AiBookLanguageProvider（或 Composite）
 - [x] `AiAgentRuntimeGate` 对 Genkit 默认切换执行 runtime factory、真实取消、模型矩阵、工具恢复、Trace/Snapshot 与契约测试门禁；当前锁版会确定性回退兼容 Runtime。
 - [x] 聊天消息时间线、输入区和导图范围选择卡片使用公开 Widget 输入/回调；系统 TTS 已从 `BookReaderController` 拆入独立 Controller，公共门面行为不变。
 - [x] 图谱 Tab 的作品选择、生成确认、视图/排序、实体导航与全屏路由迁入 `BookAiGraphWorkspace`；原生导图的附件、范围等待、布局/揭示/指针状态迁入 `BookAiMindMapCoordinator`，证据与全屏路由迁入 `BookAiMindMapRoutes`。主 Sheet 不再持有第二份图谱展示或导图交互状态机。
-- [x] headless Runtime Harness 同时提供离线确定性验收与显式 BYOK live 模式，覆盖回答、读工具、现有产品行动事件、结构化思维导图、续写、transport 取消和脱敏报告。
+- [x] 无界面运行验收工具同时提供离线确定性测试与显式真实模型模式，覆盖回答、只读工具、现有产品任务事件、结构化思维导图、续写、网络请求取消和脱敏报告。
 - [x] Product Action Protocol v1 平台能力已具备（重任务用）；图书思维导图改为轻会话主路径，见 [ai-mind-map.md](./ai-mind-map.md)。
 - [x] 导图实现收敛：去掉自由输入确认卡与强制「继续修改」，对齐轻路径验收。
 - [x] 长任务扩展基础落地：动作登记、能力检查、独立版本、通用执行接口、类型化结果和执行记录通过契约测试；新增测试动作不修改通用 Controller 分发代码。

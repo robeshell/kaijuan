@@ -20,7 +20,7 @@ kaijuan/                            # 仓库名
     library/import/                 # 方式适配、格式判定、内容寻址、元数据、DB 提交
     readers/comic/                  # 页图引擎
     readers/book/                   # reflow 引擎
-    ai/                             # BYOK Provider、设置存储（不进 WebDAV 备份）
+    ai/                             # 用户自备模型、服务商适配、设置存储（不进 WebDAV 备份）
     presentation/                   # UI / controllers
   android/ ios/ macos/ windows/ linux/
   tool/                             # 构建与辅助脚本
@@ -92,7 +92,7 @@ lib/main.dart → runApp(App(brand: BrandConfig.app))
 - 默认 `PlatformBookLanguageProvider` 只调用设备已有能力：Android 使用系统 Intent 选择器，Apple 使用系统词典 / Translation framework；不内置外网词典，也不发起网络请求。
 - `BookLanguageProvider` 的请求包含 `dictionary`、`selectionTranslation`、`fullBookTranslation` 三种操作；后续 AI Provider 可替换默认实现，承载单句结果或整本书任务，不改选区菜单协议。
 
-### AI 边界（BYOK）
+### AI 边界（用户自备模型）
 
 #### 当前代码结构
 
@@ -121,12 +121,12 @@ BookAiChatView
 ```
 
 - `BookAiWorkspaceController` 持有 `BookAiConversationController` 与导图会话生成。Widget 不直连模型流。
-- **图书思维导图（已落地）**：会话产物路径 — 快捷或对话工具声明 → 冻结范围 → `runMindMapSession` → `AiBookMindMapService.completeJson` → 写入 `ai_chat` 消息附件。**不经** Proposal / Journal / Command / Receipt。规格见 [specs/ai-mind-map.md](./specs/ai-mind-map.md)。编排入口：`BookAiActionHost`。
+- **图书思维导图（已落地）**：会话产物路径 — 快捷或对话工具声明 → 冻结范围 → `runMindMapSession` → `AiBookMindMapService.completeJson` → 写入 `ai_chat` 消息附件。它不写任务建议、任务记录、固定执行命令或执行回执。`BookAiActionHost` 只是会话导图和未来长任务共用的分发入口：遇到导图会立即转入会话路径；打开阅读器时会把旧版本遗留且未结束的导图任务记录标为废弃，只恢复真正的长任务。规格见 [specs/ai-mind-map.md](./specs/ai-mind-map.md)。
 - **长任务控制基础**：任务建议、权限判断、本地任务记录、通用执行器、检查点和结果仓库已经存在，并由测试导出任务验证；生产环境尚未登记整本翻译、正式导出等重任务。**知识图谱**仍使用自己的生成与保存流程（`ai_graph/`）。
 - **不引入 LangChain**；模型 I/O 用现有 Genkit adapter。演进复盘见 [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)；旧讨论见 [research/ai-architecture-consolidation.md](./research/ai-architecture-consolidation.md)（含过时段落，以本页与 ai-mind-map 为准）。
 - `AiAgentRuntime` 是 App 自有的纯 Dart 契约，输入包含冻结作用域、历史、可用产品别名和预算，输出继续使用 `AiRunEvent` 完整快照语义。任何 Genkit 类型不得越过该边界进入表现层或产品持久化。
 - `AiProductActionController` 仅服务未来**重任务**路径：任务建议 → 权限判断 → 固定执行命令 → 本地任务记录 → 执行结果。导图生产路径不调用它。详见 [specs/ai-product-actions.md](./specs/ai-product-actions.md)。
-- `ProductActionRegistry` 只接受编译期 `AiProductActionDefinition`。用于重任务的定义必须写明唯一类型、固定输入结构、风险、作用范围、所需能力、阅读器接口、任务执行接口、可选结果格式和各自版本。注册表只负责发现与冲突检查，不替用户授权、不读取实时翻页位置，也不执行任务。当前导图虽登记了对话工具定义，但不连接重任务执行接口。完整契约见 [specs/ai-workflow-extension.md](./specs/ai-workflow-extension.md)。
+- `ProductActionRegistry` 只接受编译期 `AiProductActionDefinition`。用于重任务的定义必须写明唯一类型、固定输入结构、风险、作用范围、所需能力、阅读器接口、任务执行接口、可选结果格式和各自版本。注册表只负责发现与冲突检查，不替用户授权、不读取实时翻页位置，也不执行任务。当前导图虽登记了对话工具定义，但不连接重任务执行接口。完整契约见 [specs/ai-product-actions.md](./specs/ai-product-actions.md)。
 - `AiWorkflowAdapter` 是长任务执行的统一接口，提供开始前检查、启动、恢复、取消和查询状态，并只发布开卷自己的事件。实现可以调用本地 Dart 服务、Genkit 结构化输出或未来远端服务，但执行命令、检查点、取消、结果提交和执行记录不能使用第三方框架类型作为正式数据。
 - 当前能力快照只根据“可读取图书”和“模型支持结构化输出”生成，并同时用于工具目录和任务执行环境。文档中更细的长上下文、文件写入、渲染器等能力仍是扩展设计，不是当前已经检测的项目。
 - `LegacyAiAgentRuntime` 是当前生产实现，内部包装 `AiChatService`。普通问题最多 14 轮工具交互，整书类问题最多 24 轮；每轮最多接受 10 个工具调用，总工具结果最多 64,000 字符；单次回答最多 4,096 输出 token，截断后最多自动续写 8 次，整轮最长 10 分钟。
@@ -139,7 +139,7 @@ BookAiChatView
 - 通用任务结果仓库、任务检查点和本地任务记录已经有 JSON 文件实现。当前没有生产重任务使用它们；思维导图仍以对话消息附件为唯一正式结果，知识图谱仍存入 `ai_graph/`。
 - Genkit Interrupt/Resume 或 `toolApproval` 只能用来实现 `GenkitAgentRuntime` 的暂停和恢复；重任务的建议、权限判断、执行命令和本地记录在兼容运行时下同样成立。导图会话路径不依赖这项能力。
 
-知识图谱 v3：入口与共享的 `AiBookStructureResolver` 保持不变；识别结果之后采用“生成目标 → 内容单元 → 构建任务”三层边界。`AiGraphScopePlanner` 把书内作品与全部可读单元整理为确定性选择计划，只给出正文/辅文的默认勾选建议，不能替用户删除范围；图谱管线只接收用户确认后的正文切片，负责多类型抽取、可选补漏、证据定位、消歧、合并与方向复核，并通过 checkpoint 回调发布不可变快照。实体与关系以稳定 ID 相连，关系图、家族树及实体详情都不得用名称作为身份键；家族树只消费父母/祖辈到子女的代际边，旁系亲属保留在关系图但不进入层级。电子书正文、标题、证据摘录和已知实体表一律作为不可信上下文注入模型。
+知识图谱：入口与共享的 `AiBookStructureResolver` 保持不变；识别结果之后采用“生成目标 → 内容单元 → 构建任务”三层边界。`AiGraphScopePlanner` 把书内作品与全部可读单元整理为确定性选择计划，只给出正文/辅文的默认勾选建议，不能替用户删除范围；图谱管线只接收用户确认后的正文切片，负责多类型抽取、可选补漏、证据定位、消歧、合并与方向复核，并通过 checkpoint 回调发布不可变快照。实体与关系以稳定 ID 相连，关系图、家族树及实体详情都不得用名称作为身份键；家族树只消费父母/祖辈到子女的代际边，旁系亲属保留在关系图但不进入层级。电子书正文、标题、证据摘录和已知实体表一律作为不可信上下文注入模型。
 
 本书 AI 按职责组合，新增功能不得继续堆入职责已经过多的阅读器 Controller：
 
@@ -157,7 +157,7 @@ BookAiChatView
   - `BookAnnotationsController` 独占批注列表、选择菜单状态机、数据库 watch、Foliate annotation bridge 与笔记操作；`BookSearchController` 独占搜索/图片查看状态和对应 bridge；`BookReaderPreferencesController` 独占排版偏好、字体存储与持久化；`BookReaderBridge` 独占 Foliate 页导航、seek 与正文读取回调。`BookReaderController` 组合这些职责，只保留阅读定位、书签、chrome、生命周期、AI 应用门面与 TTS 公共门面。
   - 系统听书继续由独立 `BookTtsController` 持有引擎、句游标、速率与播放循环；`BookReaderController` 保留既有 TTS 公共门面，避免修改 UI 与 Foliate bridge 契约。
   - 子 Controller 只通过公开构造依赖、不可变输入和显式回调协作；不得各自复制当前 section、locator、作品或会话状态。拆分不得改变 UI、AI 提示词、思维导图/图谱结构与持久化、WebDAV、阅读器行为或系统 TTS 行为。
-- `tool/ai_runtime_harness.dart` 是运行时验收入口，通过 `flutter test tool/ai_runtime_harness.dart --reporter expanded` 运行：默认启动进程内伪 OpenAI Compatible 端点，验证普通回答、书内工具、任务建议、授权/拒绝、结构化思维导图、续写和网络请求真实取消；只有显式设置 `AI_HARNESS_MODE=live` 及 BYOK 环境变量时才访问真实端点。该测试工具不读取 Keychain、不打印正文或 Key，并输出机器可读的 JSON 报告；通过 Genkit CLI 包装运行时还必须保留 Trace ID 供人工复核。它必须区分“模型已经提出任务”和“任务已经获得授权”，不得把 Tool Call 当作授权验收。
+- `tool/ai_runtime_harness.dart` 是无界面运行验收入口，通过 `flutter test tool/ai_runtime_harness.dart --reporter expanded` 运行：默认启动进程内伪 OpenAI Compatible 端点，验证普通回答、书内工具、任务建议、授权/拒绝、结构化思维导图、续写和网络请求真实取消；只有显式设置 `AI_HARNESS_MODE=live` 及用户自备模型环境变量时才访问真实端点。该测试工具不读取 Keychain、不打印正文或 Key，并输出机器可读的 JSON 报告；通过 Genkit CLI 包装运行时还必须保留 Trace ID 供人工复核。它必须区分“模型已经提出任务”和“任务已经获得授权”，不得把 Tool Call 当作授权验收。
 - 图谱模型、文件存储、抽取、合并消歧、质量检查和描述润色是独立职责。管线协调器只按固定顺序调用这些组件，拆分不得改变提示词、算法阈值、缓存格式或检查点时机。
 
 - 产品范围见 [PRODUCT.md §6](./PRODUCT.md)，AI 总规格见 [specs/ai.md](./specs/ai.md)，长任务控制规则见 [specs/ai-product-actions.md](./specs/ai-product-actions.md)。

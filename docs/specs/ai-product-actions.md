@@ -3,11 +3,11 @@
 | | |
 |--|--|
 | **状态** | 基础代码已完成；仅有非生产测试任务验证全链路，尚无生产重任务接入。图书思维导图和知识图谱都不走本规则的任务记录 |
-| **日期** | 2026-08-12 |
+| **日期** | 2026-08-13 |
 | **收口设计** | [ai-architecture-consolidation.md](../research/ai-architecture-consolidation.md) |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **工程** | [ENGINEERING.md](../ENGINEERING.md)「AI 边界」 |
-| **相关** | [ai.md](./ai.md)、[ai-workflow-extension.md](./ai-workflow-extension.md)、[ai-mind-map.md](./ai-mind-map.md)、[ai-graph.md](./ai-graph.md)、[ai-translation.md](./ai-translation.md) |
+| **相关** | [ai.md](./ai.md)、[ai-mind-map.md](./ai-mind-map.md)、[ai-graph.md](./ai-graph.md)、[ai-translation.md](./ai-translation.md) |
 | **适用范围** | 本书对话中由模型建议，或由 App 明确入口触发的产品动作 |
 
 > 本页规定未来 AI 长任务如何提出、确认、执行、取消、恢复和记录结果，不规定某个领域如何生成内容。代码类型仍沿用 `Proposal / Policy / Command / Journal / Receipt` 等名称，正文优先使用中文说明。
@@ -79,19 +79,19 @@ Read Tool 不进入产品动作审批，但仍受冻结作用域、参数预算�
 ### 3.2 重任务共用一套控制流程
 
 - 本节只适用于接入本规则的重任务。它们的自由输入、明确入口、范围卡片、失败重试和崩溃恢复都汇入同一 `AiProductActionController`。创建或修订先形成任务建议并经过权限判断；失败重试和恢复只引用既有执行命令与本地记录，不重新解释原始自然语言。
-- 动作发现与分发来自 `ProductActionRegistry` 的注册定义；完整扩展接口见 [ai-workflow-extension.md](./ai-workflow-extension.md)。
+- 动作发现与分发来自 `ProductActionRegistry` 的注册定义；新增长任务必须同时遵守本文的登记与执行规则。
 - 不为每个中文说法增加关键词路由、正则矩阵或专用隐式分支。
 - 不增加第二个意图模型。普通对话的同一模型可以回答、调用 Read Tool 或提出 Product Action Proposal。
 - 明确 UI 命令可以跳过模型判断，但不能绕过权限判断、本地任务记录和开始前检查。
 
-### 3.6 不经本协议 Journal 的 AI 能力（成文边界）
+### 3.3 不使用通用任务记录的 AI 能力
 
 并非所有 AI 能力都走 Product Action Journal。下表为**产品默认**：
 
 | 能力 | 入口 | 持久化 | Journal？ |
 |------|------|--------|-----------|
 | **图书思维导图（日常）** | 快捷 / 会话生成与修订 | `ai_chat/` 消息附件 | **否**（轻量会话路径，见 [ai-mind-map.md](./ai-mind-map.md)） |
-| **知识图谱** | 图谱 Tab | `ai_graph/` + 服务 checkpoint | **否**（Domain Job C1） |
+| **知识图谱** | 图谱 Tab | `ai_graph/` + 逐节保存 | **否**（使用图谱自己的生成与恢复流程） |
 | **整本译 / 导出 / 外写**（规划） | 待定 | 领域结果 | **是**（应走本规则） |
 
 约束：
@@ -100,21 +100,21 @@ Read Tool 不进入产品动作审批，但仍受冻结作用域、参数预算�
 2. 导图：会话体验验收，不以确认卡/强制「继续修改」为准。
 3. 不得口头发明「第三套」旁路；新重任务默认走本协议。
 
-### 3.3 框架无关
+### 3.4 不依赖某个模型框架
 
 - `AiActionProposal`、`AiActionDecision`、`AiAuthorizedCommand`、`AiActionReceipt` 与 Journal 都是 App 自有纯 Dart 契约。
 - Genkit Agent 的 Tool、Interrupt、Session、Snapshot 和 Artifact 不得成为产品数据库、会话文件或 WebDAV schema。
 - `LegacyAiAgentRuntime` 与未来 `GenkitAgentRuntime` 必须投影成同一 App 协议。
 - Genkit 可以承载 Interrupt/Resume，但不能拥有作品范围、产品授权、幂等、领域 Artifact 或 Workflow 提交权。
 
-### 3.4 最小权限与显式作用域
+### 3.5 最小权限与明确范围
 
 - 每轮只向模型声明当前可用工具和临时别名。
 - Command 必须携带冻结的 `contentHash`、可选 `workKey`、范围指纹和目标版本。
 - 作品、章节或 Artifact 不明确时不得猜测执行；进入补充信息状态。
 - 人类可读标题只用于展示，不作为身份键或授权依据。
 
-### 3.5 可恢复且至多一次提交
+### 3.6 可恢复且至多一次提交
 
 - Workflow 开始前必须先持久化 Command 和幂等键。
 - 重试可以产生新的 attempt，但不得重复提交同一个目标效果。
@@ -154,7 +154,7 @@ cancelRequested
 - 一个 Command 只能有一个产品终态。终态后的模型、网络和 Workflow 事件必须忽略并记录为晚到事件。
 - `cancelRequested` 不是终态。只有 Workflow 已停止产生可提交副作用，才可进入 `cancelled`。
 
-### 4.2 Proposal 与 Agent Run
+### 4.2 任务建议与对话运行
 
 - Product Tool Call 必须终止当前普通 Read Tool 循环，并投影成 `AiActionProposal`。
 - Proposal 产生后，不保存模型声称“已经生成”的伪完成正文。
@@ -317,12 +317,12 @@ Journal 至少保存 Proposal/Decision/Command/Receipt 引用、当前状态、�
 
 | 输入 | 期望 |
 |------|------|
-| “不用再出导图” | 普通回答；不得 Proposal |
-| “请再出一个详细导图” | 创建或修订 Proposal，取决于可信上下文 |
+| “不用再出导图” | 普通回答；不得生成或修订导图 |
+| “请再出一个详细导图” | 直接进入导图会话的创建或修订；目标不清楚时先追问 |
 | “不用，再出个详细导图” | 语义/标点有歧义时补充确认，不直接执行 |
 | 附件 + “这张图很好” | 普通回答 |
-| 附件 + “再详细一点” | 指向附件的修订 Proposal |
-| 附件 + “不用改了” | 普通回答或取消待确认 Proposal |
+| 附件 + “再详细一点” | 指向附件并直接进入导图会话修订 |
+| 附件 + “不用改了” | 普通回答；若导图正在生成则可停止当前生成 |
 
 ---
 
@@ -389,7 +389,7 @@ Genkit Tool Call / Interrupt
 - Resume 必须恢复原始 Proposal/Interrupt；不得手工伪造 Provider Tool Part 或让模型重新猜目标。
 - Genkit Session/Snapshot 可以帮助恢复普通 Agent Run，但产品等待态和已授权命令必须能在没有 Genkit Session 时独立恢复。
 - 当前锁定 `genkit 0.15.1` 的取消缺口未解除前，`GenkitAgentRuntime` 继续受运行时门禁限制；本协议先在兼容运行时落地。
-- 注册表、能力门禁、通用 Workflow Adapter、领域 Artifact 与多层版本以 [ai-workflow-extension.md](./ai-workflow-extension.md) 为准；Genkit `Artifact` 不能替代它们。
+- 注册表、能力检查、通用任务执行接口、领域生成结果与多层版本以本文 §13–§17 为准；Genkit `Artifact` 不能替代它们。
 
 背景参考：
 
@@ -402,7 +402,126 @@ Genkit Tool Call / Interrupt
 
 ---
 
-## 13. 可观察性与评测
+## 13. 新增长任务的登记规则
+
+### 13.1 何时必须登记为长任务
+
+满足以下任一条件的未来能力，必须接入本规则，不能复制一套聊天路由：
+
+- 需要较长时间运行，并且要取消、恢复或保存检查点；
+- 创建或修改独立保存的结果；
+- 写入数据库、文件、WebDAV 或外部系统；
+- 执行导出、分享、覆盖或删除；
+- 需要由本地执行结果证明成功、部分成功、失败或取消。
+
+只读目录、章节、搜索和取样仍是对话只读工具。图书思维导图是会话附件，知识图谱使用自己的逐节保存流程，两者当前都不写通用长任务记录。
+
+### 13.2 动作定义
+
+每个动作必须登记为一个不可变的 `AiProductActionDefinition`。当前代码支持以下字段：
+
+| 字段 | 说明 |
+|------|------|
+| `actionKind` | 全局唯一且稳定的动作类型 |
+| `definitionVersion` | 登记信息版本 |
+| `proposalSchemaVersion` | 模型或界面提交的参数版本 |
+| `commandSchemaVersion` | 任务执行器接收的参数版本 |
+| `workflowVersion` | 执行阶段和恢复语义版本 |
+| `artifactKind` / `artifactSchemaVersion` | 可选的结果类型和格式版本 |
+| `riskClass` | 只读、可逆、外部写入或破坏性风险 |
+| `supportedSources` | 允许模型工具或明确界面入口提出 |
+| `requiredCapabilities` | 缺少即不可见、不可执行的能力 |
+| `optionalCapabilities` | 缺少时可按领域规则降级的能力 |
+| `anyOfCapabilities` | 若干可替代能力，满足一组即可 |
+| `supportedScopes` | 章节、作品、整本文件或选定单元等范围 |
+| `argumentSchema` | 提供给工具目录的输入结构；领域解析器仍须自行严格校验 |
+| `toolName` / `toolDescription` | 需要开放给对话模型时的工具定义 |
+| `displayNameKey` | App 自己维护的本地化名称 |
+
+约束：
+
+- 动作类型和工具名不得重复、动态拼接或随语言变化；创建和修订可以明确共用同一种结果类型。
+- 模型不能用自由参数传数据库 ID、文件路径、凭据或未登记的子动作。当前通用注册表不会自动拒绝所有未知字段；新增生产领域必须在自己的解析器中拒绝未知字段，并用测试证明。
+- 每轮只向模型开放当前能力和作用范围真正可用的最小工具集合；明确界面入口也不能绕过能力检查。
+- 目前生产能力快照只包含 `book.read` 和 `structuredOutput`。长上下文、文件写入、渲染器、外部素材等只是未来扩展字段，不能写成已经自动检测。
+- 注册表只负责发现、重复检查和工具目录，不授权、不读取实时翻页位置，也不执行任务。
+
+### 13.3 领域接入接口
+
+每个生产长任务至少实现：
+
+1. 领域请求解析，把本轮临时别名解析成冻结的真实范围和目标；
+2. 确认卡文案和权限规则；
+3. `AiWorkflowAdapter`，提供开始前检查、启动、恢复、取消和状态查询；
+4. 领域检查点和结果仓库；
+5. 根据执行结果生成稳定的对话卡片或提示；
+6. 契约、恢复、失败、取消、重复提交、界面和真实模型测试。
+
+通用 Controller 不得为每个新动作增加 `switch(actionKind)`。领域通过 `AiProductActionDomainRegistry` 登记解析、执行接口和结果投影。
+
+---
+
+## 14. 执行、检查点与结果
+
+### 14.1 通用执行接口
+
+`AiWorkflowAdapter` 对外只有以下职责：
+
+```text
+preflight(command, environment)  → 开始前检查
+start(command, runContext)       → 运行事件流
+recover(recoveryRequest)         → 从已保存检查点恢复
+requestCancel(runId, reason)     → 请求取消
+inspect(runId)                   → 查询是否仍在运行
+```
+
+任务执行器只能读取 App 签发的固定命令、冻结正文和结构、已批准设置与预算，以及 App 注入的模型会话、取消信号、时钟、检查点和结果仓库。它不得读取实时翻页位置、输入框内容或全局“最近结果”补齐目标。
+
+### 14.2 运行事件与检查点
+
+当前通用事件覆盖接受、阶段开始、进度、检查点提交、结果就绪、成功、部分成功、失败和取消。每条事件必须带稳定运行 ID、单调序号和尝试次数，允许安全重放。
+
+- 检查点由领域版本化，不写入聊天消息，也不能用 Genkit Snapshot 代替。
+- 恢复只能从已提交检查点开始；新版本无法读取旧检查点时，必须明确废弃或运行迁移，不能静默从头重做副作用。
+- 请求取消后允许收到模型或网络的晚到数据，但不能再提交正式结果。
+- “确定性”指输入、阶段、预算、校验、停止条件、提交顺序和恢复由代码决定，不表示模型每次输出相同。
+
+### 14.3 版本和结果
+
+长任务至少分别记录：外层协议版本、动作定义版本、任务建议参数版本、执行命令参数版本、执行流程版本和结果格式版本。提示词与渲染器版本用于质量追踪，但不能代替数据兼容版本。
+
+正式结果使用 `AiArtifactEnvelope` 保存稳定 ID、类型、格式版本、修订号、书籍内容哈希、JSON 负载、创建时间和可选修订谱系。当前通用仓库并不知道领域负载的具体类型，领域在提交前必须自行校验。当前实现已有 JSON 原子写入、按命令查询、修订号比较和结果头指针；大型派生文件及 WebDAV 处理仍要由首个生产长任务验证。
+
+固定提交顺序：
+
+```text
+命令先写入任务记录
+  → 临时结果完成并校验
+  → 结果仓库原子提交或修订号比较提交
+  → 执行结果写入任务记录
+  → 对话显示正式结果
+```
+
+PNG、PPTX、Markdown 或压缩包只是领域结果的派生文件。先写临时文件，校验后再原子提交；写到用户选择的位置属于单独的外部写入动作。
+
+---
+
+## 15. 新增长任务的固定步骤
+
+1. 在 PRODUCT 中声明价值、状态、入口和非目标。
+2. 在领域规格中写清范围、输入、提示词职责、结果结构、存储和验收。
+3. 登记明确的动作类型、封闭参数结构、风险、来源、范围和能力要求。
+4. 实现领域解析，只把临时别名解析成冻结真实身份，不在这里授权或生成。
+5. 在权限矩阵登记明确入口、自由输入、重试、外部写入和破坏性操作。
+6. 实现任务执行接口、检查点、结果仓库和预览或导出器。
+7. 接入任务记录、执行结果和 App 自己的结果展示；先验证失败、取消、崩溃与重复提交。
+8. 增加语义、契约、恢复、Widget、真实模型和性能测试后再开放工具。
+
+例如未来增加演示文稿，应把“创建结构化演示内容”“修改演示内容”“导出 PPTX”登记为不同动作。模型返回结构化页面内容，PPTX 由 App 渲染；这只是扩展示例，不表示该功能已立项。
+
+---
+
+## 16. 可观察性与评测
 
 每个阶段至少记录脱敏结构化事件：
 
@@ -429,9 +548,9 @@ late_event.quarantined
 
 ---
 
-## 14. 测试矩阵
+## 17. 测试矩阵
 
-### 14.1 纯单元测试
+### 17.1 纯单元测试
 
 - Proposal schema、未知动作和别名拒绝。
 - Policy 授权矩阵全覆盖。
@@ -439,7 +558,7 @@ late_event.quarantined
 - Command 不可变、submission 级幂等键、Journal attempt 和 revision compare-and-set。
 - Journal 原子写入、终态唯一、晚到事件隔离。
 
-### 14.2 语义评测
+### 17.2 语义评测
 
 计划建立 200–300 条中文为主的最小对照集，至少覆盖：
 
@@ -451,7 +570,7 @@ late_event.quarantined
 
 语义评测只评价 Proposal/普通回答/补充信息选择，不直接执行真实 Workflow。
 
-### 14.3 集成与恢复测试
+### 17.3 集成与恢复测试
 
 - Proposal → 确认 → Command → Workflow → Receipt 正常链路。
 - 确认前杀进程，恢复同一等待卡片。
@@ -461,16 +580,16 @@ late_event.quarantined
 - 取消与 Provider 晚到结果；取消后不得持久化 Artifact。
 - WebDAV 合并按稳定消息/Artifact 身份去重，不同步本地等待态。
 
-### 14.4 Widget 测试
+### 17.4 Widget 测试
 
 - 对话内确认、补充、拒绝、过期和恢复卡片。
-- 附件只绑定目标；评价不修订，明确修改才出现 Proposal。
+- 附件只绑定目标；评价不修订，明确修改才进入对应任务或导图会话。
 - 键盘与按钮重复提交只产生一个 Proposal。
 - 屏幕阅读器能读出动作、范围、风险、按钮与状态变化；触控区符合 AI 面板规范。
 
 ---
 
-## 15. 实施情况与后续顺序
+## 18. 实施情况与后续顺序
 
 不得一次性替换当前对话和所有任务执行器。
 
@@ -502,7 +621,7 @@ late_event.quarantined
 ### P4 — 接入首个生产重任务（未开始）
 
 - 将整本翻译、写入笔记和导出等未来重任务逐项接入注册表；知识图谱是否迁入另行决定。
-- 按 [Workflow Extension Contract](./ai-workflow-extension.md) 落地 Action Definition、能力门禁、多层版本、Workflow Adapter、领域 Artifact 与 App-owned Receipt 投影。
+- 按本文 §13–§17 落地动作定义、能力检查、多层版本、任务执行接口、领域结果与 App 自己的执行结果展示。
 - 每新增动作只增加注册定义、schema、Policy、Gateway、Workflow adapter 和领域产物实现，不增加自然语言关键词路由或通用 Controller switch。
 
 ### P5 — 验证并尝试切换 Genkit Agent（未开始）
@@ -512,10 +631,10 @@ late_event.quarantined
 
 ---
 
-## 16. 完成标准
+## 19. 完成标准
 
 - [x] 通用任务控制基础：任务建议、权限判断、执行命令、本地记录和执行结果可用；领域注册与能力检查已有实现。
-- [x] 第二测试 Workflow（`test_book_export`）证明扩展路径。
+- [x] 非生产 `test_book_export` 证明新增任务不必修改通用分发代码。
 - [x] **图书思维导图产品规格**改为轻会话（本文矩阵与 [ai-mind-map.md](./ai-mind-map.md) 已对齐）。
 - [x] **导图实现**去掉自由输入确认卡与强制「继续修改」，对齐轻路径验收。
 - [ ] 为整本翻译或正式导出建立生产领域实现、恢复测试与用户界面。

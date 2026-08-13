@@ -27,7 +27,7 @@
 - `Collections` 与成员；
 - `ReadingDayStats` 与 `ReadingItemTime`（阅读时长；旧快照可无此字段）。
 
-不包含绝对路径、封面缓存、导入临时目录、WebView 缓存、WebDAV 凭据、API Key 和运行中的听书状态。用户主动快照会包含按 `contentHash` 归属的 AI 对话历史、已生成大纲、知识图谱和已完成的图书思维导图（见 [ai-graph.md](./ai-graph.md)、[ai-mind-map.md](./ai-mind-map.md)）；运行中思维导图 checkpoint 不上传。恢复时合并消息，本地已有大纲优先，图谱与思维导图本地已有则保留本地，不覆盖本地已有内容。恢复使用 `contentHash` 建立书籍身份，不能依赖数据库自增 ID 或本机 `filePath`。
+不包含绝对路径、封面缓存、导入临时目录、WebView 缓存、WebDAV 凭据、API Key 和运行中的听书状态。用户主动快照会包含按 `contentHash` 归属的 AI 对话历史、历史大纲数据、知识图谱和已完成的图书思维导图（见 [ai-graph.md](./ai-graph.md)、[ai-mind-map.md](./ai-mind-map.md)）。导图作为对话消息附件备份，本身没有独立运行检查点。通用长任务的本地记录、运行检查点和结果仓库当前不上传。恢复时合并消息，本地已有大纲优先，图谱与思维导图本地已有则保留本地，不覆盖本地已有内容。恢复使用 `contentHash` 建立书籍身份，不能依赖数据库自增 ID 或本机 `filePath`。
 
 ## 远端布局
 

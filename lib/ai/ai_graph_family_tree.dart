@@ -1,4 +1,4 @@
-/// Family-tree build (spec: docs/specs/ai-graph-narration.md §5).
+/// Family-tree build (spec: docs/specs/ai-graph.md §7.4).
 ///
 /// Turns person entities + directed 亲属 edges (source = elder, target =
 /// younger, per the step-0 direction convention) into a forest of hierarchy

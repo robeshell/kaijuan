@@ -3,14 +3,14 @@
 | | |
 |--|--|
 | **状态** | T0–T3 已实现（设置偏好 + 选区译）；T4 整本译待办 |
-| **日期** | 2026-08-04 |
+| **日期** | 2026-08-13 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **视觉** | [../DESIGN_FOUNDATION.md](../DESIGN_FOUNDATION.md) |
 | **相关** | [ai.md](./ai.md)、[book-reader.md](./book-reader.md)、[subpages.md](./subpages.md) |
-| **引擎** | 图书 reflow only；漫画页图翻译 **不做**（本 spec） |
+| **引擎** | 仅图书阅读器；漫画页图翻译另行设计 |
 
-> 产品状态只改 [PRODUCT.md](../PRODUCT.md)。本页写翻译偏好、选区交互、prompt 边界与切片验收。  
-> 与 AI 连接配置（BYOK / 服务商）正交：翻译偏好**不**按服务商分存。
+> 产品状态只改 [PRODUCT.md](../PRODUCT.md)。本页写翻译偏好、选区交互、提示词边界与验收。
+> 与 AI 连接配置（用户自备模型 / 服务商）无关：翻译偏好**不**按服务商分存。
 
 ---
 
@@ -99,7 +99,7 @@
 | `fixedTarget` | 固定译到目标语言 | **默认**。始终译向 `targetLanguage`。 |
 | `smartBidi` | 智能双向 | 原文脚本 ≈ 目标语言 → 译向「对侧」默认语言（中↔英）；否则译向目标语言。 |
 
-**v1 实现 `fixedTarget` 即可**；`smartBidi` 可同字段预留，UI 可先只展示「固定」或两项都做。
+`fixedTarget` 与 `smartBidi` 均已实现并可在设置中选择。
 
 **原文已是目标语言**（启发式：与目标语言脚本高度一致）：
 
@@ -129,7 +129,7 @@
 | `includeContext` | **false** |
 | `contextChars` | 100（开启时，前后各不超过该字数，按字符截断） |
 
-开启后 prompt 可带「选区前后文」，并标明哪一段是待译正文。
+开启后会读取选区前后的正文，并明确标出哪一段是待译内容。
 
 ### 4.6 写入笔记格式 `noteFormat`
 
@@ -182,7 +182,7 @@
 
 ---
 
-## 6. Prompt 边界（实现约束）
+## 6. 提示词边界（实现约束）
 
 ### 6.1 输入
 
@@ -190,7 +190,7 @@
 - **可选上下文**：仅当 `includeContext`；明确标注「以下为待译正文」。  
 - **目标语言**：解析后的语言名（如「简体中文」「English」）。  
 - **风格**：映射到简短指令（意译 / 直译 / 学术意译）。  
-- 选区、前后文、书名、作者和章节名全部是不可信引用数据，必须放在 user 消息的显式边界内；不得把电子书元数据直接插入 system prompt。
+- 选区、前后文、书名、作者和章节名全部是不可信引用数据，必须放在用户消息的明确边界内；不得把电子书元数据直接插入系统提示词。
 
 ### 6.2 输出
 
@@ -203,13 +203,13 @@
 - **不得**用猜文种覆盖用户选择的目标语言。  
 - 猜文种仅用于：  
   - 判断「原文是否已是目标语言」；  
-  - `smartBidi` 的对侧语言（若实现）。  
+  - `smartBidi` 的对侧语言。
 
 ---
 
 ## 7. 数据
 
-建议挂在 `AiSettings`（或并列 `AiTranslationPreferences` 写入同一 `ai_settings.json` 非机密文件）：
+翻译偏好存放在 `AiSettings`，写入同一份不含密钥的 `ai_settings.json`：
 
 ```text
 translation:
@@ -238,12 +238,12 @@ translation:
 ```text
 AiSettings / translation 字段
   → AiSettingsController（读写偏好）
-  → AiLanguageService（拼 prompt，读偏好 + 本次 override）
+  → AiLanguageService（组织提示词，读取偏好和本次临时设置）
   → BookReaderController.streamLanguageAssist(…, translationOverride?)
   → book_ai_language_sheet（展示、本次语言、再译）
 ```
 
-- UI **不**拼 prompt、**不**持有 HTTP。  
+- UI **不**组织提示词、**不**持有 HTTP 连接。
 - 系统翻译仍走 `performPlatformLanguageAction`。  
 
 ---
@@ -262,9 +262,9 @@ AiSettings / translation 字段
 | 切片 | 内容 | 验收 |
 |------|------|------|
 | **T0** | 偏好字段 + 设置 UI（目标语言、方向、风格、显示、上下文、笔记格式）；默认值见 §1 | **已有** |
-| **T1** | 选区翻译读偏好拼 prompt；原文≈目标语言时不请求并展示 §5.3 文案 | **已有** |
+| **T1** | 选区翻译读取偏好并组织提示词；原文≈目标语言时不请求并展示 §5.3 文案 | **已有** |
 | **T2** | 结果卡目标语言覆盖 + 自动再译；显示对照模式 | **已有** |
-| **T3** | 风格 + 上下文进 prompt（上下文需引擎提供前后文；开关已接） | **已有**（上下文正文待引擎） |
+| **T3** | 风格与选区前后文进入提示词；关闭上下文时只发送选区 | **已有** |
 | **T4** | 整本/按章任务复用偏好（见 PRODUCT M4） | **待办** |
 
 ---
@@ -273,10 +273,10 @@ AiSettings / translation 字段
 
 | 能力 | PRODUCT | 本页 |
 |------|---------|------|
-| 选区 AI 翻译 MVP | 已有 | 交互加深 T0–T3 |
-| 翻译偏好设置 | 近 | §4、T0 |
+| 选区 AI 翻译 MVP | 已有 | T0–T3 已实现 |
+| 翻译偏好设置 | 已有 | §4、T0 |
 | 整本/按章译 | 中 | T4 + ai.md M4 |
-| 系统翻译 fallback | 已有 | §5.2 |
+| 系统翻译回退 | 已有 | §5.2 |
 
 冲突时以 **PRODUCT** 为准，再改本页。
 
@@ -296,10 +296,9 @@ AiSettings / translation 字段
 
 ---
 
-## 13. 文档回写清单（实现时）
+## 13. 文档对齐情况
 
-- [ ] PRODUCT §6：翻译偏好 / 选区译状态更新  
-- [ ] ai.md §4.2 翻译卡指向本页  
-- [ ] book-reader.md：选区翻译行为  
-- [ ] ENGINEERING：`AiSettings` 翻译字段  
-- [ ] 本页状态：按 T0–T4 推进  
+- [x] PRODUCT §6：翻译偏好与选区翻译状态已更新
+- [x] ai.md：选区翻译指向本页
+- [x] book-reader.md：记录选区翻译已经实现
+- [x] 本页状态：T0–T3 已实现，T4 待办

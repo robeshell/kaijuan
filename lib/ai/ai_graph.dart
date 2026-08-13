@@ -380,7 +380,7 @@ class AiGraphRelation {
 
   /// Concrete kinship label for 亲属/婚配 relations (父子/夫妻/兄弟…); empty
   /// for non-kin or graphs generated before this field existed. Shown on
-  /// family-tree edges (spec: ai-graph-narration §5.1).
+  /// family-tree edges (spec: ai-graph §7.4).
   final String kin;
   final List<AiGraphEvidence> evidence;
 
@@ -459,7 +459,7 @@ class AiGraphRelation {
   }
 }
 
-/// Book-level display plan (spec: docs/specs/ai-graph-narration.md §3).
+/// Book-level display plan (spec: docs/specs/ai-graph.md §6.1).
 ///
 /// Produced by the model at pipeline step 0 from the book title, outline and
 /// a body sample. Only affects *display* preferences — default view, entry

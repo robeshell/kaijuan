@@ -127,7 +127,7 @@ class AiBookGraphService {
   /// Whole-run corpus budget (mirrors outline's cap).
   static const int maxBookBodyChars = 1500000;
 
-  /// Step-0 display plan call (spec: docs/specs/ai-graph-narration.md §3).
+  /// Step-0 display plan call (spec: docs/specs/ai-graph.md §6.1).
   ///
   /// One whole-book call (title + outline labels + body sample) asking the
   /// model for the five-dimension narration profile and the recommended
@@ -1243,7 +1243,7 @@ class AiBookGraphService {
   /// the junior a candidate parent and pollutes the family tree.
   /// Objective quality gate over a generated graph — pure structure
   /// self-consistency, no human annotation, so any book can be screened
-  /// automatically after generation (docs/specs/ai-graph-pipeline.md §5).
+  /// automatically after generation (docs/specs/ai-graph.md §5).
   /// Anything the pipeline is supposed to have fixed (flipped kin mirrors,
   /// kin-less 亲属 edges, mislabelled high-evidence references) lands in
   /// [AiGraphQualityReport.issues]; the other metrics are informational.

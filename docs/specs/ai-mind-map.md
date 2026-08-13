@@ -6,7 +6,7 @@
 | **日期** | 2026-08-13 |
 | **PRODUCT** | [§6](../PRODUCT.md) |
 | **相关** | [ai.md](./ai.md)、[ai-product-actions.md](./ai-product-actions.md)、[ai-graph.md](./ai-graph.md)、[webdav-backup.md](./webdav-backup.md) |
-| **引擎** | 图书 reflow only；漫画页图另案 |
+| **引擎** | 仅图书阅读器；漫画页图另行设计 |
 | **模型接入** | **不引入 LangChain**；模型请求用现有 Genkit 适配层，范围和保存由 App 负责 |
 
 ---
@@ -28,15 +28,17 @@
 - 普通聊天 Mermaid 仍是通用富内容，**不得**解析、导入或迁移为原生 `AiBookMindMap`。  
 - **不引入 LangChain**。生成与改图使用当前对话模型的原生工具调用，再由 `AiBookMindMapService` 进行结构化生成；Genkit 只负责模型请求和结构化输出。
 
-### 1.1 与 Product Action 的边界
+### 1.1 与长任务规则的边界
 
 | 路径 | 适用 |
 |------|------|
-| **会话路径（导图默认，已落地）** | 快捷 / 自由输入 create·revise → 冻结 → 生成 → 对话附件；无确认卡、无「继续修改」 |
+| **会话路径（导图默认，已落地）** | 快捷或自由输入生成、修订 → 冻结范围 → 生成 → 对话附件；无确认卡、无「继续修改」 |
 | **长任务控制基础** | 仅预留给整本翻译、正式导出等任务；**生产导图不调用** |
 | **遗留代码** | `lib/ai/legacy/` 中旧 Workflow/大纲 batch 仅测试与考古 |
 
 控制面协议本身可保留为平台能力，见 [ai-product-actions.md](./ai-product-actions.md)；**导图规格以本节轻路径为准**。
+
+实现中的 `BookAiActionHost` 是共用分发入口，不代表导图使用长任务机制。它收到导图请求后直接调用会话生成；阅读器打开时，旧版本尚未结束的导图任务记录会被标为废弃，不会恢复成新任务。
 
 ---
 
