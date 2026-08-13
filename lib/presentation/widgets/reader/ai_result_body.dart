@@ -98,16 +98,18 @@ class AiResultBody extends StatelessWidget {
           height: 1.45,
           backgroundColor: codeSurface,
         ),
-        h1: headingBase.copyWith(fontSize: context.aiBodySize + 2),
-        h2: headingBase.copyWith(fontSize: context.aiBodySize + 1),
+        // Chat hierarchy is weight + spacing, not a magazine type scale.
+        // h4–h6 stay at body size so deeper headings never look like captions.
+        h1: headingBase.copyWith(fontSize: context.aiBodySize + 1),
+        h2: headingBase,
         h3: headingBase,
-        h4: headingBase.copyWith(fontSize: context.aiLabelSize),
+        h4: headingBase.copyWith(fontWeight: FontWeight.w500),
         h5: headingBase.copyWith(
-          fontSize: context.aiLabelSize,
+          fontWeight: FontWeight.w500,
           color: context.appSecondaryText,
         ),
         h6: headingBase.copyWith(
-          fontSize: context.aiDetailSize,
+          fontWeight: FontWeight.w500,
           color: context.appSecondaryText,
         ),
         h1Padding: EdgeInsets.only(top: compact ? 8 : 10, bottom: 2),
