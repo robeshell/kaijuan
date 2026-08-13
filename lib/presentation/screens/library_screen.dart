@@ -21,6 +21,7 @@ import '../widgets/collection_cover.dart';
 import '../widgets/cover_card_ink.dart';
 import '../widgets/selection_action_sheet.dart';
 import '../widgets/settings_components.dart';
+import '../widgets/reader/book_cover_hero.dart';
 import '../widgets/wifi_transfer_sheet.dart';
 import 'collections_screen.dart';
 import 'lists_screen.dart';
@@ -367,7 +368,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  void _openItem(ReadingItem item) {
+  void _openItem(BuildContext context, ReadingItem item) {
     openReadingItem(
       context,
       database: widget.controller.database,
@@ -377,12 +378,12 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  void _onItemTap(LibraryEntry entry) {
+  void _onItemTap(BuildContext context, LibraryEntry entry) {
     if (_selecting) {
       _toggleSelected(entry.item.id);
       return;
     }
-    _openItem(entry.item);
+    _openItem(context, entry.item);
   }
 
   void _onItemLongPress(LibraryEntry entry) {
@@ -1374,7 +1375,7 @@ class _GridBody extends StatelessWidget {
   final LibraryController controller;
   final ComicReadingPreferences? readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
-  final ValueChanged<LibraryEntry> onTap;
+  final void Function(BuildContext context, LibraryEntry entry) onTap;
   final ValueChanged<LibraryEntry> onLongPress;
 
   @override
@@ -1417,7 +1418,7 @@ class _GridBody extends StatelessWidget {
           entry: entry,
           selecting: selecting,
           isSelected: selected.contains(entry.item.id),
-          onTap: () => onTap(entry),
+          onTap: () => onTap(context, entry),
           onLongPress: () => onLongPress(entry),
         );
       },
@@ -1447,7 +1448,7 @@ class _ListBody extends StatelessWidget {
   final LibraryController controller;
   final ComicReadingPreferences? readingPreferences;
   final BookReadingPreferences? bookReadingPreferences;
-  final ValueChanged<LibraryEntry> onTap;
+  final void Function(BuildContext context, LibraryEntry entry) onTap;
   final ValueChanged<LibraryEntry> onLongPress;
 
   @override
@@ -1497,35 +1498,38 @@ class _ListBody extends StatelessWidget {
           leading: SizedBox(
             width: 48,
             height: 64,
-            child: SoftCoverFrame(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  item.coverPath != null
-                      ? Image.file(
-                          File(item.coverPath!),
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          height: double.infinity,
-                          errorBuilder: (_, _, _) => ColoredBox(
+            child: CoverFlightHandle(
+              itemId: item.id,
+              child: SoftCoverFrame(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    item.coverPath != null
+                        ? Image.file(
+                            File(item.coverPath!),
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            height: double.infinity,
+                            errorBuilder: (_, _, _) => ColoredBox(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                            ),
+                          )
+                        : ColoredBox(
                             color: Theme.of(context).scaffoldBackgroundColor,
                           ),
-                        )
-                      : ColoredBox(
-                          color: Theme.of(context).scaffoldBackgroundColor,
-                        ),
-                  if (selecting)
-                    Positioned(
-                      right: 2,
-                      bottom: 2,
-                      child: CoverSelectBadge(selected: isSelected, size: 18),
-                    ),
-                ],
+                    if (selecting)
+                      Positioned(
+                        right: 2,
+                        bottom: 2,
+                        child: CoverSelectBadge(selected: isSelected, size: 18),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
           title: Text(item.title),
-          onTap: () => onTap(entry),
+          onTap: () => onTap(context, entry),
           onLongPress: () => onLongPress(entry),
         );
       },
@@ -1619,48 +1623,53 @@ class _GridCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: SoftCoverFrame(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    item.coverPath != null
-                        ? Image.file(
-                            File(item.coverPath!),
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            errorBuilder: (_, _, _) => ColoredBox(
+              child: CoverFlightHandle(
+                itemId: item.id,
+                child: SoftCoverFrame(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      item.coverPath != null
+                          ? Image.file(
+                              File(item.coverPath!),
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              errorBuilder: (_, _, _) => ColoredBox(
+                                color: Theme.of(
+                                  context,
+                                ).scaffoldBackgroundColor,
+                              ),
+                            )
+                          : ColoredBox(
                               color: Theme.of(context).scaffoldBackgroundColor,
                             ),
-                          )
-                        : ColoredBox(
-                            color: Theme.of(context).scaffoldBackgroundColor,
-                          ),
-                    if (item.onShelf && !selecting)
-                      Positioned(
-                        top: 6,
-                        left: 6,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.35),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
-                            child: Icon(
-                              KaijuanIcons.bookmarkFilled,
-                              size: 12,
-                              color: Colors.white,
+                      if (item.onShelf && !selecting)
+                        Positioned(
+                          top: 6,
+                          left: 6,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.35),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(
+                                KaijuanIcons.bookmarkFilled,
+                                size: 12,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    if (selecting)
-                      Positioned(
-                        right: 6,
-                        bottom: 6,
-                        child: CoverSelectBadge(selected: isSelected),
-                      ),
-                  ],
+                      if (selecting)
+                        Positioned(
+                          right: 6,
+                          bottom: 6,
+                          child: CoverSelectBadge(selected: isSelected),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),

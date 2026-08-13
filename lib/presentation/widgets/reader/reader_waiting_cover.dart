@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart'; // appIsShortViewport + appPrimaryText
 import '../../../core/theme/brand_tokens.g.dart';
+import 'book_cover_hero.dart';
 
 /// Window-fitted cover shown while a reader prepares content (Apple Books–style
 /// open). Backdrop is painted by the reveal layer behind this widget.
@@ -22,8 +23,12 @@ class ReaderWaitingCover extends StatelessWidget {
     final path = coverPath;
     // Phone landscape: less inset so the cover still reads at usable size.
     final short = context.appIsShortViewport;
-    final hPad = short ? 28.0 : 40.0;
-    final vPad = short ? 16.0 : 48.0;
+    final hPad = short
+        ? CoverFlightGeometry.destHPadShort
+        : CoverFlightGeometry.destHPad;
+    final vPad = short
+        ? CoverFlightGeometry.destVPadShort
+        : CoverFlightGeometry.destVPad;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),

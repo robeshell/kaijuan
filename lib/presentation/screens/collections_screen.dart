@@ -15,6 +15,7 @@ import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/collection_cover.dart';
 import '../widgets/cover_card_ink.dart';
+import '../widgets/reader/book_cover_hero.dart';
 import '../widgets/selection_action_sheet.dart';
 import '../widgets/settings_components.dart';
 
@@ -426,7 +427,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     });
   }
 
-  void _openItem(ReadingItem item) {
+  void _openItem(BuildContext context, ReadingItem item) {
     openReadingItem(
       context,
       database: widget.controller.database,
@@ -436,12 +437,12 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     );
   }
 
-  void _onTap(ReadingItem item) {
+  void _onTap(BuildContext context, ReadingItem item) {
     if (_selecting) {
       _toggle(item.id);
       return;
     }
-    _openItem(item);
+    _openItem(context, item);
   }
 
   void _onLongPress(ReadingItem item) {
@@ -720,7 +721,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                     borderRadius: BorderRadius.circular(
                                       AppProductRadii.cover,
                                     ),
-                                    onTap: () => _onTap(item),
+                                    onTap: () => _onTap(context, item),
                                     onLongPress: () => _onLongPress(item),
                                     enablePressScale: !_selecting,
                                     child: Column(
@@ -728,34 +729,40 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                           CrossAxisAlignment.start,
                                       children: [
                                         Expanded(
-                                          child: SoftCoverFrame(
-                                            child: Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                item.coverPath != null
-                                                    ? Image.file(
-                                                        File(item.coverPath!),
-                                                        fit: BoxFit.cover,
-                                                        width: double.infinity,
-                                                        errorBuilder:
-                                                            (_, _, _) =>
-                                                                ColoredBox(
-                                                                  color:
-                                                                      fallback,
-                                                                ),
-                                                      )
-                                                    : ColoredBox(
-                                                        color: fallback,
+                                          child: CoverFlightHandle(
+                                            itemId: item.id,
+                                            child: SoftCoverFrame(
+                                              child: Stack(
+                                                fit: StackFit.expand,
+                                                children: [
+                                                  item.coverPath != null
+                                                      ? Image.file(
+                                                          File(item.coverPath!),
+                                                          fit: BoxFit.cover,
+                                                          width:
+                                                              double.infinity,
+                                                          errorBuilder:
+                                                              (
+                                                                _,
+                                                                _,
+                                                                _,
+                                                              ) => ColoredBox(
+                                                                color: fallback,
+                                                              ),
+                                                        )
+                                                      : ColoredBox(
+                                                          color: fallback,
+                                                        ),
+                                                  if (_selecting)
+                                                    Positioned(
+                                                      right: 6,
+                                                      bottom: 6,
+                                                      child: CoverSelectBadge(
+                                                        selected: isSelected,
                                                       ),
-                                                if (_selecting)
-                                                  Positioned(
-                                                    right: 6,
-                                                    bottom: 6,
-                                                    child: CoverSelectBadge(
-                                                      selected: isSelected,
                                                     ),
-                                                  ),
-                                              ],
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ),

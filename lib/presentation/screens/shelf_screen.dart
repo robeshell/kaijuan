@@ -13,6 +13,7 @@ import '../navigation/open_reading_item.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/cover_card_ink.dart';
+import '../widgets/reader/book_cover_hero.dart';
 import '../widgets/settings_components.dart';
 
 /// Shelf: 继续阅读 + 最近 + 我的书架（仅单本钉选；合集在书库展示）.
@@ -141,7 +142,7 @@ class ShelfScreen extends StatelessWidget {
                         path: recent.first.item.coverPath,
                         title: recent.first.item.title,
                       ),
-                      onTap: () => _openReal(context, recent.first.item),
+                      onTap: (ctx) => _openReal(ctx, recent.first.item),
                     ),
                     if (recent.length > 1) ...[
                       const SizedBox(height: 32),
@@ -169,7 +170,7 @@ class ShelfScreen extends StatelessWidget {
                                 path: e.item.coverPath,
                                 title: e.item.title,
                               ),
-                              onTap: () => _openReal(context, e.item),
+                              onTap: (ctx) => _openReal(ctx, e.item),
                             );
                           },
                         ),
@@ -200,7 +201,7 @@ class ShelfScreen extends StatelessWidget {
                               path: item.coverPath,
                               title: item.title,
                             ),
-                            onTap: () => _openReal(context, item),
+                            onTap: (ctx) => _openReal(ctx, item),
                             onLongPress: () =>
                                 _showShelfItemMenu(context, item),
                             onRemove: () => _removeFromShelf(context, item),
@@ -257,7 +258,7 @@ class _HeroCard extends StatelessWidget {
   final Color hairline;
   final Color muted;
   final Widget cover;
-  final VoidCallback onTap;
+  final ValueChanged<BuildContext> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +271,7 @@ class _HeroCard extends StatelessWidget {
           button: true,
           label: '继续阅读$title，已读 ${(p * 100).round()}%',
           child: CoverCardInk(
-            onTap: onTap,
+            onTap: () => onTap(context),
             borderRadius: BorderRadius.circular(AppRadii.card),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -363,7 +364,7 @@ class _CoverCard extends StatelessWidget {
   final double? progress;
   final Color accent;
   final Color hairline;
-  final VoidCallback onTap;
+  final ValueChanged<BuildContext> onTap;
   final VoidCallback? onLongPress;
 
   /// Optional cover control to remove a pinned shelf item (spec: 封面按钮).
@@ -381,7 +382,7 @@ class _CoverCard extends StatelessWidget {
         button: true,
         label: semanticLabel,
         child: CoverCardInk(
-          onTap: onTap,
+          onTap: () => onTap(context),
           onLongPress: onLongPress,
           borderRadius: BorderRadius.circular(AppProductRadii.cover),
           child: Column(
@@ -497,17 +498,20 @@ class _FileOrFallbackCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canvas = Theme.of(context).scaffoldBackgroundColor;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppProductRadii.cover),
-      child: path != null
-          ? Image.file(
-              File(path!),
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              errorBuilder: (_, _, _) => ColoredBox(color: canvas),
-            )
-          : ColoredBox(color: canvas),
+    return CoverFlightHandle(
+      itemId: itemId,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppProductRadii.cover),
+        child: path != null
+            ? Image.file(
+                File(path!),
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                errorBuilder: (_, _, _) => ColoredBox(color: canvas),
+              )
+            : ColoredBox(color: canvas),
+      ),
     );
   }
 }

@@ -11,6 +11,7 @@ import '../../ai/ai_workflow_contract.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../core/platform_window.dart';
 import '../../core/text_editing_focus.dart';
+import '../../core/theme.dart';
 import '../../domain/reader_models.dart';
 import '../../library/persistence/app_database.dart';
 import '../../library/stats/reading_time_tracker.dart';
@@ -22,9 +23,11 @@ import '../../readers/book/foliate_js_engine_adapter.dart';
 import '../controllers/ai_settings_controller.dart';
 import '../controllers/book_reader_controller.dart';
 import '../navigation/app_route_observer.dart';
+import '../navigation/cover_open_page_route.dart';
 import '../widgets/ai_settings_scope.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/reader/book_annotation_note_sheet.dart';
+import '../widgets/reader/book_cover_hero.dart';
 import '../widgets/reader/book_image_viewer.dart';
 import '../widgets/reader/book_nav_drawer.dart';
 import '../widgets/reader/book_page_meta_overlay.dart';
@@ -35,9 +38,9 @@ import '../widgets/reader/reader_waiting_cover.dart';
 
 /// Full-screen reflow book reader.
 ///
-/// Open UX follows Apple Books: fitted cover on the reading backdrop, wait for
-/// Foliate, dissolve the cover into that backdrop, then ease the backdrop into
-/// the text.
+/// Open UX: the library cover travels along a slight arc while growing into
+/// the waiting frame; Foliate then dissolves that cover into the text. Close
+/// reverses the same path back to the card.
 class BookReaderScreen extends StatefulWidget {
   const BookReaderScreen({
     super.key,
@@ -45,6 +48,7 @@ class BookReaderScreen extends StatefulWidget {
     required this.item,
     this.readingPreferences,
     this.aiSettings,
+    this.sourceCoverRect,
   });
 
   final AppDatabase database;
@@ -54,29 +58,43 @@ class BookReaderScreen extends StatefulWidget {
   /// Optional; when null the screen resolves [AiSettingsScope] from context.
   final AiSettingsController? aiSettings;
 
+  /// Global bounds of the tapped cover; used to keep the waiting frame
+  /// aligned with the flying cover after the route animation settles.
+  final Rect? sourceCoverRect;
+
   static Future<void> open(
     BuildContext context, {
     required AppDatabase database,
     required ReadingItem item,
     BookReadingPreferences? readingPreferences,
+    Rect? sourceCoverRect,
   }) {
     // Resolve from the navigator context (fully mounted) so initState of the
     // new route does not miss the inherited scope.
     final aiSettings = AiSettingsScope.maybeOf(context);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final captured =
+        sourceCoverRect ?? CoverFlightHandle.resolve(context, item.id);
+    final source = reduceMotion ? null : captured;
+    final backdrop = Color(
+      readingPreferences?.readingTheme.backgroundArgb ??
+          BookReadingTheme.paper.backgroundArgb,
+    );
     return Navigator.of(context, rootNavigator: true).push<void>(
-      PageRouteBuilder<void>(
-        transitionDuration: Duration.zero,
-        reverseTransitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (context, animation, secondaryAnimation) {
+      CoverOpenPageRoute<void>(
+        sourceRect: source,
+        coverPath: item.coverPath,
+        title: item.title,
+        backdropColor: backdrop,
+        itemId: item.id,
+        builder: (context) {
           return BookReaderScreen(
             database: database,
             item: item,
             readingPreferences: readingPreferences,
             aiSettings: aiSettings ?? AiSettingsScope.maybeOf(context),
+            sourceCoverRect: source,
           );
-        },
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
         },
       ),
     );
@@ -98,6 +116,11 @@ class _BookReaderScreenState extends State<BookReaderScreen>
   bool _revealStarted = false;
   bool _lastTtsPlaying = false;
   ModalRoute<dynamic>? _route;
+  Animation<double>? _routeAnimation;
+  bool _allowEngineView = false;
+  bool _closing = false;
+  bool _preparedClose = false;
+  bool _openScheduled = false;
 
   @override
   void initState() {
@@ -149,7 +172,10 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     // When AI/search/note TextFields take focus, drop WKWebView first-responder
     // so Cmd/Ctrl+C·V reach Flutter instead of the platform view.
     FocusManager.instance.addListener(_onGlobalFocusChange);
-    unawaited(_openBookFile());
+    // File I/O + WebView must not share the first cover-flight frames.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback(_startDeferredOpen);
+    });
   }
 
   bool _aiStoresAttachStarted = false;
@@ -276,6 +302,51 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     _reveal.duration = reduceMotion
         ? Duration.zero
         : const Duration(milliseconds: 420);
+    final routeAnim = route?.animation;
+    if (routeAnim != _routeAnimation) {
+      _routeAnimation?.removeStatusListener(_onRouteAnimationStatus);
+      _routeAnimation?.removeListener(_onRouteAnimationTick);
+      _routeAnimation = routeAnim;
+      _routeAnimation?.addStatusListener(_onRouteAnimationStatus);
+      _routeAnimation?.addListener(_onRouteAnimationTick);
+    }
+  }
+
+  void _startDeferredOpen(Duration _) {
+    if (!mounted || _closing || _openScheduled) return;
+    _openScheduled = true;
+    unawaited(_openBookFile());
+    _onRouteAnimationTick();
+  }
+
+  void _onRouteAnimationTick() {
+    if (_allowEngineView || _closing || !mounted) return;
+    final anim = _routeAnimation;
+    if (anim == null ||
+        anim.isCompleted ||
+        anim.value >= 0.72 ||
+        !CoverFlightGeometry.isUsable(widget.sourceCoverRect)) {
+      _mountEngineView();
+    }
+  }
+
+  void _mountEngineView() {
+    if (!mounted || _allowEngineView || _closing) return;
+    setState(() => _allowEngineView = true);
+  }
+
+  void _onRouteAnimationStatus(AnimationStatus status) {
+    if (!mounted) return;
+    if (status == AnimationStatus.completed) {
+      _mountEngineView();
+      _maybeStartReveal(_engine.rendererReady);
+    }
+  }
+
+  bool get _routeFlightActive {
+    final anim = _routeAnimation;
+    if (anim == null) return false;
+    return !anim.isCompleted && !anim.isDismissed;
   }
 
   Future<void> _openBookFile() async {
@@ -300,15 +371,79 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   void _maybeStartReveal(bool contentReady) {
     if (!contentReady || _revealStarted || !_showReveal) return;
+    if (_routeFlightActive) return;
     _revealStarted = true;
     _openTrace?.mark('cover-reveal-started');
     unawaited(_reveal.forward());
   }
 
+  bool get _needsPreparedClose {
+    return CoverFlightGeometry.isUsable(widget.sourceCoverRect) &&
+        !MediaQuery.disableAnimationsOf(context);
+  }
+
+  Future<void> _prepareCoverClose() async {
+    if (_preparedClose) return;
+    _preparedClose = true;
+    _reveal.stop();
+    _reveal.value = 0;
+    if (mounted) {
+      setState(() {
+        _closing = true;
+        _allowEngineView = false;
+        _showReveal = true;
+      });
+    }
+    final route = ModalRoute.of(context);
+    if (route is CoverOpenPageRoute<void>) {
+      route.preparePreviousRoute();
+    }
+  }
+
   void _exit() {
     unawaited(_controller.stopTts());
     if (_controller.chromeVisible) _controller.hideChrome();
+    unawaited(_popReader());
+  }
+
+  Future<void> _popReader() async {
+    if (_needsPreparedClose) {
+      await _prepareCoverClose();
+      if (!mounted) return;
+      await SchedulerBinding.instance.endOfFrame;
+      if (!mounted) return;
+      await SchedulerBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     Navigator.of(context, rootNavigator: true).pop();
+  }
+
+  Widget _waitingCover(BuildContext context) {
+    final source = widget.sourceCoverRect;
+    if (!CoverFlightGeometry.isUsable(source)) {
+      return ReaderWaitingCover(
+        coverPath: widget.item.coverPath,
+        title: widget.item.title,
+      );
+    }
+    final dest = CoverFlightGeometry.destinationRect(
+      viewport: MediaQuery.sizeOf(context),
+      safePadding: MediaQuery.paddingOf(context),
+      aspectRatio: source!.size.aspectRatio,
+      shortViewport: context.appIsShortViewport,
+    );
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fromRect(
+          rect: dest,
+          child: CoverFlightLeaf(
+            coverPath: widget.item.coverPath,
+            title: widget.item.title,
+          ),
+        ),
+      ],
+    );
   }
 
   void _openToc() => _scaffoldKey.currentState?.openDrawer();
@@ -452,98 +587,110 @@ class _BookReaderScreenState extends State<BookReaderScreen>
                 ? Duration.zero
                 : const Duration(milliseconds: 200);
 
-            return Focus(
-              focusNode: _focusNode,
-              autofocus: _controller.isReady && !_showReveal,
-              onKeyEvent: _handleKeyEvent,
-              child: Scaffold(
-                key: _scaffoldKey,
-                resizeToAvoidBottomInset: false,
-                drawerEnableOpenDragGesture: false,
-                drawer: _controller.isReady
-                    ? BookNavDrawer(
-                        controller: _controller,
-                        onOpenTocEntry: _engine.openTocEntry,
-                        onOpenNote: _openNoteFromDrawer,
-                      )
-                    : null,
-                backgroundColor: bg,
-                body: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _engine.buildView(context),
-                    if (_showReveal)
-                      IgnorePointer(
-                        child: AnimatedBuilder(
-                          animation: _reveal,
-                          builder: (context, _) {
-                            final coverT = Curves.easeOutCubic.transform(
-                              const Interval(0, 0.52).transform(_reveal.value),
-                            );
-                            final pageT = Curves.easeInOut.transform(
-                              const Interval(0.48, 1).transform(_reveal.value),
-                            );
-                            final coverChild = ReaderWaitingCover(
-                              coverPath: widget.item.coverPath,
-                              title: widget.item.title,
-                            );
-                            return Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                // Reading backdrop under the cover; holds until
-                                // the cover is gone, then eases into the text.
-                                Opacity(
-                                  opacity: (1 - pageT).clamp(0.0, 1.0),
-                                  child: ColoredBox(color: bg),
-                                ),
-                                Opacity(
-                                  opacity: (1 - coverT).clamp(0.0, 1.0),
-                                  child: reduceMotion
-                                      ? coverChild
-                                      : Transform.scale(
-                                          scale: 1 + 0.1 * coverT,
-                                          filterQuality: FilterQuality.low,
-                                          child: coverChild,
-                                        ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    if (_controller.isReady && !_showReveal) ...[
-                      BookPageMetaOverlay(controller: _controller),
-                      BookSelectionMenuOverlay(controller: _controller),
-                      IgnorePointer(
-                        ignoring: !_controller.chromeVisible,
-                        child: AnimatedOpacity(
-                          opacity: _controller.chromeVisible ? 1 : 0,
-                          duration: chromeAnim,
-                          curve: Curves.easeOut,
-                          child: BookReaderChrome(
-                            controller: _controller,
-                            onBack: _exit,
-                            onOpenToc: _openToc,
+            return PopScope(
+              canPop: !_needsPreparedClose || _preparedClose,
+              onPopInvokedWithResult: (didPop, _) {
+                if (didPop) return;
+                _exit();
+              },
+              child: Focus(
+                focusNode: _focusNode,
+                autofocus: _controller.isReady && !_showReveal,
+                onKeyEvent: _handleKeyEvent,
+                child: Scaffold(
+                  key: _scaffoldKey,
+                  resizeToAvoidBottomInset: false,
+                  drawerEnableOpenDragGesture: false,
+                  drawer: _controller.isReady
+                      ? BookNavDrawer(
+                          controller: _controller,
+                          onOpenTocEntry: _engine.openTocEntry,
+                          onOpenNote: _openNoteFromDrawer,
+                        )
+                      : null,
+                  backgroundColor: bg,
+                  body: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _allowEngineView && !_closing
+                          ? _engine.buildView(context)
+                          : ColoredBox(color: bg),
+                      if (_showReveal)
+                        IgnorePointer(
+                          child: AnimatedBuilder(
+                            animation: _reveal,
+                            builder: (context, _) {
+                              final coverT = Curves.easeOutCubic.transform(
+                                const Interval(
+                                  0,
+                                  0.52,
+                                ).transform(_reveal.value),
+                              );
+                              final pageT = Curves.easeInOut.transform(
+                                const Interval(
+                                  0.48,
+                                  1,
+                                ).transform(_reveal.value),
+                              );
+                              final coverChild = _waitingCover(context);
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  // Reading backdrop under the cover; holds until
+                                  // the cover is gone, then eases into the text.
+                                  Opacity(
+                                    opacity: (1 - pageT).clamp(0.0, 1.0),
+                                    child: ColoredBox(color: bg),
+                                  ),
+                                  Opacity(
+                                    opacity: (1 - coverT).clamp(0.0, 1.0),
+                                    child: reduceMotion
+                                        ? coverChild
+                                        : Transform.scale(
+                                            scale: 1 + 0.1 * coverT,
+                                            filterQuality: FilterQuality.low,
+                                            child: coverChild,
+                                          ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ),
-                      ),
-                      if (_controller.search.open)
-                        BookSearchPanel(
-                          controller: _controller.search,
-                          readingTheme: _controller.preferences.readingTheme,
+                      if (_controller.isReady && !_showReveal) ...[
+                        BookPageMetaOverlay(controller: _controller),
+                        BookSelectionMenuOverlay(controller: _controller),
+                        IgnorePointer(
+                          ignoring: !_controller.chromeVisible,
+                          child: AnimatedOpacity(
+                            opacity: _controller.chromeVisible ? 1 : 0,
+                            duration: chromeAnim,
+                            curve: Curves.easeOut,
+                            child: BookReaderChrome(
+                              controller: _controller,
+                              onBack: _exit,
+                              onOpenToc: _openToc,
+                            ),
+                          ),
                         ),
-                      if (_controller.search.imageOpen)
-                        BookImageViewer(controller: _controller.search),
+                        if (_controller.search.open)
+                          BookSearchPanel(
+                            controller: _controller.search,
+                            readingTheme: _controller.preferences.readingTheme,
+                          ),
+                        if (_controller.search.imageOpen)
+                          BookImageViewer(controller: _controller.search),
+                      ],
+                      // Above WebView + chrome SafeArea pad so the title band
+                      // still moves the window (Platform View eats background drag).
+                      const Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: ReaderWindowDragHandle(),
+                      ),
                     ],
-                    // Above WebView + chrome SafeArea pad so the title band
-                    // still moves the window (Platform View eats background drag).
-                    const Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: ReaderWindowDragHandle(),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             );
@@ -563,6 +710,8 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     unawaited(_timeTracker.detach());
     _controller.annotations.onOpenNoteEditor = null;
     _controller.detachPlatformFocusClearer();
+    _routeAnimation?.removeStatusListener(_onRouteAnimationStatus);
+    _routeAnimation?.removeListener(_onRouteAnimationTick);
     _reveal.dispose();
     _focusNode.dispose();
     _engine.dispose();

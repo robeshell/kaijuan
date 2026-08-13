@@ -37,8 +37,8 @@
 
 ```text
 点单本 → 按 item.kind 进入对应引擎
-  kind=book  → BookReaderScreen
-  kind=comic → ComicReaderScreen
+  kind=book  → BookReaderScreen（封面从卡片沿线放大；关闭收回）
+  kind=comic → ComicReaderScreen（等待封面淡入）
 
 点合集卡 → 合集内容页 → 再点成员 → 引擎
 点书单 → 书单内容列表 → 再点成员 → 引擎

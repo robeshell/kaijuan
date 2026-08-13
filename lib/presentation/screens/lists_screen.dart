@@ -13,6 +13,7 @@ import '../navigation/app_page_route.dart';
 import '../navigation/open_reading_item.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
+import '../widgets/reader/book_cover_hero.dart';
 import '../widgets/settings_components.dart';
 
 /// Reading lists hub (书库二级).
@@ -410,26 +411,29 @@ class _ListDetailScreen extends StatelessWidget {
                                   leading: SizedBox(
                                     width: 42,
                                     height: 58,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(
-                                        AppProductRadii.cover,
+                                    child: CoverFlightHandle(
+                                      itemId: item.id,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(
+                                          AppProductRadii.cover,
+                                        ),
+                                        child: item.coverPath != null
+                                            ? Image.file(
+                                                File(item.coverPath!),
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, _, _) =>
+                                                    ColoredBox(
+                                                      color: Theme.of(
+                                                        context,
+                                                      ).scaffoldBackgroundColor,
+                                                    ),
+                                              )
+                                            : ColoredBox(
+                                                color: Theme.of(
+                                                  context,
+                                                ).scaffoldBackgroundColor,
+                                              ),
                                       ),
-                                      child: item.coverPath != null
-                                          ? Image.file(
-                                              File(item.coverPath!),
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, _, _) =>
-                                                  ColoredBox(
-                                                    color: Theme.of(
-                                                      context,
-                                                    ).scaffoldBackgroundColor,
-                                                  ),
-                                            )
-                                          : ColoredBox(
-                                              color: Theme.of(
-                                                context,
-                                              ).scaffoldBackgroundColor,
-                                            ),
                                     ),
                                   ),
                                   title: Text(item.title),

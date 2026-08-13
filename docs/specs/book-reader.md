@@ -321,7 +321,7 @@ markup
 
 ### 模式约定
 
-- **打开时序**：点击后立即显示阅读底色 + 适应窗体的完整封面。Foliate `view.init` 完成（`renderer-load-end` / `reveal-unlocked`）即开始封面过渡（约 420ms），不必等 TOC/`attachEngine`。locator 与 loopback mount 并行；CFI 在首屏 init 传入。退出为短淡出。
+- **打开时序**：点封面后，封面从卡片位置沿三次贝塞尔上弧、按弧长匀速放大到阅读位（时间线性、路径为三次贝塞尔，约 460ms），同时铺上阅读底色。前两帧只飞封面：不挂 WebView、不重解大图、不在第 0 帧重建书库网格；EPUB 打开推迟到封面已经动起来之后，WebView 在飞行过半再挂。到达后若 Foliate 尚未就绪则停在该封面；`view.init` 完成（`renderer-load-end` / `reveal-unlocked`）即溶入正文（约 420ms），不必等 TOC/`attachEngine`。locator 与 loopback mount 并行；CFI 在首屏 init 传入。关闭前先卸 WebView、把书库从 offstage 热回来，再沿原路径收回（约 420ms），避免收回第 0 帧重铺网格。无封面位置（纯文字行、封面已滚出）或系统减少动效时回退为阅读底色 + 适应窗体封面，退出为短淡出。不引入第三方动画库。
 - **页面上下留白**：Chrome 为覆盖式悬浮层，不永久占用完整操作栏高度；正文只保留系统安全区 + 8dp 阅读留白。Chrome 显隐不得改变分页尺寸或页码。
 - **滚动（仅 iOS / iPadOS / Android）**：同一 foliate Paginator 切换为 `flow=scrolled`，位置仍由 CFI 表示；切模式和尺寸变化不销毁 WebView。跨 spine 节仍按 Anx 语义单 iframe 挂载：接近章节边界时预加载相邻节 HTML，新节 iframe 就绪后再替换旧节（避免空白卡顿）；节末上/下滑仍由 `book.js` 触发 `nextPage`/`prevPage` 进入下一节。
 - **翻页**：正文交给 Anx foliate Paginator 的 CSS multi-column、方向锁定和 snap；移动端横滑跟手、释放后吸附到相邻页，点按/按钮翻页复用其 200–300ms 动画。Dart 不生成 page list，也不运行 `TextPainter` 章节分页。尺寸/生命周期切换开始时冻结最后一个稳定 CFI，并忽略离屏、零尺寸阶段产生的 relocation；普通尺寸变化保留同一 WebView 并由 ResizeObserver reflow 后回到冻结位置。若 Android 在内外屏切换时报告 renderer process gone，则立即移除失效 WebView，待 App resumed 后用该 CFI 重建一次。
@@ -411,3 +411,4 @@ markup
 3. 移动端触摸 / 手写笔、桌面触控板 / 鼠标拖动均符合上表。
 4. 退出再进恢复章节与大致位置。
 5. 页图 EPUB 自动进入漫画引擎。
+6. 从书库 / 书架点图书封面：封面沿弧线放大到阅读位；返回时沿原路径收回原卡片。

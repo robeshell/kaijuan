@@ -17,6 +17,7 @@ import '../navigation/open_reading_item.dart';
 import '../widgets/app_components.dart';
 import '../widgets/app_overlays.dart';
 import '../widgets/cover_card_ink.dart';
+import '../widgets/reader/book_cover_hero.dart';
 import '../widgets/settings_components.dart';
 
 /// Library insights + foreground reading duration. See docs/specs/reading-stats.md.
@@ -68,7 +69,7 @@ class _ReadingStatsScreenState extends State<ReadingStatsScreen> {
     super.dispose();
   }
 
-  void _openItem(ReadingItem item) {
+  void _openItem(BuildContext context, ReadingItem item) {
     openReadingItem(
       context,
       database: widget.libraryController.database,
@@ -1235,7 +1236,7 @@ class _TopByTimeList extends StatelessWidget {
   const _TopByTimeList({required this.rows, required this.onOpen});
 
   final List<StatsItemRow> rows;
-  final void Function(ReadingItem item) onOpen;
+  final void Function(BuildContext context, ReadingItem item) onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -1245,7 +1246,7 @@ class _TopByTimeList extends StatelessWidget {
           Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: () => onOpen(row.item),
+              onTap: () => onOpen(context, row.item),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
@@ -1518,7 +1519,7 @@ class _RecentCovers extends StatelessWidget {
   const _RecentCovers({required this.rows, required this.onOpen});
 
   final List<StatsItemRow> rows;
-  final void Function(ReadingItem item) onOpen;
+  final void Function(BuildContext context, ReadingItem item) onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -1534,12 +1535,13 @@ class _RecentCovers extends StatelessWidget {
         itemBuilder: (context, i) {
           final row = rows[i];
           return _CoverTile(
+            itemId: row.item.id,
             title: row.item.title,
             progress: row.progressFraction,
             accent: accent,
             hairline: hairline,
             cover: _FileCover(path: row.item.coverPath),
-            onTap: () => onOpen(row.item),
+            onTap: () => onOpen(context, row.item),
           );
         },
       ),
@@ -1549,6 +1551,7 @@ class _RecentCovers extends StatelessWidget {
 
 class _CoverTile extends StatelessWidget {
   const _CoverTile({
+    required this.itemId,
     required this.title,
     required this.cover,
     required this.accent,
@@ -1557,6 +1560,7 @@ class _CoverTile extends StatelessWidget {
     this.progress,
   });
 
+  final String itemId;
   final String title;
   final Widget cover;
   final double? progress;
@@ -1577,7 +1581,10 @@ class _CoverTile extends StatelessWidget {
             SizedBox(
               width: 104,
               height: 140,
-              child: SoftCoverFrame(child: cover),
+              child: CoverFlightHandle(
+                itemId: itemId,
+                child: SoftCoverFrame(child: cover),
+              ),
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -1614,14 +1621,14 @@ class _FinishedList extends StatelessWidget {
   const _FinishedList({required this.rows, required this.onOpen});
 
   final List<StatsItemRow> rows;
-  final void Function(ReadingItem item) onOpen;
+  final void Function(BuildContext context, ReadingItem item) onOpen;
 
   @override
   Widget build(BuildContext context) {
     return AppSettingsGroup(
       children: [
         for (final row in rows)
-          _FinishedRow(row: row, onTap: () => onOpen(row.item)),
+          _FinishedRow(row: row, onTap: () => onOpen(context, row.item)),
       ],
     );
   }
@@ -1646,8 +1653,11 @@ class _FinishedRow extends StatelessWidget {
               SizedBox(
                 width: 40,
                 height: 54,
-                child: SoftCoverFrame(
-                  child: _FileCover(path: row.item.coverPath),
+                child: CoverFlightHandle(
+                  itemId: row.item.id,
+                  child: SoftCoverFrame(
+                    child: _FileCover(path: row.item.coverPath),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
