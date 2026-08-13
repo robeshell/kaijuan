@@ -219,6 +219,7 @@ void main() {
         isAvailable: () => true,
         openModelAdapter: () => provider,
         settings: () => const AiSettings(model: 'synth-book'),
+        packTargetChars: 0,
       );
 
       final graph = await service.generate(
@@ -407,6 +408,7 @@ void main() {
           isAvailable: () => true,
           openModelAdapter: () => provider,
           settings: () => const AiSettings(model: 'synth-book'),
+          packTargetChars: 0,
         );
 
         final first = await service.generate(

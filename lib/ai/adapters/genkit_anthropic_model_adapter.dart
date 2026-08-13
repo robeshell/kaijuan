@@ -283,7 +283,6 @@ class GenkitAnthropicModelAdapter
           .timeout(
             timeout,
             onTimeout: () {
-              _resetTransport();
               throw TimeoutException('Genkit Anthropic 结构化输出等待超时', timeout);
             },
           );

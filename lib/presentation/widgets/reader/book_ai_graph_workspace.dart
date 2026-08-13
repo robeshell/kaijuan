@@ -73,14 +73,23 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
   void initState() {
     super.initState();
     _c.addListener(_onControllerChanged);
+    _c.bookGraphSession.addListener(_onGraphSessionChanged);
     unawaited(_ensureGraphWorks());
+  }
+
+  void _onGraphSessionChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _onControllerChanged() {
     if (!mounted) return;
     final storedGraph = _c.bookGraph;
     final visibleGraph = _c.visibleBookGraph;
-    if (storedGraph != null &&
+    // Checkpoints mint a new graph object every finished section. Remounting
+    // the list on each write drops scroll and looks like the tab is stuck.
+    if (!_c.isGeneratingBookGraph &&
+        storedGraph != null &&
         !identical(storedGraph, _appliedNarrationGraph)) {
       _appliedNarrationGraph = storedGraph;
       final wanted = _viewModeFor(
@@ -182,7 +191,10 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
   Widget _buildGraphContent(BuildContext context) {
     final colors = context.appColors;
     final graph = _c.visibleBookGraph;
-    final hadEmptySnapshot = graph == null && _c.bookGraph != null;
+    final hiddenEntities = _c.hiddenBookGraphEntities;
+    final allHidden = graph == null && hiddenEntities.isNotEmpty;
+    final hadEmptySnapshot =
+        graph == null && _c.bookGraph != null && hiddenEntities.isEmpty;
     final generating = _c.isGeneratingBookGraph;
     final preparing = _graphPreparing && !generating;
     final busy = preparing || generating;
@@ -243,7 +255,11 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
               const SizedBox(height: 14),
               if (!busy)
                 Text(
-                  hadEmptySnapshot ? '尚无有效图谱数据' : '知识图谱',
+                  allHidden
+                      ? '实体都已隐藏'
+                      : hadEmptySnapshot
+                      ? '尚无有效图谱数据'
+                      : '知识图谱',
                   style: TextStyle(
                     fontSize: _panelTitleSize(context),
                     fontWeight: FontWeight.w600,
@@ -261,7 +277,18 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
                   ),
                 ),
               ] else ...[
-                if (hadEmptySnapshot) ...[
+                if (allHidden) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '图谱还在。恢复显示后，索引和关系会回来。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: context.appCaptionSize,
+                      height: 1.4,
+                      color: context.appSecondaryText,
+                    ),
+                  ),
+                ] else if (hadEmptySnapshot) ...[
                   const SizedBox(height: 8),
                   Text(
                     '上一次没有得到可展示的实体或关系。再次生成会重新读取正文，不会沿用空的完成记录。',
@@ -285,19 +312,26 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () => unawaited(
-                    _generateGraph(
-                      // Retry the range being retried: after a cancelled /
-                      // failed generation the active work is still set, and
-                      // the dialog must open scoped to it (not the whole
-                      // collection).
-                      work: _c.activeGraphWork,
+                if (allHidden)
+                  FilledButton.icon(
+                    onPressed: _showHiddenEntities,
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: Text('已隐藏的实体（${hiddenEntities.length}）'),
+                  )
+                else
+                  FilledButton.icon(
+                    onPressed: () => unawaited(
+                      _generateGraph(
+                        // Retry the range being retried: after a cancelled /
+                        // failed generation the active work is still set, and
+                        // the dialog must open scoped to it (not the whole
+                        // collection).
+                        work: _c.activeGraphWork,
+                      ),
                     ),
+                    icon: const Icon(KaijuanIcons.graph, size: 18),
+                    label: Text(hadEmptySnapshot ? '重新生成图谱' : '生成图谱'),
                   ),
-                  icon: const Icon(KaijuanIcons.graph, size: 18),
-                  label: Text(hadEmptySnapshot ? '重新生成图谱' : '生成图谱'),
-                ),
               ],
             ],
           ),
@@ -407,6 +441,8 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
       onRegenerate: () =>
           unawaited(_generateGraph(force: true, work: _c.activeGraphWork)),
       onDelete: () => unawaited(_deleteGraph()),
+      hiddenEntityCount: _c.hiddenBookGraphEntities.length,
+      onShowHidden: _showHiddenEntities,
       onViewModeChanged: (mode) => setState(() => _graphViewMode = mode),
       onQueryChanged: (value) => setState(() => _graphQuery = value),
       onClearQuery: () {
@@ -861,7 +897,20 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
         bodySize: _panelBodySize(context),
         onOpenEvidence: _goToGraphEvidence,
         onHideEntity: () => unawaited(_c.hideBookGraphEntity(entity.id)),
+        onMergeInto: (keepId) => unawaited(
+          _c.mergeBookGraphEntities(keepId: keepId, absorbId: entity.id),
+        ),
       ),
+    );
+  }
+
+  void _showHiddenEntities() {
+    final hidden = _c.hiddenBookGraphEntities;
+    if (hidden.isEmpty) return;
+    showBookAiHiddenEntitiesSheet(
+      context,
+      hidden: hidden,
+      onUnhide: (entityId) => unawaited(_c.unhideBookGraphEntity(entityId)),
     );
   }
 
@@ -1081,6 +1130,8 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
         : _c.bookGraphError ??
               (_c.visibleBookGraph != null
                   ? '知识图谱已生成'
+                  : _c.hiddenBookGraphEntities.isNotEmpty
+                  ? '实体都已隐藏'
                   : _c.bookGraph != null
                   ? '知识图谱没有有效数据'
                   : '尚未生成知识图谱');
@@ -1102,6 +1153,7 @@ class _BookAiGraphWorkspaceState extends State<BookAiGraphWorkspace> {
   @override
   void dispose() {
     _c.removeListener(_onControllerChanged);
+    _c.bookGraphSession.removeListener(_onGraphSessionChanged);
     _graphQueryController.dispose();
     _graphScrollController.dispose();
     _graphHighlightTimer?.cancel();

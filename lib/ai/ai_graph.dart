@@ -146,6 +146,9 @@ String graphEntityIdFor({
 }) {
   String normalize(String value) =>
       value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+  // Hint is only hashed when the caller is splitting same-name rows in
+  // one text unit. Unique names must pass an empty hint so later
+  // life-stage wording cannot mint a second ID.
   final seed =
       '${type.wireName}\u0000${normalize(name)}\u0000'
       '${normalize(identityHint)}';
@@ -1007,6 +1010,107 @@ class AiBookGraph {
       if (entity.id == id) return entity;
     }
     return null;
+  }
+
+  /// Entities the user hid; still stored, just not shown.
+  List<AiGraphEntity> get hiddenEntities => [
+    for (final entity in entities)
+      if (hiddenEntityIds.contains(entity.id)) entity,
+  ];
+
+  AiBookGraph hideEntity(String entityId) {
+    if (entityById(entityId) == null) return this;
+    if (hiddenEntityIds.contains(entityId)) return this;
+    return copyWith(hiddenEntityIds: [...hiddenEntityIds, entityId]);
+  }
+
+  AiBookGraph unhideEntity(String entityId) {
+    if (!hiddenEntityIds.contains(entityId)) return this;
+    return copyWith(
+      hiddenEntityIds: [
+        for (final id in hiddenEntityIds)
+          if (id != entityId) id,
+      ],
+    );
+  }
+
+  /// Absorbs [absorbId] into [keepId]. Same type only; [keepId]'s display
+  /// name wins, and the absorbed name becomes an alias. Returns null when
+  /// the pair is missing, identical, or mixed type.
+  AiBookGraph? mergeEntities({
+    required String keepId,
+    required String absorbId,
+  }) {
+    if (keepId == absorbId) return null;
+    final keep = entityById(keepId);
+    final absorb = entityById(absorbId);
+    if (keep == null || absorb == null || keep.type != absorb.type) {
+      return null;
+    }
+
+    final absorbAsAlias = absorb.copyWith(
+      aliases: {
+        ...absorb.aliases,
+        if (absorb.name != keep.name) absorb.name,
+      }.toList(growable: false),
+      aliasSections: {
+        ...absorb.aliasSections,
+        if (absorb.name != keep.name && absorb.firstSection > 0)
+          absorb.name: absorb.firstSection,
+      },
+    );
+    var merged = _mergeDuplicateEntity(keep, absorbAsAlias);
+    if (keep.description.isNotEmpty) {
+      merged = merged.copyWith(
+        description: keep.description,
+        descriptionSection: keep.descriptionSection,
+      );
+    }
+
+    final nextEntities = <AiGraphEntity>[
+      for (final entity in entities)
+        if (entity.id == keepId) merged else if (entity.id != absorbId) entity,
+    ];
+
+    final nextRelations = <String, AiGraphRelation>{};
+    for (final relation in relations) {
+      final sourceId = relation.sourceId == absorbId
+          ? keepId
+          : relation.sourceId;
+      final targetId = relation.targetId == absorbId
+          ? keepId
+          : relation.targetId;
+      if (sourceId.isNotEmpty && sourceId == targetId) continue;
+      final rewired = relation.copyWith(
+        sourceId: sourceId,
+        targetId: targetId,
+        source: sourceId == keepId ? merged.name : relation.source,
+        target: targetId == keepId ? merged.name : relation.target,
+      );
+      final current = nextRelations[rewired.mergeKey];
+      nextRelations[rewired.mergeKey] = current == null
+          ? rewired
+          : _mergeDuplicateRelation(current, rewired);
+    }
+
+    return copyWith(
+      entities: nextEntities,
+      relations: nextRelations.values.toList(growable: false),
+      hiddenEntityIds: [
+        for (final id in hiddenEntityIds)
+          if (id != absorbId) id,
+      ],
+      mergeLog: [
+        ...mergeLog,
+        {
+          'from': absorb.name,
+          'to': keep.name,
+          'score': 1.0,
+          'reason': 'manual',
+          'section': absorb.firstSection,
+        },
+      ],
+    );
   }
 
   /// Immutable spoiler-safe projection used whenever a full-book graph is

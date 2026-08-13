@@ -91,6 +91,35 @@ void main() {
     expect(reread!.hiddenEntityIds, contains(id));
   });
 
+  test('unhide removes a hidden id and persists', () async {
+    await store.write(graphWith('张三'));
+    await controller.load();
+    final id = controller.current!.entities.single.id;
+    await controller.hideEntity(id);
+    await controller.unhideEntity(id);
+    expect(controller.current!.hiddenEntityIds, isEmpty);
+    expect(controller.hiddenEntities, isEmpty);
+    expect(controller.visible?.entities.single.name, '张三');
+    final reread = await store.read('hash-book');
+    expect(reread!.hiddenEntityIds, isEmpty);
+  });
+
+  test('merge absorbs one person into another and persists', () async {
+    final keep = person('张三丰');
+    final absorb = person('张三');
+    await store.write(
+      AiBookGraph(contentHash: 'hash-book', entities: [keep, absorb]),
+    );
+    await controller.load();
+    await controller.mergeEntities(keepId: keep.id, absorbId: absorb.id);
+    expect(controller.current!.entities.map((e) => e.id), [keep.id]);
+    expect(controller.current!.entities.single.aliases, contains('张三'));
+    expect(controller.current!.mergeLog.single['reason'], 'manual');
+    final reread = await store.read('hash-book');
+    expect(reread!.entities.single.id, keep.id);
+    expect(reread.entities.single.aliases, contains('张三'));
+  });
+
   test('delete clears the current graph', () async {
     await store.write(graphWith('张三'));
     await controller.load();

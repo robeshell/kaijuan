@@ -16,6 +16,7 @@ void main() {
       isAvailable: () => true,
       openModelAdapter: () => provider,
       settings: () => const AiSettings(model: 'graph-test'),
+      packTargetChars: 0,
     );
   }
 
@@ -998,11 +999,54 @@ void main() {
       );
     });
 
-    test(
-      'whole-range gleaning recovers a category missed by every chunk',
-      () async {
-        final provider = _GraphProvider(
-          gleaningBody: '''
+    test('packed extract covers several short chapters in one call', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[
+              {"name":"张三","type":"person","aliases":[],
+               "description":"主角。",
+               "evidence":[{"section":1,"quote":"张三出场"}]},
+              {"name":"李四","type":"person","aliases":[],
+               "description":"配角。",
+               "evidence":[{"section":2,"quote":"李四出场"}]}],
+             "relations":[]}
+          ''',
+        },
+      );
+      final service = AiBookGraphService(
+        isAvailable: () => true,
+        openModelAdapter: () => provider,
+        settings: () => const AiSettings(model: 'graph-test'),
+      );
+
+      final graph = await service.generate(
+        bookTitle: '测试书',
+        sections: [
+          slice(1, '第一章', '张三出场。'),
+          slice(2, '第二章', '李四出场。'),
+          slice(3, '第三章', '两人同行。'),
+        ],
+        includesUnread: true,
+        narrationMode: AiNarrationPlanMode.skip,
+      );
+
+      expect(provider.extractionRequests, hasLength(1));
+      expect(graph.coveredSections, [1, 2, 3]);
+      expect(graph.entities.map((entity) => entity.name), containsAll(['张三', '李四']));
+      expect(
+        graph.entities.singleWhere((entity) => entity.name == '张三').firstSection,
+        1,
+      );
+      expect(
+        graph.entities.singleWhere((entity) => entity.name == '李四').firstSection,
+        2,
+      );
+    });
+
+    test('gleaning stays off when persons were already extracted', () async {
+      final provider = _GraphProvider(
+        gleaningBody: '''
           {"entities":[{"name":"霍格沃茨魔法学校","type":"organization",
             "scope":"setting","identityHint":"魔法学校","aliases":["霍格沃茨"],
             "description":"培养巫师的学校组织。",
@@ -1011,29 +1055,76 @@ void main() {
              "type":"隶属","description":"哈利是该校学生。",
              "evidence":[{"section":1,"quote":"霍格沃茨魔法学校录取了哈利"}]}]}
         ''',
-          responses: {
-            1: '''
+        responses: {
+          1: '''
             {"entities":[{"name":"哈利","type":"person","scope":"setting",
               "aliases":[],"description":"新生。",
               "evidence":[{"section":1,"quote":"哈利"}]}],"relations":[]}
           ''',
+        },
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一章', '霍格沃茨魔法学校录取了哈利。')],
+        includesUnread: true,
+      );
+
+      expect(graph.entities.single.name, '哈利');
+      expect(
+        provider.requests.any(
+          (request) =>
+              request.messages.any((m) => m.text.contains('知识图谱漏项复核器')),
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+      'gleans missing organizations when the display plan emphasizes them',
+      () async {
+        final provider = _GraphProvider(
+          narrationBody:
+              '{'
+              '"features":{"eventDriven":0.3,"characterEnsemble":0.4,'
+              '"organization":0.9,"geography":0.2,"essay":0.0},'
+              '"defaultView":"organizations","viewOrder":["organizations","persons"],'
+              '"wantMap":false}',
+          gleaningBody: '''
+            {"entities":[{"name":"内阁","type":"organization",
+              "scope":"setting","identityHint":"中枢","aliases":[],
+              "description":"辅政机构。",
+              "evidence":[{"section":1,"quote":"内阁票拟"}]}],
+             "relations":[]}
+          ''',
+          responses: {
+            1: '''
+              {"entities":[{"name":"张居正","type":"person","scope":"setting",
+                "aliases":[],"description":"首辅。",
+                "evidence":[{"section":1,"quote":"张居正入阁"}]}],
+               "relations":[]}
+            ''',
           },
         );
 
         final graph = await serviceWith(provider).generate(
           bookTitle: '测试书',
-          sections: [slice(1, '第一章', '霍格沃茨魔法学校录取了哈利。')],
+          sections: [slice(1, '第一章', '张居正入阁。内阁票拟。')],
           includesUnread: true,
         );
 
+        expect(graph.entities.map((entity) => entity.name), contains('内阁'));
         expect(
-          graph.entities
-              .singleWhere((entity) => entity.name == '霍格沃茨魔法学校')
-              .type,
+          graph.entities.singleWhere((entity) => entity.name == '内阁').type,
           AiGraphEntityType.organization,
         );
-        expect(graph.relations.single.source, '霍格沃茨魔法学校');
-        expect(graph.relations.single.target, '哈利');
+        expect(
+          provider.requests.any(
+            (request) =>
+                request.messages.any((m) => m.text.contains('知识图谱漏项复核器')),
+          ),
+          isTrue,
+        );
       },
     );
 
@@ -1385,6 +1476,7 @@ void main() {
             model: 'graph-test',
             contentRuleWords: AiContentRuleWords(genericPersonTerms: ['老爷子']),
           ),
+          packTargetChars: 0,
         );
 
         final graph = await service.generate(
@@ -1488,6 +1580,7 @@ void main() {
               },
             ),
           ),
+          packTargetChars: 0,
         );
 
         final graph = await service.generate(
@@ -1840,6 +1933,20 @@ void main() {
         expect(hagrid.identityHint, '猎场看守');
         expect(hagrid.evidence, hasLength(3));
         expect(hagrid.chapterFreq, {1: 1, 2: 1, 3: 1});
+        expect(
+          hagrid.id,
+          graphEntityIdFor(type: AiGraphEntityType.person, name: '海格'),
+        );
+        expect(
+          hagrid.id,
+          isNot(
+            graphEntityIdFor(
+              type: AiGraphEntityType.person,
+              name: '海格',
+              identityHint: '猎场看守',
+            ),
+          ),
+        );
       },
     );
 
@@ -2036,8 +2143,9 @@ void main() {
         expect(graph.narration!.defaultView, 'events');
         expect(graph.narration!.viewOrder.first, 'events');
         expect(graph.entities.single.name, '张三');
-        // Plan + extraction + bounded missing-type gleaning + description polish.
-        expect(provider.requests.length, 4);
+        // Plan + extraction. Gleaning/polish stay off when persons already exist
+        // and descriptions are not first-mention stubs.
+        expect(provider.requests.length, 2);
         expect(provider.extractionRequests.length, 1);
         // Direction convention is baked into the extraction prompt (system
         // message: fixed rules live there for DeepSeek context-cache hits).
@@ -2244,6 +2352,19 @@ void main() {
       expect(graph.coveredSections, [1, 2]);
       expect(graph.entities.any((e) => e.name == '张三'), isTrue);
       expect(graph.entities.any((e) => e.name == '李四'), isTrue);
+      expect(
+        provider.requests.any(
+          (request) =>
+              request.messages.any((m) => m.text.contains('知识图谱漏项复核器')),
+        ),
+        isFalse,
+      );
+      expect(
+        provider.requests.any(
+          (request) => request.messages.any((m) => m.text.contains('书籍编辑')),
+        ),
+        isFalse,
+      );
     });
 
     test('allowUnread off limits extraction to read sections', () async {
@@ -2369,7 +2490,25 @@ void main() {
             ),
           ),
         );
-        expect(provider.extractionRequests.length, 1);
+        expect(provider.extractionRequests.length, 2);
+      },
+    );
+
+    test(
+      'unparseable structured JSON halves a dense chunk instead of dropping the section',
+      () async {
+        final provider = _GraphProvider(failLongExtractionBodies: true);
+        final text = '张三走进了房间。' * 300;
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一章', text)],
+          includesUnread: true,
+          narrationMode: AiNarrationPlanMode.skip,
+        );
+
+        expect(graph.coveredSections, [1]);
+        expect(provider.extractionRequests.length, greaterThan(1));
       },
     );
 
@@ -2600,11 +2739,9 @@ void main() {
         plannedNarration: confirmed,
       );
 
-      // The confirmed plan lands as-is; no step-0 request because the caller
-      // already decided the plan. Extraction, missing-type gleaning and
-      // description polish still run.
+      // The confirmed plan lands as-is; no step-0, gleaning or polish.
       expect(graph.narration, same(confirmed));
-      expect(provider.requests.length, 3);
+      expect(provider.requests.length, 1);
       expect(provider.extractionRequests.length, 1);
     });
 
@@ -2733,7 +2870,7 @@ void main() {
             {"entities":[
               {"name":"哈利·波特","type":"person",
                "aliases":["哈利","大难不死的男孩"],
-               "description":"波特夫妇的儿子。",
+               "description":"波特夫妇的儿子，尚未登场。",
                "evidence":[{"section":1,"quote":"波特夫妇的儿子哈利"}]}],
              "relations":[]}
           ''',
@@ -2758,6 +2895,98 @@ void main() {
       // flag is ignored (hallucinated drops can't strip legitimate aliases).
       expect(harry.aliases, contains('大难不死的男孩'));
     });
+
+    test('rewrites a first-chapter blurb after later evidence arrives', () async {
+      final provider = _GraphProvider(
+        responses: {
+          1: '''
+            {"entities":[{"name":"张三","type":"person","aliases":["三哥"],
+              "description":"刚出场的年轻人。",
+              "evidence":[{"section":1,"quote":"张三出场"}]}],
+             "relations":[]}
+          ''',
+          2: '''
+            {"entities":[{"name":"张三","type":"person","aliases":[],
+              "description":"",
+              "evidence":[{"section":2,"quote":"张三主持朝议"}]}],
+             "relations":[]}
+          ''',
+        },
+        refreshBody: '''
+          {"entities":[{"name":"张三","description":"后来主持朝议的重臣","dropAliases":[]}]}
+        ''',
+      );
+
+      final graph = await serviceWith(provider).generate(
+        bookTitle: '测试书',
+        sections: [slice(1, '第一章', '张三出场。'), slice(2, '第二章', '张三主持朝议。')],
+        includesUnread: true,
+      );
+
+      expect(graph.entities.single.description, '后来主持朝议的重臣');
+      expect(
+        provider.requests.any(
+          (request) => request.messages.any((m) => m.text.contains('书籍编辑')),
+        ),
+        isTrue,
+      );
+    });
+
+    test(
+      'incremental polish rewrites a touched entity with a stale description',
+      () async {
+        final provider = _GraphProvider(
+          responses: {
+            2: '''
+              {"entities":[{"name":"张三","type":"person","aliases":[],
+                "description":"",
+                "evidence":[{"section":2,"quote":"张三主持朝议"}]}],
+               "relations":[]}
+            ''',
+          },
+          refreshBody: '''
+            {"entities":[{"name":"张三","description":"后来主持朝议的重臣","dropAliases":[]}]}
+          ''',
+        );
+        final existing = AiBookGraph(
+          contentHash: 'h1',
+          coveredSections: const [1],
+          entities: [
+            AiGraphEntity(
+              name: '张三',
+              type: AiGraphEntityType.person,
+              description: '刚出场的年轻人。',
+              descriptionSection: 1,
+              evidence: const [
+                AiGraphEvidence(
+                  sectionIndex: 1,
+                  quote: '张三出场',
+                  spanResolved: true,
+                ),
+              ],
+              firstSection: 1,
+              lastSection: 1,
+            ),
+          ],
+        );
+
+        final graph = await serviceWith(provider).generate(
+          bookTitle: '测试书',
+          sections: [slice(1, '第一章', '张三出场。'), slice(2, '第二章', '张三主持朝议。')],
+          includesUnread: true,
+          existing: existing,
+        );
+
+        expect(graph.entities.single.description, '后来主持朝议的重臣');
+        expect(provider.extractionRequests.length, 1);
+        expect(
+          provider.requests.any(
+            (request) => request.messages.any((m) => m.text.contains('书籍编辑')),
+          ),
+          isTrue,
+        );
+      },
+    );
   });
 
   group('AiGraphStore per-work graphs', () {
@@ -2850,6 +3079,7 @@ class _GraphProvider implements AiModelAdapter, AiStructuredOutputAdapter {
   _GraphProvider({
     this.responses = const {},
     this.invalidJson = false,
+    this.failLongExtractionBodies = false,
     this.narrationBody = defaultNarrationBody,
     this.reviewVerdicts = '[]',
     this.directionReviewBody = '{"relations":[]}',
@@ -2862,6 +3092,10 @@ class _GraphProvider implements AiModelAdapter, AiStructuredOutputAdapter {
   /// sectionIndex -> raw JSON body (may be wrapped in ```json fences).
   final Map<int, String> responses;
   final bool invalidJson;
+
+  /// Mimic a dense-chapter parse failure: only long extraction bodies throw
+  /// [AiModelStructuredOutputFormatException], so chunk-halving can recover.
+  final bool failLongExtractionBodies;
 
   /// Step-0 display plan body (default: event-driven, organization low).
   final String narrationBody;
@@ -2901,6 +3135,13 @@ class _GraphProvider implements AiModelAdapter, AiStructuredOutputAdapter {
     requests.add(request);
     if (invalidJson) {
       throw AiProviderException('结构化输出校验失败');
+    }
+    if (failLongExtractionBodies &&
+        request.messages.any((message) => message.text.contains('章节编号：'))) {
+      final bodyLength = _extractionBodyLength(request);
+      if (bodyLength > 2000) {
+        throw AiModelStructuredOutputFormatException();
+      }
     }
     final prompt = request.messages.last.text;
     if (request.messages.any((m) => m.text.contains('人物身份判定引擎'))) {
@@ -2945,6 +3186,15 @@ class _GraphProvider implements AiModelAdapter, AiStructuredOutputAdapter {
 
   @override
   Future<void> close() async {}
+
+  static int _extractionBodyLength(AiModelJsonRequest request) {
+    final text = request.messages.last.text;
+    final start = text.indexOf('正文：\n');
+    if (start < 0) return text.length;
+    final from = start + '正文：\n'.length;
+    final end = text.indexOf('\n\n已抽取实体', from);
+    return (end < 0 ? text.length : end) - from;
+  }
 
   static Map<String, dynamic> _decodeObject(String source) {
     final unfenced = source

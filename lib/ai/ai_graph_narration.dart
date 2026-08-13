@@ -76,15 +76,14 @@ Future<AiNarrationPlan?> analyzeGraphNarrationPlan(
       temperature: 0,
       timeout: kGraphCallTimeout,
     );
-    final result = await model.completeJson(
-      request,
-      cancelToken: cancelToken,
-    );
+    final watch = Stopwatch()..start();
+    final result = await model.completeJson(request, cancelToken: cancelToken);
     final plan = AiNarrationPlan.fromJson(result.value);
     if (plan != null) {
       AiLog.d(
         'graph narration plan: default=${plan.defaultView} '
-        'order=${plan.viewOrder.join(',')} wantMap=${plan.wantMap}',
+        'order=${plan.viewOrder.join(',')} wantMap=${plan.wantMap} '
+        'ms=${watch.elapsedMilliseconds}',
       );
     }
     return plan;

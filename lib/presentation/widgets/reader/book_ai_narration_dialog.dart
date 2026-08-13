@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../ai/ai_cancel.dart';
 import '../../../ai/ai_graph.dart';
 import '../../../ai/ai_graph_scope.dart';
 import '../../../core/theme.dart';
@@ -82,6 +83,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
   bool _scopeFailed = false;
   final Set<int> _excludedSections = {};
   final ScrollController _bodyScrollController = ScrollController();
+  final CancelToken _analyzeCancel = CancelToken();
 
   List<AiGraphSectionChoice> get _selectable => _scope?.selectable ?? const [];
 
@@ -101,6 +103,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
 
   @override
   void dispose() {
+    _analyzeCancel.cancel();
     _bodyScrollController.dispose();
     super.dispose();
   }
@@ -162,6 +165,7 @@ class _NarrationPlanDialogState extends State<NarrationPlanDialog> {
     try {
       final plan = await widget.controller.analyzeActiveGraphNarration(
         work: widget.work,
+        cancel: _analyzeCancel,
       );
       if (!mounted) return;
       setState(() {

@@ -5,6 +5,7 @@ import '../../../core/kaijuan_icons.dart';
 import '../../../core/theme.dart';
 import '../ai_typography.dart';
 import '../app_components.dart';
+import '../app_overlays.dart';
 import 'ai_relation_row.dart';
 
 /// Entity detail bottom sheet (tapped from any graph list row / family-tree
@@ -24,6 +25,7 @@ class BookAiEntitySheet extends StatelessWidget {
     required this.bodySize,
     required this.onOpenEvidence,
     this.onHideEntity,
+    this.onMergeInto,
   });
 
   final AiGraphEntity entity;
@@ -36,6 +38,42 @@ class BookAiEntitySheet extends StatelessWidget {
   /// Jump to the original passage for an evidence quote.
   final ValueChanged<AiGraphEvidence> onOpenEvidence;
   final VoidCallback? onHideEntity;
+
+  /// Merge this entity into [keepId]; the current card is the absorbed side.
+  final ValueChanged<String>? onMergeInto;
+
+  List<AiGraphEntity> get _mergeCandidates {
+    final others = [
+      for (final candidate in graph.entities)
+        if (candidate.id != entity.id && candidate.type == entity.type)
+          candidate,
+    ];
+    others.sort((a, b) => a.name.compareTo(b.name));
+    return others;
+  }
+
+  Future<void> _mergeIntoPickedTarget(BuildContext context) async {
+    final keep = await showAppBottomSheet<AiGraphEntity>(
+      context,
+      useRootNavigator: true,
+      anchorPoint: appTrailingBottomOverlayAnchor(context),
+      builder: (_) => _MergeTargetPicker(
+        absorb: entity,
+        candidates: _mergeCandidates,
+        bodySize: bodySize,
+      ),
+    );
+    if (keep == null || !context.mounted) return;
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: '将「${entity.name}」并入「${keep.name}」？',
+      message: '「${entity.name}」会变成「${keep.name}」的别名，关系和出处也会转到「${keep.name}」。',
+      confirmLabel: '并入',
+    );
+    if (confirmed != true || !context.mounted) return;
+    Navigator.of(context).pop();
+    onMergeInto!(keep.id);
+  }
 
   static String _filterLabel(AiGraphEntityType type) => switch (type) {
     AiGraphEntityType.person => '人物',
@@ -260,19 +298,29 @@ class BookAiEntitySheet extends StatelessWidget {
                 ),
               ),
             ),
-          if (onHideEntity != null) ...[
+          if (onMergeInto != null || onHideEntity != null) ...[
             const SizedBox(height: 12),
-            TextButton.icon(
-              style: TextButton.styleFrom(
-                textStyle: TextStyle(fontSize: context.aiLabelSize),
+            if (onMergeInto != null && _mergeCandidates.isNotEmpty)
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  textStyle: TextStyle(fontSize: context.aiLabelSize),
+                ),
+                onPressed: () => _mergeIntoPickedTarget(context),
+                icon: const Icon(Icons.merge_type, size: 18),
+                label: const Text('合并到…'),
               ),
-              onPressed: () {
-                Navigator.of(context).pop();
-                onHideEntity!();
-              },
-              icon: const Icon(Icons.visibility_off_outlined, size: 18),
-              label: const Text('从图谱中隐藏'),
-            ),
+            if (onHideEntity != null)
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  textStyle: TextStyle(fontSize: context.aiLabelSize),
+                ),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  onHideEntity!();
+                },
+                icon: const Icon(Icons.visibility_off_outlined, size: 18),
+                label: const Text('从图谱中隐藏'),
+              ),
           ],
         ],
       ),
@@ -313,6 +361,55 @@ void showBookAiEntitySheetByName(
   );
 }
 
+void showBookAiHiddenEntitiesSheet(
+  BuildContext context, {
+  required List<AiGraphEntity> hidden,
+  required ValueChanged<String> onUnhide,
+}) {
+  if (hidden.isEmpty) return;
+  showAppBottomSheet<void>(
+    context,
+    useRootNavigator: true,
+    anchorPoint: appTrailingBottomOverlayAnchor(context),
+    builder: (sheetContext) => SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        children: [
+          Text(
+            '已隐藏的实体',
+            style: TextStyle(
+              fontSize: sheetContext.aiTitleSize,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '恢复后会重新出现在索引和关系图里。',
+            style: TextStyle(
+              fontSize: sheetContext.appCaptionSize,
+              color: sheetContext.appSecondaryText,
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (final entity in hidden)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(entity.name),
+              subtitle: Text(BookAiEntitySheet._filterLabel(entity.type)),
+              trailing: TextButton(
+                onPressed: () {
+                  Navigator.of(sheetContext).pop();
+                  onUnhide(entity.id);
+                },
+                child: const Text('恢复显示'),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
 void showBookAiEntitySheetById(
   BuildContext context,
   String entityId, {
@@ -337,4 +434,99 @@ void showBookAiEntitySheetById(
       onOpenEvidence: (evidence) => onJumpToEvidence?.call(evidence),
     ),
   );
+}
+
+class _MergeTargetPicker extends StatefulWidget {
+  const _MergeTargetPicker({
+    required this.absorb,
+    required this.candidates,
+    required this.bodySize,
+  });
+
+  final AiGraphEntity absorb;
+  final List<AiGraphEntity> candidates;
+  final double bodySize;
+
+  @override
+  State<_MergeTargetPicker> createState() => _MergeTargetPickerState();
+}
+
+class _MergeTargetPickerState extends State<_MergeTargetPicker> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = [
+      for (final candidate in widget.candidates)
+        if (_query.isEmpty ||
+            candidate.name.contains(_query) ||
+            candidate.aliases.any((alias) => alias.contains(_query)))
+          candidate,
+    ];
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '将「${widget.absorb.name}」合并到',
+              style: TextStyle(
+                fontSize: context.aiTitleSize,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (widget.candidates.length > 8)
+              TextField(
+                autofocus: true,
+                onChanged: (value) => setState(() => _query = value.trim()),
+                style: context.appInputTextStyle,
+                decoration: const InputDecoration(
+                  hintText: '搜索名称或别名',
+                  isDense: true,
+                ),
+              ),
+            if (widget.candidates.length > 8) const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.5,
+              ),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  if (filtered.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Text(
+                        '没有匹配的同类型实体。',
+                        style: TextStyle(
+                          fontSize: widget.bodySize,
+                          color: context.appSecondaryText,
+                        ),
+                      ),
+                    )
+                  else
+                    for (final candidate in filtered)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(candidate.name),
+                        subtitle: candidate.aliases.isEmpty
+                            ? null
+                            : Text(
+                                candidate.aliases.join('、'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                        onTap: () => Navigator.of(context).pop(candidate),
+                      ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

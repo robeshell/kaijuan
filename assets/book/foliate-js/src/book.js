@@ -3122,7 +3122,11 @@ const logicalSectionsFromToc = (bodyText, tocLabels, fallbackLabel) => {
   for (const label of tocLabels) {
     const position = bodyText.indexOf(label, cursor)
     if (position < 0) {
-      console.warn('[Kaika][AI outline] TOC first occurrence missing=', label)
+      // Per-chapter EPUB files rarely contain the whole TOC. Missing the
+      // first label just means this document is not a flattened MOBI body.
+      if (positions.length > 0) {
+        console.warn('[Kaika][AI outline] TOC first occurrence missing=', label)
+      }
       return []
     }
     positions.push(position)

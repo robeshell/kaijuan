@@ -397,7 +397,8 @@ class GenkitOpenAiModelAdapter
           .timeout(
             timeout,
             onTimeout: () {
-              if (_ownsClient) _resetOwnedTransport();
+              // Do not close the shared client: overlapping graph extracts
+              // would die with it and the UI would freeze on the start label.
               throw TimeoutException('Genkit 结构化输出等待超时', timeout);
             },
           );

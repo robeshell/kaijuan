@@ -35,6 +35,8 @@ class BookAiGraphContentView extends StatelessWidget {
     required this.onCloseWork,
     required this.onRegenerate,
     required this.onDelete,
+    this.hiddenEntityCount = 0,
+    this.onShowHidden,
     required this.onViewModeChanged,
     required this.onQueryChanged,
     required this.onClearQuery,
@@ -69,6 +71,8 @@ class BookAiGraphContentView extends StatelessWidget {
   final VoidCallback onCloseWork;
   final VoidCallback onRegenerate;
   final VoidCallback onDelete;
+  final int hiddenEntityCount;
+  final VoidCallback? onShowHidden;
   final ValueChanged<BookAiGraphViewMode> onViewModeChanged;
   final ValueChanged<String> onQueryChanged;
   final VoidCallback onClearQuery;
@@ -113,12 +117,24 @@ class BookAiGraphContentView extends StatelessWidget {
               onPressed: busy ? null : onRegenerate,
               icon: const Icon(KaijuanIcons.refresh, size: 20),
             ),
-            PopupMenuButton<bool>(
+            PopupMenuButton<String>(
               tooltip: '更多',
               enabled: !busy,
-              onSelected: (_) => onDelete(),
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: true, child: Text('删除图谱')),
+              onSelected: (value) {
+                switch (value) {
+                  case 'hidden':
+                    onShowHidden?.call();
+                  case 'delete':
+                    onDelete();
+                }
+              },
+              itemBuilder: (_) => [
+                if (hiddenEntityCount > 0)
+                  PopupMenuItem(
+                    value: 'hidden',
+                    child: Text('已隐藏的实体（$hiddenEntityCount）'),
+                  ),
+                const PopupMenuItem(value: 'delete', child: Text('删除图谱')),
               ],
             ),
           ],

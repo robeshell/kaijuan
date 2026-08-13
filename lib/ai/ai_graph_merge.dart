@@ -42,6 +42,7 @@ extension _AiGraphMerge on AiBookGraphService {
     final sorted = [...entities]..sort(AiBookGraphService._byFrequencyThenName);
     final targets = sorted
         .where((e) => e.evidence.isNotEmpty && nameCounts[e.name] == 1)
+        .where(AiBookGraphService._needsDescriptionPolish)
         .take(_refreshTopEntities)
         .toList(growable: false);
     if (targets.isEmpty) return;
@@ -285,13 +286,13 @@ extension _AiGraphMerge on AiBookGraphService {
         final identityHint = (map['identityHint'] as String? ?? '').trim();
         final priorName = priorAliases[originalName];
         final proposedName = priorName ?? originalName;
+        final ambiguousInChunk =
+            (rawNameCounts['${type.wireName}\u0000$originalName'] ?? 0) > 1;
         final proposedId = graphEntityIdFor(
           type: type,
           name: proposedName,
-          identityHint: identityHint,
+          identityHint: ambiguousInChunk ? identityHint : '',
         );
-        final ambiguousInChunk =
-            (rawNameCounts['${type.wireName}\u0000$originalName'] ?? 0) > 1;
         // Exact stable identity wins even when the display name is ambiguous
         // across multiple people/roles. Without this check, once a name had
         // two identity hints, every later mention of either exact identity
@@ -418,6 +419,7 @@ extension _AiGraphMerge on AiBookGraphService {
             map['evidence'],
             sectionIndex: sectionIndex,
             sectionText: sectionText,
+            anchors: [originalName, proposedName, ...aliases],
           );
           if (evidence.isEmpty) continue;
           final first = evidence.first.sectionIndex;
@@ -514,6 +516,7 @@ extension _AiGraphMerge on AiBookGraphService {
             map['evidence'],
             sectionIndex: sectionIndex,
             sectionText: sectionText,
+            anchors: [sourceRaw.trim(), targetRaw.trim(), source, target],
           );
           if (evidence.isEmpty) continue;
           final relation = AiGraphRelation(
@@ -1037,6 +1040,7 @@ extension _AiGraphMerge on AiBookGraphService {
       rawEvidence,
       sectionIndex: sectionIndex,
       sectionText: sectionText,
+      anchors: [entity.name, ...entity.aliases, ...aliases],
     )) {
       if (seen.add('${e.sectionIndex}\u0000${e.quote.trim()}')) evidence.add(e);
     }
@@ -1087,6 +1091,7 @@ extension _AiGraphMerge on AiBookGraphService {
       rawEvidence,
       sectionIndex: sectionIndex,
       sectionText: sectionText,
+      anchors: [relation.source, relation.target],
     )) {
       if (seen.add('${e.sectionIndex}\u0000${e.quote.trim()}')) evidence.add(e);
     }

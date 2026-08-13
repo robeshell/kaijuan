@@ -224,16 +224,18 @@ class BookAiGraphController extends ChangeNotifier {
 
   Future<AiNarrationPlan?> analyzeNarration({
     AiGraphWorkCandidate? work,
+    CancelToken? cancel,
   }) async {
     final service = workspace.graph;
     if (service == null || !_canUseAi()) return null;
     try {
-      await _resolveWorks();
+      await _resolveWorks(cancel: cancel);
       final sections = await _loadSections(work);
       return await service.analyzeNarration(
         bookTitle: work?.title ?? bookTitle,
         bookAuthor: _bookAuthorsLabel().isEmpty ? null : _bookAuthorsLabel(),
         sections: sections,
+        cancelToken: cancel,
       );
     } catch (_) {
       return null;
@@ -259,18 +261,46 @@ class BookAiGraphController extends ChangeNotifier {
     _notify();
   }
 
+  List<AiGraphEntity> get hiddenEntities {
+    final graph = _current;
+    if (graph == null) return const [];
+    return graph.hiddenEntities;
+  }
+
   Future<void> hideEntity(String entityId) async {
     if (isGenerating) return;
     final graph = _current;
-    if (graph == null || graph.hiddenEntityIds.contains(entityId)) return;
-    final hidden = [...graph.hiddenEntityIds, entityId];
-    final updated = graph.copyWith(hiddenEntityIds: hidden);
+    if (graph == null) return;
+    final updated = graph.hideEntity(entityId);
+    if (identical(updated, graph)) return;
+    await _persist(updated);
+  }
+
+  Future<void> unhideEntity(String entityId) async {
+    if (isGenerating) return;
+    final graph = _current;
+    if (graph == null) return;
+    final updated = graph.unhideEntity(entityId);
+    if (identical(updated, graph)) return;
+    await _persist(updated);
+  }
+
+  Future<void> mergeEntities({
+    required String keepId,
+    required String absorbId,
+  }) async {
+    if (isGenerating) return;
+    final graph = _current;
+    if (graph == null) return;
+    final updated = graph.mergeEntities(keepId: keepId, absorbId: absorbId);
+    if (updated == null) return;
+    await _persist(updated);
+  }
+
+  Future<void> _persist(AiBookGraph updated) async {
     _current = updated;
     final work = _activeWork;
-    await _save(
-      updated,
-      workKey: work == null ? null : workKeyFor(work),
-    );
+    await _save(updated, workKey: work == null ? null : workKeyFor(work));
     _notify();
   }
 
@@ -288,10 +318,7 @@ class BookAiGraphController extends ChangeNotifier {
       if (target == null) return;
       final key = workKeyFor(target);
       if (_workGraphs.containsKey(key)) return;
-      await store.write(
-        graph.copyWith(contentHash: contentHash),
-        workKey: key,
-      );
+      await store.write(graph.copyWith(contentHash: contentHash), workKey: key);
       await store.delete(contentHash);
       _workGraphs[key] = graph;
       _current = null;
@@ -349,9 +376,10 @@ class BookAiGraphController extends ChangeNotifier {
           excludedGraphSectionIndices ??
           existing?.excludedGraphSections.toSet() ??
           const <int>{};
-      final sections = excludeSections(deduped, effectiveExcluded)
-          .where((s) => s.text.trim().isNotEmpty)
-          .toList(growable: false);
+      final sections = excludeSections(
+        deduped,
+        effectiveExcluded,
+      ).where((s) => s.text.trim().isNotEmpty).toList(growable: false);
       if (sections.isEmpty) {
         throw AiProviderException('所选章节都被排除了，请至少保留一节正文');
       }
@@ -385,7 +413,7 @@ class BookAiGraphController extends ChangeNotifier {
           ),
         ),
         budget: AiRunBudget(
-          maxModelCalls: (sections.length * 12 + 64).clamp(128, 4096),
+          maxModelCalls: AiBookGraphService.modelCallBudgetFor(sections),
         ),
         cancelToken: cancel,
         checkpointWriter: (checkpoint) async {
@@ -413,8 +441,7 @@ class BookAiGraphController extends ChangeNotifier {
           ),
           onProgress: (progress) {
             execution.progress(progress.label);
-            _progress = progress;
-            _notify();
+            _setProgress(progress);
           },
           onCheckpoint: (partial) => execution.checkpoint(
             partial.copyWith(
@@ -468,6 +495,22 @@ class BookAiGraphController extends ChangeNotifier {
       workKey: workKey,
     );
     if (workKey != null) _workGraphs[workKey] = graph;
+  }
+
+  DateTime? _lastProgressNotify;
+
+  void _setProgress(AiGraphProgress progress) {
+    final labelChanged = _progress?.label != progress.label;
+    _progress = progress;
+    final now = DateTime.now();
+    final last = _lastProgressNotify;
+    if (!labelChanged &&
+        last != null &&
+        now.difference(last) < const Duration(milliseconds: 250)) {
+      return;
+    }
+    _lastProgressNotify = now;
+    _notify();
   }
 
   void _notify() {

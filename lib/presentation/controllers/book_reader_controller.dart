@@ -126,11 +126,21 @@ class BookReaderController extends ChangeNotifier {
       resolvedWorks: () => resolvedBookWorks,
       isSuggestedSupplement: (title) =>
           _isOutlineMetadataTitle(title) || _isGraphAppendixLabel(title),
-    )..addListener(_notifyAiWorkspaceChanged);
+    )..addListener(_onGraphSessionChanged);
   }
 
   void _notifyAiWorkspaceChanged() {
     if (!_disposed) notifyListeners();
+  }
+
+  /// Graph progress ticks must not rebuild Foliate + the whole AI sheet.
+  /// The graph tab listens to [bookGraphSession] directly.
+  void _onGraphSessionChanged() {
+    if (_disposed) return;
+    if (bookGraphSession.isGenerating && bookGraphSession.progress != null) {
+      return;
+    }
+    notifyListeners();
   }
 
   void _notifyPreferencesChanged() {
@@ -651,8 +661,6 @@ class BookReaderController extends ChangeNotifier {
     return _contentRuleWords.metadataUnits.any((word) => word.trim() == title);
   }
 
-
-
   Future<void> deleteBookOutline() async {
     await _enqueueChatSessionWrite(() async {
       final store = _chatHistoryStore;
@@ -974,7 +982,6 @@ class BookReaderController extends ChangeNotifier {
     excludedGraphSectionIndices: excludedGraphSectionIndices,
   );
 
-
   /// Resolves deterministic file structure once per reader. Compatibility
   /// return: independent work scopes for an omnibus, otherwise null.
   Future<List<AiBookWork>?> resolveBookStructure({CancelToken? cancel}) async {
@@ -1003,7 +1010,6 @@ class BookReaderController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
     return works;
   }
-
 
   /// Wraps raw slices with a non-empty label, falling back to a title for
   /// untitled pieces (metadata blocks produce empty labels). Shared by the
@@ -1203,12 +1209,24 @@ class BookReaderController extends ChangeNotifier {
 
   Future<AiNarrationPlan?> analyzeActiveGraphNarration({
     AiGraphWorkCandidate? work,
-  }) => bookGraphSession.analyzeNarration(work: work);
+    CancelToken? cancel,
+  }) => bookGraphSession.analyzeNarration(work: work, cancel: cancel);
 
   Future<void> deleteBookGraph() => bookGraphSession.delete();
 
   Future<void> hideBookGraphEntity(String entityId) =>
       bookGraphSession.hideEntity(entityId);
+
+  Future<void> unhideBookGraphEntity(String entityId) =>
+      bookGraphSession.unhideEntity(entityId);
+
+  Future<void> mergeBookGraphEntities({
+    required String keepId,
+    required String absorbId,
+  }) => bookGraphSession.mergeEntities(keepId: keepId, absorbId: absorbId);
+
+  List<AiGraphEntity> get hiddenBookGraphEntities =>
+      bookGraphSession.hiddenEntities;
 
   void cancelBookGraphGeneration() => bookGraphSession.cancel();
 
