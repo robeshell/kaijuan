@@ -432,11 +432,15 @@ wantMap: 是否建议展示地点首次出现顺序，不代表真实地图
 ## 9. 分层与边界
 
 ```text
-lib/ai/ai_graph.dart          — 模型（entity/relation/evidence/graph 包）+ AiGraphStore
+lib/ai/ai_graph.dart          — 模型（entity/relation/evidence/graph 包、展示方案）
+lib/ai/ai_graph_store.dart    — 按 contentHash / workKey 落盘
 lib/ai/ai_graph_scope.dart    — 用户范围计划：完整内容单元 + 默认勾选建议，不删除辅文
-lib/ai/ai_graph_service.dart  — 管线：消费确认范围 → 抽取 → 校验回填 → 顺序增量合并（内联，未独立 merge 文件）→ 落盘 → 进度/取消
+lib/ai/ai_graph_service.dart  — 管线入口：确认范围 → 抽取 → 回填 → 进度/取消
+lib/ai/ai_graph_narration.dart — step-0 展示方案
+lib/ai/ai_graph_merge.dart    — 共指合并、别名、描述润色（service 的 mixin）
 lib/library/backup/           — aiGraphs 导出 / 恢复合并（扩展现有 aiChats 逻辑）
-lib/presentation/controllers/book_reader_controller.dart — 既有 AI 应用门面：图谱缓存、范围、生成/取消/checkpoint 与文件操作；不向 Workspace 暴露可写字段
+lib/presentation/controllers/book_ai_graph_controller.dart — 生成生命周期：缓存、作品切换、检查点、隐藏/删除
+lib/presentation/controllers/book_reader_controller.dart — 兼容门面 + 正文/结构回调；不持有图谱运行时字段
 lib/presentation/widgets/reader/book_ai_graph_workspace.dart — 图谱 Tab 组合边界（作品选择、实体索引、视图/排序、确认、详情、证据与全屏路由）
 lib/presentation/widgets/reader/book_ai_chat_sheet.dart — 只组合对话 / 图谱工作区，不持有图谱状态机
 lib/presentation/widgets/reader/book_ai_graph_view.dart / book_ai_graph_fullscreen.dart — 关系图视图

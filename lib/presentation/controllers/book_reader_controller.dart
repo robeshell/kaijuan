@@ -34,7 +34,6 @@ import '../../ai/ai_search.dart';
 import '../../ai/ai_settings.dart';
 import '../../ai/ai_structure_supplements.dart';
 import '../../ai/ai_translation.dart';
-import '../../ai/ai_user_error.dart';
 import '../../ai/legacy_ai_agent_runtime.dart';
 import '../../app/book_reading_preferences.dart';
 import '../../domain/reader_models.dart';
@@ -44,6 +43,7 @@ import '../../readers/book/book_language_actions.dart';
 import '../../readers/book/foliate_js_bridge.dart';
 import 'ai_settings_controller.dart';
 import 'book_annotations_controller.dart';
+import 'book_ai_graph_controller.dart';
 import 'book_ai_mind_map_controller.dart';
 import 'book_ai_reader_gateway.dart';
 import 'book_ai_workspace_controller.dart';
@@ -113,6 +113,20 @@ class BookReaderController extends ChangeNotifier {
       onChanged: _notifyAiWorkspaceChanged,
     );
     bindAiSettings(aiSettings);
+    bookGraphSession = BookAiGraphController(
+      contentHash: item.contentHash,
+      bookTitle: item.title,
+      workspace: _aiWorkspace,
+      bookAuthorsLabel: () => bookAuthorsLabel,
+      canUseAi: () => canUseAiChat,
+      allowUnread: () => allowUnreadGraphContext,
+      readThrough: () => sectionIndex + 1,
+      loadSections: _graphSectionsForWork,
+      resolveWorks: ({cancel}) => resolveBookStructure(cancel: cancel),
+      resolvedWorks: () => resolvedBookWorks,
+      isSuggestedSupplement: (title) =>
+          _isOutlineMetadataTitle(title) || _isGraphAppendixLabel(title),
+    )..addListener(_notifyAiWorkspaceChanged);
   }
 
   void _notifyAiWorkspaceChanged() {
@@ -140,6 +154,7 @@ class BookReaderController extends ChangeNotifier {
   final AiAgentRuntimeKind requestedAgentRuntime;
   final AiAgentRuntimeCapabilities genkitAgentCapabilities;
   late final BookAiWorkspaceController _aiWorkspace;
+  late final BookAiGraphController bookGraphSession;
   late final BookAnnotationsController _annotationState;
   final BookReaderBridge bridge = BookReaderBridge();
   late final BookReaderPreferencesController _preferences;
@@ -229,7 +244,6 @@ class BookReaderController extends ChangeNotifier {
   StreamSubscription<List<ReaderBookmark>>? _bookmarksSubscription;
 
   AiChatHistoryStore? _chatHistoryStore;
-  AiGraphStore? _aiGraphStore;
   AiBookOutline? _bookOutline;
 
   /// Work key of [_bookOutline] for collections (null = plain book / whole
@@ -237,42 +251,11 @@ class BookReaderController extends ChangeNotifier {
   /// routes to `session.workOutlines[key]`.
   String? _bookOutlineWorkKey;
   String? _bookOutlineError;
-  AiBookGraph? _bookGraph;
-
-  /// Graph of the work currently shown/generated when viewing a collection
-  /// (null for whole-book graphs / plain books).
-  AiGraphWorkCandidate? _activeGraphWork;
-
-  /// Per-work graphs of the current collection, keyed by workKey.
-  Map<String, AiBookGraph> _workGraphs = {};
-
-  /// Work being generated right now (null = whole book / not generating).
-  AiGraphProgress? _bookGraphProgress;
-  String? _bookGraphError;
-
-  CancelToken? _bookGraphCancel;
-  Future<void>? _bookGraphGeneration;
   Future<void> _chatSessionWriteQueue = Future<void>.value();
 
   Map<String, AiRunState> get aiRunStates => _aiWorkspace.runStates;
 
   AiRunState? get activeAiRunState => _aiWorkspace.activeRunState;
-
-  Future<T> _executeAiWorkflow<T>({
-    required AiRunDescriptor descriptor,
-    required AiRunBudget budget,
-    required CancelToken cancelToken,
-    required Future<T> Function(AiRunExecution execution) body,
-    AiRunCheckpointWriter? checkpointWriter,
-  }) async {
-    return _aiWorkspace.executeWorkflow(
-      descriptor: descriptor,
-      budget: budget,
-      cancelToken: cancelToken,
-      checkpointWriter: checkpointWriter,
-      body: body,
-    );
-  }
 
   late final AiBookCorpusCache _aiCorpus = AiBookCorpusCache(
     loadBookBody: bridge.loadBookPlainText,
@@ -480,7 +463,7 @@ class BookReaderController extends ChangeNotifier {
 
   /// Optional graph cache store (per contentHash under `ai_graph/`).
   void attachAiGraphStore(AiGraphStore? store) {
-    _aiGraphStore = store;
+    bookGraphSession.attachStore(store);
   }
 
   void attachAiActionJournalStore(AiActionJournalStore store) {
@@ -876,20 +859,14 @@ class BookReaderController extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------
-  // Book knowledge graph (AI M5) — see docs/specs/ai-graph.md
+  // Book knowledge graph — facade over [bookGraphSession]
   // ------------------------------------------------------------------
 
-  AiBookGraph? get bookGraph => _bookGraph;
-
-  static bool _hasDisplayGraphData(AiBookGraph? graph) {
-    if (graph == null) return false;
-    final display = graph.verifiedForDisplay();
-    return display.entities.isNotEmpty || display.relations.isNotEmpty;
-  }
+  AiBookGraph? get bookGraph => bookGraphSession.current;
 
   @visibleForTesting
   static bool graphCanResumeIncrementally(AiBookGraph? graph) =>
-      _hasDisplayGraphData(graph);
+      BookAiGraphController.canResumeIncrementally(graph);
 
   @visibleForTesting
   static int? graphReadThroughForGeneration({
@@ -898,40 +875,21 @@ class BookReaderController extends ChangeNotifier {
     required bool existingIncludesUnread,
     required bool allowUnread,
     required int readThrough,
-  }) {
-    final applyAutomaticReadGate =
-        !userConfirmedScope &&
-        !resettingEmptySnapshot &&
-        !existingIncludesUnread &&
-        !allowUnread;
-    return applyAutomaticReadGate ? readThrough : null;
-  }
+  }) => BookAiGraphController.readThroughForGeneration(
+    userConfirmedScope: userConfirmedScope,
+    resettingEmptySnapshot: resettingEmptySnapshot,
+    existingIncludesUnread: existingIncludesUnread,
+    allowUnread: allowUnread,
+    readThrough: readThrough,
+  );
 
-  /// Whether the saved snapshot contains at least one grounded item that the
-  /// reader can actually present. Coverage metadata alone does not make an
-  /// empty snapshot a completed graph.
-  bool get hasUsableBookGraph => _hasDisplayGraphData(_bookGraph);
+  bool get hasUsableBookGraph => bookGraphSession.hasUsableGraph;
 
-  /// Display projection of the saved graph.
-  ///
-  /// [includesUnread] records the scope that was explicitly used when the
-  /// graph was generated. Do not re-filter that persisted result with this
-  /// device's current setting or renderer position: preferences are local and
-  /// mobile relocation can arrive after the graph tab opens, which previously
-  /// turned a valid cross-device graph into an all-zero view.
-  AiBookGraph? get visibleBookGraph {
-    final graph = _bookGraph;
-    if (graph == null) return null;
-    final display = graph.verifiedForDisplay();
-    if (display.entities.isEmpty && display.relations.isEmpty) return null;
-    return display;
-  }
+  AiBookGraph? get visibleBookGraph => bookGraphSession.visible;
 
-  /// Collection work currently shown in the graph tab, or null for a
-  /// whole-book graph / plain book.
-  AiGraphWorkCandidate? get activeGraphWork => _activeGraphWork;
+  AiGraphWorkCandidate? get activeGraphWork => bookGraphSession.activeWork;
 
-  bool get hasActiveWorkGraph => _activeGraphWork != null;
+  bool get hasActiveWorkGraph => bookGraphSession.hasActiveWork;
 
   static String workKeyFor(AiBookWork work) => work.id;
 
@@ -980,109 +938,27 @@ class BookReaderController extends ChangeNotifier {
   /// publication instead of disabling the composer.
   bool get canChatAtCurrentPosition => true;
 
-  /// True when a graph was already generated for [work] of this collection.
   bool hasWorkGraph(AiGraphWorkCandidate work) =>
-      _hasDisplayGraphData(_workGraphs[workKeyFor(work)]);
+      bookGraphSession.hasWorkGraph(work);
 
-  /// Whether [work]'s saved graph already carries a display plan — a fresh
-  /// per-work generation must not reuse the whole-book plan's existence.
   bool workGraphHasNarration(AiGraphWorkCandidate work) =>
-      _workGraphs[workKeyFor(work)]?.narration != null;
+      bookGraphSession.workGraphHasNarration(work);
 
-  /// Saved graph of [work], or null when not generated yet.
   AiBookGraph? workGraphFor(AiGraphWorkCandidate work) =>
-      _workGraphs[workKeyFor(work)];
+      bookGraphSession.workGraphFor(work);
 
-  /// Shows the generated graph of [work] (collection picker → work view).
-  void openWorkGraph(AiGraphWorkCandidate work) {
-    final graph = _workGraphs[workKeyFor(work)];
-    if (graph == null) return;
-    _bookGraph = graph;
-    _activeGraphWork = work;
-    if (!_disposed) notifyListeners();
-  }
+  void openWorkGraph(AiGraphWorkCandidate work) =>
+      bookGraphSession.openWorkGraph(work);
 
-  /// Returns from a generated work to the publication's work list. Reader
-  /// pagination never selects a graph on the user's behalf.
-  void closeActiveWorkGraph() {
-    if (_activeGraphWork == null && _bookGraph == null) return;
-    _activeGraphWork = null;
-    _bookGraph = null;
-    if (!_disposed) notifyListeners();
-  }
+  void closeActiveWorkGraph() => bookGraphSession.closeActiveWorkGraph();
 
-  AiGraphProgress? get bookGraphProgress => _bookGraphProgress;
-  String? get bookGraphError => _bookGraphError;
-  bool get isGeneratingBookGraph => _bookGraphGeneration != null;
-  AiGraphWorkCandidate? get generatingGraphWork => _generatingGraphWork;
+  AiGraphProgress? get bookGraphProgress => bookGraphSession.progress;
+  String? get bookGraphError => bookGraphSession.error;
+  bool get isGeneratingBookGraph => bookGraphSession.isGenerating;
+  AiGraphWorkCandidate? get generatingGraphWork =>
+      bookGraphSession.generatingWork;
 
-  AiGraphWorkCandidate? _generatingGraphWork;
-
-  /// Loads the cached graph for this book (no model calls).
-  Future<void> loadBookGraph() async {
-    final store = _aiGraphStore;
-    if (store == null) return;
-    final graph = await store.read(item.contentHash);
-    final works = await store.readAllFor(item.contentHash);
-    _workGraphs = works;
-    if (graph != null && !identical(graph, _bookGraph)) {
-      _bookGraph = graph;
-      _activeGraphWork = null;
-      // Legacy: the pre-per-work dialog-era graph lives in $hash.json. If it
-      // demonstrably covers a single work, migrate it to that work's file so
-      // the picker shows it as that work's 已生成 instead of a bogus
-      // whole-book graph.
-      await _migrateLegacyWholeBookGraph(graph);
-      if (!_disposed) notifyListeners();
-    }
-  }
-
-  /// Moves a legacy whole-book graph file to its owning work's per-work file,
-  /// when the outline lets us attribute it. Leaves the file untouched when
-  /// the graph spans multiple works (a real whole-book graph) or the outline
-  /// is unavailable.
-  Future<void> _migrateLegacyWholeBookGraph(AiBookGraph graph) async {
-    final store = _aiGraphStore;
-    if (store == null) return;
-    try {
-      final works = _resolvedBookWorks;
-      if (works == null || works.length < 2) return;
-      final target = _matchingWorkForGraph(works, graph);
-      if (target == null) return;
-      final key = workKeyFor(target);
-      if (_workGraphs.containsKey(key)) return; // already migrated
-      await store.write(
-        graph.copyWith(contentHash: item.contentHash),
-        workKey: key,
-      );
-      await store.delete(item.contentHash);
-      _workGraphs[key] = graph;
-      _bookGraph = null;
-    } catch (_) {
-      // A failed migration must never break loading the sheet: the legacy
-      // whole-book row keeps the graph reachable instead.
-    }
-  }
-
-  /// The single work whose spine range covers the whole graph's entity span
-  /// (min..max first/last section). Null when the span crosses works or is
-  /// ambiguous — those stay whole-book.
-  AiGraphWorkCandidate? _matchingWorkForGraph(
-    List<AiGraphWorkCandidate> works,
-    AiBookGraph graph,
-  ) {
-    if (works.length < 2 || graph.entities.isEmpty) return null;
-    var first = graph.entities.first.firstSection;
-    var last = graph.entities.first.lastSection;
-    for (final entity in graph.entities.skip(1)) {
-      if (entity.firstSection < first) first = entity.firstSection;
-      if (entity.lastSection > last) last = entity.lastSection;
-    }
-    final candidates = works
-        .where((work) => work.contains(first) && work.contains(last))
-        .toList(growable: false);
-    return candidates.length == 1 ? candidates.single : null;
-  }
+  Future<void> loadBookGraph() => bookGraphSession.load();
 
   Future<void> generateBookGraph({
     AiGraphWorkCandidate? only,
@@ -1090,36 +966,14 @@ class BookReaderController extends ChangeNotifier {
     AiNarrationPlan? narrationOverride,
     AiNarrationPlanMode narrationMode = AiNarrationPlanMode.autoAnalyze,
     Set<int>? excludedGraphSectionIndices,
-  }) {
-    final active = _bookGraphGeneration;
-    if (active != null) return active;
-    _generatingGraphWork = only ?? _activeGraphWork;
-    final done = Completer<void>();
-    _bookGraphGeneration = done.future;
-    unawaited(() async {
-      try {
-        await _generateBookGraph(
-          only: only,
-          force: force,
-          narrationOverride: narrationOverride,
-          narrationMode: narrationMode,
-          excludedGraphSectionIndices: excludedGraphSectionIndices,
-        );
-        done.complete();
-      } catch (error, stackTrace) {
-        done.completeError(error, stackTrace);
-      }
-    }());
-    unawaited(
-      done.future.whenComplete(() {
-        _bookGraphGeneration = null;
-        _bookGraphCancel = null;
-        _generatingGraphWork = null;
-        if (!_disposed) notifyListeners();
-      }),
-    );
-    return done.future;
-  }
+  }) => bookGraphSession.generate(
+    only: only,
+    force: force,
+    narrationOverride: narrationOverride,
+    narrationMode: narrationMode,
+    excludedGraphSectionIndices: excludedGraphSectionIndices,
+  );
+
 
   /// Resolves deterministic file structure once per reader. Compatibility
   /// return: independent work scopes for an omnibus, otherwise null.
@@ -1150,173 +1004,6 @@ class BookReaderController extends ChangeNotifier {
     return works;
   }
 
-  Future<void> _generateBookGraph({
-    AiGraphWorkCandidate? only,
-    bool force = false,
-    AiNarrationPlan? narrationOverride,
-    AiNarrationPlanMode narrationMode = AiNarrationPlanMode.autoAnalyze,
-    Set<int>? excludedGraphSectionIndices,
-  }) async {
-    // Carry the manual slice so a failed partial save doesn't silently drop
-    // it for the next incremental run (catch block is out of try scope).
-    var carryExcluded = const <int>[];
-    final service = _aiWorkspace.graph;
-    if (service == null || !canUseAiChat) {
-      _bookGraphError = 'AI 未启用或未配置';
-      if (!_disposed) notifyListeners();
-      return;
-    }
-    final work = only ?? _activeGraphWork;
-    final workKey = work == null ? null : workKeyFor(work);
-    // Regeneration starts from scratch: the previous graph may come from a
-    // different corpus granularity (piece vs section) and must not leak into
-    // the new one via incremental merge.
-    final previous = workKey == null ? _bookGraph : _workGraphs[workKey];
-    // An old/partial cache can have every section marked covered while still
-    // containing zero grounded display data. Resuming from it would skip the
-    // entire corpus forever and immediately produce another all-zero graph.
-    // Treat it as a fresh run while preserving the user's hidden-ID list.
-    final resettingEmptySnapshot =
-        previous != null && !graphCanResumeIncrementally(previous);
-    final existing = force || resettingEmptySnapshot ? null : previous;
-    final hiddenEntityIds = previous?.hiddenEntityIds ?? const <String>[];
-    _bookGraphError = null;
-    final cancel = CancelToken();
-    _bookGraphCancel = cancel;
-    if (!_disposed) notifyListeners();
-    try {
-      await resolveGraphWorkCandidates(cancel: cancel);
-      final allowUnread = allowUnreadGraphContext;
-      final deduped = await _graphSectionsForWork(work);
-      // Manual slice persists on the graph: a fresh regeneration carries the
-      // previous exclusions unless the user changed them in the dialog;
-      // incremental runs keep excluding the same sections too.
-      final effectiveExcluded =
-          excludedGraphSectionIndices ??
-          existing?.excludedGraphSections.toSet() ??
-          const <int>{};
-      final sections = excludeGraphSections(deduped, effectiveExcluded)
-          // Structural container markers have no body; the flat range picker
-          // and extraction pipeline both operate only on non-empty leaves.
-          .where((s) => s.text.trim().isNotEmpty)
-          .toList(growable: false);
-      if (sections.isEmpty) {
-        throw AiProviderException('所选章节都被排除了，请至少保留一节正文');
-      }
-      final readThrough = sectionIndex + 1;
-      final userConfirmedScope = excludedGraphSectionIndices != null;
-      final selectedIncludesUnread = sections.any(
-        (section) => section.originSectionIndex > readThrough,
-      );
-      final includesUnread =
-          allowUnread ||
-          selectedIncludesUnread ||
-          (existing?.includesUnread ?? false);
-      // The range chooser is the user's final decision. In particular, a
-      // mobile renderer may still report the cover/first spine while the
-      // chooser already contains 248 valid sections; applying the position
-      // gate again here used to collapse that explicit selection to zero.
-      final effectiveReadThrough = graphReadThroughForGeneration(
-        userConfirmedScope: userConfirmedScope,
-        resettingEmptySnapshot: resettingEmptySnapshot,
-        existingIncludesUnread: existing?.includesUnread ?? false,
-        allowUnread: allowUnread,
-        readThrough: readThrough,
-      );
-      carryExcluded = (effectiveExcluded.toList()..sort()).toList(
-        growable: false,
-      );
-      final graph = await _executeAiWorkflow<AiBookGraph>(
-        descriptor: AiRunDescriptor(
-          runId: AiRunIds.next(),
-          task: AiRunTask.bookGraph,
-          scope: AiRunScope(
-            contentHash: item.contentHash,
-            workKey: workKey,
-            label: work?.title,
-          ),
-        ),
-        budget: AiRunBudget(
-          maxModelCalls: (sections.length * 12 + 64).clamp(128, 4096),
-        ),
-        cancelToken: cancel,
-        checkpointWriter: (checkpoint) async {
-          final partial = checkpoint.payload;
-          if (partial is! AiBookGraph) return;
-          _bookGraph = partial;
-          if (work != null) _activeGraphWork = work;
-          await _saveBookGraph(partial, workKey: workKey);
-        },
-        body: (execution) => service.generate(
-          bookTitle: work?.title ?? item.title,
-          bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-          sections: sections,
-          sectionScheme: 'spine',
-          includesUnread: includesUnread,
-          readThroughSection: effectiveReadThrough,
-          existing: existing,
-          plannedNarration: narrationOverride,
-          narrationMode: narrationMode,
-          cancelToken: execution.cancelToken,
-          onModelStarted: execution.modelStarted,
-          onUsage: ({inputTokens, outputTokens}) => execution.reportTokens(
-            inputTokens: inputTokens,
-            outputTokens: outputTokens,
-          ),
-          onProgress: (progress) {
-            execution.progress(progress.label);
-            _bookGraphProgress = progress;
-            if (!_disposed) notifyListeners();
-          },
-          onCheckpoint: (partial) => execution.checkpoint(
-            partial.copyWith(
-              contentHash: item.contentHash,
-              excludedGraphSections: carryExcluded,
-              hiddenEntityIds: hiddenEntityIds,
-            ),
-          ),
-        ),
-      );
-      final saved = graph.copyWith(
-        excludedGraphSections: carryExcluded,
-        hiddenEntityIds: hiddenEntityIds,
-      );
-      _bookGraph = saved;
-      if (work != null) _activeGraphWork = work;
-      _bookGraphProgress = null;
-      await _saveBookGraph(saved, workKey: workKey);
-      if (!_disposed) notifyListeners();
-    } on AiGraphGenerationException catch (error) {
-      _bookGraphProgress = null;
-      if (!cancel.isCancelled) {
-        AiLog.d('graph failed: ${error.message}');
-        final partial = error.partial;
-        if (partial != null && !identical(partial, _bookGraph)) {
-          // contentHash is re-stamped by _saveBookGraph; on a first
-          // generation the partial carries an empty hash. Keep the manual
-          // slice on the partial so incremental runs keep excluding.
-          final savedPartial = partial.copyWith(
-            excludedGraphSections: carryExcluded,
-            hiddenEntityIds: hiddenEntityIds,
-          );
-          _bookGraph = savedPartial;
-          await _saveBookGraph(savedPartial, workKey: workKey);
-        }
-        _bookGraphError = aiUserErrorMessage(
-          error,
-          operation: AiUserOperation.graph,
-        );
-      }
-      if (!_disposed) notifyListeners();
-    } catch (error, stack) {
-      _bookGraphProgress = null;
-      if (!cancel.isCancelled) {
-        AiLog.d('graph failed: $error\n$stack');
-        _bookGraphError = '生成图谱失败，请稍后重试';
-      }
-      if (!_disposed) notifyListeners();
-    }
-  }
 
   /// Wraps raw slices with a non-empty label, falling back to a title for
   /// untitled pieces (metadata blocks produce empty labels). Shared by the
@@ -1501,111 +1188,29 @@ class BookReaderController extends ChangeNotifier {
 
   /// Complete user-visible scope plan. Rules are recommendations and never
   /// erase a readable unit before the user sees it.
-  Future<AiGraphScopePlan> graphScopePlan(AiGraphWorkCandidate? work) async {
-    final sections = await _graphSectionsForWork(work);
-    return AiGraphScopePlanner.build(
-      sections: sections,
-      work: work,
-      isSuggestedSupplement: (title) =>
-          _isOutlineMetadataTitle(title) || _isGraphAppendixLabel(title),
-    );
-  }
+  Future<AiGraphScopePlan> graphScopePlan(AiGraphWorkCandidate? work) =>
+      bookGraphSession.scopePlan(work);
 
-  /// Compatibility accessor for tests and non-UI callers. New UI should use
-  /// [graphScopePlan] so recommendation reasons are not lost.
   Future<List<AiBookSectionSlice>> graphSectionChoices(
     AiGraphWorkCandidate? work,
-  ) async => (await graphScopePlan(
-    work,
-  )).choices.map((choice) => choice.section).toList(growable: false);
+  ) => bookGraphSession.sectionChoices(work);
 
-  /// Applies the user-confirmed manual slice on top of the automatic filter
-  /// (the dialog showed exactly the [sections] list, so [excluded] indices
-  /// line up). Throws when nothing remains.
   @visibleForTesting
   static List<AiBookSectionSlice> excludeGraphSections(
     List<AiBookSectionSlice> sections,
     Set<int> excluded,
-  ) {
-    if (excluded.isEmpty) return sections;
-    final kept = [
-      for (final section in sections)
-        if (!excluded.contains(section.index)) section,
-    ];
-    if (kept.isEmpty) {
-      throw AiProviderException('所选章节都被排除了，请至少保留一节正文');
-    }
-    return kept;
-  }
+  ) => BookAiGraphController.excludeSections(sections, excluded);
 
-  /// Runs the step-0 display plan for [work] (null = whole book) and returns
-  /// it — used by the pre-generation confirm dialog. Null on any failure
-  /// (the dialog then offers retry / cancel). Does not save anything.
   Future<AiNarrationPlan?> analyzeActiveGraphNarration({
     AiGraphWorkCandidate? work,
-  }) async {
-    final service = _aiWorkspace.graph;
-    if (service == null || !canUseAiChat) return null;
-    try {
-      await resolveGraphWorkCandidates();
-      final sections = await _graphSectionsForWork(work);
-      return await service.analyzeNarration(
-        bookTitle: work?.title ?? item.title,
-        bookAuthor: bookAuthorsLabel.isEmpty ? null : bookAuthorsLabel,
-        sections: sections,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
+  }) => bookGraphSession.analyzeNarration(work: work);
 
-  Future<void> _saveBookGraph(AiBookGraph graph, {String? workKey}) async {
-    final store = _aiGraphStore;
-    if (store == null) return;
-    await store.write(
-      graph.copyWith(contentHash: item.contentHash),
-      workKey: workKey,
-    );
-    if (workKey != null) _workGraphs[workKey] = graph;
-  }
+  Future<void> deleteBookGraph() => bookGraphSession.delete();
 
-  Future<void> deleteBookGraph() async {
-    if (isGeneratingBookGraph) return;
-    final store = _aiGraphStore;
-    final work = _activeGraphWork;
-    final workKey = work == null ? null : workKeyFor(work);
-    if (store != null) {
-      await store.delete(item.contentHash, workKey: workKey);
-    }
-    if (workKey == null) {
-      _bookGraph = null;
-    } else {
-      _workGraphs.remove(workKey);
-      _bookGraph = null;
-      _activeGraphWork = null;
-    }
-    _bookGraphError = null;
-    if (!_disposed) notifyListeners();
-  }
+  Future<void> hideBookGraphEntity(String entityId) =>
+      bookGraphSession.hideEntity(entityId);
 
-  Future<void> hideBookGraphEntity(String entityId) async {
-    if (isGeneratingBookGraph) return;
-    final graph = _bookGraph;
-    if (graph == null || graph.hiddenEntityIds.contains(entityId)) return;
-    final hidden = [...graph.hiddenEntityIds, entityId];
-    final updated = graph.copyWith(hiddenEntityIds: hidden);
-    _bookGraph = updated;
-    final work = _activeGraphWork;
-    await _saveBookGraph(
-      updated,
-      workKey: work == null ? null : workKeyFor(work),
-    );
-    if (!_disposed) notifyListeners();
-  }
-
-  void cancelBookGraphGeneration() {
-    _bookGraphCancel?.cancel();
-  }
+  void cancelBookGraphGeneration() => bookGraphSession.cancel();
 
   /// Lean chat seed: current chapter + selection + TOC titles (no whole-book dump).
   Future<AiChatContextBundle> loadAiChatContext({
@@ -2071,8 +1676,7 @@ class BookReaderController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _aiWorkspace.dispose();
-
-    _bookGraphCancel?.cancel();
+    bookGraphSession.dispose();
     _attachGeneration++;
     _preferences.removeListener(_notifyPreferencesChanged);
     _preferences.dispose();

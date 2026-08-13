@@ -468,6 +468,8 @@ class AiGraphRelation {
 ///
 /// Older graphs have no `narration` segment; the UI then falls back to the
 /// default person list exactly as before this feature.
+enum AiNarrationPlanMode { autoAnalyze, confirmed, skip }
+
 class AiNarrationPlan {
   const AiNarrationPlan({
     required this.features,

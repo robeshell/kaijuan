@@ -109,6 +109,9 @@ BookAiChatView
     → BookAiMindMapController
       → AiBookMindMapService
         → AiWorkflowModelSession.completeJson
+    → BookAiGraphController
+      → AiBookGraphService
+        → AiWorkflowModelSession.completeJson
     → BookAiReaderGateway / 本地文件 / WebDAV 快照
 
 未来生产重任务
@@ -120,7 +123,7 @@ BookAiChatView
     → 结果仓库与执行回执
 ```
 
-- `BookAiWorkspaceController` 持有 `BookAiConversationController` 与导图会话生成。Widget 不直连模型流。
+- `BookAiWorkspaceController` 持有对话与导图会话生成。`BookAiGraphController` 拥有图谱缓存、生成、取消与检查点；`BookReaderController` 只作兼容门面并提供正文/结构回调。Widget 不直连模型流。
 - **图书思维导图（已落地）**：会话产物路径 — 快捷或对话工具声明 → 冻结范围 → `runMindMapSession` → `AiBookMindMapService.completeJson` → 写入 `ai_chat` 消息附件。它不写任务建议、任务记录、固定执行命令或执行回执。`BookAiActionHost` 只是会话导图和未来长任务共用的分发入口：遇到导图会立即转入会话路径；打开阅读器时会把旧版本遗留且未结束的导图任务记录标为废弃，只恢复真正的长任务。规格见 [specs/ai-mind-map.md](./specs/ai-mind-map.md)。
 - **长任务控制基础**：任务建议、权限判断、本地任务记录、通用执行器、检查点和结果仓库已经存在，并由测试导出任务验证；生产环境尚未登记整本翻译、正式导出等重任务。**知识图谱**仍使用自己的生成与保存流程（`ai_graph/`）。
 - **不引入 LangChain**；模型 I/O 用现有 Genkit adapter。演进复盘见 [research/ai-chat-agent-evolution.md](./research/ai-chat-agent-evolution.md)；旧讨论见 [research/ai-architecture-consolidation.md](./research/ai-architecture-consolidation.md)（含过时段落，以本页与 ai-mind-map 为准）。
